@@ -150,7 +150,8 @@ const appendSshExe = @import("console.zig").appendSshExe;
 const tmuxSshTarget = @import("console.zig").tmuxSshTarget;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const fetchAcPersistent = @import("vps.zig").fetchAcPersistent;
-const sshOneShotCapture = @import("vps.zig").sshOneShotCapture;
+const sshOneShotCaptureInput = @import("vps.zig").sshOneShotCaptureInput;
+const TMUX_HOST_DE = @import("app_state.zig").TMUX_HOST_DE;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
@@ -1084,7 +1085,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
     const row_h = uiScaled(32);
     const mentioning = app_state.g_chat_ac.token.mode == .file;
     if (app_state.g_chat_ac.count == 0) {
-        const text = if (mentioning) "No matches" else if (slot.pending != 0 or slot.status == .loading) "Loading commands from VPS..." else if (slot.status == .@"error") "Commands unavailable: the VPS helper is not installed" else "No matches";
+        const text = if (mentioning) "No matches" else if (slot.pending != 0 or slot.status == .loading) "Loading commands from VPS..." else if (slot.status == .@"error") slot.error_text[0..slot.error_len] else "No matches";
         var line = RECT{ .left = uiScaled(14), .top = chatAcPad(), .right = rc.right - uiScaled(14), .bottom = chatAcPad() + row_h };
         _ = SetTextColor(dc, menu_colors.hint);
         drawAscii(dc, text, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -1309,9 +1310,11 @@ pub fn chatAcRequest(slot_index: usize) void {
     if (app_state.g_chat_ac_request_id == 0) app_state.g_chat_ac_request_id = 1;
     slot.pending = app_state.g_chat_ac_request_id;
     const req = ChatAcRequest{ .slot = slot_index, .id = slot.pending, .host = slot.host, .agent = slot.agent, .mode = slot.mode, .session = slot.session, .cwd = slot.cwd };
-    const thread = std.Thread.spawn(.{}, chatAcFetchThread, .{req}) catch {
+    const thread = std.Thread.spawn(.{}, chatAcFetchThread, .{req}) catch |err| {
         slot.pending = 0;
         slot.status = .@"error";
+        const text = std.fmt.bufPrint(&slot.error_text, "Commands unavailable: {s}", .{@errorName(err)}) catch "Commands unavailable";
+        slot.error_len = text.len;
         slot.fetched = GetTickCount64();
         return;
     };
@@ -1323,19 +1326,32 @@ fn chatAcFetchThread(req: ChatAcRequest) void {
     const op = if (req.agent == .codex and req.mode == .dollar) "skills" else "slash";
     const session = std.mem.sliceTo(&req.session, 0);
     const cwd = std.mem.sliceTo(&req.cwd, 0);
+    const owner_account = req.host == TMUX_HOST_DE and (std.mem.eql(u8, cwd, "/home/inne") or std.mem.startsWith(u8, cwd, "/home/inne/"));
     const agent = if (req.agent == .codex) "codex" else "claude";
-    const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (cwd.len == 0) "-" else cwd }) catch return;
+    const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
     const started = GetTickCount64();
     var bytes: [128 * 1024]u8 = undefined;
-    var n = fetchAcPersistent(req.host, request, &bytes) orelse 0;
+    var n = if (owner_account) @as(usize, 0) else fetchAcPersistent(req.host, request, &bytes) orelse 0;
     if (n == 0) {
         var encoded: [1024]u8 = undefined;
         const b64 = std.base64.standard.Encoder.encode(&encoded, request);
         var command: [2048]u8 = undefined;
         var pos: usize = 0;
         if (appendSshExe(&command, &pos)) {
-            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} python3 ~/.local/share/zigshell/mp_complete.py --once {s}", .{ tmuxSshTarget(req.host), b64 }) catch "";
-            if (tail.len > 0) n = sshOneShotCapture(command[0 .. pos + tail.len], &bytes);
+            const helper = if (owner_account) "sudo -n -H -u inne -- python3 /home/inne/.local/share/zigshell/mp_complete.py" else "python3 ~/.local/share/zigshell/mp_complete.py";
+            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s} --once {s}", .{ tmuxSshTarget(req.host), helper, b64 }) catch "";
+            if (tail.len > 0) {
+                const result = sshOneShotCaptureInput(command[0 .. pos + tail.len], &bytes, null, 20_000);
+                n = result.len;
+                if (!result.success and n == 0) {
+                    const text: []const u8 = std.fmt.bufPrint(&bytes, "SSH command failed (exit {d})", .{result.exit_code}) catch "";
+                    n = text.len;
+                }
+            }
+        } else {
+            const text = "Could not locate the SSH executable";
+            @memcpy(bytes[0..text.len], text);
+            n = text.len;
         }
     }
     while (!app_state.g_chat_ac_mutex.tryLock()) Sleep(1);
@@ -1369,8 +1385,17 @@ pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
             @memcpy(slot.entries[0..slot.count], entries[0..slot.count]);
         }
         slot.status = parsed.?.header.status;
+        slot.error_len = 0;
     } else {
         slot.status = .@"error";
+        const raw = std.mem.trim(u8, slot.bytes[next][0..slot.pending_len], " \t\r\n");
+        const detail = if (raw.len == 0) "No response from the command helper" else if (parsed != null and parsed.?.header.id != id) "Command helper returned a different request ID" else if (parsed != null) "Command helper rejected the request" else if (std.mem.startsWith(u8, raw, "@mp")) "Invalid command helper response" else raw[if (std.mem.lastIndexOfScalar(u8, raw, '\n')) |end| end + 1 else 0..];
+        const prefix = "Commands unavailable: ";
+        @memcpy(slot.error_text[0..prefix.len], prefix);
+        const n = @min(detail.len, slot.error_text.len - prefix.len);
+        for (detail[0..n], 0..) |c, i| slot.error_text[prefix.len + i] = if (c >= 32 and c < 127) c else ' ';
+        slot.error_len = prefix.len + n;
+        debugLog(slot.error_text[0..slot.error_len]);
     }
     _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);

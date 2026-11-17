@@ -1003,9 +1003,10 @@ def completion(remote):
     def reply(line):
         if state().get("slashProof"):
             target = next((arg for arg in ARGS if arg in ("remote-1", "remote-2", "remote-3")), "unknown")
-            record("completion-owner.jsonl", target=target, request=line.strip())
+            owner = "inne" if "sudo -n -H -u inne -- python3 /home/inne/" in " ".join(ARGS) else "login"
+            record("completion-owner.jsonl", target=target, owner=owner, request=line.strip())
             fields = line.rstrip("\n").split("\t")
-            if target != "remote-3":
+            if target != "remote-1" or owner != "inne":
                 return f"@mp\t{fields[0]}\t{fields[1]}\terror\t-\t0\n@@MP_END@@\n"
             return f"@mp\t{fields[0]}\t{fields[1]}\tok\t/home/inne/projects/sample\t1\nS\tverify-owner\t\tOwner account skill\n@@MP_END@@\n"
         helper.CACHE.write_text(json.dumps({"key": helper.cache_key(), "at": time.time(), "commands": []}), encoding="utf-8")
