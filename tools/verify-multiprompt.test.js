@@ -21,11 +21,6 @@ const bridge = read('src/browser_bridge.zig');
 const journey = control.slice(control.indexOf("        'session-open' {"), control.indexOf("        'inbox' {"));
 const transport = control.slice(control.indexOf('function Invoke-Zsb('), control.indexOf('function Select-Theme('));
 
-test('SOFT-2555 hosted reply evidence keeps the requested journey name', () => {
-  const upload = workflow.slice(workflow.indexOf('      - name: Upload durable verification evidence'));
-  assert.match(upload, /name: verify-\$\{\{ matrix\.feature \}\}/, 'artifact identity must survive routing chat-working-live through chat-delivery');
-});
-
 function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();

@@ -285,7 +285,7 @@ test('IGSH-1055 two independent app revisions share the identical branch verifie
   assert.match(workflow, /if \(\$env:VERIFY_APP_REVISION\) \{ \$revision = \(git -C app-source rev-parse HEAD\).Trim\(\) \}/);
   assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
   assert.match(workflow, /embeddedRevision = \$embeddedRevision/);
-  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}\$\{\{ matrix.app-revision/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}\$\{\{ matrix.app-revision/);
 });
 
 
