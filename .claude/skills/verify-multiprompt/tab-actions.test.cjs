@@ -90,6 +90,14 @@ function stepEvidence(step, before, after, inbox, groupId) {
     assert.equal(after.active_workspace, 0);
   } else assert.fail(`Unknown evidence step ${name}`);
 }
+function windowEvidence(doctor, nodes, pid) {
+  assert.equal(doctor.pid, pid);
+  assert.match(doctor.sha256, /^[a-f0-9]{64}$/i);
+  assert.ok(nodes.length);
+  assert.equal(nodes[0].pid, pid);
+  assert.equal(nodes[0].class, 'ZigShell');
+  assert.equal(nodes[0].handle, doctor.hwnd);
+}
 function evidence(dir) {
   const identities = readJson(dir, 'tab-identities.json');
   const ids = [identities.control, identities.target, identities.peer];
@@ -113,12 +121,9 @@ function evidence(dir) {
     stepEvidence(step, before, after, readJson(dir, `${step.stem}-after.inbox.json`), groupId);
     if (step.name === 'group-new') groupId = tab(after, step.id).group_id;
     const doctor = readJson(dir, `${step.stem}-doctor.json`);
-    assert.equal(doctor.pid, step.pid);
-    assert.match(doctor.sha256, /^[a-f0-9]{64}$/i);
     const png = fs.readFileSync(path.join(dir, `${step.stem}.png`));
     assert.ok(png.length > 24 && png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')));
-    const nodes = readJson(dir, `${step.stem}.uia.json`);
-    assert.ok(nodes.length && nodes.every(node => node.pid === step.pid));
+    windowEvidence(doctor, readJson(dir, `${step.stem}.uia.json`), step.pid);
   }
   for (const name of markerNames) assert.equal(fs.readFileSync(path.join(dir, `${name}.txt`), 'utf8').trim(), name);
   assert.deepEqual(layout(readJson(dir, 'tab-layout-after-restart.json')), layout(readJson(dir, 'tab-layout-before-restart.json')), 'names, IDs, appearance and membership survive a real restart');
@@ -170,6 +175,15 @@ else if (process.argv[2] === '--evidence') {
     `], { encoding: 'utf8' });
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the driver geometry helper');
     assert.equal(run.status, 0, run.stderr);
+  });
+  test('window evidence binds the app root while allowing its embedded native console', () => {
+    const doctor = { pid: 7228, hwnd: 131478, sha256: 'a'.repeat(64) };
+    const nodes = [{ pid: 7228, handle: 131478, class: 'ZigShell' }, { pid: 832, handle: 393336, class: 'ConsoleWindowClass' }, { pid: 832, handle: 0, class: '' }];
+    windowEvidence(doctor, nodes, 7228);
+    assert.throws(() => windowEvidence(doctor, nodes, 99), assert.AssertionError);
+    for (const changed of [{ pid: 99 }, { handle: 99 }, { class: 'OtherApp' }]) {
+      assert.throws(() => windowEvidence(doctor, [{ ...nodes[0], ...changed }, ...nodes.slice(1)], 7228), assert.AssertionError);
+    }
   });
   test('wrong inactive targets, clipboard identity and collateral edits fail with positive controls', () => {
     const before = { active_tab: 0, active_workspace: 0, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Target' }] };
