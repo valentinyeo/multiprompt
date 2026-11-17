@@ -20,7 +20,7 @@ The workflow captures the current master commit when verification starts. It run
 
 The gate rejects a repair when master passes, when no master evidence exists, when either side is blocked by infrastructure, or when head still fails. Another journey's failure cannot substitute for the named repro. Matching failures on both revisions remain inherited for ordinary PRs, but do not prove a repair.
 
-The finalizer reads the PR's current title, labels, and description again before publishing its verdict. Editing those fields reruns verification. Non-repair PRs keep the existing optional baseline policy.
+The finalizer reads the PR's current title, labels, and description again before publishing its verdict. Editing those fields reruns verification. Resolution sets the required commit status to pending before waiting for Tests, so an earlier green verdict on the same head cannot approve changed metadata. Non-repair PRs keep the existing optional baseline policy.
 
 ## Check the rule
 

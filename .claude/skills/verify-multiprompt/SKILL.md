@@ -109,7 +109,7 @@ The gate treats titles containing `bug`, `bug fix`, `fix`, `fixes`, or `fixed`, 
 
 For these PRs, the named journey takes priority over the picker and runs against both head and the current master commit captured when verification starts. Both runs use the PR's journey harness. The journey must fail on master for a product assertion and pass on head. A master pass, missing result, infrastructure failure, unknown journey, or an omitted declaration makes `pstack-verifier` FAIL even if the judge says PASS. An unrelated failing journey and inherited failures on both revisions do not prove a repair. Keep the failure screenshots and result files in the uploaded artifacts.
 
-Other PRs retain the existing failed-head baseline comparison. Title, description, and label changes also rerun the gate, so adding a repair label cannot reuse an earlier verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
+Other PRs retain the existing failed-head baseline comparison. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
 
 ## Doctor
 

@@ -73,13 +73,15 @@ test('the CLI carries real PR metadata into selection, schedules a passing repro
   try {
     fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
 const args = process.argv.slice(2);
+require('node:fs').appendFileSync(process.env.GH_REQUESTS, JSON.stringify(args) + '\\n');
 if (args[0] === 'pr') console.log(process.env.PR_FIXTURE);
 else if (args.some(arg => arg.endsWith('/jobs'))) console.log(JSON.stringify({ name: 'head appearance / verify (appearance)', conclusion: 'success' }));
 else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40));
 `, { mode: 0o755 });
     const output = path.join(dir, 'outputs');
-    const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GITHUB_OUTPUT: output,
-      REPO: 'owner/repo', PR_NUMBER: '1', PR_FIXTURE: JSON.stringify({ ...fix, number: 1, state: 'OPEN', headRefOid: 'a'.repeat(40), baseRefName: 'master', commits: [] }) };
+    const requests = path.join(dir, 'requests.jsonl');
+    const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GITHUB_OUTPUT: output, GH_REQUESTS: requests,
+      REPO: 'owner/repo', PR_NUMBER: '1', PR_FIXTURE: JSON.stringify({ ...fix, number: 1, state: 'OPEN', headRefOid: 'a'.repeat(40), baseRefName: 'release', commits: [] }) };
     const run = (args, extra = {}) => {
       fs.writeFileSync(output, '');
       const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), ...args], { env: { ...env, ...extra }, encoding: 'utf8' });
@@ -87,6 +89,9 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
       return fs.readFileSync(output, 'utf8');
     };
     assert.match(run(['resolve']), new RegExp(`base_sha=${'b'.repeat(40)}`));
+    const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(calls.some(args => args.includes('repos/owner/repo/commits/master')), 'repair baselines must be master even for a retargeted PR');
+    assert.ok(calls.some(args => args.includes(`repos/owner/repo/statuses/${'a'.repeat(40)}`) && args.includes('state=pending') && args.includes('context=pstack-verifier')), 'a metadata rerun must invalidate a previous green status on the same head');
     run(['prepare', dir]);
     const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [], compare_base: false }) });
     assert.match(selected, /repro_features=\["appearance"\]/);
