@@ -14,7 +14,7 @@ Open a saved server chat, read its history, type a message, and watch its reply 
 
 ## Driving it with control.ps1
 
-`verify.yml` runs this journey automatically on a PR. Do not dispatch an additional run while its automatic run is pending.
+`click-through.yml` requires this journey on desktop PR changes and calls `verify.yml`. Do not dispatch an additional run while its automatic run is pending.
 
 The workflow calls `drive.ps1 chat-and-composer chat-real-size` with the executable identity and evidence arguments from the shared skill. It records `journey.mp4` and delegates to the existing console-backed SSH and provider boundary.
 

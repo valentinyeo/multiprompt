@@ -25,7 +25,7 @@ The seed contains 64 saved sessions in eight non-restoring workspaces, 19,872 so
 
 The generator preserves the journey's selected tabs and existing workspace entries. It adds saved workspaces rather than launching 64 consoles or replacing feature-specific preconditions. This supplies realistic saved-session discovery and source-history state; it does not claim that every journey opens every long chat. `chat-real-size` opens a long server conversation through production history storage, sends with real keys, and observes partial and completed replies through eight production live events.
 
-`drive.ps1` requires the seed manifest for its mapped routes. `verify.yml` runs `chat-real-size` automatically in its PR matrix and retains `journey.mp4`. Use that existing automatic run; do not dispatch another run while waiting for it.
+`drive.ps1` requires the seed manifest for its mapped routes. `click-through.yml` requires `chat-real-size` on desktop PR changes through `verify.yml`, which retains `journey.mp4`. Use that existing automatic run; do not dispatch another run while waiting for it.
 
 For another hosted reproduction, create the same data before launching the app:
 

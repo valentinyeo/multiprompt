@@ -33,6 +33,11 @@ test('the seeded streaming journey runs automatically and retains video', () => 
   const features = require('./verify-features.cjs').discoverFeatures();
   assert.ok(features.pr.includes('chat-real-size'));
   assert.ok(features.full.includes('chat-real-size'));
+  const automatic = read('.github/workflows/click-through.yml');
+  assert.match(automatic, /  chat-real-size:\n    needs: changes\n    if: needs\.changes\.outputs\.run == 'true'\n    uses: \.\/\.github\/workflows\/verify\.yml\n    with:\n      feature: chat-real-size/);
+  assert.match(automatic, /needs: \[changes,[^\n]*, chat-real-size\]/);
+  assert.match(automatic, /REAL_SIZE: \$\{\{ needs\.chat-real-size\.result \}\}/);
+  assert.match(automatic, /for result in [^\n]*"\$REAL_SIZE"; do/);
   const workflow = read('.github/workflows/verify.yml');
   assert.match(workflow, /'chat-real-size' = 'chat-and-composer'/);
   assert.match(workflow, /Install browser toggle recorder\n\s+if: [^\n]*env\.FEATURE == 'chat-real-size'/);
