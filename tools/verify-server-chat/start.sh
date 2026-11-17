@@ -23,4 +23,5 @@ Subsystem sftp internal-sftp
 CONFIG
 /usr/sbin/sshd -t -f /tmp/mp-ci-sshd.conf
 /usr/sbin/sshd -f /tmp/mp-ci-sshd.conf -E /tmp/mp-ci-sshd.log
+runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/check-locks.py"
 runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/seed.py" "$repo"

@@ -520,7 +520,7 @@ jobs:
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
-          wsl-version: '1'
+          wsl-version: '2'
           additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
         if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat'

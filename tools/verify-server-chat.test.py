@@ -60,6 +60,18 @@ ConvertTo-Json -InputObject $values -Compress
         self.assertEqual(paths, [r'D:\a path\multiprompt', r'D:\key path\id_ed25519.pub', r'D:\a path\multiprompt', r'D:\evidence path'])
 
 
+    @unittest.skipIf(os.name == 'nt', 'The lock preflight runs inside the Linux server')
+    def test_server_sqlite_lock_preflight(self):
+        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        self.assertIn("wsl-version: '2'", workflow, 'Concurrent SQLite writers require the WSL2 kernel, not WSL1 lock emulation')
+        with tempfile.TemporaryDirectory() as home:
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/verify-server-chat/check-locks.py')], env=dict(os.environ, HOME=home), text=True, capture_output=True, check=True)
+            proof = json.loads(result.stdout)
+            self.assertEqual(proof['blockedWriter'], 'SQLITE_BUSY')
+            self.assertEqual(proof['integrity'], 'ok')
+            self.assertEqual(proof['writes'], 2)
+            self.assertEqual(list(Path(home).iterdir()), [])
+
     def test_seed_waits_for_persisted_provider_readiness(self):
         seed = ROOT / 'tools/verify-server-chat/seed.py'
         execute = runpy.run_path

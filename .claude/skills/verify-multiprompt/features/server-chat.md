@@ -18,7 +18,7 @@ Select the saved server tab with Ctrl+1. Open Chat View with Alt+C. Type in the 
 
 ## Driving it with control.ps1
 
-Preconditions: GitHub `windows-latest`, the branch executable, WSL1 Ubuntu 24.04 with OpenSSH server, tmux and Python, Windows OpenSSH client, and FFmpeg. `verify.yml` installs these for `feature=server-chat`.
+Preconditions: GitHub `windows-latest`, the branch executable, WSL2 Ubuntu 24.04 with OpenSSH server, tmux and Python, Windows OpenSSH client, and FFmpeg. `verify.yml` installs these for `feature=server-chat`.
 
 `control.ps1 -Feature server-chat` delegates to `tools/verify-server-chat/drive.ps1`. This is a real networking journey, not the fake SSH/tmux boundary used by `chat-delivery` and `chat-slash`. The runner owns both ends of the loopback connection on port 2222. Linux uses a dedicated `mpverify` user, key-only authentication and a real tmux session. The unmodified production host and connectors dispatch to a deterministic stream-json provider instead of making paid Claude calls. The provider writes normal Claude transcript records and independently records its input. Seeding waits for the production host's persisted `host.status=ready` event before submitting its first message; a live socket alone does not mean the provider has initialized.
 
@@ -31,6 +31,6 @@ Require `result.json` status `passed`, all four named cases passed, zero app pro
 - This proves real server transport and that the `/clear` journey runs through the UI, host and provider. It does **not** prove paid Claude context erasure, or fix the separate server-chat clear behavior tracked by SOFT-2420. The deterministic provider echoes `/clear`; it does not fabricate a reset acknowledgement or alter the production reader.
 - Initial saved-tab and provider configuration are seeded before launch. User actions after launch use SendInput, not UI setters or forged transport responses. Server snapshots are read-only SQLite reads over real SSH.
 - Never use a shared VPS, production key, real account, or user computer. WSL and its test user belong to this disposable GitHub runner.
-- WSL1 shares loopback with Windows. WSL2 would require separate reachability configuration; do not silently switch it.
+- WSL2 provides the Linux kernel and ext4 file locking required by concurrent production-host SQLite writers. WSL1 does not respect those locks and can corrupt event sequences or raise disk I/O errors. Startup proves cross-process SQLite exclusion in the Linux user's home before seeding and records the kernel and integrity result in `server-start.stdout.log`. Windows reaches the WSL2 server through its default localhost forwarding; `ssh-preflight.txt` must prove that connection before the app launches.
 - Startup writes complete native stdout and stderr to `server-start.stdout.log` and `server-start.stderr.log`. Stderr alone is not failure; the native process exit code decides. Cleanup runs `stop.sh` as a file, not a nested shell command, and retains the production host logs in `linux-host/` before shutting WSL down.
 - A green source test is not Windows proof. The run and video are required.
