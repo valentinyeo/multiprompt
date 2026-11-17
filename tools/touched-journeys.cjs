@@ -23,15 +23,53 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
   return { features: unmapped.length ? available : [...selected].sort(), unmapped };
 }
 
-module.exports = { touchedJourneys };
+async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {
+  const { execFileSync } = require('node:child_process');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const head = git('rev-parse', '--verify', `${headRef}^{commit}`).trim();
+  const base = git('merge-base', baseRef, head).trim();
+  const files = git('diff', '--name-only', '-z', base, head).split('\0').filter(Boolean);
+  if (!files.some(file => /^src\/[^/]+\.zig$/.test(file))) return touchedJourneys(files, directory);
+  const { nativeTestParts } = await import('./native-test-parts.mjs');
+  const scratch = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'journey-diff-'));
+  const checkouts = [];
+  try {
+    for (const [name, revision] of [['base', base], ['head', head]]) {
+      const checkout = path.join(scratch, name);
+      git('worktree', 'add', '--quiet', '--detach', checkout, revision);
+      checkouts.push(checkout);
+    }
+    const productionFiles = files.filter(file => {
+      if (!/^src\/[^/]+\.zig$/.test(file)) return true;
+      try {
+        const parts = checkouts.map(checkout => {
+          const source = path.join(checkout, file);
+          if (!fs.lstatSync(source).isFile()) throw new Error('Not a regular Zig source file');
+          return nativeTestParts(fs.readFileSync(source, 'utf8'));
+        });
+        return !(parts[0].names.length > 0 && JSON.stringify(parts[0].names) === JSON.stringify(parts[1].names) && parts[0].outside === parts[1].outside);
+      } catch {
+        return true;
+      }
+    });
+    return touchedJourneys(productionFiles, directory);
+  } finally {
+    for (const checkout of checkouts.reverse()) git('worktree', 'remove', '--force', checkout);
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+module.exports = { touchedJourneys, touchedJourneysForDiff };
 
 if (require.main === module) {
-  const { execFileSync } = require('node:child_process');
-  const files = execFileSync('git', ['diff', '--name-only', '-z', `${process.argv[2]}...${process.argv[3] || 'HEAD'}`], { encoding: 'utf8' }).split('\0').filter(Boolean);
-  const result = touchedJourneys(files);
-  for (const [name, value] of Object.entries(result)) {
-    const line = `${name}=${JSON.stringify(value)}\n`;
-    if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line);
-    process.stdout.write(line);
-  }
+  touchedJourneysForDiff(process.argv[2], process.argv[3]).then(result => {
+    for (const [name, value] of Object.entries(result)) {
+      const line = `${name}=${JSON.stringify(value)}\n`;
+      if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line);
+      process.stdout.write(line);
+    }
+  }).catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
 }

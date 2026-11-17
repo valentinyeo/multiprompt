@@ -201,6 +201,8 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 
 A proof requires the real user path, action plus resulting state, and independently read side effects. A screenshot alone, a green unit test, a log claiming an action, or hand-written app state is insufficient. For appearance, require both a persisted `light` preference and the visible sidebar becoming substantially brighter than the user-selected Dark baseline. Other journeys assert their own saved state/files/window titles. Download and look at the screenshots yourself; reject blank, occluded, login-only, wrong-build or unchanged images even if JSON says passed. A screenshot's existence or luminance is not a substitute for that review.
 
+Cite only evidence files you successfully opened. A filename returned by a journey is not a file read. If your client cannot display images, do not cite PNGs or describe their pixels. Read native measurements in `result.json` and the saved state, attribute each observation to that exact file, and state that screenshots remain unreviewed. An image-capable independent reviewer must inspect those screenshots. Never infer what `action.png` or `after.png` shows from its filename or another file's assertions.
+
 For example:
 
 ```sh
