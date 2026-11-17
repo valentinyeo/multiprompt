@@ -28,6 +28,9 @@ Dispatch `gh workflow run verify.yml -f feature=chat-first-paint` (or `--ref <br
 
 ## Gotchas
 
+The old master red-control statement is historical: current source saves and reserves browser-pane state. The driver waits six elapsed seconds before its next measurement; it does not detect six quiet seconds. verify.yml has no direct master-push trigger at this revision; do not infer one from this map.
+
+
 - Red control: current master does not save the browser pane in the launch snapshot, so the first frame uses the full width and the later frame the pane width; the run fails with `chat layout moved after first paint`. The red and green run links are on the IGSH-925 ticket.
 - The two `[chat]` log lines exist only under verbose logging, which the journey turns on; they add no behaviour.
 - Groups are keyed by window size so a deliberate resize is never reported as a shift.

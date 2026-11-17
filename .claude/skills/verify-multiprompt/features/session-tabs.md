@@ -30,5 +30,8 @@ Preconditions are the same as [Session open](session-open.md): single-window off
 
 ## Gotchas
 
+The driver submits the real listener protocol directly, not actual zsb shell command parsing. Close is remote-only and refuses pinned tabs. Workspace moves require single-window mode and ungroup when no group is specified. Rebind attaches an existing session; it does not create one.
+
+
 - A rebound tab cannot reach `connected` in CI because no server is supplied; the journey checks the saved layout and the reply state, not a live attachment.
 - Group ids are compared by group name after the restart.

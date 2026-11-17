@@ -28,6 +28,9 @@ A successful run captures evidence; it does not automatically verify displayed o
 
 ## Gotchas
 
+The recency-order exception is the Frequent split, not Favorites. Active filters also restrict which session can occupy the top row.
+
+
 - The second update is a scripted local notification, not a cloud message, so reply timing and remote ordering are not covered.
 - Order is proven by eye on the two captures; `result.json` never decides it and always asks for visual review.
 - This map covers desktop only; Android keeps its own order and needs its own journey.

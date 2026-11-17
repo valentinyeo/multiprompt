@@ -107,6 +107,9 @@ The driver sends three messages, cancels the middle one from its menu, then pres
 
 ## Gotchas
 
+Queue reconciliation and guarded draft transfer now exist in the reader; older statements below about missing CHAT_QUEUE support or a mandatory wrapped Ctrl+U leftover describe historical behavior, not this candidate. Clearing re-reads until empty. Palette queue/retry/discard reachability is specified in chat-message-sending.md; labels/handlers alone are not offered rows.
+
+
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
 - `agentBoundary` honestly records: stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. This proves that real Chat View input reaches the production tmux-channel system boundary, not that Claude consumes it, generates a response, or persists a real conversation.
 - No real SSH networking, authentication, server, Claude process or remote rendering is verified. The three delivery cases use no transcript; `queue-draft-sync` supplies a synthetic Claude transcript through the production reader's pane-process discovery and verifies that the app turns its queue events into the Chat View queue list. No credentials, synthetic transcript files, account data or test-only app setters are supplied.

@@ -31,6 +31,9 @@ IGSH-1894 adds an edge check to every photo crop. The top-left quarter, two pixe
 
 ## Gotchas
 
+Use PNG/JPEG within 16 MiB, 8192-pixel dimensions and 32-megapixel area. Right-click tab then Bot face is an alternate entry. Workflow artifacts may append DPI/theme or revision suffixes to verify-bot-photo; inspect the actual uploaded artifact name.
+
+
 This journey uses offline local tabs. It does not verify account sync, remote services, or Android. Review `result.json` and screenshots before claiming success.
 
 Account protocol checks run in the Test workflow. The Worker suite exercises D1 persistence, feature negotiation, layout-write preservation, concurrent writes, reset, and account/workspace isolation. `bot_photo_sync.zig` tests production upload scheduling with an explicit disk/HTTP stand-in for migration, retry, replace, reset, account changes and restart. These do not prove signed-in desktop-to-phone delivery.

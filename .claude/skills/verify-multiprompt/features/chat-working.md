@@ -31,6 +31,9 @@ The native test does not send input, run a transport, contact a provider, or pum
 
 ## Gotchas
 
+A reply delta or turn-ended signal does not by itself clear the dots while another working signal remains. Stop/Escape interruption needs its separate chat-stop recipe. Alt+C requires a terminal-backed tab; live chats have no shell toggle.
+
+
 No provider is contacted. Only the console boundary is replaced.
 The pre-fix release must fail with `IGSH-924 inline dots painted` after the owned working console and transcript are ready.
 Never run this journey on a user's machine.

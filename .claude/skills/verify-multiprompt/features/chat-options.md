@@ -27,4 +27,7 @@ Retain the workflow run, exact build hash, provider answer receipts and AMOLED s
 
 ## Gotchas
 
+The owned SSH/tmux and provider are synthetic boundaries. Structured option number keys are another user entry point, but this journey does not prove a real provider accepted the answer. Permission approval shortcuts are a separate feature.
+
+
 The provider console is scripted. No Claude, Codex or other paid provider is called. The reader regression suite separately covers request_user_input and completed/sidechain/ordinary-text negatives. A released build runs through the same journey; the desktop update offer is verified separately.

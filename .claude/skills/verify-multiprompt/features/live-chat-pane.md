@@ -37,6 +37,9 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 
 ## Gotchas
 
+Chat two is selected to inspect its closed baseline; its opened pane is never viewed. The live-* fixture identity is a synthetic binding, not proof of a real hosted provider. Production pane identity does not require that name prefix.
+
+
 - The real reader host, tmux and Claude agent are absent. This proves the desktop side with explicit session tokens, not a real hosted chat creation or agent environment. The reader suite checks the supplied environment separately.
 - An agent call on a chat whose pane is closed opens that chat's own pane. The journey therefore expects a closed pane only before the first call on that chat, never as an answer to one.
 - The wrapper selftest uses a real public test page. It fails if the page or pane cannot be reached. An initially empty pane retains a blank tab after the test page closes; existing user tabs are never closed.

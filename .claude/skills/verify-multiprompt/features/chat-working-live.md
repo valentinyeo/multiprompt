@@ -27,4 +27,7 @@ The `Verify steady chat` workflow runs this same driver against the instrumented
 
 ## Gotchas
 
+The driver requires an already-running subscribed turn with visible dots before Enter. Its Enter-to-dots assertion proves continued visibility within the bound, not idle-to-working onset caused by that send.
+
+
 This is not proof of a real provider, real SSH, provider startup or the normal external message-worker process. Timing includes the actual hosted runner and stand-in transport, not production network or provider latency. A passing portable checker test is not a hosted desktop result. Require the Windows artifact and inspect the screenshots; no pass is claimed until that run succeeds.

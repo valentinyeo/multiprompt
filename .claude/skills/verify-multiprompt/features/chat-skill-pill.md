@@ -15,8 +15,8 @@ Type a known skill in Chat View, or pick one using the existing command menu. No
 Run on GitHub Windows only:
 
 ```sh
-gh workflow run verify.yml --ref ceo/IGSH-928 -f feature=chat-skill-pill
-gh workflow run verify.yml --ref ceo/IGSH-928 -f feature=chat-skill-pill -f tag=v0.28.912
+gh workflow run verify.yml --ref <branch> -f feature=chat-skill-pill
+gh workflow run verify.yml --ref <branch> -f feature=chat-skill-pill -f tag=v0.28.912
 ```
 
 The same harness must fail `IGSH-928 skill pill pixels` on the old release and pass on the shipped release. Download `verify-chat-skill-pill` and inspect its ten named screenshots, `skill-pill.json`, `skill-pill-summary.json`, `result.json` and action trace.

@@ -30,6 +30,9 @@ Preconditions:
 
 ## Gotchas
 
+The current picker oracle excludes This evening from required IDs even before 16:00. It proves picker opening, not every applicable preset. Escape can return from preset mode to the parent palette; it need not dismiss all overlays. Reminder eligibility requires tmux backing, not merely a Claude name.
+
+
 - The signal is the app's `[palette] rows` line, not a pixel check. It proves which rows exist, not how they look; inspect `action.png` for the labels and times.
 - Esc is not covered: the test tab's failing remote console can steal foreground on the GitHub runner, and closing the palette writes no new `[palette] rows` line, so waiting for rows to disappear is not a reliable dismissal proof.
 - The tmux tab fails its SSH attach on the runner; the picker only needs the tab's saved tmux name.

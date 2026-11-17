@@ -1,24 +1,24 @@
-# Quit, hide and delete chats
+# Quit, archive and delete chats
 
 Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-actions.ps1
 
 ## Sub-features
 
-Ctrl+W quits without stopping agents. Ctrl+Shift+W deletes the selected chat once. Deletion saves its history identity before stopping it. Alt+X has no action. Right-click opens seven shared palette actions, with Delete last and red.
+Ctrl+K Quit multi bot quits without stopping agents; Ctrl+W does not quit. Ctrl+Shift+W is the active-chat delete shortcut, while this journey selects Delete through the palette. Deletion saves its history identity before stopping it. Alt+X has no action. Right-click opens seven shared palette actions, with Delete last and red.
 
 ## How to get to it (user POV)
 
-Press Ctrl+W, reopen, then right-click a chat. Search Ctrl+K for Copy chat ID or Hide from sidebar. Press Ctrl+Shift+W to delete the active chat.
+Choose Ctrl+K Quit multi bot, reopen, then right-click a chat. Search Ctrl+K for Copy chat ID or Archive chat. Press Ctrl+Shift+W to delete the active chat.
 
 ## Driving it with control.ps1
 
 Dispatch `verify.yml` with `feature=session-actions` on the verification branch. The dedicated hosted Windows driver launches the real app with an isolated offline profile. It seeds two saved remote tabs and distinct synthetic provider transcripts once. An explicit SSH boundary dispatches production session-end commands to two independently owned synthetic agent processes.
 
-Require quit/reopen to keep both processes and chats. Search `close tab`, require the Hide target, and hide the local CMD tab without stopping either process. Require right-click to expose exactly the seven ordered IDs, then open the background chat's inline Rename without changing the active chat. Capture paired closed/open menu screenshots after selecting each built-in Light, AMOLED and Mid theme through real input. Delete the background chat through that menu, then delete the active chat with one shortcut. Require exactly one stop request per identity and both archive identities.
+Require quit/reopen to keep both processes and chats. Search `close tab`, require the Archive chat target, and close the local CMD tab without stopping either synthetic remote process. This local check does not prove remote archive keeps its tmux carrier running. Require right-click to expose exactly the seven ordered IDs, then open the background chat's inline Rename without changing the active chat. Capture paired closed/open menu screenshots after selecting each built-in Light, AMOLED and Mid theme through real input. Delete the background chat through that menu, then delete the active chat with one shortcut. Require exactly one stop request per identity and both archive identities.
 
 Search each deleted chat's name through Ctrl+K and reopen its existing archived resume action. The SSH boundary accepts only a resume command whose saved identity matches an ended fixture, then supplies a new console transport without modifying either original transcript. Require an owned visible native transcript, nonempty native text layout and the correct original question and answer copied through the app's Select all command. Reject the other chat's text. Save `history-Alpha.txt`, `history-Beta.txt` and matching screenshots, and verify both original transcript hashes again. Require zero remaining owned processes. Retain launch identity, actions, saved files and boundary logs in `verify-session-actions`.
 
-The sessions journey separately uses the real Hide from sidebar palette action when removing its temporary tabs.
+The sessions journey separately uses the close/archive palette path when removing its temporary tabs. Remote archive persists identity and kills its tmux carrier; it is distinct from Delete's explicit provider-stop identity.
 
 ## Gotchas
 

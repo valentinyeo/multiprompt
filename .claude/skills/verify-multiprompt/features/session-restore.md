@@ -42,6 +42,9 @@ Dispatch `gh workflow run verify.yml -f feature=session-restore` for the exact r
 
 ## Gotchas
 
+The direct signed-helper restart in this journey does not prove the Restart Multi Bot or Restart to update palette entry. Use --ref <branch> for a standalone candidate run and verify the exact checkout SHA. Real remote continuity belongs to Part B.
+
+
 - Session shell IDs can be reassigned during restoration. Resolve the published active ID to the unique user-created name; do not assume the previous process's ID survives a relaunch.
 - Startup's painted launch snapshot is not proof of completed restoration. The driver requires the new HWND in published state and the new launch's restore/browser phase before checking selection.
 - Only this job's private directory is reused. No shared desktop, credentials, synthetic sessions or test-only setters are used.

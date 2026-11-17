@@ -15,7 +15,7 @@ Open a real local console tab, give it a recognizable name and execute a command
 - Press Ctrl+K, type `new cmd`, and choose `New CMD Shell`.
 - The CMD spawn button and Ctrl+Shift+1 also open CMD; this journey covers the palette entry only.
 - Press F2 or double-click the active tab to rename it. This journey uses F2.
-- Type in the console and press Enter to execute. Ctrl+Tab / Ctrl+Shift+Tab cycle sessions; Ctrl+1 through Ctrl+9 select one; Ctrl+W quits the app.
+- Type in the console and press Enter to execute. Ctrl+Tab / Ctrl+Shift+Tab cycle sessions; Ctrl+1 through Ctrl+9 select one; quit through Ctrl+K Quit multi bot. Ctrl+W is left to the browser; it does not quit the app.
 - Right-click a tab opens its tab-actions palette for pin, move and other actions; these are not exercised by this create/rename journey.
 
 ## Driving it with control.ps1
@@ -44,7 +44,7 @@ Preconditions:
 
 ## Gotchas
 
-- **Known failing:** run [39871210688](https://github.com/valentinyeo/multiprompt/actions/runs/39871210688), v0.28.821: after F2 rename and Enter, foreground and native focus stay on the ZigShell main frame, not ConsoleWindowClass. The echo never reaches CMD; `real console command wrote file` fails. This focus-after-rename product gap is tracked as IGSH-597; keep the journey unchanged. See [coverage](../coverage.md) for the other failing releases and run history.
+- **Historical failure, not current-candidate proof:** run [39871210688](https://github.com/valentinyeo/multiprompt/actions/runs/39871210688), v0.28.821: after F2 rename and Enter, foreground and native focus stay on the ZigShell main frame, not ConsoleWindowClass. The echo never reaches CMD; `real console command wrote file` fails. This focus-after-rename product gap is tracked as IGSH-597; keep the journey unchanged. See [coverage](../coverage.md) for the other failing releases and run history.
 
 - The CMD shell is a real hosted console, not an emulated terminal or a mock agent.
 - Rename must finish before typing a shell command; typing into the rename UI is not successful console execution.

@@ -40,6 +40,9 @@ Preconditions:
 
 ## Gotchas
 
+Frequent-input settings retain a label and handler but no current palette insertion. Do not promise that row is reachable. Unread-only is saved through saveSession, not merely a global transient filter. Use the full notifications-inbox map for alternate triage inputs.
+
+
 - An empty or filtered-out list cannot exercise a read/unread toggle. Treat that as a failed precondition, not success opening an empty overlay.
 - Unread-only is a global transient filter; it is not the same thing as one session's blue dot.
 - A muted session never appears in Inbox whatever it does (new output, done, waiting), on every device; it stays in its workspace tab, and the mute is saved and synced through the account layout.

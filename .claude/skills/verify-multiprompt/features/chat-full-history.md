@@ -15,7 +15,7 @@ Select the session with Ctrl+1 and open Chat View with Alt+C. No scroll-to-load 
 
 ## Driving it with control.ps1
 
-Dispatch `gh workflow run verify.yml --ref ceo/IGSH-815 -f feature=chat-full-history` and download `verify-chat-full-history`.
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=chat-full-history` and download `verify-chat-full-history`.
 
 The existing delivery boundary creates its own ordinary Claude transcript: two initial messages, then 24 user/assistant pairs interleaved with large synthetic tool results. The source exceeds the reader's tail window. The harness seeds only its documented isolated remote tab and agent boundary, never the app's message cache.
 
@@ -34,5 +34,8 @@ The production-history regression in `tools/chat-transcript-history.test.js` req
 
 
 ## Gotchas
+
+Current harness gap: the driver can wheel upward when the expected block count is absent. Such a run proves eventual completeness, not the no-scroll completeness-at-open requirement above. Do not report that requirement passed until the driver independently asserts it before scrolling. Real-size data belongs to Part A.
+
 
 This is a synthetic Claude/SSH/tmux boundary on GitHub's free Windows runner, not a signed-in live agent. Production transcript discovery, Python reader, history/cache, native layout, selection/copy and app restart are real. No desktop, build or test runs on the VPS. Existing driver condition observations are reused; no new timing constants, page limits or row caps are introduced.
