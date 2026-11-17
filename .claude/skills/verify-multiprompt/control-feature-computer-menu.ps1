@@ -3,8 +3,9 @@ Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -
 $initial = Read-Session
 $groupIds = @()
 if ($initial.PSObject.Properties['groups']) { $groupIds = @($initial.groups | ForEach-Object { $_.id }) }
-Palette 'move to group'
-Press @(0x0D) 'Enter: Move to Group'
+Invoke-JourneyCommand 'Move to Group' -Confirm {
+    Press @(0x0D) 'Enter: Move to Group'
+}
 Type-Text 'new group'
 Press @(0x0D) 'Enter: create isolated group'
 Wait-Until {
@@ -28,8 +29,9 @@ $hostName = $listed.hosts[0]
 $created = Invoke-Zsb @('session-open', '--workspace', $workspace, '--group', $group.name, '--host', $hostName, '--tmux', 'verify-computer', '--name', 'Computer parity') $script:computerPort 'session-created'
 if ($created.created -ne $true -or $created.tab -le 0) { throw 'Session command did not create the isolated remote identity' }
 Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.name -ceq 'Computer parity' }).Count -eq 1 } 'remote identity saved by the app'
-Palette 'Computer parity'
-Press @(0x0D) 'Enter: select Computer parity chat'
+Invoke-JourneyCommand 'Computer parity' -Session -Confirm {
+    Press @(0x0D) 'Enter: select Computer parity chat'
+}
 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].name -ceq 'Computer parity' } 'remote chat selected'
 $selected = Read-Session
 if (-not ($selected.tabs[$selected.active_tab].PSObject.Properties['cv'] -and $selected.tabs[$selected.active_tab].cv)) {
@@ -39,8 +41,9 @@ Wait-ChatFocus 'Edit' 'computer-chat'
 Assert-ChatTyping 'keep this draft' 'computer-draft'
 Save-Json (Read-Session) 'session-before.json'
 Snapshot 'before'
-Palette 'more menu'
-Press @(0x0D) 'Enter: open the existing three-dots menu'
+Invoke-JourneyCommand 'Chat View: More Menu' -Confirm {
+    Press @(0x0D) 'Enter: open the existing three-dots menu'
+}
 Wait-Until {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
@@ -68,8 +71,9 @@ $after = Read-Session
 if (@($after.tabs).Count -ne @($baseline.tabs).Count + 1 -or $after.tabs[$after.active_tab].name -cne 'Computer parity' -or -not $after.tabs[$after.active_tab].cv) { throw 'Computer menu action changed or closed the chat' }
 Save-Json $after 'session-selected.json'
 Snapshot 'computer-pane'
-Palette 'computer'
-Press @(0x0D) 'Enter: return from Computer using its existing toggle'
+Invoke-JourneyCommand 'Computer: Show or hide' -Confirm {
+    Press @(0x0D) 'Enter: return from Computer using its existing toggle'
+}
 Wait-Until { (Test-Path -LiteralPath $choicePath) -and [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $choicePath -Raw)) } 'Computer selection cleared by the existing action'
 Wait-ChatFocus 'Edit' 'computer-return'
 $composer = [System.Windows.Automation.AutomationElement]::FocusedElement

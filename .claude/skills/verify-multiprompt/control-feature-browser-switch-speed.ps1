@@ -27,13 +27,15 @@
                 $initial = Read-Session
                 Wait-WorkspaceSurface $initial.active_workspace 0 $false
                 $gapCase.phase = 'idle-close-fixture'
-                Focus-Palette 'browser auto suspend' 6240
-                Press @(0x0D) 'Enter: disable timed browser closing while measuring fresh tier-two freezes'
+                Invoke-JourneyCommand 'Browser: Auto-Suspend Idle Panes' -Confirm {
+                    Press @(0x0D) 'Enter: disable timed browser closing while measuring fresh tier-two freezes'
+                }
                 Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled; automatic freezing remains enabled'
                 Save-Json (Read-Session) 'switch-idle-close-fixture.json'
                 $gapCase.phase = 'group-setup'
-                Focus-Palette 'move to group' 6301
-                Press @(0x0D) 'Enter: Move to Group submenu'
+                Invoke-JourneyCommand 'Move to Group' -Confirm {
+                    Press @(0x0D) 'Enter: Move to Group submenu'
+                }
                 Type-Text 'new group'
                 Press @(0x0D) 'Enter: New group containing timing CMD'
                 Wait-Until {
@@ -42,8 +44,9 @@
                 } 'timing CMD membership in the user-created group'
                 Press @(0x1B) 'Esc: leave inline group rename using the saved default name'
                 $gapCase.phase = 'second-console'
-                Palette 'new cmd'
-                Press @(0x0D) 'Enter: create second CMD for Ctrl+Tab timing'
+                Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                    Press @(0x0D) 'Enter: create second CMD for Ctrl+Tab timing'
+                }
                 Wait-Until {
                     $state = Read-Session
                     @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'cmd' -and
@@ -89,8 +92,9 @@
                     $paintRgb = if ($browserOn) { $rgb } else { $consoleRgb }
                     if ($mode -eq 'chat_browser_off') {
                         $gapCase.phase = 'chat-setup'
-                        Focus-Palette 'chat view off everywhere' 6347
-                        Press @(0x0D) 'Enter: reset both switch test sessions to shell'
+                        Invoke-JourneyCommand 'Chat View off everywhere' -Confirm {
+                            Press @(0x0D) 'Enter: reset both switch test sessions to shell'
+                        }
                         Wait-Until {
                             $state = Read-Session
                             $null -ne $state -and @($state.tabs).Count -eq 2 -and -not $state.PSObject.Properties['chat_view_mode'] -and
@@ -132,8 +136,9 @@
                             $browser = [VerifyNative]::DockedPaneWindow($script:window)
                             $dock = New-Object VerifyNative+Rect
                             if (-not [VerifyNative]::GetWindowRect($browser, [ref]$dock)) { throw 'Timing browser dock rectangle unavailable' }
-                            Palette 'jump browser'
-                            Press @(0x0D) 'Enter: focus the session browser through the palette'
+                            Invoke-JourneyCommand 'Browser: Switch Focus Between Terminal and Pane' -Confirm {
+                                Press @(0x0D) 'Enter: focus the session browser through the palette'
+                            }
                             Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $browser } 'target browser foreground for real address-bar navigation'
                             Doctor
                             if ([VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window -or [VerifyNative]::DockedPaneWindow($script:window) -ne $browser) { throw 'Navigation browser ownership changed' }
@@ -201,7 +206,7 @@
                             [VerifyNative]::Chord(@(0x75))
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'F6 did not reach the browser address bar' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            Palette 'open browser'
+                            Invoke-JourneyCommand 'Open Browser Pane' -SelectOnly
                             $hopLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
                             $hopStart = (Read-SharedText $hopLog).Length
                             Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'

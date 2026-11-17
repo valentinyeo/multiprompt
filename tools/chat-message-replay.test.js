@@ -49,6 +49,7 @@ function reducerFrom(zig) {
     .replaceAll('token.len', 'token.length')
     .replaceAll(' and ', ' && ')
     .replaceAll(' or ', ' || ')
+    .replace('if (found) |i| {', 'if (found !== null) { const i = found;')
     .replace('if (found) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);', 'if (found !== null) chatOutboxRemoveAtIn(app_state.g_chat_outbox, found);')
     .replace('const text = json_reader.string(json_reader.field(message, "text")) orelse return false;', 'const text = json_reader.string(json_reader.field(message, "text")); if (text === null) return false;')
     .replace('const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch return false;', 'const wide = text;')
@@ -60,14 +61,16 @@ function reducerFrom(zig) {
     .replace('_ = json_reader.copyString(message, "state", &entry.message_phase);', 'json_reader.copyString(message, "state", entry, "message_phase");')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else if (equal(phase, "accepted") || equal(phase, "started")) .delivered else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : equal(phase, "accepted") || equal(phase, "started") ? "delivered" : "queued";')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : "queued";');
-  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'chatMessageFromAgent', 'equal', 'chat_echo', code);
+  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'chatMessageFromAgent', 'equal', 'chat_echo', 'rememberLandedSend', code);
 }
 
 function harness(zig = body('chatMessageReduce')) {
   const app = { g_chat_outbox: { items: [] }, g_chat_confirmed: { items: [] } };
   const reduce = reducerFrom(zig);
+  const landed = [];
   return {
     app,
+    landed,
     send: (shell, value) => reduce(shell, value, app, {
       field: (object, field) => object && object[field] !== undefined ? object[field] : null,
       string: value => typeof value === 'string' ? value : null,
@@ -78,7 +81,7 @@ function harness(zig = body('chatMessageReduce')) {
         if (now_ms < sent_ms) return true;
         return now_ms - sent_ms < 600000;
       },
-    }),
+    }, (shell, entry) => landed.push({ shell, entry })),
   };
 }
 
@@ -168,8 +171,22 @@ test('non-Claude terminal states retain original removal behavior', () => {
     const shell = { key: 'tab-a', sid: 'session-a', agent };
     const message = { id: 'wire-1', text: 'message', state: 'queued' };
     assert.equal(h.send(shell, message), true);
+    const entry = h.app.g_chat_outbox.items[0];
     assert.equal(h.send(shell, { ...message, state: phase }), true);
     assert.equal(h.app.g_chat_outbox.items.length, 0);
+    assert.deepEqual(h.landed, [{ shell, entry }]);
+  }
+});
+
+test('SOFT-2418 cancelling a send does not remember it as working', () => {
+  for (const agent of [1, 2, 3]) {
+    const h = harness();
+    const shell = { key: 'tab-a', sid: 'session-a', agent };
+    const message = { id: 'wire-cancelled', text: 'message', state: 'queued' };
+    assert.equal(h.send(shell, message), true);
+    assert.equal(h.send(shell, { ...message, state: 'cancelled' }), true);
+    assert.equal(h.app.g_chat_outbox.items.length, 0);
+    assert.deepEqual(h.landed, []);
   }
 });
 

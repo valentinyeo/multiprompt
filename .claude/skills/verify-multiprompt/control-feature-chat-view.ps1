@@ -1,9 +1,8 @@
 
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'The fresh offline CMD has no signed-in agent or received conversation; the separate native painter proof uses a synthetic envelope without seeding app state' }
-            Palette 'interface'
-            Press @(0x28) 'Down: UI Size: Decrease'
-            Press @(0x28) 'Down: UI Size: Reset'
-            Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            Invoke-JourneyCommand 'UI Size: Reset' -Confirm {
+                Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'saved initial tab before Chat View'
             $baseline = Read-Session
             if ($baseline.PSObject.Properties['ui_scale'] -and $baseline.ui_scale -ne 100) { throw 'Chat View baseline UI size is not 100' }
@@ -61,8 +60,9 @@
                 try {
                     foreach ($mode in @('typed', 'suggestion')) {
                         $beforeLocal = Read-Session
-                        Palette 'new cmd'
-                        Press @(0x0D) 'Enter: create local console for direct-route check'
+                        Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                            Press @(0x0D) 'Enter: create local console for direct-route check'
+                        }
                         Wait-Until {
                             $state = Read-Session
                             @($state.tabs).Count -eq @($beforeLocal.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
@@ -147,9 +147,8 @@
                             Snapshot 'running-claude-shell'
                             foreach ($chat in @($true, $false)) {
                                 $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
-                                Focus-Palette 'switch to terminal' 6305
+                                Invoke-JourneyCommand 'Switch to shell' -SelectOnly
                                 Snapshot $(if ($chat) { 'running-claude-palette-chat' } else { 'running-claude-palette-shell' })
-                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label for the current tab"
                                 & $checkJourney $(if ($chat) { 'palette-chat' } else { 'palette-shell' }) $chat
                             }
@@ -166,17 +165,13 @@
                                 $targetIndex = [int]$indices[0]
                                 $shot = if ($chat) { 'running-claude-pre-context-chat' } else { 'running-claude-pre-context-shell' }
                                 Snapshot $shot
-                                $lines = @(Get-Content $debugLog)
-                                if ($lines.Count -lt $paintBoundary) { throw 'Debug log changed across the paint boundary' }
                                 $pair = $null
-                                for ($i = $paintBoundary; $i -lt $lines.Count; $i++) {
-                                    if ($lines[$i] -match ('\[sidebar-avatar\] target=' + $targetIndex + ' face=(\d+) color=(\d+)$')) {
-                                        $face = $Matches[1]; $color = $Matches[2]
-                                        if ($i + 1 -ge $lines.Count -or $lines[$i + 1] -notmatch ('\[bots\] face=' + $face + ' color=' + $color + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { throw 'Context target paint pair is incomplete or ambiguous' }
-                                        $pair = @{ avatar = $lines[$i]; bots = $lines[$i + 1]; left = [int]$Matches[1]; top = [int]$Matches[2]; right = [int]$Matches[3]; bottom = [int]$Matches[4] }
+                                foreach ($line in @(Get-Content $debugLog)) {
+                                    if ($line -match ('\[photo-proof\] expanded target=' + $targetIndex + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) {
+                                        $pair = @{ geometry = $line; left = [int]$Matches[1]; top = [int]$Matches[2]; right = [int]$Matches[3]; bottom = [int]$Matches[4] }
                                     }
                                 }
-                                if ($null -eq $pair) { throw 'No fresh SID-qualified context target paint pair' }
+                                if ($null -eq $pair) { throw 'No SID-qualified context target geometry' }
                                 $client = New-Object VerifyNative+Rect
                                 $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                                 if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or -not (Test-Path $snapshotPath)) { throw 'Context target client or sidebar geometry unavailable' }
@@ -188,7 +183,7 @@
                                 if ($dpi -eq 0 -or $scale -le 0 -or $pair.left -lt $client.Left -or $pair.top -lt $client.Top -or $pair.right -le $pair.left -or $pair.bottom -le $pair.top -or $pair.right -gt $client.Right -or $pair.bottom -gt $client.Bottom -or $pair.right -gt $sidebarRight) { throw 'Context target rectangle outside the client sidebar' }
                                 $x = [int][Math]::Floor(($pair.left + $pair.right) / 2.0)
                                 $y = [int][Math]::Floor(($pair.top + $pair.bottom) / 2.0)
-                                $journey.contextTargets += @{ shellId = $journeyId; index = $targetIndex; avatarLine = $pair.avatar; botsLine = $pair.bots; rect = @($pair.left, $pair.top, $pair.right, $pair.bottom); center = @($x, $y); screenshot = ($shot + '.png') }
+                                $journey.contextTargets += @{ shellId = $journeyId; index = $targetIndex; geometryLine = $pair.geometry; rect = @($pair.left, $pair.top, $pair.right, $pair.bottom); center = @($x, $y); screenshot = ($shot + '.png') }
                                 Save-Json $journey 'running-claude-switch.json'
                                 Doctor
                                 Assert-Foreground
@@ -208,7 +203,6 @@
                                     @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count -gt $readyBefore
                                 } 'current tab switch action selected'
                                 Snapshot $(if ($chat) { 'running-claude-context-chat' } else { 'running-claude-context-shell' })
-                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label from the tab menu"
                                 & $checkJourney $(if ($chat) { 'context-chat' } else { 'context-shell' }) $chat
                             }
@@ -292,15 +286,15 @@
                                 $menuLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
                                 if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
                                 $menuCheck.items = 'Reply,Copy'
-                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
-                                $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                                $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible })[0]
                                 $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
                                 $menuCheck.look = $menuLook
                                 Snapshot 'message-menu'
                                 if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
-                                if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
+                                if ($menuLook.fill -ne '1F1F1F' -or $menuLook.leftEdge -ne '2E2E2E' -or $menuLook.rightEdge -ne '2E2E2E') { throw ('IGSH-1019: message menu differs from the approved style: fill ' + $menuLook.fill + ', edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge) }
                                 Press @(0x1B) 'Esc: dismiss message menu'
-                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
                                 $menuCheck.passed = $true
                                 $menuCheck.reason = ''
                             } catch {
@@ -384,8 +378,9 @@
             $insideCard = { param($rect, $card) $rect[0] -ge $card[0] -and $rect[1] -ge $card[1] -and $rect[2] -le $card[2] -and $rect[3] -le $card[3] }
             try {
                 $beforeStop = Read-Session
-                Palette 'new cmd'
-                Press @(0x0D) 'Enter: create local console for the in-box Stop check'
+                Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                    Press @(0x0D) 'Enter: create local console for the in-box Stop check'
+                }
                 Wait-Until {
                     $state = Read-Session
                     @($state.tabs).Count -eq @($beforeStop.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'

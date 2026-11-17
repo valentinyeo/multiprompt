@@ -4,8 +4,9 @@
             $initial = Read-Session
             $initialGroupIds = @()
             if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
-            Palette 'move to group'
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text 'new group'
             Press @(0x0D) 'Enter: first group'
             Wait-Until {
@@ -36,8 +37,9 @@
                 $tabIds[$n] = [int]$opened.tab
             }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -cmatch '^verify-[1-4]$' }).Count -eq 4 } 'four tmux tabs saved'
-            Palette 'move to group'
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text 'new group'
             Press @(0x0D) 'Enter: second group'
             $knownGroupIds = @($initialGroupIds) + @($groupA.id)

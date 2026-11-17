@@ -2,7 +2,7 @@
             $changelogSpeed = [ordered]@{ open_ms = @(); scroll_ms = @(); close_ms = @(); before_ms = @(); after_ms = @(); samples = 5; input = 'native SendInput'; completion = 'visible text patch changed and UI thread responded'; errors = 0 }
             for ($sample = 0; $sample -lt 5; $sample++) {
                 $changelogSpeed.before_ms += [VerifyNative]::ChangelogResponse($script:window)
-                Focus-Palette 'changelog' 6241
+                Invoke-JourneyCommand 'Changelog' -SelectOnly
                 $changelogSpeed.open_ms += [VerifyNative]::MeasureChangelogKey($script:window, 0x0D)
                 if ($sample -eq 0) { Snapshot 'changelog-open' }
                 $changelogSpeed.scroll_ms += [VerifyNative]::MeasureChangelogKey($script:window, 0x22)
@@ -27,11 +27,11 @@
             [IO.File]::WriteAllText($commandsPath, $seedJson, (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
             $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Palette ''
+            Press @(0x11, 0x4B) 'Ctrl+K: open empty command palette'
             Snapshot 'ctrl-k-empty'
             Save-Json (Read-Session) 'ctrl-k-empty.session.json'
             Press @(0x1B) 'Esc: close empty palette'
-            Palette 'powershell' '2005'
+            Invoke-JourneyCommand 'new powershell' -SelectOnly
             Snapshot 'more-shells-search'
             Snapshot 'more-shells-search-inside'
             Press @(0x1B) 'Esc: close PowerShell search'
@@ -67,9 +67,10 @@
             [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $otherEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 700
             $pickTabsBefore = @((Read-Session).tabs).Count
-            Palette 'pick repo'
-            Snapshot 'pick-repo-row'
-            Press @(0x0D) 'Enter: Pick repo'
+            Invoke-JourneyCommand 'Pick repo...' -Confirm {
+                Snapshot 'pick-repo-row'
+                Press @(0x0D) 'Enter: Pick repo'
+            }
             Wait-Until {
                 $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
                 ((Get-Content $repoLog -Raw) -join '') -match '\[palette\] rows chars=0 count=2 ids=6702 6710'
@@ -86,8 +87,9 @@
             $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true; repoRows = $repoRows; repo = $repoFolder }
             $repoLogPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $repoListsBefore = ([regex]::Matches(((Get-Content $repoLogPath -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count
-            Palette 'pick repo'
-            Press @(0x0D) 'Enter: reopen Pick repo'
+            Invoke-JourneyCommand 'Pick repo...' -Confirm {
+                Press @(0x0D) 'Enter: reopen Pick repo'
+            }
             Wait-Until { ([regex]::Matches(((Get-Content $repoLogPath -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count -gt $repoListsBefore } 'Pick repo list reopened'
             Press @(0x0D) 'Enter: open the harness folder repo'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore + 1 } 'Pick repo opened one new tab'
@@ -104,28 +106,30 @@
             if (Test-Path -LiteralPath $crashRoot) { $crashReports = @(Get-ChildItem -LiteralPath $crashRoot -Filter 'crash-*.txt' -File -ErrorAction SilentlyContinue).Count }
             if ($crashReports -ne 0) { throw 'Pick repo left a crash report behind' }
             Snapshot 'pick-repo-opened'
-            Palette 'close tab' '7110'
-            Press @(0x0D) 'Enter: hide the tab Pick repo opened'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide the tab Pick repo opened'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore } 'Pick repo tab closed'
             $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $pickedFolder; tabSelected = ($pickedActive -eq [int]$pickedTab.shell_id); crashReports = $crashReports }
-            Palette 'close tab' '7110'
-            Press @(0x0D) 'Enter: hide the harness folder tab'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide the harness folder tab'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
             Remove-Item -LiteralPath $repoCommands -Force
-            Palette 'interface'
-            Snapshot 'action'
-            Press @(0x0D) 'Enter: UI Size: Increase'
+            Invoke-JourneyCommand 'UI Size: Increase' -Confirm {
+                Snapshot 'action'
+                Press @(0x0D) 'Enter: UI Size: Increase'
+            }
             Wait-Until { (Read-Session).ui_scale -eq 110 } 'UI scale saved as 110'
             Snapshot 'after'
-            Palette 'interface'
-            Press @(0x28) 'Down: UI Size: Decrease'
-            Press @(0x28) 'Down: UI Size: Reset'
-            Press @(0x0D) 'Enter: UI Size: Reset'
+            Invoke-JourneyCommand 'UI Size: Reset' -Confirm {
+                Press @(0x0D) 'Enter: UI Size: Reset'
+            }
             Wait-Until { $state = Read-Session; -not ($state.PSObject.Properties.Name -contains 'ui_scale') -or $state.ui_scale -eq 100 } 'UI scale reset to default'
             Snapshot 'reset'
             $result.checks += @{ name = 'palette-increase-reset'; increasedScale = 110; resetScale = 100 }
-            Palette 'restart to update'
+            Invoke-JourneyCommand 'Restart to Update' -SelectOnly
             Snapshot 'update-command'
             $image = New-Object Drawing.Bitmap((Join-Path $Evidence 'update-command.png'))
             $selectedTextPixels = 0
@@ -155,16 +159,18 @@
             [IO.File]::WriteAllText($snippetFile, '{"version":1,"snippets":[{"name":"Remove Me","text":"Saved text for Remove Me"},{"name":"Keep Me","text":"Saved text for Keep Me"}]}')
             Record 'Prepare two saved snippets through the existing version-one storage format'
             $beforeSnippets = [IO.File]::ReadAllText($snippetFile)
-            Focus-Palette 'manage snippets' 6296
-            Snapshot 'manage-snippets-command'
-            Press @(0x0D) 'Enter: Manage Snippets'
+            Invoke-JourneyCommand 'Manage snippets' -Confirm {
+                Snapshot 'manage-snippets-command'
+                Press @(0x0D) 'Enter: Manage Snippets'
+            }
             Press @(0x0D) 'Enter: request deletion of Remove Me'
             Snapshot 'snippet-delete-confirmation'
             if ([IO.File]::ReadAllText($snippetFile) -cne $beforeSnippets) { throw 'First delete action changed saved snippets without confirmation' }
             Press @(0x1B) 'Escape: cancel deletion'
             if ([IO.File]::ReadAllText($snippetFile) -cne $beforeSnippets) { throw 'Escape deleted or changed snippets' }
-            Focus-Palette 'manage snippets' 6296
-            Press @(0x0D) 'Enter: reopen Manage Snippets'
+            Invoke-JourneyCommand 'Manage snippets' -Confirm {
+                Press @(0x0D) 'Enter: reopen Manage Snippets'
+            }
             Press @(0x28) 'Down: choose Keep Me'
             Press @(0x26) 'Up: choose Remove Me'
             Press @(0x2E) 'Delete: request selected deletion'
@@ -179,8 +185,9 @@
             $shellsBeforeRestart = @((Read-Inbox).shells).Count
             if ($shellsBeforeRestart -lt 1) { throw 'Restart has no owned shell to restore' }
             Restart-ChatView $shellsBeforeRestart
-            Focus-Palette 'use snippets' 6254
-            Press @(0x0D) 'Enter: existing snippet picker after restart'
+            Invoke-JourneyCommand 'Use snippets' -Confirm {
+                Press @(0x0D) 'Enter: existing snippet picker after restart'
+            }
             Type-Text 'Keep Me'
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             Wait-Until { ((Get-Content $log -Raw) -join '') -match '\[palette\] ready chars=7 count=2 target=6257' } 'remaining snippet loaded into existing picker after restart'

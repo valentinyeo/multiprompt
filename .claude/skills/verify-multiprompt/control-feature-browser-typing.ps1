@@ -108,13 +108,15 @@ for ($round = 1; $round -le 20; $round++) {
     Wait-Until { [VerifyNative]::GetForegroundWindow() -ne $browser } "native round $round Alt+Q leaves browser" 10 -PollMilliseconds 20
     Page-TypingFocus
 }
-Focus-Palette 'browser url' 6236
-Press @(0x0D) 'Enter: choose browser URL'
+Invoke-JourneyCommand 'Browser: Open URL...' -Confirm {
+    Press @(0x0D) 'Enter: choose browser URL'
+}
 Type-Text $url
 Press @(0x0D) 'Enter: save the synthetic local page URL'
 Wait-Until { (Read-Session).tabs[0].burl -ceq $url } 'synthetic local page URL saved through the app UI'
-Focus-Palette 'browser mode' 6244
-Press @(0x0D) 'Enter: use the app address bar'
+Invoke-JourneyCommand 'Browser: Use App Address Bar' -Confirm {
+    Press @(0x0D) 'Enter: use the app address bar'
+}
 $oldModeBrowser = $browser
 Wait-Until {
     $candidate = [VerifyNative]::DockedPaneWindow($script:window)
