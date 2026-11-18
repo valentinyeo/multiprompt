@@ -153,6 +153,7 @@ var captured_cache: std.ArrayList(u8) = .empty;
 var status_layout_calls: usize = 0;
 fn layoutChatControls() void { status_layout_calls += 1; _ = chatReadBoundary(); }
 fn chatNewMessagesChanged(_: bool) void {}
+fn verboseLoggingEnabled() bool { return false; }
 const WM_APP_CHAT_FILE_READY = 1;
 var g_chat_cache_write_mutex: struct {
     fn tryLock(_: *@This()) bool { return true; }

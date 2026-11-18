@@ -118,6 +118,12 @@ function assertScrollJourney(driver, desktop, boundary) {
   assert.match(boundary, /Readable transcript paragraph[^\n]+\\n\\n" \* 32/);
 }
 
+test('handled scrolling reports a fresh exact counter state even when the counter is unchanged', () => {
+  const render = fs.readFileSync(new URL('../src/chat_render.zig', import.meta.url), 'utf8');
+  const scroll = render.slice(render.indexOf('pub fn chatScrollBy('), render.indexOf('const scroll_ui ='));
+  assert.match(scroll, /chatScrollStateChanged\(client.bottom - client.top\);\s+if \(verboseLoggingEnabled\(\)\) chatNewMessagesChanged\(app_state.g_chat_new_messages.count\(\) != 0\);/);
+});
+
 test('IGSH-813 wheel journey requires overflow and fresh strict app-log states without transcript focus', () => {
   const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
   const driver = read('tools/verify-chat-delivery/drive.ps1');

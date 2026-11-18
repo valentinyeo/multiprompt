@@ -2745,6 +2745,7 @@ pub fn chatScrollBy(delta_px: i32) void {
     var client: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client);
     chatScrollStateChanged(client.bottom - client.top);
+    if (verboseLoggingEnabled()) chatNewMessagesChanged(app_state.g_chat_new_messages.count() != 0);
     if (app_state.g_chat_scrolled_up) app_state.g_chat_scroll_bottom_pending = false;
     app_state.g_chat_hover_copy = null;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
