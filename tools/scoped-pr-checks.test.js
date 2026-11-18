@@ -45,7 +45,9 @@ test('heavy workflows run nightly and manually, not on pull requests', () => {
 });
 
 test('formal delivery PR checks stay bounded, source-filtered and Linux-only', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/chat-delivery-formal.yml'), 'utf8');
+  const workflowPath = path.join(root, '.github/workflows/chat-delivery-formal.yml');
+  assert.ok(fs.existsSync(workflowPath), 'The required formal delivery workflow must be installed');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
   const coverage = JSON.parse(fs.readFileSync(path.join(root, '.claude/skills/verify-chat-delivery-formal/coverage.json'), 'utf8'));
   const paths = workflow.split('\n  pull_request:\n')[1].split('\n  workflow_dispatch:')[0];
   for (const file of Object.keys(coverage.files)) assert.ok(paths.includes(`'${file}'`), file);
