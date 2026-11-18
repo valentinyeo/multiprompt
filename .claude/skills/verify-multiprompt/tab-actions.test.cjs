@@ -190,7 +190,7 @@ else if (process.argv[2] === '--evidence') {
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
       $script:state = '{"active_workspace":0,"active_tab":1,"tabs":[{"chat_id":101,"name":"Control"},{"chat_id":202,"name":"CMD 7"}]}' | ConvertFrom-Json
       $script:tabLog = ''; $script:log = ''; $script:tabPaletteOffset = 0; $script:selected = 0; $script:ready = $false
-      $script:selectable = @(6301, 0, 1); $script:downs = 0
+      $script:window = [IntPtr]202; $script:selectable = @(6301, 0, 1); $script:downs = 0
       function Read-Session { return $script:state }
       function Get-ActionTab($Id) { return @($script:state.tabs | Where-Object { $_.chat_id -eq $Id })[0] }
       function Invoke-JourneyCommand { $script:state.tabs[1].name = 'auto-renamed-folder'; throw 'The mutable CMD 7 query no longer contains the session' }
@@ -209,7 +209,14 @@ else if (process.argv[2] === '--evidence') {
           $script:log += "[palette] confirm target=$target\n"
           $script:ready = $target -eq 1
         }
+        $script:log += "[palette-row] target=1 session=1 left=236 top=309 height=39 text=280\n"
       }
+      function Doctor { }
+      function Wait-Foreground { }
+      function Assert-Foreground { }
+      function Record { }
+      Add-Type 'public static class VerifyNative { public static System.Action Receive; public static void ClickClient(System.IntPtr w, int x, int y) { if (w.ToInt64() != 202 || x != 280 || y != 328) throw new System.Exception("Wrong session row"); Receive(); } }'
+      [VerifyNative]::Receive = { $script:log += "[palette] confirm target=1\n"; $script:ready = $true }
       function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) { if (-not $script:ready -or $Workspace -ne 0 -or $Tab -ne 1 -or $Chat) { throw 'Wrong native receiving surface' } }
       ${confirm}
       ${select}
@@ -220,6 +227,45 @@ else if (process.argv[2] === '--evidence') {
       if (-not $rejected) { throw 'Missing persistent identity was accepted' }
     `], { encoding: 'utf8' });
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute stable session selection');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('a palette refresh between Home and Down cannot confirm the Back row', t => {
+    const text = fs.readFileSync(path.join(__dirname, 'control-feature-tab-actions.ps1'), 'utf8');
+    const helper = text.slice(text.indexOf('function Confirm-ActionRow('), text.indexOf('function Select-ActionRow('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:tabLog = ''; $script:tabPaletteOffset = 0; $script:window = [IntPtr]202
+      $script:log = "[palette-row] target=6304 session=0 left=1 top=999 height=39 text=15\n[palette] rows chars=0 count=4 ids=6302 6320 6303 6304\n"
+      $script:selected = 0; $script:confirmed = 0; $script:doctored = $false; $script:foreground = $false
+      function Read-SharedText { return $script:log }
+      function Type-Text { $script:log += "[palette] rows chars=8 count=2 ids=6302 6304\n[palette] ready chars=8 count=2 target=6304\n" }
+      function Wait-Until($Condition, $Label) { for ($n=0; $n -lt 5; $n++) { if (& $Condition) { return } }; throw $Label }
+      function Paint { $script:log += "[palette-row] target=6304 session=0 left=236 top=231 height=39 text=250\n" }
+      function Doctor { $script:doctored = $true }
+      function Wait-Foreground { $script:foreground = $true }
+      function Assert-Foreground { if (-not $script:foreground) { throw 'Unowned input' } }
+      function Record { }
+      function Press($Keys, $Label) {
+        if ($Keys[0] -eq 0x24) { $script:selected = 0; Paint }
+        elseif ($Keys[0] -eq 0x28) {
+          $script:selected = 1
+          $script:log += "[palette] rows chars=8 count=2 ids=6302 6304\n[palette] ready chars=8 count=2 target=6304\n"
+          $script:selected = ($script:selected + 1) % 2
+          Paint
+        } elseif ($Keys[0] -eq 13) { $script:confirmed = @(6302, 6304)[$script:selected]; $script:log += "[palette] confirm target=$script:confirmed\n" }
+      }
+      function Receive-Click($Window, $X, $Y) {
+        if (-not $script:doctored -or -not $script:foreground -or $Window -ne 202) { throw 'Missing input ownership' }
+        if ($X -ne 250 -or $Y -ne 250) { throw 'Stale or guessed row geometry' }
+        $script:confirmed = 6304; $script:log += "[palette] confirm target=6304\n"
+      }
+      Add-Type 'public static class VerifyNative { public static System.Action<System.IntPtr, int, int> Receive; public static void ClickClient(System.IntPtr w, int x, int y) { Receive(w, x, y); } }'
+      [VerifyNative]::Receive = { param($Window, $X, $Y) Receive-Click $Window $X $Y }
+      ${helper}
+      [void](Confirm-ActionRow 6304 'no group')
+      if ($script:confirmed -ne 6304) { throw 'Wrong receiving action' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to reproduce palette selection refresh');
     assert.equal(run.status, 0, run.stderr);
   });
   test('a refreshed unchanged palette row can confirm once more without replaying accepted or changed actions', t => {
@@ -234,28 +280,37 @@ else if (process.argv[2] === '--evidence') {
       function Save-Json { }
       function Type-Text { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
       function Wait-Until($Condition, $Label) { for ($n = 0; $n -lt 5; $n++) { if (& $Condition) { return } }; throw $Label }
-      function Press($Keys, $Label) {
-        if ($Keys[0] -ne 13) { return }
-        $script:enters++
-        if ($script:scenario -eq 'accepted' -or ($script:scenario -eq 'refreshed' -and $script:enters -eq 2)) { $script:log += "[palette] confirm target=6301\n" }
+      function Paint { $script:log += "[palette-row] target=6301 session=0 left=236 top=231 height=39 text=250\n" }
+      function Doctor { }
+      function Wait-Foreground { }
+      function Assert-Foreground { }
+      function Record { }
+      function Press($Keys, $Label) { if ($script:scenario -ne 'no-fresh-paint') { Paint } }
+      function Receive-Click {
+        $script:clicks++
+        if ($script:scenario -eq 'accepted' -or ($script:scenario -eq 'refreshed' -and $script:clicks -eq 2)) { $script:log += "[palette] confirm target=6301\n" }
         elseif ($script:scenario -eq 'refreshed' -or $script:scenario -eq 'keeps-refreshing') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
         elseif ($script:scenario -eq 'changed') { $script:log += "[palette] rows chars=13 count=1 ids=6302\n[palette] ready chars=13 count=1 target=6302\n" }
         elseif ($script:scenario -eq 'selection-changed') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6302\n" }
         elseif ($script:scenario -eq 'query-changed') { $script:log += "[palette] rows chars=0 count=1 ids=6301\n[palette] ready chars=0 count=1 target=6301\n" }
         elseif ($script:scenario -eq 'reordered') { $script:log += "[palette] rows chars=13 count=2 ids=6302 6301\n[palette] ready chars=13 count=2 target=6301\n" }
         elseif ($script:scenario -eq 'other-confirmed') { $script:log += "[palette] confirm target=6302\n[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
+        Paint
       }
+      Add-Type 'public static class VerifyNative { public static System.Action Receive; public static void ClickClient(System.IntPtr w, int x, int y) { if (w.ToInt64() != 202 || x != 250 || y != 250) throw new System.Exception("Wrong action row"); Receive(); } }'
+      [VerifyNative]::Receive = { Receive-Click }
+      $script:window = [IntPtr]202
       ${helper}
-      foreach ($scenario in @('refreshed', 'accepted', 'silent', 'changed', 'selection-changed', 'query-changed', 'reordered', 'other-confirmed', 'keeps-refreshing')) {
-        $script:scenario = $scenario; $script:log = ''; $script:enters = 0
+      foreach ($scenario in @('refreshed', 'accepted', 'silent', 'changed', 'selection-changed', 'query-changed', 'reordered', 'other-confirmed', 'keeps-refreshing', 'no-fresh-paint')) {
+        $script:scenario = $scenario; $script:log = "[palette-row] target=6301 session=0 left=1 top=999 height=39 text=15\n"; $script:clicks = 0
         $script:tabLog = ''; $script:tabPaletteOffset = 0; $script:tabInputs = @()
         $script:tabTargets = [pscustomobject]@{ SEARCH_GROUPMOVE_MENU_OFFSET = 6301 }
         $passed = $false
         try { Select-ActionRow 'SEARCH_GROUPMOVE_MENU_OFFSET' 'move to group'; $passed = $true } catch { }
         $expected = $scenario -in @('refreshed', 'accepted')
         if ($passed -ne $expected) { throw "$scenario receiving-confirm result was $passed" }
-        $count = if ($scenario -in @('refreshed', 'keeps-refreshing')) { 2 } else { 1 }
-        if ($script:enters -ne $count) { throw "$scenario sent $script:enters keypresses, expected $count" }
+        $count = if ($scenario -in @('refreshed', 'keeps-refreshing')) { 2 } elseif ($scenario -eq 'no-fresh-paint') { 0 } else { 1 }
+        if ($script:clicks -ne $count) { throw "$scenario sent $script:clicks clicks, expected $count" }
       }
     `], { encoding: 'utf8' });
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute native confirmation handling');

@@ -53,10 +53,34 @@ function Confirm-ActionRow([int]$Target, [string]$Query = '') {
     $rows = [regex]::Matches((Read-SharedText $script:tabLog).Substring($script:tabPaletteOffset), $pattern)
     $rowIds = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ')
     $ids = @($rowIds | Where-Object { $_ -notmatch '^h\d+$' })
+    $paintOffset = (Read-SharedText $script:tabLog).Length
     Press @(0x24) 'Home: first visible action'
-    for ($i = 0; $i -lt [Array]::IndexOf($ids, [string]$target); $i++) { Press @(0x28) 'Down: requested action row' }
+    for ($i = 0; $i -lt [Array]::IndexOf($ids, [string]$target); $i++) {
+        $paintOffset = (Read-SharedText $script:tabLog).Length
+        Press @(0x28) 'Down: scroll requested action into view'
+    }
+    $clickRow = {
+        param([int]$Since)
+        Doctor
+        Wait-Foreground
+        Record "Click painted native palette target $Target"
+        $point = @{}
+        Wait-Until {
+            $fresh = (Read-SharedText $script:tabLog).Substring($script:tabPaletteOffset)
+            $currentRows = [regex]::Matches($fresh, '\[palette\] rows chars=(\d+) count=\d+ ids=([^\r\n]+)')
+            if ($currentRows.Count -eq 0 -or [int]$currentRows[-1].Groups[1].Value -ne $Query.Length -or $currentRows[-1].Groups[2].Value.Trim() -cne ($rowIds -join ' ')) { return $false }
+            $start = [Math]::Max($Since, $script:tabPaletteOffset + $currentRows[-1].Index + $currentRows[-1].Length)
+            $paint = [regex]::Matches((Read-SharedText $script:tabLog).Substring($start), ('\[palette-row\] target=' + $Target + ' session=[01] left=(-?\d+) top=(-?\d+) height=(\d+) text=(-?\d+)'))
+            if ($paint.Count -eq 0 -or [int]$paint[-1].Groups[3].Value -le 0) { return $false }
+            $point.x = [int]$paint[-1].Groups[4].Value
+            $point.y = [int]$paint[-1].Groups[2].Value + [int][Math]::Floor([int]$paint[-1].Groups[3].Value / 2)
+            return $true
+        } 'fresh painted target row in the unchanged native menu'
+        Assert-Foreground
+        [VerifyNative]::ClickClient($script:window, $point.x, $point.y)
+    }
     $nextOffset = (Read-SharedText $script:tabLog).Length
-    Press @(0x0D) "Enter: native palette target $Target"
+    & $clickRow $paintOffset
     $confirmation = @{ retried = $false }
     Wait-Until {
         $log = Read-SharedText $script:tabLog
@@ -65,12 +89,12 @@ function Confirm-ActionRow([int]$Target, [string]$Query = '') {
         $refresh = $log.Substring($nextOffset)
         $newRows = [regex]::Matches($refresh, '\[palette\] rows chars=(\d+) count=\d+ ids=([^\r\n]+)')
         $ready = [regex]::Matches($refresh, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
-        # A refresh can invalidate queued Enter. Reconfirm only an unchanged row, never an accepted action.
+        # A refresh can invalidate a queued click. Reconfirm only an unchanged row, never an accepted action.
         if (-not $confirmation.retried -and $trace -notmatch '\[palette\] confirm target=' -and $newRows.Count -gt 0 -and $ready.Count -gt 0 -and
             [int]$newRows[-1].Groups[1].Value -eq $Query.Length -and $newRows[-1].Groups[2].Value.Trim() -ceq ($rowIds -join ' ') -and
             [int]$ready[-1].Groups[1].Value -eq $Query.Length -and [int]$ready[-1].Groups[2].Value -eq $target) {
             $confirmation.retried = $true
-            Press @(0x0D) "Enter: reconfirm refreshed palette target $Target"
+            & $clickRow $nextOffset
         }
         return $false
     } 'production palette confirms the selected routing ID'
