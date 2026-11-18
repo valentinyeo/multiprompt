@@ -32,6 +32,10 @@ Start with one feature, then pick a named journey. The area files keep the refer
 
 Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/command_palette.zig`, and `openwiki/architecture/features.md`. Use `drive.ps1 <feature> <journey>` with the identity/evidence arguments shown in each map. It reuses existing control helpers. The new maps link existing journeys and mark missing full paths unreachable; they do not add product behavior or claim those paths passed. GitHub `verify.yml -f feature=appearance` and `-f feature=command-palette` now use this entry point and retain video. Other workflow routes remain in the [migration inventory](../inventory.md) for follow-up. Do not claim those routes already produce video or that Rooms passed offline.
 
+## Real server journey
+
+- [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
+
 ## Source feature coverage
 
 Run `node tools/check-feature-coverage.mjs --base <clean-master-checkout>` from the repository root. It prints numeric coverage and every gap from `SHORTCUT_ROWS`, palette source rows and row families, and the shipped architecture features. Shortcut section headings, palette group headings, test-only rows and Future Features are not actions. Dynamic session names are instances of their source row family, not separate features.
@@ -182,4 +186,4 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. Both prerequisites are integrated on this branch. `server-chat` seeds its real Linux transcript from Part A's shared corpus before starting its host; do not add replacement fixtures here.

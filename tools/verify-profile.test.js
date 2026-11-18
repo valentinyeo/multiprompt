@@ -19,7 +19,7 @@ test('all desktop profile owners install the same default seed', () => {
   for (const file of [
     skill + 'control.ps1', skill + 'control-feature-server-open-group.ps1',
     'tools/verify-chat-delivery/drive.ps1', 'tools/verify-session-actions/drive.ps1',
-    'tools/verify-bot-photo/drive.ps1', 'tools/verify-app-icon/drive.ps1',
+    'tools/verify-bot-photo/drive.ps1', 'tools/verify-app-icon/drive.ps1', 'tools/verify-server-chat/drive.ps1',
     'tools/update-release.test.ps1',
   ]) {
     assert.match(read(file), /seed-profile\.ps1" -Root \$(?:scratch|profile|Root|workRoot) -HomePath \$env:HOME -Evidence/, file);
@@ -27,6 +27,10 @@ test('all desktop profile owners install the same default seed', () => {
   assert.match(read(skill + 'drive.ps1'), /seed='real-size-v1'/);
   assert.match(read(skill + 'drive.ps1'), /manifest\.messagesPerLongChat -ne 2400/);
   assert.match(read(skill + 'seed-profile.ps1'), /if \(\$LASTEXITCODE -ne 0\) \{ throw/);
+  const { touchedJourneys } = require('./touched-journeys.cjs');
+  for (const file of [skill + 'seed-profile.py', skill + 'seed-profile.ps1']) {
+    assert.ok(touchedJourneys([file]).features.includes('server-chat'), 'shared corpus edits must also exercise real SSH server chats');
+  }
 });
 
 test('the seeded streaming journey runs automatically and retains video', () => {
