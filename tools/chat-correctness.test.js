@@ -190,7 +190,7 @@ test "correctness unreadable: every failed or partial console read stays unknown
         try std.testing.expect(storage[0].state != .delivered);
         for (0..5) |_| chatSendVerifyTick();
         try std.testing.expectEqual(ChatEchoState.not_sent, storage[0].state);
-        try std.testing.expectEqual(ChatEchoState.not_sent, chat_echo.stateOnLoad(@intFromEnum(storage[0].state), storage[0].write_started));
+        try std.testing.expectEqual(ChatEchoState.not_sent, chat_echo.stateOnLoad(@intFromEnum(storage[0].state), storage[0].write_started, false));
         try std.testing.expect(!chat_echo.mayType(storage[0].state, storage[0].write_started, false, false));
         try std.testing.expectEqual(@as(usize, 1), enters);
         try std.testing.expectEqual(@as(usize, 1), writes);

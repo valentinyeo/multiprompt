@@ -232,22 +232,6 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
     return ISSUE_349_ORPHAN_SENDING_SETTLES and state == .sending and id != verify_id;
 }
 
-pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
-
-pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
-    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
-}
-
-test "a host message left sending with no job settles after the deadline" {
-    try std.testing.expect(v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
-    try std.testing.expect(!v1SendingAbandoned(.sending, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 10));
-    for ([_]OutboxState{ .queued, .not_sent, .delivered, .cancelled }) |state| {
-        try std.testing.expect(!v1SendingAbandoned(state, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    }
-}
-
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
     return state == .queued and !write_started and !busy and !link_down;
 }
@@ -308,7 +292,7 @@ test "ISSUE-349 three stuck entries load unconfirmed and qualify for full settle
     const sent = [_]i64{ 1792250528437, 1792250551635, 1792250686932 };
     const relaunch_ms: i64 = 1792260198783;
     for (sent) |sent_ms| {
-        const state = stateOnLoad(2, true);
+        const state = stateOnLoad(2, true, false);
         try std.testing.expectEqual(OutboxState.not_sent, state);
         try std.testing.expect(needsFullSettle(state, true, false, sent_ms, relaunch_ms));
     }
@@ -351,24 +335,25 @@ pub fn pendingExpired(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
 
 pub const NOT_SENT_WAIT_MS: i64 = 10 * 60 * 1000;
 
-pub fn showsNotSent(message_v1: bool, state: OutboxState, phase: []const u8, sent_tick_ms: i64, now_ms: i64) bool {
+pub fn showsNotSent(message_v1: bool, state: OutboxState, phase: []const u8) bool {
     if (!message_v1 or state == .cancelled) return false;
-    if (state == .not_sent or std.mem.eql(u8, phase, "failed")) return true;
-    if (state == .delivered or std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) return false;
-    return sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= NOT_SENT_WAIT_MS;
+    if (phaseTaken(phase)) return false;
+    return state == .not_sent or std.mem.eql(u8, phase, "failed");
 }
 
-test "IGSH-1847 a failed send and a ten-minute wait show Not sent" {
-    try std.testing.expect(showsNotSent(true, .not_sent, "failed", 1, 2));
-    try std.testing.expect(showsNotSent(true, .queued, "failed", 1, 2));
-    try std.testing.expect(showsNotSent(true, .sending, "sent", 1_000, 1_000 + NOT_SENT_WAIT_MS));
-    try std.testing.expect(showsNotSent(true, .queued, "queued", 1_000, 1_000 + NOT_SENT_WAIT_MS));
-    try std.testing.expect(!showsNotSent(true, .queued, "sent", 1_000, 1_000 + NOT_SENT_WAIT_MS - 1));
-    try std.testing.expect(!showsNotSent(true, .queued, "queued", 0, NOT_SENT_WAIT_MS));
-    try std.testing.expect(!showsNotSent(true, .delivered, "accepted", 1, 1 + NOT_SENT_WAIT_MS));
-    try std.testing.expect(!showsNotSent(true, .delivered, "started", 1, 1 + NOT_SENT_WAIT_MS * 2));
-    try std.testing.expect(!showsNotSent(true, .cancelled, "failed", 1, 2));
-    try std.testing.expect(!showsNotSent(false, .not_sent, "failed", 1, 2));
+test "SOFT-2724 only an actual failure shows Not sent" {
+    try std.testing.expect(showsNotSent(true, .not_sent, "failed"));
+    try std.testing.expect(showsNotSent(true, .queued, "failed"));
+    try std.testing.expect(showsNotSent(true, .delivered, "failed"));
+    for ([_]OutboxState{ .queued, .sending, .delivered }) |state| {
+        for ([_][]const u8{ "", "queued", "sent", "accepted", "started" }) |phase| {
+            try std.testing.expect(!showsNotSent(true, state, phase));
+        }
+    }
+    try std.testing.expect(!showsNotSent(true, .not_sent, "accepted"));
+    try std.testing.expect(!showsNotSent(true, .not_sent, "started"));
+    try std.testing.expect(!showsNotSent(true, .cancelled, "failed"));
+    try std.testing.expect(!showsNotSent(false, .not_sent, "failed"));
 }
 
 pub fn snapshotRowFresh(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
@@ -512,19 +497,32 @@ pub fn refusesCommand(warning: []const u16, text: []const u16) bool {
     return rest.len == end or rest[end] == ' ' or (rest[end] == '.' and (rest.len == end + 1 or rest[end + 1] == ' '));
 }
 
-pub fn stateOnLoad(saved: u8, write_started: bool) OutboxState {
+pub fn stateOnLoad(saved: u8, write_started: bool, message_v1: bool) OutboxState {
+    if (message_v1 and (saved == @intFromEnum(OutboxState.queued) or saved == @intFromEnum(OutboxState.sending))) return .queued;
     if (saved == @intFromEnum(OutboxState.cancelled)) return .cancelled;
     if (write_started) return if (saved == @intFromEnum(OutboxState.delivered)) .delivered else .not_sent;
     return if (saved == 0) .queued else .not_sent;
 }
 
-test "reserved uncertain sends stay unconfirmed across restart" {
-    for ([_]OutboxState{ .queued, .sending, .not_sent }) |state| {
-        try std.testing.expectEqual(OutboxState.not_sent, stateOnLoad(@intFromEnum(state), true));
-        try std.testing.expect(!mayType(stateOnLoad(@intFromEnum(state), true), true, false, false));
+test "SOFT-2725 host-owned sends stay uncertain across restart without being resent" {
+    for ([_]OutboxState{ .queued, .sending }) |state| {
+        const loaded = stateOnLoad(@intFromEnum(state), true, true);
+        try std.testing.expectEqual(OutboxState.queued, loaded);
+        try std.testing.expect(!mayType(loaded, true, false, false));
+        try std.testing.expect(!showsNotSent(true, loaded, "sent"));
     }
-    try std.testing.expectEqual(OutboxState.queued, stateOnLoad(0, false));
-    try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true));
+    try std.testing.expectEqual(OutboxState.not_sent, stateOnLoad(2, true, true));
+    try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(3, true, true));
+    try std.testing.expectEqual(OutboxState.cancelled, stateOnLoad(4, true, true));
+}
+
+test "reserved uncertain legacy sends stay unconfirmed across restart" {
+    for ([_]OutboxState{ .queued, .sending, .not_sent }) |state| {
+        try std.testing.expectEqual(OutboxState.not_sent, stateOnLoad(@intFromEnum(state), true, false));
+        try std.testing.expect(!mayType(stateOnLoad(@intFromEnum(state), true, false), true, false, false));
+    }
+    try std.testing.expectEqual(OutboxState.queued, stateOnLoad(0, false, false));
+    try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true, false));
 }
 
 fn skillToken(token: []const u16) bool {
@@ -978,11 +976,11 @@ test "ISSUE-608 a message with leftover box text glued in front still confirms" 
 test "delivery: busy then idle and restart reserve one text write" {
     try std.testing.expect(!mayType(.queued, false, true, false));
     try std.testing.expect(!mayType(.queued, false, false, true));
-    try std.testing.expect(mayType(stateOnLoad(0, false), false, false, false));
+    try std.testing.expect(mayType(stateOnLoad(0, false, false), false, false, false));
     try std.testing.expect(mayType(.queued, false, false, false));
     for (std.enums.values(OutboxState)) |state| {
         try std.testing.expect(!mayType(state, true, false, false));
-        try std.testing.expect(!mayType(stateOnLoad(@intFromEnum(state), true), true, false, false));
+        try std.testing.expect(!mayType(stateOnLoad(@intFromEnum(state), true, false), true, false, false));
     }
 }
 
@@ -1122,7 +1120,7 @@ pub fn transcriptStatus(watch: *DeliveryWatch, busy: bool, now_ms: i64, loaded_m
 }
 
 test "IGSH-442 unconfirmed written entries offer Send again and Remove" {
-    const state = stateOnLoad(@intFromEnum(OutboxState.not_sent), true);
+    const state = stateOnLoad(@intFromEnum(OutboxState.not_sent), true, false);
     const actions = pendingActions(state);
     try std.testing.expect(actions.send_again);
     try std.testing.expect(actions.remove);
