@@ -29,6 +29,15 @@ function reproRequirement(pr) {
   return { bugFix, reproJourney: names.length === 1 ? names[0] : '' };
 }
 
+function ciRepro(selection, summary) {
+  const workflows = selection.ciWorkflows || [];
+  const receipts = summary?.ciRepro || [];
+  if (selection.reproJourney || selection.features?.length || !workflows.length || selection.unmapped?.length || selection.nearest?.length) return null;
+  const proofs = workflows.map(workflow => receipts.find(item => item.workflow === workflow));
+  const proven = proofs.every(item => item && Number.isInteger(item.base_exit_code) && item.base_exit_code !== 0 && item.head_exit_code === 0);
+  return proven ? proofs : null;
+}
+
 function validateSelection(raw, available, pr = {}) {
   let parsed;
   try {
@@ -247,7 +256,10 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     final = 'PASS+NOTES';
     notes.push(`Not covered by any journey: ${selection.uncovered}`);
   }
-  if (selection.bugFix) {
+  const ciProof = selection.bugFix ? ciRepro(selection, summary) : null;
+  if (ciProof) {
+    notes.unshift(`Repro by CI workflow: ${ciProof.map(item => `${item.workflow} (${item.part}: base exit ${item.base_exit_code}, head exit ${item.head_exit_code})`).join(', ')}.`);
+  } else if (selection.bugFix) {
     const repro = rows.find(row => row.feature === selection.reproJourney);
     const baseRuns = summary.base[selection.reproJourney] || [];
     if (!repro || repro.head !== 'passed' || repro.base !== 'failed' || repro.blocked ||
@@ -495,6 +507,14 @@ function download(env, selectionFile, evidenceDir, baseSha) {
 function readCapped(file, limit = MAX_FILE_CHARS) {
   const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
   return text.length > limit ? `${text.slice(0, limit)}\n[truncated]` : text;
+}
+
+function ciReproReceipts(evidenceDir, workflows) {
+  return workflows.flatMap(workflow => {
+    const file = path.join(evidenceDir, workflow.replace(/\.yml$/, ''), 'summary.json');
+    const repro = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).repro : null;
+    return repro && typeof repro === 'object' ? [{ workflow, part: String(repro.part), base_exit_code: repro.base_exit_code, head_exit_code: repro.head_exit_code }] : [];
+  });
 }
 
 function judgeInputs(outDir, evidenceDir) {
@@ -759,6 +779,7 @@ async function main(argv, env) {
     const [evidenceDir, selectionFile, baseSha, outDir] = rest;
     const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
     const summary = summarize(evidenceDir, selection.features, baseSha);
+    summary.ciRepro = ciReproReceipts(evidenceDir, selection.ciWorkflows || []);
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
     fs.writeFileSync(path.join(outDir, 'evidence.md'), evidenceMarkdown(summary, selection));

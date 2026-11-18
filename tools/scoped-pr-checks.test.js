@@ -31,8 +31,18 @@ test('an unknown tool does not expand an already mapped plan', () => {
   assert.ok(result.unmapped.includes('tools/new-ci-tool.cjs'));
 });
 
+test('the CI repair receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
+  const source = fs.readFileSync(path.join(root, '.github/workflows/ci-repair-receipt.yml'), 'utf8');
+  const map = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'), 'utf8');
+  assert.match(source, /^  pull_request:\n    paths:/m);
+  assert.match(source, /name: ci-repair-receipt\n/);
+  assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
+  for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+});
+
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
