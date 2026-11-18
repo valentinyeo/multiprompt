@@ -69,6 +69,13 @@ test('routing checks reject the removed dependency, missing history, classifier 
   }
 });
 
+test('reader tests include video-tool installation in their bounded job budget', () => {
+  const reader = workflow.split('\n  reader-tests:\n')[1].split('\n  test:\n')[0];
+  assert.match(reader, /timeout-minutes: 20\n/);
+  assert.match(reader, /sudo apt-get update -qq && sudo apt-get install -y ffmpeg/);
+  assert.match(reader, /python3 -W error::DeprecationWarning tools\/chat-history-reader-test.py -v/);
+});
+
 test('Windows group 3 has a bounded twenty-minute build and test budget', () => {
   const job = workflow.split('\n  test:\n')[1].split(/\n  [\w-]+:\n/)[0];
   const budget = job.match(/timeout-minutes: \$\{\{ (.+) \}\}/)[1];

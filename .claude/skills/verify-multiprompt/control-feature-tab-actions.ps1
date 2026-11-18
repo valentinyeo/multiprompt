@@ -1,4 +1,5 @@
 $script:tabLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+$script:tabAuditLog = Join-Path $scratch 'roaming/ZigShell/session-audit.log'
 $script:tabInputs = @()
 $script:tabSteps = @()
 $script:tabSequence = 0
@@ -88,7 +89,15 @@ function Select-ActionTab([long]$Id) {
 }
 function Rename-ActionTab([string]$Name) {
     Wait-Until { $h = [VerifyNative]::GetFocusedWindow($script:window); [VerifyNative]::Class($h) -ceq 'Edit' -and [VerifyNative]::GetAncestor($h, 2) -eq $script:window } 'owned native rename editor'
+    Doctor
+    Wait-Foreground
+    $editor = [VerifyNative]::GetFocusedWindow($script:window)
+    $rect = New-Object VerifyNative+Rect
+    if (-not [VerifyNative]::GetClientRect($editor, [ref]$rect)) { throw 'Native rename editor rectangle unavailable' }
+    [VerifyNative]::ClickClient($editor, [int](($rect.Right - $rect.Left) / 2), [int](($rect.Bottom - $rect.Top) / 2))
+    Press @(0x11, 0x41) 'Ctrl+A: select the native rename text'
     Type-Text $Name
+    Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $editor -and [VerifyNative]::EditText($editor) -ceq $Name } 'native rename editor received the requested name'
     Press @(0x0D) 'Enter: save the native rename'
 }
 function New-ActionTab([string]$Name) {
@@ -100,6 +109,7 @@ function New-ActionTab([string]$Name) {
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -gt 0 } 'native Copy chat ID initialized a persistent local identity'
     $state = Read-Session
     $id = [long]$state.tabs[$state.active_tab].chat_id
+    Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
     Press @(0x71) 'F2: name the disposable local tab'
     Rename-ActionTab $Name
     Wait-Until { (Get-ActionTab $id).name -ceq $Name } 'new tab name saved'
@@ -305,10 +315,10 @@ foreach ($route in @('context', 'global')) {
     Open-ActionPalette 'global' $victim
     Select-ActionRow 'SEARCH_TABCTX_PIN_TOP' 'pin'
     Wait-Until { (Get-ActionTab $victim).pinned_top } 'pin keeps the exited local tab available for cleanup'
-    $exitOffset = (Read-SharedText $script:tabLog).Length
+    $exitOffset = (Read-SharedText $script:tabAuditLog).Length
     Type-Text 'exit'
     Press @(0x0D) 'Enter: exit only the disposable pinned CMD'
-    Wait-Until { $victimProcess.HasExited -and (Read-SharedText $script:tabLog).Substring($exitOffset) -match 'pinned-local-session-exited-preserved' } 'real CMD exits and the app preserves its pinned disconnected row'
+    Wait-Until { $victimProcess.HasExited -and (Read-SharedText $script:tabAuditLog).Substring($exitOffset) -match 'pinned-local-session-exited-preserved' } 'real CMD exits and the app preserves its pinned disconnected row'
     Select-ActionTab $script:controlId
     Start-ActionStep ('disconnected-' + $route) $victim $route
     Open-ActionPalette $route $victim
@@ -351,6 +361,7 @@ if ((Get-Clipboard -Raw) -cne ('session:#{0:x16}' -f $script:targetId)) { throw 
 Save-Json @{ clipboard=(Get-Clipboard -Raw) } 'tab-restarted-identity.json'
 Snapshot 'after'
 Copy-Item $script:tabLog (Join-Path $Evidence 'tab-actions-debug.log')
+Copy-Item $script:tabAuditLog (Join-Path $Evidence 'tab-actions-session-audit.log')
 & node (Join-Path $PSScriptRoot 'tab-actions.test.cjs') --evidence $Evidence
 if ($LASTEXITCODE -ne 0) { throw 'Independent tab action evidence did not match the live journey' }
 $result.checks += @{ name='tab-actions-native'; steps=$script:tabSteps.Count; selections=$script:tabInputs.Count; boundary='Real local CMD processes and app-written saved state; no remote provider or account synchronization claimed' }

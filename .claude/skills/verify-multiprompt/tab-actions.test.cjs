@@ -128,7 +128,7 @@ function evidence(dir) {
   for (const name of markerNames) assert.equal(fs.readFileSync(path.join(dir, `${name}.txt`), 'utf8').trim(), name);
   assert.deepEqual(layout(readJson(dir, 'tab-layout-after-restart.json')), layout(readJson(dir, 'tab-layout-before-restart.json')), 'names, IDs, appearance and membership survive a real restart');
   assert.equal(readJson(dir, 'tab-restarted-identity.json').clipboard, copiedId(identities.target));
-  assert.match(fs.readFileSync(path.join(dir, 'tab-actions-debug.log'), 'utf8'), /pinned-local-session-exited-preserved/);
+  assert.match(fs.readFileSync(path.join(dir, 'tab-actions-session-audit.log'), 'utf8'), /pinned-local-session-exited-preserved/);
 }
 
 if (process.argv[2] === '--catalog') console.log(JSON.stringify(catalog()));
@@ -262,6 +262,69 @@ else if (process.argv[2] === '--evidence') {
       if (-not $script:state.tabs[0].PSObject.Properties['manual'] -or $script:state.tabs[0].name -ne 'Batch workspace peer') { throw 'Workspace peer retains a changing automatic title' }
     `], { encoding: 'utf8' });
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute workspace peer creation');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('pinned CMD exit waits on the real session audit channel', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const wait = fs.readFileSync(file, 'utf8').split('\n').find(line => line.includes("'real CMD exits and the app preserves its pinned disconnected row'"));
+    assert.ok(wait);
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:tabLog = 'debug'; $script:tabAuditLog = 'audit'; $exitOffset = 0
+      $victimProcess = [pscustomobject]@{ HasExited = $true }
+      function Read-SharedText($Path) {
+        if ($Path -eq 'audit') { return 'reason=pinned-local-session-exited-preserved instance=default count=5 active=4' }
+        return 'WM_APP_SHELL_EXITED id=5 kind=cmd reason=preserve exit_code=0 known=true'
+      }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      ${wait}
+      $victimProcess.HasExited = $false
+      $rejected = $false
+      try { ${wait} } catch { $rejected = $true }
+      if (-not $rejected) { throw 'Audit receipt cannot substitute for actual process exit' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the process-exit observation');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('native rename focuses and reads the editor before committing', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const helper = text.slice(text.indexOf('function Rename-ActionTab('), text.indexOf('function New-ActionTab('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      Add-Type 'public class VerifyNative {
+        public struct Rect { public int Left, Top, Right, Bottom; }
+        public static bool Clicked, Selected; public static int Commits; public static string Value;
+        public static System.IntPtr GetFocusedWindow(System.IntPtr window) { return new System.IntPtr(202); }
+        public static string Class(System.IntPtr window) { return "Edit"; }
+        public static System.IntPtr GetAncestor(System.IntPtr window, uint flag) { return new System.IntPtr(101); }
+        public static bool GetClientRect(System.IntPtr window, ref Rect rect) { rect.Right = 300; rect.Bottom = 24; return true; }
+        public static void ClickClient(System.IntPtr window, int x, int y) { if (window.ToInt64() != 202 || x != 150 || y != 12) throw new System.Exception("Wrong editor click"); Clicked = true; }
+        public static string EditText(System.IntPtr window) { return Value; }
+      }'
+      $script:window = [IntPtr]101
+      function Doctor { }
+      function Wait-Foreground { }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      function Type-Text($Text) { if (-not $script:drop -and [VerifyNative]::Clicked -and [VerifyNative]::Selected) { [VerifyNative]::Value = $Text } }
+      function Press($Keys, $Label) {
+        if ($Keys[0] -eq 0x11) { [VerifyNative]::Selected = $true }
+        if ($Keys[0] -eq 13) { [VerifyNative]::Commits++; if ([VerifyNative]::Value -ne 'Disconnected context') { throw 'Unreceived rename committed' } }
+      }
+      ${helper}
+      foreach ($drop in @($false, $true)) {
+        $script:drop = $drop; [VerifyNative]::Clicked = $false; [VerifyNative]::Selected = $false
+        [VerifyNative]::Commits = 0; [VerifyNative]::Value = 'CMD 5'
+        $passed = $false
+        try { Rename-ActionTab 'Disconnected context'; $passed = $true } catch { }
+        if ($passed -eq $drop) { throw 'Rename receiving-check result is wrong' }
+        $expected = if ($drop) { 0 } else { 1 }
+        if ([VerifyNative]::Commits -ne $expected) { throw 'Rename committed before the requested text arrived' }
+      }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute native rename handling');
     assert.equal(run.status, 0, run.stderr);
   });
   test('window evidence binds the app root while allowing its embedded native console', () => {
