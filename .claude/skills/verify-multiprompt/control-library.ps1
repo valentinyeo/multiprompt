@@ -608,7 +608,9 @@ function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Co
         $foreground = [VerifyNative]::GetForegroundWindow()
         if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
         if (-not $Chat) {
-            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and [VerifyNative]::Title($foreground).EndsWith(('ZigShell-' + $state.tabs[$Tab].shell_id), [StringComparison]::Ordinal)
+            $consolePid = [uint32]0
+            [void][VerifyNative]::GetWindowThreadProcessId($foreground, [ref]$consolePid)
+            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and $consolePid -gt 0 -and $consolePid -eq $state.tabs[$Tab].pid
         }
         $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Composer)
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement

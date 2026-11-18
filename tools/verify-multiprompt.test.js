@@ -931,7 +931,8 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(surface, /IsOffscreen/);
   assert.match(surface, /NativeWindowHandle -eq \$Composer/);
   assert.match(surface, /Class\(\$foreground\) -eq 'ConsoleWindowClass'/);
-  assert.match(surface, /'ZigShell-' \+ \$state.tabs\[\$Tab\].shell_id/);
+  assert.match(surface, /GetWindowThreadProcessId\(\$foreground, \[ref\]\$consolePid\)/);
+  assert.match(surface, /\$consolePid -gt 0 -and \$consolePid -eq \$state.tabs\[\$Tab\].pid/);
   assert.doesNotMatch(surface + console, /SetFocus|SetForegroundWindow|ClickClient|::Text\(|::Chord\(/);
   assert.match(console, /TextPattern\]::Pattern/);
   assert.match(console, /EndsWith\(\$Command, \[StringComparison\]::Ordinal\)/);
@@ -964,6 +965,7 @@ test('IGSH-522: hidden pills are shown through the palette and every focus trans
     ["Wait-WorkspaceSurface $second $secondTab $false", 'Start-Sleep -Milliseconds 250'],
     ["Wait-ConsoleText 'echo workspace-focus-shell-pill'", ''],
     ['$focused.Current.NativeWindowHandle -eq $Composer', '$true'],
+    ['$consolePid -gt 0 -and $consolePid -eq $state.tabs[$Tab].pid', '$true'],
   ]) {
     const broken = control.replaceAll(before, after);
     assert.notEqual(broken, control);

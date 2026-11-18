@@ -438,6 +438,44 @@ else if (process.argv[2] === '--evidence') {
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute new-tab focus handling');
     assert.equal(run.status, 0, run.stderr);
   });
+  test('restored console readiness follows the saved process identity, not the independent title counter', t => {
+    const text = fs.readFileSync(path.join(__dirname, 'control-library.ps1'), 'utf8');
+    const helper = text.slice(text.indexOf('function Wait-WorkspaceSurface('), text.indexOf('function Wait-ConsoleText('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:window = [IntPtr]101
+      $script:state = '{"active_workspace":0,"active_tab":0,"tabs":[{"kind":"cmd","shell_id":5,"pid":8292}]}' | ConvertFrom-Json
+      Add-Type 'public static class VerifyNative {
+        public static System.IntPtr Root = new System.IntPtr(101);
+        public static uint Pid = 8292;
+        public static string WindowClass = "ConsoleWindowClass", WindowTitle = "Administrator: ZigShell-1";
+        public static System.IntPtr GetForegroundWindow() { return new System.IntPtr(202); }
+        public static System.IntPtr GetAncestor(System.IntPtr w, uint flags) { return Root; }
+        public static string Class(System.IntPtr w) { return WindowClass; }
+        public static string Title(System.IntPtr w) { return WindowTitle; }
+        public static uint GetWindowThreadProcessId(System.IntPtr w, out uint pid) { pid = Pid; return 1; }
+      }'
+      function Read-Session { return $script:state }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      ${helper}
+      Wait-WorkspaceSurface 0 0 $false
+      foreach ($scenario in @('wrong-pid', 'foreign-root', 'wrong-class', 'missing-pid')) {
+        [VerifyNative]::Pid = 8292; [VerifyNative]::Root = [IntPtr]101; [VerifyNative]::WindowClass = 'ConsoleWindowClass'
+        [VerifyNative]::WindowTitle = 'Administrator: ZigShell-5'; $script:state.tabs[0].pid = 8292
+        switch ($scenario) {
+          'wrong-pid' { [VerifyNative]::Pid = 999 }
+          'foreign-root' { [VerifyNative]::Root = [IntPtr]777 }
+          'wrong-class' { [VerifyNative]::WindowClass = 'Edit' }
+          'missing-pid' { [VerifyNative]::Pid = 0; $script:state.tabs[0].pid = 0 }
+        }
+        $rejected = $false
+        try { Wait-WorkspaceSurface 0 0 $false } catch { $rejected = $true }
+        if (-not $rejected) { throw "$scenario accepted a nonreceiving console" }
+      }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute restored console readiness');
+    assert.equal(run.status, 0, run.stderr);
+  });
   test('pinned CMD exit waits on the real session audit channel', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
