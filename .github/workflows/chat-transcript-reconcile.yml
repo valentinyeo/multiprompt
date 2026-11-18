@@ -42,7 +42,7 @@ jobs:
           python3 tools/chat-transcript-reconcile.test.py --before > red.log 2>&1 || status=$?
           cat red.log
           test "$status" -eq 1
-          ! grep -q '^ERROR:' red.log
+          if grep -q '^ERROR:' red.log; then exit 1; fi
           grep -q '^FAIL: test_IGSH_835_recorded_transcript_clears_queue_on_next_refresh' red.log
           grep -q '^FAIL: test_IGSH_835_identical_sends_need_distinct_occurrences' red.log
           echo 'RED PROVEN: both fixtures fail on the pre-fix queue replay'

@@ -424,7 +424,7 @@ test('revert PR dispatches exactly the required workflows on its branch after cr
   }
   const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
   assert.deepEqual(required, ['click-through', 'no-comments', 'secret-scan', 'test', 'verify (appearance)']);
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+  const workflow = fs.readFileSync(`${__dirname}/../tools/fixtures/SOFT-2713/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  actions: write\n/);
 });
 
@@ -548,8 +548,9 @@ for (const [name, failure, blocked] of [
   assert.equal(result.process.exitCode, 1);
 });
 
-test('auto-revert stays manual-only and never reacts to a failed or cancelled master push', () => {
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+test('auto-revert is archived outside GitHub workflow discovery', () => {
+  assert.ok(!fs.existsSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`));
+  const workflow = fs.readFileSync(`${__dirname}/../tools/fixtures/SOFT-2713/auto-revert-master.yml`, 'utf8');
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
   assert.match(events, /^  workflow_dispatch:\n/m);
   assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch|schedule):/m);
@@ -557,7 +558,7 @@ test('auto-revert stays manual-only and never reacts to a failed or cancelled ma
 });
 
 test('auto-revert workflow grants contents and pull-request writes with the existing token', () => {
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+  const workflow = fs.readFileSync(`${__dirname}/../tools/fixtures/SOFT-2713/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  contents: write\n/);
   assert.match(workflow, /\n  pull-requests: write\n/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
@@ -585,12 +586,12 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
   assert.match(release, /\n  journeys:[\s\S]*?feature: all/);
   assert.match(release, /\n  launch:\n    needs: \[prepare, build\]/);
-  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journeys\]/);
+  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journey-gate\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    needs: \[journeys, build-app\]\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ matrix\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| matrix\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: \[journeys, build-app\]\n    if: always\(\) && !cancelled\(\) && needs\.journeys\.result == 'success' && \(needs\.build-app\.result == 'success' \|\| inputs\.candidate_artifact != ''\) && inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ matrix\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| matrix\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
