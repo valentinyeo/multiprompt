@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const send = fs.readFileSync('src/chat_send.zig', 'utf8');
+const echo = fs.readFileSync('src/chat_echo.zig', 'utf8');
 
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
@@ -20,6 +21,12 @@ test('IGSH-1812 a host message sending in one chat does not gate sends in other 
 });
 
 test('SOFT-2724 and SOFT-2725 uncertain sends never become failure labels', t => {
+  assert.match(echo, /test "SOFT-2724 only an actual failure shows Not sent"/, 'the SOFT-2724 native test exists');
+  assert.match(echo, /test "SOFT-2725 host-owned sends stay uncertain across restart without being resent"/, 'the SOFT-2725 native test exists');
+  const label = body(echo, 'showsNotSent');
+  assert.ok(label.length > 0, 'showsNotSent exists');
+  assert.ok(!/now_ms|sent_tick_ms/.test(label), 'Not sent no longer depends on elapsed time');
+  assert.match(body(echo, 'stateOnLoad'), /message_v1/, 'a reloaded host message keeps its own uncertain state');
   const zig = process.env.ZIG || 'zig';
   if (spawnSync(zig, ['version']).status !== 0) {
     t.skip('zig is not installed here');
