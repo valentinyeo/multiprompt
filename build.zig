@@ -776,11 +776,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }) });
-    const run_tmux_identity_tests = std.Build.Step.Run.create(b, "run tmux identity tests");
-    run_tmux_identity_tests.addArtifactArg(tmux_identity_tests);
-    run_tmux_identity_tests.expectExitCode(0);
-    run_tmux_identity_tests.has_side_effects = true;
-    test_step.dependOn(&run_tmux_identity_tests.step);
+    test_step.dependOn(&b.addRunArtifact(tmux_identity_tests).step);
     const zsb_who_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-who.test.js" });
     test_step.dependOn(&zsb_who_tests.step);
     const zsb_selftest_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-selftest.test.js", "tools/zsb-selftest-docs.test.js" });

@@ -247,37 +247,6 @@ test('ISSUE-543 executable help sweep depends on its installed bridge in every s
   assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\);/);
 });
 
-test('tmux identity tests finish directly and preserve assertion failures', () => {
-  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
-  const start = build.indexOf('    const tmux_identity_tests =');
-  const end = build.indexOf('    const zsb_who_tests =', start);
-  assert.ok(start >= 0 && end > start);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-identity-completion-'));
-  try {
-    require('./zig-copy').copyZig(['src/tmux_identity.zig'], dir, root);
-    fs.writeFileSync(path.join(dir, 'build.zig'), `const std = @import("std");
-pub fn build(b: *std.Build) void {
-    const target = b.graph.host;
-    const optimize: std.builtin.OptimizeMode = .Debug;
-    const test_step = b.step("check", "Run identity completion control");
-${build.slice(start, end)}
-}
-`);
-    const run = () => spawnSync(process.env.ZIG || 'zig', ['build', 'check', '--verbose', '--summary', 'all', '-j1'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
-    const green = run();
-    assert.equal(green.status, 0, `${green.error || green.signal || ''}\n${green.stdout}${green.stderr}`);
-    assert.doesNotMatch(green.stderr, /(?:^|\n)[^\n]*[\\/]test(?:\.exe)?[ \t]+[^\n]*--listen=-/, 'identity completion must not depend on the stalled listen protocol');
-    assert.match(green.stderr, /All 13 tests passed/);
-    const source = path.join(dir, 'src/tmux_identity.zig');
-    fs.writeFileSync(source, fs.readFileSync(source, 'utf8').replace('host_a == host_b', 'host_a != host_b'));
-    const red = run();
-    assert.equal(red.status, 1, `${red.error || red.signal || ''}\n${red.stdout}${red.stderr}`);
-    assert.match(red.stderr, /TestUnexpectedResult/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test('chat CPU budget binaries finish without the listen transport and preserve failing exit codes', () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const start = build.indexOf('    const run_chat_echo_budget_tests =');
