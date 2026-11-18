@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 
 const read = file => {
   const full = path.join(__dirname, '..', file);
@@ -77,7 +78,8 @@ test('formal findings inherit only from byte-identical modeled source', { skip: 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
   const fixture = path.join(dir, 'fixture');
-  for (const file of ['src/chat_session.zig', 'src/chat_history.zig', 'src/chat_render.zig', 'tools/verify-chat-still', 'tools/chat-still/verify.py', 'tools/chat-still/replay.py', 'tools/chat-still/coverage.json', 'tools/chat-still/regressions.json']) {
+  copyZig(['chat_session.zig', 'chat_history.zig', 'chat_render.zig'], path.join(fixture, 'src'));
+  for (const file of ['tools/verify-chat-still', 'tools/chat-still/verify.py', 'tools/chat-still/replay.py', 'tools/chat-still/coverage.json', 'tools/chat-still/regressions.json']) {
     const target = path.join(fixture, file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(root, file), target);
