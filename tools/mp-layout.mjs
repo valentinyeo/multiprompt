@@ -517,7 +517,7 @@ export async function run(argv, overrides = {}) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === import.meta.resolve(pathToFileURL(process.argv[1]).href)) {
   const argv = process.argv.slice(2);
   process.exitCode = await run(basename(process.argv[1]) === 'mp' && (!argv.length || ['--help', 'help'].includes(argv[0])) ? ['session', '--help'] : argv);
 }

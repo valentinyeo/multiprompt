@@ -7,6 +7,18 @@ const crypto = require('node:crypto');
 
 const unix = process.platform !== 'win32';
 
+test('importing mp-layout does not treat a caller argument as an executable path', () => {
+  const { spawnSync } = require('node:child_process');
+  const { pathToFileURL } = require('node:url');
+  const url = pathToFileURL(path.resolve('tools/mp-layout.mjs')).href;
+  for (const argument of [url, path.join(os.tmpdir(), 'mp-layout-no-such-entrypoint')]) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(url)})`, argument], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, '');
+  }
+});
+
 test('real flock and reader config/message storage converge without forwarding the account key', { skip: !unix }, async t => {
   const { run } = await import('./mp-layout.mjs');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-spawn-adapters-'));
