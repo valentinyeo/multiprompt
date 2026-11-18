@@ -33,6 +33,30 @@ test('the CI-only judge receives the actual patch and check results, not just PR
   assert.match(prompt, /BLOCKED.*CI evidence/);
 });
 
+test('CI-owned checks supply exact-head raw findings to the judge and fail closed without them', t => {
+  const dir = scratch(t);
+  const evidence = path.join(dir, 'evidence');
+  const artifact = path.join(evidence, 'chat-delivery-formal');
+  fs.mkdirSync(artifact, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pr.json'), JSON.stringify({ headRefOid: head }));
+  fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features: [], ciWorkflows: ['chat-delivery-formal.yml'] }));
+  fs.writeFileSync(path.join(dir, 'ci.json'), JSON.stringify({ checks: [{ head_sha: head }] }));
+  fs.writeFileSync(path.join(dir, 'diff.patch'), 'formal-check patch');
+  assert.throws(() => verifier.judgeInputs(dir, evidence), /CI workflow evidence/);
+  const receipt = { workflow: 'chat-delivery-formal.yml', head_sha: head, conclusion: 'success', id: 2, artifact: 'chat-delivery-formal' };
+  fs.writeFileSync(path.join(evidence, 'ci-workflows.json'), JSON.stringify([receipt]));
+  assert.throws(() => verifier.judgeInputs(dir, evidence), /CI workflow evidence/);
+  fs.writeFileSync(path.join(artifact, 'summary.json'), JSON.stringify({ failures: ['NoFalseNotSent'], mutations_caught: ['NoFalseNotSent'], inherited_from: 'b'.repeat(40) }));
+  const material = verifier.judgeInputs(dir, evidence);
+  assert.match(material, /ci-workflows\.json/);
+  assert.match(material, /chat-delivery-formal\/summary\.json/);
+  assert.match(material, /NoFalseNotSent/);
+  for (const change of [{ head_sha: 'b'.repeat(40) }, { conclusion: 'failure' }, { conclusion: null }, { artifact: 'different' }]) {
+    fs.writeFileSync(path.join(evidence, 'ci-workflows.json'), JSON.stringify([{ ...receipt, ...change }]));
+    assert.throws(() => verifier.judgeInputs(dir, evidence), /CI workflow evidence/);
+  }
+});
+
 test('CI-only review fails closed without its CI snapshot or source patch', t => {
   const dir = scratch(t);
   fs.writeFileSync(path.join(dir, 'selection.json'), '{"features":[]}');
