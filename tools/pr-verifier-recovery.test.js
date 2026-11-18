@@ -42,8 +42,8 @@ test('retry collection selects one newest artifact ID per journey and revision',
   assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
   assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection, artifacts.baseSha), selected);
-  const headOnly = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
-  assert.deepEqual(headOnly.map(item => item.name).sort(), ['verify-chat-focus', 'verify-command-palette']);
+  const automaticBase = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
+  assert.deepEqual(automaticBase, selected, 'failed-head baseline evidence must survive an initial head-only selection');
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {
@@ -67,7 +67,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
 }
 `, { mode: 0o755 });
     const selection = path.join(dir, 'selection.json');
-    fs.writeFileSync(selection, JSON.stringify(artifacts.selection));
+    fs.writeFileSync(selection, JSON.stringify({ ...artifacts.selection, compareBase: false }));
     const evidence = path.join(dir, 'evidence');
     const requests = path.join(dir, 'requests.jsonl');
     const env = {

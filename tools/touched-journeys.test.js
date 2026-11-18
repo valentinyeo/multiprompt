@@ -43,6 +43,56 @@ test('documentation and CI-only changes do not launch unrelated desktop journeys
   assert.deepEqual(touchedJourneys(['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs', '.claude/skills/verify-multiprompt/features/appearance.md', 'src/chat.test.js', 'tools/chat-dictation.test.js', 'tools/chat-history-reader-test.py'], directory), { features: [], unmapped: [] });
 });
 
+test('diff routing excludes only proven edits inside existing top-level Zig tests', async t => {
+  const { touchedJourneysForDiff } = require(modulePath);
+  assert.equal(typeof touchedJourneysForDiff, 'function', 'Diff routing compares production source before selecting desktop journeys');
+  const { execFileSync } = require('node:child_process');
+  const directory = maps(t);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'journey-source-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.invalid');
+  fs.mkdirSync(path.join(root, 'src'));
+  const original = 'pub fn color() u8 { return 1; }\n\ntest "fixture" {\n    const nested = .{ .text = "} test \\"fake\\" {" };\n    _ = nested;\n}\n';
+  const save = (name, source) => fs.writeFileSync(path.join(root, 'src', name), source);
+  const commit = () => { git('add', '.'); git('commit', '--quiet', '-m', 'fixture'); return git('rev-parse', 'HEAD'); };
+  save('themes.zig', original);
+  const base = commit();
+  save('themes.zig', original.replace('_ = nested;', 'try std.testing.expectEqualStrings("} test", nested.text);'));
+  let head = commit();
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: [], unmapped: [] });
+  save('themes.zig', original.replace('return 1;', 'return 2;'));
+  head = commit();
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance'], unmapped: [] });
+  save('themes.zig', original.replace('const nested', 'const added = 3;\n    const nested') + '\npub const added = 3;\n');
+  head = commit();
+  assert.deepEqual((await touchedJourneysForDiff(base, head, directory, root)).features, ['appearance']);
+  save('themes.zig', original.replace('test "fixture"', 'test "renamed"'));
+  head = commit();
+  assert.deepEqual((await touchedJourneysForDiff(base, head, directory, root)).features, ['appearance']);
+  for (const source of [original + '\ntest "added" {}\n', original.replace('\n}\n', '\n'), original.replace('test "fixture"', 'test')]) {
+    save('themes.zig', source);
+    head = commit();
+    assert.deepEqual((await touchedJourneysForDiff(base, head, directory, root)).features, ['appearance']);
+  }
+  save('themes.zig', original.replace('_ = nested;', 'try std.testing.expect(true);'));
+  fs.mkdirSync(path.join(root, 'tools'));
+  fs.writeFileSync(path.join(root, 'tools/drive-chat.ps1'), 'Write-Output changed');
+  head = commit();
+  assert.deepEqual((await touchedJourneysForDiff(base, head, directory, root)).features, ['chat-view'], 'Desktop driver edits remain covered alongside test-only source edits');
+  fs.unlinkSync(path.join(root, 'tools/drive-chat.ps1'));
+  save('themes.zig', original);
+  save('new_feature.zig', 'test "new" {}\n');
+  head = commit();
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance', 'chat-view', 'pane-layout'], unmapped: ['src/new_feature.zig'] });
+  fs.unlinkSync(path.join(root, 'src/themes.zig'));
+  head = commit();
+  assert.ok((await touchedJourneysForDiff(base, head, directory, root)).features.includes('appearance'));
+  assert.equal(git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1, 'Temporary comparison checkouts are removed');
+});
+
 test('every runnable feature has source-file ownership in its map', () => {
   const directory = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
   for (const name of discoverFeatures(directory).available) {
