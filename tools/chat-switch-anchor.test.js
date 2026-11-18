@@ -41,6 +41,7 @@ const app_state = struct {
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = false;
   var g_chat_read_hold = false;
+  var g_chat_new_messages = struct { fn count(_: @This()) usize { return 0; } }{};
   var g_chat_scroll_bottom_pending = false;
   var g_chat_scrolled_up = false;
   var g_chat_prepend_pending = false;
@@ -52,6 +53,8 @@ const app_state = struct {
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
 fn chatEchoMatchActive() void {}
+fn verboseLoggingEnabled() bool { return false; }
+fn chatNewMessagesChanged(_: bool) void {}
 fn chatScrollStateChanged(viewport_h: i32) void {
   app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - 4;
 }
@@ -182,6 +185,21 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
 }
+test "IGSH-1921 ready history follows the bottom unless the reader released the opening hold" {
+  openTab(40);
+  app_state.g_chat_read_open_ready = true;
+  app_state.g_chat_scrolled_up = true;
+  app_state.next_blocks = 45;
+  refreshChatTranscript(false);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  app_state.g_chat_read_hold = false;
+  app_state.g_chat_scroll_y = 100;
+  app_state.g_chat_scrolled_up = true;
+  app_state.next_blocks = 50;
+  refreshChatTranscript(false);
+  try std.testing.expectEqual(@as(i32, 100), app_state.g_chat_scroll_y);
+}
 `;
 
 function run(scroll, historySource = history) {
@@ -199,7 +217,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 8 tests passed/);
+  assert.match(result.stderr, /All 9 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {

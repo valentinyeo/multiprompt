@@ -23,7 +23,7 @@ test('reader video validation reuses the runner decoder and still installs a mis
   const reader = workflow.split('\n  reader-tests:\n')[1].split('\n  test:\n')[0];
   assert.match(reader, /runs-on: ubuntu-24\.04/);
   const install = reader.match(/- name: Install video validation tools\s+run: (.+)/)[1];
-  for (const [available, expected] of [[true, ''], [false, 'apt-get update -qq\napt-get install -y ffmpeg\n']]) {
+  for (const [available, expected] of [[true, ''], [false, 'apt-get update -qq\napt-get install -y ffmpeg --no-install-recommends\n']]) {
     const output = execFileSync('bash', ['-e', '-c', `command() { return ${available ? 0 : 1}; }; sudo() { printf '%s\\n' "$*"; }; ${install}`], { encoding: 'utf8' });
     assert.equal(output, expected);
   }

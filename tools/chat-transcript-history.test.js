@@ -561,6 +561,38 @@ test "cache-first switch-back IGSH-1924 caught-up append" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
+test('fresh source completion resumes bottom follow after a cached opening preview', () => {
+  const cases = String.raw`
+test "cache-first switch-back fresh completion follows bottom" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    fake_viewport_h = 80;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        ("{\"role\":\"assistant\",\"text\":\"message\"}\n" ** 10) ++ "@@MP_END@@\n", 1, one.key);
+    chatDeferTranscriptLoad();
+    refreshChatTranscript(true);
+    g_chat_scrolled_up = true;
+    g_chat_scroll_y = 0;
+    var arrival = try one.history.clone(a);
+    try arrival.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"later reply\"}\n@@MP_END@@\n", 2, one.key);
+    one.result = arrival;
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expect(g_chat_read_open_ready);
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
+    try std.testing.expect(!g_chat_scrolled_up);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
 test('pushed replies persist without waiting for another transcript event', () => {
   const cases = String.raw`
 test "cache-first switch-back pushed persistence" {
