@@ -8217,5 +8217,13 @@ def load_tests(loader, tests, pattern):
     return unittest.TestSuite(group for i, group in enumerate(tests) if i % 2 == index)
 
 
+class SpawnedSourceGenerationTest(unittest.TestCase):
+    def test_a_host_started_from_the_inner_source_knows_its_generation(self):
+        namespace = dict(__name__='spawned_host', READER_SOURCE=reader.READER_SOURCE)
+        exec(compile(reader.READER_SOURCE, '<agent-host>', 'exec'), namespace)
+        self.assertEqual(namespace['RUNTIME_GENERATION'], reader.RUNTIME_GENERATION)
+        self.assertEqual(namespace['host_version']()['generation'], reader.RUNTIME_GENERATION)
+
+
 if __name__ == '__main__':
     unittest.main()
