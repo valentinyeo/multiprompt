@@ -12,7 +12,7 @@ Verify on: push, pull_request
 
 - One source row, checked by the shared `sidebar-expand` assertion.
 
-## How to get to it
+## How to get to it (user POV)
 
 Press Ctrl+K and run Sidebar: expand after hiding the sidebar with Ctrl+Shift+B.
 

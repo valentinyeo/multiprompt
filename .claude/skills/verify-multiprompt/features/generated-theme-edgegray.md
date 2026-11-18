@@ -12,7 +12,7 @@ Verify on: push, pull_request
 
 - One source row, checked by the shared `theme-color` assertion.
 
-## How to get to it
+## How to get to it (user POV)
 
 Press Ctrl+K, run Themes, type `edge grey`, and press Enter.
 

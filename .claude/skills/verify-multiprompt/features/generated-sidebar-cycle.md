@@ -12,7 +12,7 @@ Verify on: push, pull_request
 
 - One source row, checked by the shared `sidebar-cycle` assertion.
 
-## How to get to it
+## How to get to it (user POV)
 
 Press Ctrl+Shift+B three times, once per state.
 

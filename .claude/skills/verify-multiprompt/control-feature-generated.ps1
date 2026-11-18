@@ -1,4 +1,4 @@
-$rows = @(Get-Content (Join-Path $PSScriptRoot 'generated-journeys.json') -Raw | ConvertFrom-Json)
+$rows = Get-Content (Join-Path $PSScriptRoot 'generated-journeys.json') -Raw | ConvertFrom-Json
 $selectedRows = @($rows | Where-Object { $_.feature -ceq $Feature })
 if ($selectedRows.Count -ne 1) { throw "Expected one generated row for $Feature" }
 $row = $selectedRows[0]

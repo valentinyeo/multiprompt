@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { snapshot, featureDirectory } from './check-feature-coverage.mjs';
+import zigCopy from './zig-copy.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const skill = '.claude/skills/verify-multiprompt';
@@ -15,9 +16,10 @@ async function generator() {
 }
 
 test('source lists generate only rows with an independent behavioral assertion', async () => {
-  const { generate } = await generator();
+  const { generate, render } = await generator();
   const { rows, gaps } = generate(read);
   assert.equal(rows.length, 7);
+  for (const row of rows) assert.deepEqual(render(row).match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
   assert.deepEqual(rows.filter(row => row.shape === 'theme-color').map(row => row.saved).sort(), ['amoled', 'dark', 'edgegray', 'light', 'mid']);
   assert.equal(rows.find(row => row.saved === 'light').rgb, 243);
   assert.equal(rows.find(row => row.id === 'shortcut:view/ctrl-shift-b').chord, 'Ctrl+Shift+B');
@@ -51,7 +53,8 @@ test('generation is repeatable, checked for drift, and reduces real coverage gap
   const { main } = await generator();
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'generated-row-test-'));
   t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
-  for (const file of ['src/shortcuts.zig', 'src/command_palette.zig', 'openwiki/architecture/features.md', `${skill}/control.ps1`]) {
+  zigCopy.copyZig(['shortcuts.zig', 'command_palette.zig'], path.join(scratch, 'src'));
+  for (const file of ['openwiki/architecture/features.md', `${skill}/control.ps1`]) {
     fs.mkdirSync(path.dirname(path.join(scratch, file)), { recursive: true });
     fs.writeFileSync(path.join(scratch, file), read(file));
   }
@@ -88,6 +91,34 @@ test('planted break consumes the actual shortcut but leaves its advertised sourc
   assert.deepEqual(generate(file => file === 'src/shortcuts.zig' ? broken : read(file)).rows, generate(read).rows);
 });
 
+test('each generated driver row selects and executes with both JSON array output behaviors', async t => {
+  await generator();
+  const { spawnSync } = await import('node:child_process');
+  const shell = process.env.PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
+  const available = spawnSync(shell, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' });
+  if (available.error?.code === 'ENOENT' && process.platform !== 'win32') return t.skip('PowerShell execution is required by Windows CI');
+  assert.equal(available.status, 0, available.stderr);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'generated-driver-unit-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  for (const legacy of [false, true]) {
+    const run = spawnSync(shell, ['-NoProfile', '-File', path.join(root, 'tools/fixtures/SOFT-2661/generated-driver-unit.ps1'), '-Driver', path.join(root, skill, 'control-feature-generated.ps1'), '-Scratch', scratch, ...(legacy ? ['-LegacyArray'] : [])], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    const observations = JSON.parse(run.stdout);
+    const passed = observations.filter(row => row.status === 'passed');
+    assert.equal(passed.length, 7, JSON.stringify(observations));
+    for (const [theme, saved] of [['dark', 'dark'], ['mid', 'mid'], ['light', 'light'], ['amoled', 'amoled'], ['edgegray', 'edgegray']]) {
+      const row = passed.find(row => row.feature === `generated-theme-${theme}`);
+      assert.equal(row.checks[0].saved, saved);
+      assert.equal(row.themes.length, 2);
+      assert.ok(row.shots.includes('after'));
+    }
+    assert.equal(passed.find(row => row.feature === 'generated-sidebar-cycle').presses, 3);
+    assert.equal(passed.find(row => row.feature === 'generated-sidebar-expand').commands.length, 2);
+    assert.match(observations.find(row => row.feature === 'generated-missing').error, /Expected one generated row/);
+    assert.match(observations.find(row => row.feature === 'broken-shortcut').error, /generated shortcut:view\/ctrl-shift-b: collapsed sidebar saved/);
+  }
+});
+
 test('hosted desktop routing runs generated rows and rejects a mutation failing for the wrong reason', async () => {
   await generator();
   const workflow = read('.github/workflows/verify.yml');
@@ -110,4 +141,13 @@ test('hosted desktop routing runs generated rows and rejects a mutation failing 
   assert.equal((workflow.match(/name: shortcut-break-app/g) || []).length, 2);
   const recorder = workflow.split('      - name: Install browser toggle recorder\n')[1].split('\n')[0].trim();
   assert.ok(recorder.includes("startsWith(env.FEATURE, 'generated-')"), 'Every generated drive.ps1 row needs the recorder before launch');
+  const { runInNewContext } = await import('node:vm');
+  for (const step of ['Download the planted shortcut break', 'Require the covered shortcut journey to catch the planted break']) {
+    const condition = workflow.split(`      - name: ${step}\n`)[1].split('\n')[0].trim().slice(4);
+    for (const artifact of ['', 'release-candidate']) assert.equal(runInNewContext(condition, {
+      success: () => true, env: { FEATURE: 'generated-sidebar-cycle' }, inputs: { app_revision: '', tag: '', candidate_artifact: artifact },
+    }), artifact === '', 'Mutation proof runs on fresh branch builds, not prebuilt release candidates');
+  }
+  const contract = spawnSync(process.execPath, ['tools/check-browser-pane-stuck.mjs'], { cwd: root, encoding: 'utf8' });
+  assert.equal(contract.status, 0, contract.stdout + contract.stderr);
 });

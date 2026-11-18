@@ -70,7 +70,16 @@ for (const file of featureFiles) {
   assert.ok(index.includes(`](${file})`), `index lists ${name}`);
   if (!desktopFeatures.includes(file)) continue;
   assert.ok(discoverFeatures().available.includes(name), `workflow allows ${name}`);
-  assert.ok(driver.includes(`        '${name}' {`), `driver implements ${name}`);
+  if (name.startsWith('generated-')) {
+    const rows = JSON.parse(read(`${directory}/generated-journeys.json`)).filter(row => row.feature === name);
+    assert.equal(rows.length, 1, `one driver row implements ${name}`);
+    assert.ok(driver.includes("if ($Feature -notlike 'generated-*') { throw"), 'generated rows have a guarded dispatcher');
+    assert.ok(driver.includes('Where-Object { $_.feature -ceq $Feature }'), 'generated rows select their exact feature');
+    assert.ok(driver.includes(`'${rows[0].shape}'`), `driver asserts ${rows[0].shape}`);
+    assert.ok(read(`${directory}/features/${file}`).includes(`Covers: ${rows[0].id}\n`), `recipe covers ${name}`);
+  } else {
+    assert.ok(driver.includes(`        '${name}' {`), `driver implements ${name}`);
+  }
 }
 for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) {
   assert.ok(map.includes(`## ${section}`), `feature map has ${section}`);
