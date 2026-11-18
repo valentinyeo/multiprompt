@@ -36,9 +36,7 @@ jobs:
           python-version: '3.12'
       - name: Install native recorder
         shell: pwsh
-        run: |
-          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
-          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+        run: ./tools/ensure-video-tools.ps1
       - name: Check regression and PowerShell contracts
         shell: powershell
         run: |

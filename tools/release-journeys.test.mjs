@@ -18,6 +18,20 @@ test('every Linux video-checking job installs the decoder', () => {
   }
 });
 
+test('Windows recorder setup verifies a pinned archive before extracting and publishing tools', () => {
+  for (const workflow of ['verify.yml', 'browser-toggle-normal.yml', 'workspace-number-shortcuts.yml']) {
+    assert.match(fs.readFileSync(`.github/workflows/${workflow}`, 'utf8'), /run: \.\/tools\/ensure-video-tools\.ps1/, workflow);
+  }
+  const source = fs.readFileSync('tools/ensure-video-tools.ps1', 'utf8');
+  assert.match(source, /Get-Command ffmpeg\.exe, ffprobe\.exe/);
+  assert.match(source, /\$sha = '[a-f0-9]{64}'/);
+  assert.match(source, /Get-FileHash -LiteralPath \$archive -Algorithm SHA256[^\n]+throw/);
+  assert.ok(source.indexOf('Get-FileHash') < source.indexOf('Expand-Archive'));
+  assert.ok(source.indexOf('Expand-Archive') < source.indexOf('Downloaded video tool failed'));
+  assert.ok(source.indexOf('Downloaded video tool failed') < source.indexOf('Add-Content'));
+  assert.doesNotMatch(source, /choco|continue-on-error/i);
+});
+
 test('Linux video setup reuses working tools without waiting on the package mirror', { skip: process.platform !== 'linux' }, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-tools-present-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -61,7 +61,7 @@ jobs:
         run: node --test tools/workspace-number-shortcuts.test.js
       - name: Install desktop recorder
         shell: powershell
-        run: choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+        run: ./tools/ensure-video-tools.ps1
       - name: Workspace and Starred keyboard recording
         shell: powershell
         run: ./tools/workspace-number-shortcuts.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/workspaces"
