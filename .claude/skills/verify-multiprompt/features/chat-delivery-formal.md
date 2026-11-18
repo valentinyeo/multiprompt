@@ -7,11 +7,11 @@ CI workflow: chat-delivery-formal.yml
 
 Check send, outbox, echo reconciliation, retry and resume in a bounded TLA+ model. Each accepted message must show once, never as a false **Not sent** copy. This verifies delivery decisions, not the Windows screen.
 
-## User entry points
+## How to get to it (user POV)
 
 An agent changing this skill or workflow runs [verify-chat-delivery-formal](../../verify-chat-delivery-formal/SKILL.md). Changes to covered product files still select their existing desktop journeys and trigger the formal workflow separately.
 
-## Driving recipe
+## Driving it with GitHub CI
 
 Run the skill's one-command check with production replay and both planted breaks on GitHub's hosted Linux runner. Read every model result with pstack /statechart. Local TLC-only investigation is permitted; native replay and reviews remain hosted.
 

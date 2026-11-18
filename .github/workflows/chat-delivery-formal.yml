@@ -17,6 +17,7 @@ on:
       - 'tools/chat-history-reader-test.py'
       - 'tools/multibot-feedback-test.py'
       - 'tools/scoped-pr-checks.test.js'
+      - 'tools/verify-reconnect.test.js'
       - '.claude/skills/verify-chat-delivery-formal/**'
       - '.claude/skills/verify-multiprompt/features/chat-delivery-formal.md'
       - '.github/workflows/chat-delivery-formal.yml'
@@ -46,8 +47,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Check the scoped PR workflow policy
-        run: node --test tools/scoped-pr-checks.test.js
+      - name: Check the scoped PR policy and feature-map contract
+        run: node --test tools/scoped-pr-checks.test.js tools/verify-reconnect.test.js
       - name: Install the production decision replay compiler
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
