@@ -1,0 +1,12 @@
+{
+  "Reconciles": true,
+  "LoadQueued": "not_sent",
+  "LoadSending": "not_sent",
+  "ShowQueuedOld": true,
+  "ShowNotSent": true,
+  "ShowDelivered": false,
+  "CanSendQueued": true,
+  "CanSendWritten": false,
+  "TimeoutQueued": "not_sent",
+  "TimeoutSending": "not_sent"
+}
