@@ -8,6 +8,7 @@ Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, s
 - Dots animate after the subscribed live turn starts.
 - Dots remain with a visible live reply before turn end.
 - Two real follow-up messages stay queued while the dots animate.
+- A streamed reply appears once when history arrives. Final list items copy as formatted bullets, without a raw second bubble. A second identical reply remains a separate message.
 - A server chat with completed live events and unchanged history stays still for five seconds, with zero layouts and at most one transcript paint between counter samples.
 - Reading an older message stays still while at least six reply deltas arrive below the viewport. Message identity, source offset, screen Y and cropped message pixels must remain unchanged for five seconds. Actual paint and layout deltas remain in `steady-position.json`.
 

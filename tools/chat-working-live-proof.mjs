@@ -54,6 +54,27 @@ function verifyCase(root, name) {
   const queuedFollowups = rows.filter(row => row.stage === 'queued-followup');
   assert.ok(queuedFollowups.some(row => observation.followups.every(text => row.events.some(({event}) => event.state === 'queued' && event.text === text))), 'Real message store did not retain both follow-up messages');
   assert.ok(!rows.some(row => row.stage === 'dispatch-error' || row.stage === 'reply-timeout'), 'Stand-in dispatch failed');
+  const checks = [];
+  if (!steady) {
+    const liveIds = new Set(rows.filter(row => row.stage === 'pushed').flatMap(row => row.events.filter(({event}) => event.kind === 'text.done').map(({event}) => event.item)));
+    for (const [stage, count] of [['working-final', 1], ['working-second', 2]]) {
+      const saved = rows.find(row => row.stage === stage);
+      const visibleReplies = observation[stage]?.split(reply).length - 1;
+      const finalTextCopies = observation[stage]?.split('Final reply').length - 1;
+      assert.equal(saved?.rows.length, count, 'Provider archive must retain each real reply');
+      assert.equal(visibleReplies, count, 'Each real reply must be copied once after history arrives');
+      assert.equal(finalTextCopies, count, 'Final text must replace the growing reply');
+      for (const item of ['First formatted item', 'Second formatted item']) {
+        assert.equal(observation[stage].split(`• ${item}`).length - 1, count, 'Reply lists must be formatted, not raw dash bullets');
+        assert.ok(!observation[stage].includes(`- ${item}`), 'Raw reply copy must not remain after history arrives');
+      }
+      assert.deepEqual(saved.rows.map(row => row.id), ['standin-reply', 'standin-reply-two'].slice(0, count), 'Archive and live items must share identities');
+      assert.ok(saved.rows.every(row => liveIds.has(row.id)), 'Saved replies must match delivered live item identities');
+      assert.ok(fs.statSync(path.join(root, `${stage}.png`)).size > 0, 'Final reply screenshot missing');
+      checks.push({name: stage, passed: true, expectedReplies: count, visibleReplies, finalTextCopies,
+        historyIds: saved.rows.map(row => row.id), liveIds: [...liveIds].filter(id => saved.rows.some(row => row.id === id)), copied: observation[stage]});
+    }
+  }
   const area = json('area.json');
   const frames = observation.frames.map(frame => {
     const image = readBmp(path.join(dir, frame.name));
@@ -101,13 +122,13 @@ function verifyCase(root, name) {
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
   assert.equal(cleanup.evidence_preserved, true);
+  return {checks, cleanup};
 }
 
 function verify(root) {
   const cases = ['working-live', 'steady-live'].map(name => {
     try {
-      verifyCase(root, name);
-      return {name, passed:true, detail:'Passed'};
+      return {name, passed:true, detail:'Passed', ...verifyCase(root, name)};
     } catch (error) {
       return {name, passed:false, detail:error.message};
     }
