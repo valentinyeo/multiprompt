@@ -106,9 +106,11 @@ test "IGSH-1924 a switch opens on the New divider and later content never moves 
   app_state.next_blocks = 40;
   refreshChatTranscript(false);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+  const divider_y = app_state.g_chat_read_divider_y - app_state.g_chat_scroll_y;
   app_state.g_chat_top_pad = 82;
   chatRelayoutPreservingScroll(800, 600);
-  try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(first + 62, app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(divider_y, app_state.g_chat_read_divider_y - app_state.g_chat_scroll_y);
   app_state.g_chat_top_pad = 20;
 }
 test "SOFT-2557 a late New divider never moves the first painted row" {
@@ -185,14 +187,20 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
 }
-test "IGSH-1921 ready history follows the bottom unless the reader released the opening hold" {
+test "IGSH-1921 ready history preserves the newest visible row through late padding" {
   openTab(40);
   app_state.g_chat_read_open_ready = true;
   app_state.g_chat_scrolled_up = true;
+  var newest: usize = 0;
+  for (app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], 0..) |rect, index| {
+    if (rect.top < app_state.g_chat_scroll_y + 600) newest = index;
+  }
+  const shown_y = app_state.g_chat_layout_rects[newest].top - app_state.g_chat_scroll_y;
+  app_state.g_chat_top_pad += 12;
   app_state.next_blocks = 45;
   refreshChatTranscript(false);
-  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
-  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  try std.testing.expectEqual(shown_y, app_state.g_chat_layout_rects[newest].top - app_state.g_chat_scroll_y);
+  try std.testing.expect(app_state.g_chat_scrolled_up);
   app_state.g_chat_read_hold = false;
   app_state.g_chat_scroll_y = 100;
   app_state.g_chat_scrolled_up = true;

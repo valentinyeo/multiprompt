@@ -878,6 +878,20 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
+pub fn visibleTailAnchor(rects: anytype, scroll_y: i32, viewport_h: i32) ?Anchor {
+    if (rects.len == 0) return null;
+    var lo: usize = 0;
+    var hi: usize = rects.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (rects[mid].top < scroll_y + viewport_h) lo = mid + 1 else hi = mid;
+    }
+    while (lo > 0 and rects[lo - 1].bottom <= rects[lo - 1].top) lo -= 1;
+    if (lo == 0 or rects[lo - 1].bottom <= scroll_y) return null;
+    return .{ .index = lo - 1, .offset = scroll_y - rects[lo - 1].top };
+}
+
+
 pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
     return force or pending or !scrolled_up;
 }
@@ -896,6 +910,20 @@ pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadB
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;
+
+test "IGSH-1921 the opening anchor is the newest visible row, not the first" {
+    const Row = struct { top: i32, bottom: i32 };
+    const rows = [_]Row{ .{ .top = -20, .bottom = 20 }, .{ .top = 20, .bottom = 80 }, .{ .top = 80, .bottom = 120 } };
+    try std.testing.expectEqual(@as(usize, 1), visibleTailAnchor(&rows, 0, 80).?.index);
+    try std.testing.expectEqual(@as(i32, -20), visibleTailAnchor(&rows, 0, 80).?.offset);
+    try std.testing.expectEqual(@as(usize, 2), visibleTailAnchor(&rows, 50, 50).?.index);
+    try std.testing.expect(visibleTailAnchor(rows[0..0], 0, 80) == null);
+    try std.testing.expect(visibleTailAnchor(&rows, 200, 80) == null);
+    try std.testing.expect(visibleTailAnchor(&rows, -100, 20) == null);
+    const hidden = [_]Row{ .{ .top = 0, .bottom = 20 }, .{ .top = 20, .bottom = 20 }, .{ .top = 80, .bottom = 120 } };
+    try std.testing.expectEqual(@as(usize, 0), visibleTailAnchor(&hidden, 0, 80).?.index);
+}
+
 pub const NEW_CHAT_GRACE: usize = 3;
 
 pub const NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view";

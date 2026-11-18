@@ -2068,10 +2068,9 @@ pub fn refreshChatTranscript(force: bool) void {
     const viewport_h = client_rc.bottom - client_rc.top;
     const old_scroll_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
-    const old_top_pad = app_state.g_chat_layout_top_pad;
     const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready;
-    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force or (app_state.g_chat_read_hold and app_state.g_chat_read_open_ready), app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
-    const anchor = if (old_content_h > 0 and (!follow_bottom or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y) else null;
+    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force, app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
+    const anchor = if (old_content_h > 0 and (!follow_bottom or app_state.g_chat_read_hold)) (if (app_state.g_chat_read_hold) chat_history.visibleTailAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y, viewport_h) else chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y)) else null;
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
     if (!refreshed and !restore_read) return;
@@ -2080,7 +2079,7 @@ pub fn refreshChatTranscript(force: bool) void {
     const previous_boundary = app_state.g_chat_read_boundary;
     chatRelayout(client_rc.right - client_rc.left);
     const anchor_top = if (app_state.g_chat_prepend_pending) old_scroll_y + app_state.g_chat_content_h - old_content_h else if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
-    const anchor_offset = (if (app_state.g_chat_prepend_pending) @as(i32, 0) else if (anchor) |p| p.offset else 0) - (if (app_state.g_chat_read_hold) app_state.g_chat_layout_top_pad - old_top_pad else 0);
+    const anchor_offset = (if (app_state.g_chat_prepend_pending) @as(i32, 0) else if (anchor) |p| p.offset else 0);
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_scroll_y, follow_bottom, anchor_top, anchor_offset);
     if (restore_read or (!app_state.g_chat_read_open_pending and !previous_boundary.unknown and app_state.g_chat_read_boundary.unknown)) {
@@ -2092,7 +2091,7 @@ pub fn refreshChatTranscript(force: bool) void {
             app_state.g_chat_content_h - viewport_h;
     }
     const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor_offset else old_scroll_y;
-    if (app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     chatScrollStateChanged(viewport_h);
     if (verboseLoggingEnabled()) chatNewMessagesChanged(app_state.g_chat_new_messages.count() != 0);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
@@ -2101,13 +2100,12 @@ pub fn refreshChatTranscript(force: bool) void {
 pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     const old_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
-    const old_top_pad = app_state.g_chat_layout_top_pad;
-    const anchor = if (old_content_h > 0 and (app_state.g_chat_scrolled_up or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y) else null;
+    const anchor = if (old_content_h > 0 and (app_state.g_chat_scrolled_up or app_state.g_chat_read_hold)) (if (app_state.g_chat_read_hold) chat_history.visibleTailAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y, viewport_h) else chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y)) else null;
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
-    const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor.?.offset - (app_state.g_chat_layout_top_pad - old_top_pad) else old_y;
+    const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor.?.offset else old_y;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
-    if (app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     chatScrollStateChanged(viewport_h);
 }
 
@@ -2630,12 +2628,14 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     const viewport_h = viewport.bottom - viewport.top;
     app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h - 100;
     app_state.g_chat_scrolled_up = true;
+    const held = chat_history.visibleTailAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y, viewport_h).?;
+    const shown_y = app_state.g_chat_layout_rects[held.index].top - app_state.g_chat_scroll_y;
     for (3..5) |turn| {
         var arrival = try perfWire(a, "term-4", 2048, @intCast(turn), entries[last].history.offset);
         defer arrival.deinit(a);
         try entries[last].history.apply(a, arrival.items, @intCast(turn), chat_transcript.Identity.initTmux(87404, 0, false, "term-4", ""));
         refreshChatTranscript(false);
-        try std.testing.expectEqual(app_state.g_chat_content_h - viewport_h, app_state.g_chat_scroll_y);
-        try std.testing.expect(!app_state.g_chat_scrolled_up);
+        try std.testing.expectEqual(shown_y, app_state.g_chat_layout_rects[held.index].top - app_state.g_chat_scroll_y);
+        try std.testing.expect(app_state.g_chat_scrolled_up);
     }
 }
