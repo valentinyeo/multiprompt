@@ -449,8 +449,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
     const shell = &app_state.shells[app_state.active_shell];
     if (shell.kind != .tmux or shell.shell_id == 0 or shell.claude_sid_len > shell.claude_sid.len or
         shell.claude_cwd_len > shell.claude_cwd.len or shell.tmux_session_len >= 64) return null;
-    var key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2,
-        shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    var key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
     key.pi = shell.ai_agent == 3;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
@@ -1673,13 +1672,18 @@ fn refreshChatBlockCache(force: bool) bool {
     const generation = if (from_file) entry.?.generation else 0;
     const seen: []const @import("chat_markdown.zig").Block = if (from_file) entry.?.history.blocks.items else &.{};
     const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen);
+    const previous_file_revision = app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15);
     if (live_revision != g_chat_live_drawn_revision) {
         g_chat_live_drawn_revision = live_revision;
         chatLiveLog("draw", shell_id, live_tail.text_len, @intCast(@min(live_tail.blocks, 255)));
     }
     const total = len + live_tail.text_len;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
-    app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
+    app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and
+        (entry.?.history.revision == previous_file_revision or entry.?.history.revision == previous_file_revision +% 1))
+        @min(app_state.g_chat_layout_reuse, if (entry.?.history.revision == previous_file_revision) entry.?.history.last_block else entry.?.history.changed_from)
+    else
+        0;
     if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
         chatTableRefresh(entry.?.history.blocks.items, source);
     } else if (app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id or from_file != app_state.g_chat_blocks_from_file or generation != app_state.g_chat_cache_generation) {
@@ -1856,6 +1860,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_block_count = 0;
     app_state.g_chat_last_len = 0;
     app_state.g_chat_last_hash = 0;
+    g_chat_live_drawn_revision = 0;
     app_state.g_chat_cache_generation = 0;
     app_state.g_chat_file_valid = false;
     app_state.g_chat_blocks_from_file = false;
@@ -2092,7 +2097,7 @@ pub fn refreshChatTranscript(force: bool) void {
             app_state.g_chat_content_h - viewport_h;
     }
     const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor_offset else old_scroll_y;
-    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+    if (app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     chatScrollStateChanged(viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
@@ -2106,7 +2111,7 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor.?.offset - (app_state.g_chat_layout_top_pad - old_top_pad) else old_y;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
-    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+    if (app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     chatScrollStateChanged(viewport_h);
 }
 
@@ -2506,6 +2511,11 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
         .histories = app_state.g_chat_histories,
         .from_file = app_state.g_chat_blocks_from_file,
         .cache = app_state.g_chat_cache_shell_id,
+        .hold = app_state.g_chat_read_hold,
+        .ready = app_state.g_chat_read_open_ready,
+        .up = app_state.g_chat_scrolled_up,
+        .visit_state = app_state.g_chat_read_visit_state,
+        .drawn = g_chat_live_drawn_revision,
     };
     app_state.g_chat_histories = .empty;
     defer {
@@ -2521,6 +2531,11 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
         app_state.shells[0..5].* = saved.shells;
         app_state.g_chat_blocks_from_file = saved.from_file;
         app_state.g_chat_cache_shell_id = saved.cache;
+        app_state.g_chat_read_hold = saved.hold;
+        app_state.g_chat_read_open_ready = saved.ready;
+        app_state.g_chat_scrolled_up = saved.up;
+        app_state.g_chat_read_visit_state = saved.visit_state;
+        g_chat_live_drawn_revision = saved.drawn;
         app_state.g_chat_block_count = 0;
         app_state.g_chat_last_len = 0;
         app_state.g_chat_layout_reuse = 0;
@@ -2594,6 +2609,10 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(app_state.g_chat_content_h, incremental_h);
+    voiceRefreshTranscriptCache(true);
+    try std.testing.expect(app_state.g_chat_layout_reuse + 8 >= app_state.g_chat_block_count);
+    chatRelayout(800);
+    try std.testing.expectEqual(app_state.g_chat_content_h, incremental_h);
     var marker: u64 = 0;
     for (app_state.g_chat_blocks[0..counts[last]]) |block| {
         if (block.role != .tool and block.message_id != 0) marker = block.message_id;
@@ -2610,4 +2629,19 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
+    app_state.g_chat_read_visit_marker = 0;
+    app_state.g_chat_read_visit_state = .all_read;
+    app_state.g_chat_read_hold = true;
+    app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_scrolled_up = false;
+    chatRelayout(800);
+    app_state.g_chat_scroll_y = app_state.g_chat_content_h - 600;
+    for (3..5) |turn| {
+        var arrival = try perfWire(a, "term-4", 2048, @intCast(turn), entries[last].history.offset);
+        defer arrival.deinit(a);
+        try entries[last].history.apply(a, arrival.items, @intCast(turn), chat_transcript.Identity.initTmux(87404, 0, false, "term-4", ""));
+        refreshChatTranscript(false);
+        try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+        try std.testing.expect(!app_state.g_chat_scrolled_up);
+    }
 }

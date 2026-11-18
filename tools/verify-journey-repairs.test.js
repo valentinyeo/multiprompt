@@ -158,3 +158,24 @@ foreach ($target in @(2,3)) {
 'OWNED_SHORTCUT_OK'
 `), /OWNED_SHORTCUT_OK/);
 });
+
+
+test('chat rectangle reuse compares file revisions independently of live overlay revisions', () => {
+  const source = read('src/chat_session.zig');
+  const decode = source.indexOf('const previous_file_revision = app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *%');
+  const changed = source.indexOf('g_chat_live_drawn_revision = live_revision;', decode);
+  assert.ok(decode >= 0 && changed > decode, 'decode the old file revision before replacing its live revision');
+  assert.match(source, /history.revision == previous_file_revision or entry\.\?\.history.revision == previous_file_revision \+% 1/);
+  assert.match(source, /if \(entry\.\?\.history.revision == previous_file_revision\) entry\.\?\.history.last_block else entry\.\?\.history.changed_from/);
+  assert.match(source, /app_state.g_chat_last_hash = 0;\s+g_chat_live_drawn_revision = 0;/);
+  assert.match(source, /voiceRefreshTranscriptCache\(true\);\s+try std.testing.expect\(app_state.g_chat_layout_reuse \+ 8 >= app_state.g_chat_block_count\)/);
+});
+
+test('opening anchor does not override bottom follow after initial history is ready', () => {
+  const source = read('src/chat_session.zig');
+  const held = [...source.matchAll(/if \(([^\n]*)\) app_state.g_chat_scroll_y = chat_history.openScroll/g)];
+  assert.equal(held.length, 2);
+  for (const match of held) assert.equal(match[1], 'app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready');
+  assert.match(source, /for \(3\.\.5\) \|turn\|/);
+  assert.match(source, /expectEqual\(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y\)/);
+});
