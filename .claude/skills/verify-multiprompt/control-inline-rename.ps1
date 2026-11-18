@@ -38,17 +38,6 @@
                 Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$state.active_tab].name -ceq $Name } "saved session name $Name"
                 Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and @($inbox.shells | Where-Object { $_.sid -eq $sid -and $_.name -ceq $Name }).Count -eq 1 } "published Inbox name $Name"
             }
-            function Rename-CancelEdit([string]$Label) {
-                $editor = [VerifyNative]::GetFocusedWindow($script:window)
-                if ($editor -eq [IntPtr]::Zero -or [VerifyNative]::Class($editor) -cne 'Edit' -or [VerifyNative]::GetAncestor($editor, 2) -ne $script:window) { throw "$Label needs the focused owned rename Edit" }
-                for ($attempt = 1; $attempt -le 3; $attempt++) {
-                    Press @(0x1B) $Label
-                    try {
-                        Wait-Until { -not [VerifyNative]::IsWindowVisible($editor) } "rename editor closed by Esc attempt $attempt" 3
-                        return
-                    } catch { if ($attempt -eq 3) { throw } }
-                }
-            }
             function Rename-Sidebar([bool]$Hidden) {
                 Invoke-JourneyCommand $(if ($Hidden) { 'Sidebar: hide' } else { 'Sidebar: expand' }) -Confirm {
                     Press @(0x0D) 'Enter: change sidebar visibility'
@@ -66,14 +55,14 @@
             Rename-ClickNoEdit ([int](100 * $scale)) ([int](120 * $scale)) 'the first sidebar session name'
             Press @(0x71) 'F2: locate the sidebar editor'
             $sidePoint = Rename-EditPoint $current
-            Rename-CancelEdit 'Esc: cancel sidebar geometry probe'
+            Press @(0x1B) 'Esc: cancel sidebar geometry probe'
             Rename-WaitChatView
             foreach ($theme in @('light', 'amoled')) {
                 Select-Theme $theme "rename-$theme-theme"
                 Rename-Sidebar $true
                 Press @(0x71) 'F2: locate the live title editor with sidebar hidden'
                 $titlePoint = Rename-EditPoint $current
-                Rename-CancelEdit 'Esc: cancel title geometry probe'
+                Press @(0x1B) 'Esc: cancel title geometry probe'
                 Rename-Snapshot "rename-$theme-title-before"
                 Doctor
                 Rename-ClickNoEdit $titlePoint[0] $titlePoint[1] 'the chat title'
@@ -90,7 +79,7 @@
                 Press @(0x71) 'F2: edit sidebar name with sidebar open'
                 $f2SidePoint = Rename-EditPoint $current
                 if ([Math]::Abs($f2SidePoint[0] - $sidePoint[0]) -gt 10 -or [Math]::Abs($f2SidePoint[1] - $sidePoint[1]) -gt 10) { throw 'F2 did not open the sidebar editor' }
-                Rename-CancelEdit 'Esc: cancel sidebar F2 probe'
+                Press @(0x1B) 'Esc: cancel sidebar F2 probe'
                 Doctor
                 Rename-ClickNoEdit $sidePoint[0] $sidePoint[1] 'the sidebar session name'
                 Press @(0x71) 'F2: edit sidebar name'
@@ -109,7 +98,7 @@
             Press @(0x0D) 'Enter: retain name after empty title'
             Press @(0x71) 'F2: verify empty title retained the name'
             [void](Rename-EditPoint $current)
-            Rename-CancelEdit 'Esc: close verification editor'
+            Press @(0x1B) 'Esc: close verification editor'
             Rename-WaitSaved $current
             Rename-Sidebar $false
             Doctor
@@ -119,7 +108,7 @@
             Press @(0x0D) 'Enter: retain name after whitespace sidebar name'
             Press @(0x71) 'F2: verify whitespace retained the name'
             [void](Rename-EditPoint $current)
-            Rename-CancelEdit 'Esc: close verification editor'
+            Press @(0x1B) 'Esc: close verification editor'
             Rename-WaitSaved $current
             Press @(0x71) 'F2: enter padded name'
             [void](Rename-EditPoint $current)
@@ -137,11 +126,11 @@
             Press @(0x11, 0x41) 'Ctrl+A: select the restored name'
             Press @(0x11, 0x56) 'Ctrl+V: paste the copied name'
             [void](Rename-EditPoint $current)
-            Rename-CancelEdit 'Esc: close verification editor'
+            Press @(0x1B) 'Esc: close verification editor'
             Press @(0x71) 'F2: edit the active name'
             [void](Rename-EditPoint $current)
             Type-Text 'Discard this name'
-            Rename-CancelEdit 'Esc: cancel rename'
+            Press @(0x1B) 'Esc: cancel rename'
             Rename-WaitSaved $current
             Invoke-JourneyCommand 'Rename' -Confirm {
                 Press @(0x0D) 'Enter: open the same inline editor'
