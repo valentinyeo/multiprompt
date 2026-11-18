@@ -30,6 +30,7 @@ test('hosted working evidence keeps animated dots through reply and two queued m
 
 test('SOFT-2725 recovery rejects a false failure or duplicate in any painted frame', async () => {
   const { recoveryFrames } = await import(modulePath.href);
+  assert.equal(typeof recoveryFrames, 'function', 'Hosted working evidence checker must read recovery paints');
   const expected = [{key:'101', wire:'desktop-first'}, {key:'102', wire:'desktop-second'}];
   const window = {startTick:1000, historyTick:2000, endTick:3000};
   const pending = expected.map(row => `[chat-identity] row source=pending role=user key=${row.key} wire=${row.wire} not_sent=0`).join('\n');
