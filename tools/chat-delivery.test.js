@@ -2262,7 +2262,7 @@ test('composer always persists through the same outbox before delivery', () => {
 test('IGSH-1847 a message that was not sent is sent again under a new wire id', () => {
   assert.match(body('chatEchoSendAgain'), /message_replaces/);
   assert.match(body('chatEchoSendAgain'), /desktop-\{x:0>16\}\{x:0>16\}/);
-  assert.match(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
+  assert.doesNotMatch(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
   assert.match(body('chatRelayout'), /e\.state == \.not_sent/);
 });
 
