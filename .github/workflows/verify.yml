@@ -1238,3 +1238,25 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y tmux
       - name: Prove the exact Windows-generated command against real tmux
         run: python3 tools/tmux-generation-proof.py binding-evidence/binding-commands.jsonl
+
+  nightly-report:
+    needs: [journeys, build-app, verify, tmux-identity-semantics, chat-sync-audit]
+    if: always() && github.event_name == 'schedule' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: File or update nightly feature failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          FEATURES: ${{ needs.journeys.outputs.selected }}
+        run: node tools/nightly-verification-ticket.cjs

@@ -51,10 +51,72 @@ test('PR performance probes are nightly and do not block the cheap aggregate', (
     assert.match(job, /if: .*github.event_name != 'pull_request'/, name);
   }
   const aggregate = workflow.split('\n  test-result:\n')[1];
-  assert.doesNotMatch(aggregate, /needs\.(?:switch-performance|idle-budget)/);
+  assert.doesNotMatch(aggregate, /needs\.(?:switch-performance|idle-budget|test-windows-update)/);
+  assert.match(workflow.split('\n  test-windows-update:\n')[1], /if: github.event_name != 'pull_request'/);
 });
 
 test('nightly feature failures are reported on board 2060', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(workflow, /nightly-report:[\s\S]*github.event_name == 'schedule'[\s\S]*nightly-verification-ticket\.cjs/);
+});
+
+test('nightly reporting creates one board 2060 ticket, updates it, and deduplicates retries', async () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /nightly-verification-ticket\.cjs/);
+  const { reportNightly } = require('./nightly-verification-ticket.cjs');
+  const tasks = [];
+  const comments = [];
+  const api = async (method, endpoint, body) => {
+    if (endpoint.startsWith('/tasks/search?')) {
+      assert.equal(new URLSearchParams(endpoint.split('?')[1]).get('project_id'), '2060');
+      return { tasks };
+    }
+    if (endpoint === '/projects/2060/labels') return { labels: ['Poteto', 'brain-medium'].map((name, id) => ({ name, id })) };
+    if (endpoint === '/projects/2060/sections') return { sections: [{ id: 4351, section_title: 'Todo' }] };
+    if (method === 'POST' && endpoint === '/tasks/create') {
+      assert.equal(body.project_id, 2060);
+      assert.equal(body.section_id, 4351);
+      assert.deepEqual(body.labels, [0, 1]);
+      const task = { id: 999, ticketNumber: 'SOFT-999', title: body.title, section: 'Todo' };
+      tasks.push(task);
+      return { task };
+    }
+    if (endpoint.startsWith('/comments?')) return { comments };
+    if (method === 'POST' && endpoint === '/comments') {
+      assert.equal(body.ticket_number, 'SOFT-999');
+      comments.push(body);
+      return { success: true };
+    }
+    throw new Error(`Unexpected endpoint: ${method} ${endpoint}`);
+  };
+  const input = { api, failures: ['chat-delivery'], runUrl: 'https://github.com/valentinyeo/multiprompt/actions/runs/123', sha: 'a'.repeat(40) };
+  assert.equal(await reportNightly(input), 'SOFT-999');
+  assert.equal(await reportNightly(input), 'SOFT-999');
+  assert.equal(tasks.length, 1);
+  assert.equal(comments.length, 1);
+  await reportNightly({ ...input, runUrl: input.runUrl + '4', failures: ['appearance'] });
+  assert.equal(tasks.length, 1);
+  assert.equal(comments.length, 2);
+  assert.match(comments[1].text, /appearance/);
+  assert.equal(await reportNightly({ failures: [], api: () => assert.fail('Clean runs never write tickets') }), 'clean');
+});
+
+test('nearest feature selection is disclosed in every verdict', () => {
+  const { finalize } = require('./pr-verifier.cjs');
+  const result = finalize({
+    verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), runUrl: 'run',
+    selection: { features: [], nearest: [{ file: 'tools/new.cjs', feature: 'appearance' }] },
+    summary: { head: {}, base: {} },
+  });
+  assert.match(result.body, /Nearest mapped feature appearance selected for tools\/new.cjs/);
+  assert.equal(result.final, 'PASS+NOTES');
+});
+
+test('file ownership in Covers selects only the owning feature', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'covers-pr-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  for (const feature of ['appearance', 'chat-history']) {
+    fs.writeFileSync(path.join(directory, `${feature}.md`), `# ${feature}\nCovers: palette:EXAMPLE, tools/${feature}.cjs\nVerify on: push, pull_request\n## Driving it with control.ps1\n`);
+  }
+  assert.deepEqual(touchedJourneys(['tools/chat-history.cjs'], directory).features, ['chat-history']);
 });

@@ -9,18 +9,33 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
   const maps = available.map(feature => {
     const text = fs.readFileSync(path.join(directory, `${feature}.md`), 'utf8');
     const sources = text.match(/^Source files: (.+)$/m)?.[1].split(', ') || [];
-    return { feature, sources };
+    const covers = text.match(/^Covers: (.+)$/m)?.[1].split(', ').filter(entry => /^(?:src|tools|extension|\.github|\.claude)\//.test(entry)) || [];
+    return { feature, sources: [...sources, ...covers] };
   });
   for (const file of files) {
     if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) continue;
-    const matches = maps.filter(map => map.sources.some(source => {
+    const matches = maps.filter(map => file === `.claude/skills/verify-multiprompt/features/${map.feature}.md` || map.sources.some(source => {
       const pattern = source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
       return new RegExp(`^${pattern}$`).test(file);
     }));
     for (const map of matches) selected.add(map.feature);
-    if (!matches.length && !/^\.claude\/skills\/verify-multiprompt\/.*\.md$/.test(file) && /^(src\/|extension\/|build\.zig(?:\.zon)?$|tools\/verify-[^/]+(?:\/|\.ps1$)|\.claude\/skills\/verify-multiprompt\/)/.test(file)) unmapped.push(file);
+    if (!matches.length) unmapped.push(file);
   }
-  return { features: unmapped.length ? available : [...selected].sort(), unmapped };
+  const nearest = [];
+  if (!selected.size && files.length) {
+    const tokens = value => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2 && !['src', 'tools', 'github', 'workflows', 'claude', 'skill', 'skills', 'verify', 'multiprompt', 'feature', 'features', 'control', 'test', 'readme', 'zig', 'ps1', 'cjs', 'mjs', 'yml'].includes(word)));
+    const ranked = maps.flatMap(map => {
+      const names = tokens(map.feature);
+      const sources = tokens(map.sources.join(' '));
+      return (unmapped.length ? unmapped : files).map(file => {
+        const score = [...tokens(file)].reduce((sum, word) => sum + (names.has(word) ? 10 : 0) + (sources.has(word) ? 1 : 0), 0);
+        return { feature: map.feature, file, score };
+      });
+    }).sort((a, b) => b.score - a.score || Number(b.feature === 'appearance') - Number(a.feature === 'appearance') || a.feature.localeCompare(b.feature) || a.file.localeCompare(b.file));
+    selected.add(ranked[0].feature);
+    nearest.push({ file: ranked[0].file, feature: ranked[0].feature });
+  }
+  return { features: [...selected].sort(), unmapped, ...(nearest.length ? { nearest } : {}) };
 }
 
 async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {
