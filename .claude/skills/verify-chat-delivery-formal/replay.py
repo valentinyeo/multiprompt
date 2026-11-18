@@ -61,8 +61,9 @@ const ChatOutboxEntry = struct {
         if (picked[0] != null) pending = false;
     }
 '''
-            elif action == "Retry" and values["host"] != "accepted":
-                source += "    entry.state = .sending; entry.write_started = true; @memset(&entry.message_phase, 0);\n"
+            elif action == "Retry":
+                retry_state = "not_sent" if values["host"] == "accepted" else "sending"
+                source += f"    entry.state = .{retry_state}; entry.write_started = true; @memset(&entry.message_phase, 0);\n"
             if values["state"] != "empty":
                 source += f'    try std.testing.expectEqual(chat_echo.OutboxState.{values["state"]}, entry.state);\n'
                 source += f'    try std.testing.expectEqual({str(values["pending"]).lower()}, pending);\n'
@@ -106,8 +107,10 @@ const ChatOutboxEntry = struct {
                     fixture.request("dispatch")
                     if fixture.status(token)["state"] != "sent":
                         raise ValueError("Host dispatch did not replay")
-                elif action == "HostAccepts":
-                    fixture.accept("synthetic delivery probe")
+                elif action == "AgentAccepts":
+                    fixture.append(dict(type="queue-operation", operation="enqueue", content="synthetic delivery probe", sessionId="sid"))
+                elif action == "StoreConfirms":
+                    fixture.poll()
                     if fixture.status(token)["state"] != "accepted":
                         raise ValueError("Host acceptance did not replay")
                 elif action == "Retry" and values["host"] == "accepted":
@@ -119,7 +122,10 @@ const ChatOutboxEntry = struct {
                     else:
                         raise ValueError("Host accepted a duplicate replacement of an accepted message")
                 rows.append({"action": action, "model_host": values["host"]})
-            if result["trace"][-1]["values"]["host"] == "accepted":
+            if result["trace"][-1]["values"]["nativeAccepted"]:
+                fixture.poll()
+                if fixture.status(token)["state"] != "accepted":
+                    raise ValueError("Native acceptance was not confirmed by the production connector")
                 accepted = fixture.status(token)
                 if fixture.submit(token, "synthetic delivery probe") != accepted:
                     raise ValueError("Replaying the original wire ID changed the accepted message")

@@ -10,5 +10,6 @@
   "TimeoutQueued": "not_sent",
   "TimeoutSending": "not_sent",
   "LoadEmpty": "queued",
-  "LoadEmptyWritten": false
+  "LoadEmptyWritten": false,
+  "ReconcilesUnwritten": false
 }

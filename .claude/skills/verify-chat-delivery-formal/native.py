@@ -62,8 +62,9 @@ const ChatOutboxEntry = struct {
     try std.testing.expect(timeout(&sending, 601000));
     var empty_phase = ChatOutboxEntry{ .state = .sending };
     restoreEntry(&empty_phase);
-    std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
+    std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"ReconcilesUnwritten\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
         chatEchoWaitsOnTranscript(.{}) and picked[0] != null,
+        chatEchoWaitsOnTranscript(.{ .write_started = false }) and picked[0] != null,
         @tagName(chat_echo.stateOnLoad(0, true)),
         @tagName(chat_echo.stateOnLoad(1, true)),
         chat_echo.showsNotSent(true, .queued, "sent", 1000, 601000),

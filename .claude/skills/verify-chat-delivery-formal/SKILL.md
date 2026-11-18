@@ -30,10 +30,10 @@ The failure depends on whether an acceptance receipt or saved chat arrives befor
 ## Bounds and assumptions
 
 - One logical human message, at most two wire IDs, one explicit retry, one app restart and a ten-minute age boundary. Disconnect and reconnect may repeat; the finite state space closes those cycles.
-- One retained Claude chat and a fixed session identity. Receipts may be arbitrarily delayed or absent. The app's local outbox save succeeds. Host writes are transactional and wire IDs do not collide.
-- Host dispatch and native acceptance are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
-- Transcript installation and echo reconciliation are one UI-thread action, before painting. One pending bubble is replaced by that user block. The native probe also checks two identical pending texts cannot claim the same block.
-- The timeout action includes the production outbox timeout branch. Restart applies `stateOnLoad` and the parser's empty-phase requeue guard. Retry of an already accepted host row is rejected by the real store. External connection and process lifecycle events remain modeled boundaries.
+- One retained terminal-backed Claude chat, a fixed session identity and at most one native acceptance. Receipts may be arbitrarily delayed or absent. The app's local outbox save succeeds. Host writes are transactional and wire IDs do not collide.
+- Host dispatch, native acceptance and store confirmation are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
+- Transcript installation and echo reconciliation are one UI-thread action, before painting. A written pending bubble should be replaced by that user block. Unwritten restored entries are checked separately. The native probe also checks two identical pending texts cannot claim the same block.
+- The timeout action includes the production outbox timeout branch. Restart applies `stateOnLoad` and the parser's empty-phase requeue guard. Retry covers rejection of an already accepted host row and aged replacement. Early unaccepted rejection, two native consumptions and live-stream row projections are outside this bound. External connection and process lifecycle events remain modeled boundaries.
 
 No liveness is claimed when a connection can stay down forever. This does not verify all strings, allocation or disk failures, full serialization, event pagination, scheduling, cancellation, session rotation, stale-session callbacks, provider restarts, Codex/Pi, assistant reply formatting, rendering pixels or Android. SOFT-2688's three assistant forms and SOFT-2681's stale session are motivating adjacent problems, not covered proofs. Use their real app journeys for those cases.
 
@@ -54,7 +54,7 @@ Whole-file drift stops before checking, even for an unrelated function change. T
 
 ## Prove the checker can fail
 
-`--self-test` first checks a reliable control with no timeout or restart. It then copies real source into temporary directories and plants two breaks:
+`--self-test` first checks a reliable control with no timeout or restart. It then copies real source into temporary directories and plants two breaks. Both run in that same reliable control, so existing restart/timeout findings cannot satisfy a mutation test:
 
 1. Stop v1 outbox entries waiting for transcript reconciliation. `SingleVisibleCopy` must fail with a transcript bubble plus a pending bubble.
 2. Label a delivered v1 message **Not sent**. In the reliable control, `NoFalseNotSent` must fail on a delivered message. This isolates the planted break from existing timeout/restart findings.
@@ -63,7 +63,7 @@ Both counterexamples must replay through the changed production decisions. The o
 
 ## Read current findings
 
-The current source violates `NoFalseNotSent` through timeout and restart. [findings.md](findings.md) contains the /statechart paths and code mapping. Keep those findings; do not weaken the invariant to make the job green. For a modeling error, identify the impossible action or mismatching source operation and fix the model. For a real bug, file each counterexample separately and keep its trace and native replay.
+The current source violates `NoFalseNotSent` through timeout and restart, and `SingleVisibleCopy` after an empty-phase restart. [findings.md](findings.md) contains the /statechart paths and code mapping. Keep those findings; do not weaken the invariant to make the job green. For a modeling error, identify the impossible action or mismatching source operation and fix the model. For a real bug, file each counterexample separately and keep its trace and native replay.
 
 The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if **every guarded source file is byte-identical to that base**. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. Changed covered code, drift and replay errors never inherit. This classifies a verification-only PR's pre-existing bugs without calling them passes.
 

@@ -121,7 +121,7 @@ def self_test(root, output):
                 raise ValueError("Mutation no longer matches " + name)
             (scratch / file).write_text(source.replace(body, body.replace(before, after)))
             values = tables(scratch, output / rule / "native")
-            result = check(values, output / rule, reliable=rule == "NoFalseNotSent")
+            result = check(values, output / rule, reliable=True)
             if result[rule]["status"] != "FAIL":
                 raise ValueError("Planted production break escaped " + rule)
             if rule == "NoFalseNotSent" and result[rule]["trace"][-1]["values"]["state"] != "delivered":
