@@ -274,6 +274,7 @@ Open-ActionPalette 'global' 0
 Select-ActionRow 'SEARCH_TABCTX_COPY_ID' 'copy chat id'
 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -gt 0 } 'new workspace CMD has its own persistent identity'
 $workspacePeerId = [long](Read-Session).tabs[(Read-Session).active_tab].chat_id
+Select-ActionTab $workspacePeerId
 Press @(0x71) 'F2: stabilize the destination-workspace peer name'
 Rename-ActionTab 'Batch workspace peer'
 Wait-Until { (Get-ActionTab $workspacePeerId).name -ceq 'Batch workspace peer' } 'workspace peer has a saved manual name'

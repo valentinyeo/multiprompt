@@ -248,14 +248,27 @@ else if (process.argv[2] === '--evidence') {
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
     const text = fs.readFileSync(file, 'utf8');
     const creation = text.slice(text.indexOf("Press @(0x11, 0x4E)"), text.indexOf("Press @(0x12, 0x32)"));
+    const select = text.slice(text.indexOf('function Select-ActionTab('), text.indexOf('function Rename-ActionTab('));
     assert.ok(creation);
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
-      $script:state = '{"workspace_count":2,"active_tab":0,"tabs":[{"chat_id":303,"name":"CMD 4"}]}' | ConvertFrom-Json
-      $script:renameOpen = $false
+      $script:state = '{"workspace_count":2,"active_workspace":1,"active_tab":0,"tabs":[{"chat_id":303,"shell_id":4,"name":"CMD 4"}]}' | ConvertFrom-Json
+      $script:renameOpen = $false; $script:consoleSelected = $false
       function Read-Session { return $script:state }
       function Get-ActionTab($Id) { if ($Id -ne 303) { throw 'Wrong peer identity' }; return $script:state.tabs[0] }
-      function Press($Keys, $Label) { if ($Keys[0] -eq 0x71) { $script:renameOpen = $true } }
+      function Press($Keys, $Label) {
+        if ($Keys[0] -eq 0x71) {
+          if (-not $script:consoleSelected) { throw 'Workspace peer console was not activated before F2' }
+          $script:renameOpen = $true
+        }
+      }
+      function Invoke-JourneyCommand($Name, [switch]$Session) {
+        if (-not $Session -or $Name -ne 'CMD 4') { throw 'Wrong workspace peer session action' }
+        $script:consoleSelected = $true
+      }
+      function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) {
+        if (-not $script:consoleSelected -or $Workspace -ne 1 -or $Tab -ne 0 -or $Chat) { throw 'Wrong workspace peer input surface' }
+      }
       function Open-ActionPalette { }
       function Select-ActionRow { }
       function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
@@ -264,6 +277,7 @@ else if (process.argv[2] === '--evidence') {
         $script:state.tabs[0].name = $Name
         $script:state.tabs[0] | Add-Member manual $true
       }
+      ${select}
       ${creation}
       if (-not $script:state.tabs[0].PSObject.Properties['manual'] -or $script:state.tabs[0].name -ne 'Batch workspace peer') { throw 'Workspace peer retains a changing automatic title' }
     `], { encoding: 'utf8' });
