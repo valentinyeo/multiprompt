@@ -7,6 +7,32 @@ const crypto = require('node:crypto');
 
 const unix = process.platform !== 'win32';
 
+test('importing mp-layout does not treat a caller argument as an executable path', () => {
+  const { spawnSync } = require('node:child_process');
+  const { pathToFileURL } = require('node:url');
+  const url = pathToFileURL(path.resolve('tools/mp-layout.mjs')).href;
+  for (const argument of [url, path.join(os.tmpdir(), 'mp-layout-no-such-entrypoint')]) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(url)})`, argument], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, '');
+  }
+});
+
+test('the installed mp command is executable and offers keyless session help', { skip: !unix }, t => {
+  const { spawnSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-entrypoint-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const mp = path.join(home, 'mp');
+  fs.symlinkSync(path.resolve('tools/mp-layout.mjs'), mp);
+  assert.notEqual(fs.statSync(mp).mode & 0o111, 0, 'the installed mp command must be executable');
+  const result = spawnSync(mp, ['--help'], { encoding: 'utf8', env: { HOME: home, PATH: process.env.PATH } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.match(result.stdout, /^usage: mp session/);
+  assert.doesNotMatch(result.stdout, /MULTIPROMPT_KEY/);
+});
+
 test('real flock and reader config/message storage converge without forwarding the account key', { skip: !unix }, async t => {
   const { run } = await import('./mp-layout.mjs');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-spawn-adapters-'));
