@@ -326,6 +326,8 @@ jobs:
 
             CI snapshots include supplementary pending checks and expected negative controls. Interpret them using the patch and aggregate gates; do not mistake them for missing selected journeys or automatically treat a negative control as a regression.
 
+            shortcut-break-proof.json records a planted shortcut-break negative control. Validate its clean pass, expected planted failure, matching mutation and nested result/Doctor/cleanup evidence; a nested shortcut-break/result.json failure alone is not a head journey regression.
+
             For every selected journey open result.json, doctor.json and at least one screenshot from the head artifact under evidence/, and the same files from the base artifact when it exists. Read the screenshots as images.
 
             Judge each Done-when line from what the evidence shows.
