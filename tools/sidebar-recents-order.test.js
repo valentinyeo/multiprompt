@@ -53,3 +53,9 @@ test("A click under the pointer keeps its row in place until the pointer leaves 
   assert.match(leave, /GetCursorPos\(&leave_pt\)/, "a leave message with the pointer still over the sidebar must not reorder");
   assert.match(leave, /thawSidebarOrder\(\)/, "pointer leaving the window releases the order");
 });
+
+test("A child covering sidebar coordinates cannot requeue mouse-leave and starve palette paint", () => {
+  const leave = block(main, "0x02A3 => {", "WM_MOUSEMOVE => {");
+  assert.match(leave, /const over_main = GetCursorPos\(&leave_pt\) != 0 and WindowFromPoint\(leave_pt\) == hwnd;/, "check the actual receiver before converting screen coordinates");
+  assert.match(leave, /if \(over_main and[^\n]+\) \{\s+var tracking[\s\S]*?TrackMouseEvent\(&tracking\);/, "rearm leave tracking only while the pointer is still over the tracked window");
+});

@@ -2407,10 +2407,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_sidebar_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
             }
-            var leave_pt: POINT = undefined;
-            _ = GetCursorPos(&leave_pt);
+            var leave_pt: POINT = std.mem.zeroes(POINT);
+            const over_main = GetCursorPos(&leave_pt) != 0 and WindowFromPoint(leave_pt) == hwnd;
             _ = ScreenToClient(hwnd, &leave_pt);
-            if (!app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
+            if (over_main and !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             } else if (@import("sidebar.zig").thawSidebarOrder()) {
