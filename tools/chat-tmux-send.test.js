@@ -48,7 +48,7 @@ var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
 const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
-var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
+var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1, ai_stopped: bool = false, ai_restart_tick: u64 = 0 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
 var shell_count: u32 = 1;
@@ -68,7 +68,7 @@ var enter_ok = true;
 var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
-    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
+    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false, clear_chat: bool = false, needs_restart: bool = false, clear_notice: [96]u8 = @splat(0), clear_notice_len: u8 = 0,
     queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
     message_v1: bool = false, message_status: bool = false, message_reset: bool = false, message_dismiss: bool = false,
     reset_cutoff: u64 = 0, history_instance: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, reset_result_epoch: u64 = 0,
@@ -98,6 +98,7 @@ fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
     return true;
 }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+fn chatRestartAi(_: u32) bool { return true; }
 fn debugLog(_: []const u8) void {}
 const CHAT_MESSAGE_SYNC_POLL_MS: u64 = 3000;
 const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
@@ -259,6 +260,10 @@ test "channel write failure falls back once but a written request or retry never
     try std.testing.expectEqual(@as(usize, 0), pastes);
 }
 `;
+test('SOFT-2420 a finished clear clears a stale stopped badge', () => {
+  assert.match(body('chatTmuxSendFinish'), /clear_chat/);
+  assert.match(body('chatTmuxSendFinish'), /ai_stopped = false/);
+});
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
