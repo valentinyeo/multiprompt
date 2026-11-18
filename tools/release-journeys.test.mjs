@@ -18,6 +18,17 @@ test('every Linux video-checking job installs the decoder', () => {
   }
 });
 
+test('reader video validation reuses the runner decoder and still installs a missing one', () => {
+  const workflow = fs.readFileSync('.github/workflows/test.yml', 'utf8');
+  const reader = workflow.split('\n  reader-tests:\n')[1].split('\n  test:\n')[0];
+  assert.match(reader, /runs-on: ubuntu-24\.04/);
+  const install = reader.match(/- name: Install video validation tools\s+run: (.+)/)[1];
+  for (const [available, expected] of [[true, ''], [false, 'apt-get update -qq\napt-get install -y ffmpeg\n']]) {
+    const output = execFileSync('bash', ['-e', '-c', `command() { return ${available ? 0 : 1}; }; sudo() { printf '%s\\n' "$*"; }; ${install}`], { encoding: 'utf8' });
+    assert.equal(output, expected);
+  }
+});
+
 const sha = 'a'.repeat(40);
 const base = 'b'.repeat(40);
 const run = 'https://github.com/example/multiprompt/actions/runs/123';
