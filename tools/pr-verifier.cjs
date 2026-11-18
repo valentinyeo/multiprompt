@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
-const { touchedJourneys } = require('./touched-journeys.cjs');
+const { touchedJourneysForDiff } = require('./touched-journeys.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -417,7 +417,7 @@ function availableFeatures(env) {
   return (env.FEATURES_DIR ? discoverFeatures(env.FEATURES_DIR) : discoverFeatures()).available;
 }
 
-function prepare(env, outDir) {
+async function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
   fs.mkdirSync(outDir, { recursive: true });
@@ -439,8 +439,7 @@ function prepare(env, outDir) {
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
   fs.writeFileSync(path.join(outDir, 'pr.json'), JSON.stringify(pr));
-  const files = execFileSync('git', ['diff', '--name-only', '-z', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).split('\0').filter(Boolean);
-  const mapped = touchedJourneys(files, env.FEATURES_DIR);
+  const mapped = await touchedJourneysForDiff(env.BASE_SHA, 'HEAD', env.FEATURES_DIR);
   fs.writeFileSync(path.join(outDir, 'mapped.json'), JSON.stringify(mapped, null, 2));
   fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(mapped.features, null, 2));
 }
@@ -450,7 +449,7 @@ function latestArtifacts(artifacts, selection, baseSha) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
+      return match && (!match[1] || match[1] === baseSha);
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||

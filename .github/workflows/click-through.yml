@@ -29,12 +29,12 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           node - <<'NODE' >> "$GITHUB_OUTPUT"
-          const { execFileSync } = require('node:child_process');
-          const { touchedJourneys } = require('./tools/touched-journeys.cjs');
+          const { touchedJourneysForDiff } = require('./tools/touched-journeys.cjs');
           const journeys = ['chat-browser-shortcut', 'chat-browser-autoload', 'chat-model', 'chat-not-sent-remove', 'server-chat-busy', 'server-chat-fresh-start'];
-          const files = process.env.EVENT === 'pull_request' ? execFileSync('git', ['diff', '--name-only', '-z', `${process.env.BASE}...${process.env.HEAD}`], { encoding: 'utf8' }).split('\0').filter(Boolean) : [];
-          const mapped = new Set(touchedJourneys(files).features);
-          console.log(`features=${JSON.stringify(process.env.EVENT === 'pull_request' ? journeys.filter(feature => mapped.has(feature)) : journeys)}`);
+          (async () => {
+            const mapped = process.env.EVENT === 'pull_request' ? await touchedJourneysForDiff(process.env.BASE, process.env.HEAD) : { features: journeys };
+            console.log(`features=${JSON.stringify(journeys.filter(feature => mapped.features.includes(feature)))}`);
+          })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
   journeys:
     needs: changes
