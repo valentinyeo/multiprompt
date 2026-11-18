@@ -85,6 +85,9 @@ def install(namespace, root, record, steady=False):
                    'sends': [dict(id=token, attempt=attempt, accepted=False)]}
         namespace['host_write'](namespace['host_paths'](provider, sid)['config'], dict(enabled=True, cwd=str(root)))
         namespace['host_state_write'](provider, sid, session['state'])
+        if not steady:
+            namespace['host_history_append'](provider, sid, session, dict(role='user', id=token, text=text))
+            record('working-host.jsonl', stage='user-saved', sid=sid, id=token, text=text)
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
         record('working-host.jsonl', stage='turn.started', sid=sid, id=token)
@@ -136,6 +139,14 @@ def install(namespace, root, record, steady=False):
                         history = namespace['host_paths'](provider, sid)['history']
                         rows = [json.loads(line)['row'] for line in history.read_text().splitlines()]
                         record('working-host.jsonl', stage=marker, sid=sid, rows=rows)
+                    deadline = time.monotonic() + 90
+                    while not (root / 'working-ended').exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if not (root / 'working-ended').exists():
+                        record('working-host.jsonl', stage='reply-timeout', sid=sid)
+                        return
+                    namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.ended')
+                    record('working-host.jsonl', stage='working-ended', sid=sid)
             finally:
                 if session.get('db') is not None:
                     session['db'].close()

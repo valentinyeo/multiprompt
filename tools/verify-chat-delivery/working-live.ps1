@@ -52,6 +52,7 @@ Doctor $true
 $frames = [Collections.Generic.List[object]]::new()
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $sendMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$observation.identityWindows = @{sendStart=[ChatDeliveryDesktop]::GetTickCount64()}
 $actions.Add(@{case=$plan.name; ms=$sendMs; input='Enter: send composer'; keys=@(13)})
 [ChatDeliveryDesktop]::Chord(@(0x0D))
 if ($steady) { [void](Scroll-Transcript -12000) }
@@ -104,6 +105,7 @@ try {
     }
     if (-not $animated) { throw 'No animated dots after dispatched turn.started push' }
     $observation.dispatchAnimation = @{pushedMs=$dispatchPush.ms; frames=$animated}
+    $observation.identityWindows.replyStart = [ChatDeliveryDesktop]::GetTickCount64()
     [IO.File]::WriteAllText("$state/working-reply", '')
     [void](Wait-For 'stand-in emitted live text delta' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "text.delta"' } 20)
     $observation.paintWindows.streamStart = [ChatDeliveryDesktop]::GetTickCount64()
@@ -171,6 +173,7 @@ $observation.copied = Copy-WorkingConversation
 if (-not $steady) {
     $reply = 'The hosted stand-in reply is visible.'
     foreach ($stage in @(@{marker='working-final'; count=1}, @{marker='working-second'; count=2})) {
+        $observation.identityWindows[$stage.marker] = [ChatDeliveryDesktop]::GetTickCount64()
         [IO.File]::WriteAllText("$state/$($stage.marker)", '')
         [void](Wait-For 'provider saved the final reply' { (Read-Shared "$state/working-host.jsonl").Contains('"stage": "' + $stage.marker + '"') } 30)
         [void](Wait-For 'final reply reached the app history cache' {
@@ -184,7 +187,23 @@ if (-not $steady) {
             if (([regex]::Matches($value, 'Final reply')).Count -ge $stage.count) { return $value }
         } 30
         $observation[$stage.marker] = $copied
+        [void](Scroll-Transcript -12000)
+        $sampleStart = $clock.ElapsedMilliseconds
+        for ($i = 0; $clock.ElapsedMilliseconds -lt $sampleStart + 1000; $i++) {
+            Capture-Working $stage.marker $i
+            Start-Sleep -Milliseconds 60
+        }
         Shot $stage.marker
-        if (([regex]::Matches($copied, [regex]::Escape($reply))).Count -ne $stage.count -or ([regex]::Matches($copied, 'Final reply')).Count -ne $stage.count) { throw 'Live and history copies must merge by identity without hiding identical real replies' }
     }
+    $observation.identityWindows['working-ended'] = [ChatDeliveryDesktop]::GetTickCount64()
+    [IO.File]::WriteAllText("$state/working-ended", '')
+    [void](Wait-For 'provider turn ended' { (Read-Shared "$state/working-host.jsonl").Contains('"stage": "working-ended"') } 30)
+    $sampleStart = $clock.ElapsedMilliseconds
+    for ($i = 0; $clock.ElapsedMilliseconds -lt $sampleStart + 1000; $i++) {
+        Capture-Working 'working-ended' $i
+        Start-Sleep -Milliseconds 60
+    }
+    $observation.identityWindows.end = [ChatDeliveryDesktop]::GetTickCount64()
+    $observation.frames = $frames.ToArray()
+    Shot 'working-ended'
 }

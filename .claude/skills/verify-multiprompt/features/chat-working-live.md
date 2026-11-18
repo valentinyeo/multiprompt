@@ -8,7 +8,7 @@ Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, s
 - Dots animate after the subscribed live turn starts.
 - Dots remain with a visible live reply before turn end.
 - Two real follow-up messages stay queued while the dots animate.
-- A streamed reply appears once when history arrives. Final list items copy as formatted bullets, without a raw second bubble. A second identical reply remains a separate message.
+- Pending user messages, streamed replies and saved history never appear twice, including a single painted frame. Final list items copy as formatted bullets. A second identical real reply remains separate.
 - A server chat with completed live events and unchanged history stays still for five seconds, with zero layouts and at most one transcript paint between counter samples.
 - Reading an older message stays still while at least six reply deltas arrive below the viewport. Message identity, source offset, screen Y and cropped message pixels must remain unchanged for five seconds. Actual paint and layout deltas remain in `steady-position.json`.
 
@@ -25,6 +25,8 @@ The remote shell and provider are stand-ins. The provider stand-in runs producti
 Recorded hosted proof: https://github.com/valentinyeo/multiprompt/actions/runs/42368960296 passed on `f6fefa003`. Downloaded `verify-chat-delivery/result.json` reports `passed`; both cleanup records report zero remaining owned processes and removed scratch directories. This is the simulated-provider boundary above, not a real provider acceptance claim.
 
 The `Verify steady chat` workflow runs this same driver against the instrumented pre-idle-fix app at `596e3261` and the candidate. Its baseline artifact is `verify-chat-delivery-596e3261e9e77ce193ab7addbfd3001892242331`; the candidate artifact is `verify-chat-delivery`. During the idle window, the stand-in appends blank JSONL lines every half-second. The file cursor advances but no message changes. At least six such refreshes must occur inside the measured window. The baseline must fail the idle layout or paint assertion, not setup. The workflow's counter job rejects an unexpectedly quiet baseline and requires the candidate's full checker to pass. The driver creates empty isolated host directories before concurrent readers start, then uses production archive and event APIs to fill them.
+
+The `working-live` case shares the read-only paint probe used by `chat-still`. Both master and head builds receive the identical probe from the journey revision; shipped builds do not contain it. `identity-frames.json` lists every completed transcript paint from Send through streaming, saved history, a second reply and turn end. It rejects a user identity shown in both saved and pending rows, or an extra reply bubble, even when later frames are clean. BMP samples continue during send and streaming and are also captured after each history handoff. The synthetic mention token in the sent message exercises display-name cleanup, so matching cannot depend on unchanged rendered text or a provider UUID arriving first.
 
 ## Gotchas
 

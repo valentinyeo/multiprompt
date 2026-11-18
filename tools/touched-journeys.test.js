@@ -157,6 +157,8 @@ test('shared build profiles and artifact names isolate instrumented and comparis
   for (const [features, profiles] of [
     [['appearance', 'chat-view'], ['normal']],
     [['chat-still'], ['chat-still']],
+    [['chat-working-live'], ['chat-still']],
+    [['chat-working-live', 'chat-still'], ['chat-still']],
     [['appearance', 'chat-still', 'chat-view'], ['normal', 'chat-still']],
   ]) {
     const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, FEATURES: JSON.stringify(features), APP_REVISION: '' } });
@@ -164,11 +166,11 @@ test('shared build profiles and artifact names isolate instrumented and comparis
     assert.deepEqual(JSON.parse(result.stdout.match(/^builds=(.+)$/m)[1]), profiles);
     assert.deepEqual(JSON.parse(result.stdout.match(/^selected=(.+)$/m)[1]), features);
   }
-  for (const feature of ['appearance', 'chat-still']) {
+  for (const feature of ['appearance', 'chat-still', 'chat-working-live']) {
     for (const revision of ['', 'base-sha']) {
-      const context = { matrix: { profile: feature === 'chat-still' ? 'chat-still' : 'normal' }, env: { FEATURE: feature }, inputs: { app_revision: revision } };
+      const context = { matrix: { profile: ['chat-still', 'chat-working-live'].includes(feature) ? 'chat-still' : 'normal' }, env: { FEATURE: feature }, inputs: { app_revision: revision } };
       const actual = names.map(name => name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => runInNewContext(expression, context)));
-      const expected = `verify-app${feature === 'chat-still' ? '-chat-still' : ''}${revision ? '-compare' : ''}`;
+      const expected = `verify-app${['chat-still', 'chat-working-live'].includes(feature) ? '-chat-still' : ''}${revision ? '-compare' : ''}`;
       assert.deepEqual(actual, [expected, expected]);
     }
   }
