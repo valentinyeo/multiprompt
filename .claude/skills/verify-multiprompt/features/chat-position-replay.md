@@ -1,36 +1,29 @@
-# Long-chat position replay
+# Real-server long-chat console replay
 
-Source files: src/chat*, src/main.zig, build.zig, build.zig.zon, src/console.zig, src/focus.zig, src/window_layout.zig, tools/verify-chat-delivery/*, .claude/skills/verify-multiprompt/control-feature-chat-switch-speed.ps1, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/drive.ps1, .claude/skills/verify-multiprompt/seed-profile.*
+Source files: src/chat*, src/main.zig, build.zig, build.zig.zon, src/console.zig, src/focus.zig, src/window_layout.zig, tools/verify-server-chat/*, tools/verify-chat-delivery/*frame-probe*, tools/verify-chat-delivery/native-console*, tools/verify-chat-delivery/position-replay*, .claude/skills/verify-multiprompt/drive.ps1, .claude/skills/verify-multiprompt/seed-profile.py
 
 ## Sub-features
 
-- PR 1070's synthetic 64-session profile, eight workspaces and 2,400-message histories with images, tables and code.
-- Opening and revisiting five long chats through native session shortcuts.
-- Every successful visible chat paint, including unfinished layouts, saved with exact pixels, message identities, bounds and scroll.
-- Native console SHOW/HIDE, foreground, parent, location and Z-order events recorded before launch through owned cleanup.
-- A hosted long chat left open through idle refreshes, reading old history, a real send, streaming and completion below the reader.
-- Native copied transcript receipts and zero surviving owned processes.
+- PR 1072's working Windows OpenSSH to WSL2 OpenSSH/tmux journey, with its production host, reader and connectors.
+- One real server conversation containing all 2,400 messages from PR 1070's `source_rows` generator, including images, tables and code. Other workspaces are not exercised by this journey.
+- Native copied text proves all 1,200 questions and 1,200 answers reached Chat View before observation starts.
+- Idle with the long chat open, scroll into older history, then Alt+Tab away and back through a separate owned peer window. Repeat while reading old history.
+- The original server send, `/clear` and after-clear cases, exact server receipts, per-job key restrictions and cleanup remain unchanged.
 
 ## How to get to it (user POV)
 
-Open a long saved session, switch away and return. Scroll into older messages, leave the chat open, send a reply and keep reading while the answer streams below.
+Open the saved server tab with Ctrl+1 and Chat View with Alt+C. Read its long conversation. Switch to another application and back with Alt+Tab. Scroll into older messages and repeat.
 
 ## Driving it with control.ps1
 
-Select `feature=chat-position-replay` in the existing reusable Windows workflow. This verification alias enables the paint probe and runs the existing switch driver, then the production-host delivery driver. The original switch-speed benchmark is unchanged.
+Select `feature=chat-position-replay` in `verify.yml`. It selects the real `server-chat` driver, installs the read-only paint probe, and starts native window observation before the app launches. It does not use the synthetic SSH or hosted-delivery stand-ins. Only the paid Claude process remains deterministic, as documented by [server-chat](server-chat.md).
 
-PR 1067 runs the same scripts automatically against master and head. The independent verifier can select this map itself. No extra dispatch or rerun is needed. Artifacts use `verify-chat-position-replay`; application-compare artifacts append the baseline SHA.
+A separate positive control must catch a real native child console. It cannot establish the app's failing-master repro. The server driver owns the only desktop video recorder at 30 fps. Keep the video, `windows/windows.tsv`, console screenshots, every paint, `position-phases.json`, `position-replay.json`, `native-console.json`, native transcript copy and server receipts.
 
-Before either journey, a separate process proves the observer catches a real native console reparented over a test chat window. Its expected failure is saved under `observer-control`. It cannot satisfy the app's failing-master requirement.
+The window observer records opening and shutdown too. `allFlashes` retains every overlap. A qualifying `flashes` entry must occur in a loaded-long-chat observation phase and identify the latest completed, nonblank paint for that same conversation. Opening-only overlap, stale content, a fixture timeout or the positive control cannot establish this bug.
 
-Done when both app journeys pass, copied text includes the seed's final answer and the sent/completed reply, and all stable phases preserve message positions. Every recorded paint must have its image. Both `native-console.json` files must pass with complete hook coverage and owned Chat View visibility intervals. `result.json.positionJourneys` must report switch and hosted success. Explicit scrolling and send-triggered scrolling retain their movement records without counting as spontaneous jumps. Console flashes fail regardless of the action's scroll policy.
-
-Before a product fix, master must expose a native console over visible long-chat Chat View under these same scripts. Inspect its event timestamps, console screenshots and desktop video. A fixture timeout, missing evidence or short-chat jump cannot establish this reproduction.
+Done when master exposes a native console over painted long-chat content on this real-server journey and the unchanged journey passes on the app fix. Inspect the event, corresponding paint and desktop video before editing app code. Head must also pass the original server receipts, paint-position checks, cleanup, and `chat-view-everywhere`.
 
 ## Gotchas
 
-The runner supports 1920x1080, not the owner's 2560x1600 mode. Video starts before app launch. Paint bitmaps establish chat positions but cannot detect another window covering chat between paints.
-
-The window observer includes child consoles reparented into the app. It retains original SHOW timestamps even when the console is already hidden at callback time. It records bounds, parent, owner, foreground and sibling Z-order. An intersecting console SHOW during an owned visible Chat View interval fails even when no chat paint occurs. Current hidden state or current Z-order cannot erase that historical SHOW. A missing hook, unobserved chat or incomplete journey interval is infrastructure failure, never a product reproduction.
-
-Recording overhead is not a latency benchmark. SSH/provider I/O is synthetic. The app's archive, subscription, layout, input and scroll paths are real. No product fix is claimed until failing-master and passing-head evidence exists.
+WSL2, SSH key handling, provider startup and SQLite locking belong to the existing server harness. Do not replace them with fake SSH, a shared VPS or production credentials. The runner is 1920x1080. The peer is an ordinary window in the driver process, not a manufactured console flash. Alt+Tab must genuinely return to the app without a focus-repair call. Recording overhead is not a latency benchmark. No app fix is claimed until failing-master and passing-head evidence exists.

@@ -1,0 +1,132 @@
+{
+  "release": "https://github.com/valentinyeo/multiprompt/releases/tag/v0.28.1761",
+  "tag": "v0.28.1761",
+  "run": "https://github.com/valentinyeo/multiprompt/actions/runs/44042909628",
+  "candidateSha256": "77cbcdbd86b20a455d0415c3f1a9ea059bb77e375d21e107adc0722a3572fd28",
+  "plan": {
+    "base": "7015b7427cca93f2b94a4f1918f300c09ddb152b",
+    "sha": "608b7d62944fd39b79cbbaa2c83bc6e3251f590c",
+    "changes": [
+      {
+        "commit": "608b7d62944fd39b79cbbaa2c83bc6e3251f590c",
+        "prs": [
+          {
+            "number": 1053,
+            "url": "https://github.com/valentinyeo/multiprompt/pull/1053"
+          }
+        ],
+        "files": [
+          ".claude/skills/verify-multiprompt/SKILL.md",
+          ".claude/skills/verify-multiprompt/control.ps1",
+          ".claude/skills/verify-multiprompt/coverage.md",
+          ".claude/skills/verify-multiprompt/features/README.md",
+          ".claude/skills/verify-multiprompt/features/chat-newest.md",
+          ".github/workflows/no-comments.yml",
+          ".github/workflows/verify.yml",
+          "changelog.d/SOFT-2489-gg-jump-bottom.md",
+          "openwiki/operations/keyboard-shortcuts.md",
+          "src/chat_composer.zig",
+          "src/chat_keynav.zig",
+          "src/command_palette.zig",
+          "src/shortcuts.zig",
+          "src/sidebar.zig",
+          "tools/changelog-fragments.test.js",
+          "tools/chat-keynav.test.js",
+          "tools/chat-newest-proof.mjs",
+          "tools/chat-newest-proof.test.mjs",
+          "tools/check-powershell-host-names.test.js",
+          "tools/ticket-titles/IGSH-2489.txt",
+          "tools/verify-chat-delivery/drive.ps1"
+        ],
+        "features": [
+          "chat-and-composer",
+          "chat-newest",
+          "palette",
+          "shortcuts",
+          "sidebar-sessions"
+        ]
+      }
+    ],
+    "features": [
+      {
+        "feature": "chat-and-composer",
+        "map": ".claude/skills/verify-multiprompt/features/chat-and-composer.md",
+        "journeys": [
+          "chat-focus",
+          "chat-view",
+          "chat-composer-text"
+        ]
+      },
+      {
+        "feature": "chat-newest",
+        "map": ".claude/skills/verify-multiprompt/features/chat-newest.md",
+        "journeys": [
+          "chat-newest"
+        ]
+      },
+      {
+        "feature": "palette",
+        "map": ".claude/skills/verify-multiprompt/features/palette.md",
+        "journeys": [
+          "command-palette"
+        ]
+      },
+      {
+        "feature": "shortcuts",
+        "map": ".claude/skills/verify-multiprompt/features/shortcuts.md",
+        "journeys": [
+          "chat-focus",
+          "workspace-focus"
+        ]
+      },
+      {
+        "feature": "sidebar-sessions",
+        "map": ".claude/skills/verify-multiprompt/features/sidebar-sessions.md",
+        "journeys": [
+          "sessions",
+          "session-actions",
+          "session-tabs"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "expired": false,
+      "id": 14312175202,
+      "name": "multiprompt-x64"
+    },
+    {
+      "expired": false,
+      "id": 14311892141,
+      "name": "release-resource-observation"
+    },
+    {
+      "expired": false,
+      "id": 14311866268,
+      "name": "multiprompt-x64-symbols"
+    },
+    {
+      "expired": false,
+      "id": 14311382429,
+      "name": "multiprompt-arm64"
+    },
+    {
+      "expired": false,
+      "id": 14311307683,
+      "name": "multiprompt-arm64-symbols"
+    },
+    {
+      "expired": false,
+      "id": 14311163986,
+      "name": "release-launch-proof"
+    },
+    {
+      "expired": false,
+      "id": 14310948052,
+      "name": "release-notes-source"
+    }
+  ],
+  "exitCode": 1,
+  "error": "Missing passing release journeys with video:\n- chat-and-composer (chat-focus: evidence/video missing; chat-view: evidence/video missing; chat-composer-text: evidence/video missing)\n- chat-newest (chat-newest: evidence/video missing)\n- palette (command-palette: evidence/video missing)\n- shortcuts (chat-focus: evidence/video missing; workspace-focus: evidence/video missing)\n- sidebar-sessions (sessions: evidence/video missing; session-actions: evidence/video missing; session-tabs: evidence/video missing)"
+}

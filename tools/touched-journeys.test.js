@@ -168,12 +168,30 @@ test('shared build profiles and artifact names isolate instrumented and comparis
   }
   for (const feature of ['appearance', 'chat-still', 'chat-position-replay']) {
     for (const revision of ['', 'base-sha']) {
-      const context = { matrix: { feature, profile: feature === 'appearance' ? 'normal' : feature }, env: { FEATURE: feature === 'chat-position-replay' ? 'chat-switch-speed' : feature }, inputs: { app_revision: revision } };
+      const context = { matrix: { feature, profile: feature === 'appearance' ? 'normal' : feature }, env: { FEATURE: feature === 'chat-position-replay' ? 'server-chat' : feature }, inputs: { app_revision: revision } };
       const actual = names.map(name => name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => runInNewContext(expression, context)));
       const expected = `verify-app${feature === 'appearance' ? '' : `-${feature}`}${revision ? '-compare' : ''}`;
       assert.deepEqual(actual, [expected, expected]);
     }
   }
+});
+
+test('the canonical replay selects the real server and never compiles fake SSH', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const alias = workflow.match(/name: Select the discoverable long-chat position journey\n[\s\S]*?FEATURE=([^']+)'/);
+  assert.ok(alias);
+  assert.equal(alias[1], 'server-chat');
+  const enabled = name => {
+    const expression = workflow.split(`      - name: ${name}\n`)[1].split('\n')[0].trim().slice(4);
+    return require('node:vm').runInNewContext(expression, { env: { FEATURE: alias[1] } });
+  };
+  assert.equal(enabled('Install runner-owned Linux server'), true);
+  assert.equal(enabled('Compile chat delivery remote-shell boundary'), false);
+  const positive = workflow.indexOf('      - name: Prove the native window observer');
+  const desktop = workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup');
+  assert.ok(positive > 0 && positive < desktop);
+  assert.match(workflow.slice(desktop), /VERIFY_CANDIDATE_ARTIFACT -or \$env:CHAT_POSITION_REPLAY -eq '1'/);
+  assert.doesNotMatch(workflow, /Record the same real-size hosted chat/);
 });
 
 test('mapped model and live-working journeys retain their chat-delivery driver', () => {

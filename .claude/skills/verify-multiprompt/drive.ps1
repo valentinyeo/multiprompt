@@ -30,11 +30,13 @@ try {
         Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/layout-capture.cs')
         [LayoutCapture]::Display()
     }
-    $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate $frameRate -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
-    $start.UseShellExecute = $false
-    $start.RedirectStandardInput = $true
-    $start.CreateNoWindow = $true
-    $video = [Diagnostics.Process]::Start($start)
+    if ($Feature -ne 'server-chat') {
+        $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate $frameRate -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
+        $start.UseShellExecute = $false
+        $start.RedirectStandardInput = $true
+        $start.CreateNoWindow = $true
+        $video = [Diagnostics.Process]::Start($start)
+    }
     if ($env:CHAT_POSITION_REPLAY -eq '1') {
         Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/native-console-recorder.cs') -ReferencedAssemblies System.Drawing, System.Windows.Forms
         $windows = [NativeConsoleRecorder]::new("$Evidence/windows")
@@ -46,12 +48,16 @@ try {
     if ($Feature -eq 'chat-delivery') {
         $cleanup = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
         if (-not $cleanup.scratch_removed -or $cleanup.remaining_owned_processes -ne 0) { throw 'Owned cleanup failed' }
+    } elseif ($Feature -eq 'server-chat') {
+        if ($result.cleanup.activeAfterStop -ne 0 -or -not $result.keyRemoved -or $result.videoExit -ne 0) { throw 'Owned server cleanup or recording failed' }
     } else {
         $tree = Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json
         if (-not $result.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Owned cleanup failed' }
     }
     $required = @('before.png', 'action.png', 'after.png', 'actions.json', 'doctor.json')
-    if ($Feature -eq 'chat-delivery') { $required += @('steady-live/debug.log', 'steady-live/host') } else { $required += 'data' }
+    if ($Feature -eq 'chat-delivery') { $required += @('steady-live/debug.log', 'steady-live/host') }
+    elseif ($Feature -eq 'server-chat') { $required = @('open.png', 'send.png', 'clear.png', 'after-clear.png', 'actions.json', 'doctor.json', 'journey.mp4', 'sshd.log', 'key-acl.json') }
+    else { $required += 'data' }
     foreach ($name in $required) {
         if (-not (Test-Path "$Evidence/$name")) { throw "Evidence missing after cleanup: $name" }
     }

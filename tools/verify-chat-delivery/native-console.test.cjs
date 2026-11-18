@@ -20,7 +20,7 @@ function parse(text) {
   return { start, stop, events: events.sort((a, b) => a.tick - b.tick || a.sequence - b.sequence) };
 }
 
-function inspect(trace, doctor, phases) {
+function inspect(trace, doctor, phases, paints) {
   if (!doctor.pid || !doctor.hwnd || !phases.length) throw new Error('Missing owned app or journey observations');
   if (phases.some(phase => !phase.end || phase.start < trace.start || phase.end > trace.stop)) throw new Error('Native window hook did not cover the complete journey');
   const windows = new Map();
@@ -58,7 +58,39 @@ function inspect(trace, doctor, phases) {
   if (open != null) chatIntervals.push({ start: open, end: trace.stop });
   if (!chatIntervals.some(interval => interval.end > interval.start)) throw new Error('No owned visible Chat View interval observed');
   if (!consoles) throw new Error('No native consoles observed; observer coverage unproven');
-  return { status: flashes.length ? 'failed' : 'passed', eventCount: trace.events.length, chatIntervals, flashes };
+  const result = { status: flashes.length ? 'failed' : 'passed', eventCount: trace.events.length, chatIntervals, flashes };
+  if (paints) {
+    if (!paints.length || paints.some(paint => !paint.end)) throw new Error('Missing completed long-chat paints');
+    result.allFlashes = flashes;
+    result.flashes = flashes.flatMap(flash => {
+      const phase = phases.find(phase => phase.repro && flash.tick >= phase.start && flash.tick <= phase.end);
+      const paint = paints.findLast(paint => paint.tick <= flash.tick);
+      return phase && paint?.content && paint.end <= flash.tick && paint.active === phase.shell && paint.cache === phase.shell ? [{ ...flash, paint }] : [];
+    });
+    result.status = result.flashes.length ? 'failed' : 'passed';
+  }
+  return result;
+}
+
+function contentPaints(text) {
+  const paints = [];
+  for (const line of text.trim().split(/\r?\n/)) {
+    const [kind, id, tick, active, cache] = line.split('\t');
+    if (kind === 'frame') {
+      const fields = line.split('\t').slice(1).map(Number);
+      if (fields.length !== 16 || fields.some(value => !Number.isSafeInteger(value)) || Number(id) !== paints.length + 1 || paints.at(-1) && !paints.at(-1).end) throw new Error('Incomplete long-chat paint header');
+      paints.push({ id: Number(id), tick: Number(tick), active: Number(active), cache: Number(cache), content: false });
+    } else if (kind === 'block' || kind === 'end') {
+      const paint = paints.at(-1);
+      if (!paint || paint.id !== Number(id)) throw new Error('Long-chat paint records are out of order');
+      if (kind === 'block') paint.content = true;
+      else {
+        if (!Number.isSafeInteger(Number(tick)) || Number(tick) < paint.tick) throw new Error('Invalid long-chat paint completion');
+        paint.end = Number(tick);
+      }
+    } else throw new Error('Unknown long-chat paint record');
+  }
+  return paints;
 }
 
 if (require.main === module && process.argv.length === 3) {
@@ -67,7 +99,9 @@ if (require.main === module && process.argv.length === 3) {
   try {
     const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     const root = fs.existsSync(path.join(evidence, 'position-phases.json')) ? evidence : path.join(evidence, 'steady-live');
-    const result = inspect(parse(fs.readFileSync(path.join(evidence, 'windows/windows.tsv'), 'utf8')), read(path.join(root, 'doctor.json')), read(path.join(root, 'position-phases.json')));
+    const phases = read(path.join(root, 'position-phases.json'));
+    const paints = phases.some(phase => phase.repro) ? contentPaints(fs.readFileSync(path.join(root, 'paints/frames.tsv'), 'utf8')) : undefined;
+    const result = inspect(parse(fs.readFileSync(path.join(evidence, 'windows/windows.tsv'), 'utf8')), read(path.join(root, 'doctor.json')), phases, paints);
     fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ status: result.status, events: result.eventCount, consoleFlashes: result.flashes.length }));
     if (result.status !== 'passed') process.exitCode = 1;
@@ -134,6 +168,51 @@ test('detects an already-shown child moved or reparented above a visible chat', 
   const shown = window('show', 200, 12, 'ConsoleWindowClass', { left: 1000, right: 1100 });
   const moved = window('location', 210, 12, 'ConsoleWindowClass');
   assert.equal(inspect(trace([shown, moved]), doctor, phases).status, 'failed');
+});
+
+test('a real-server repro rejects opening-only overlaps and preserves their diagnostics', () => {
+  const loaded = [{ name: 'activate-long-reading', start: 300, end: 5000, shell: 1, repro: true }];
+  const events = [window('show', 200, 12, 'ConsoleWindowClass'), window('hide', 220, 12, 'ConsoleWindowClass', { visible: 0 })];
+  const frames = [{ id: 1, tick: 250, end: 260, active: 1, cache: 1, content: true }];
+  const result = inspect(trace(events), doctor, loaded, frames);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.flashes.length, 0);
+  assert.equal(result.allFlashes.length, 1);
+});
+
+test('a real-server repro needs current completed long-chat content beneath the console', () => {
+  const loaded = [{ name: 'activate-long-reading', start: 150, end: 5000, shell: 1, repro: true }];
+  const event = window('show', 200, 12, 'ConsoleWindowClass', { visible: 0, received: 250 });
+  const frame = { id: 1, tick: 160, end: 170, active: 1, cache: 1, content: true };
+  const caught = inspect(trace([event]), doctor, loaded, [frame]);
+  assert.equal(caught.status, 'failed');
+  assert.ok(caught.flashes[0].paint, 'The console report identifies the actual long-chat paint underneath it');
+  assert.equal(caught.flashes[0].paint.id, 1);
+  assert.equal(caught.flashes[0].historicalShow, true);
+  for (const replacement of [{ ...frame, content: false }, { ...frame, cache: 2 }, { ...frame, end: 210 }]) {
+    assert.equal(inspect(trace([event]), doctor, loaded, [replacement]).status, 'passed');
+  }
+  assert.equal(inspect(trace([event]), doctor, loaded, [frame, { ...frame, id: 2, tick: 180, end: 190, content: false }]).status, 'passed');
+});
+
+test('the executable real-server oracle reads paints and rejects truncated evidence', t => {
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'real-server-console-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'windows'));
+  fs.mkdirSync(path.join(directory, 'paints'));
+  const row = event => ['window', ...['kind', 'tick', 'received', 'hwnd', 'cls', 'parent', 'root', 'pid', 'left', 'top', 'right', 'bottom', 'visible', 'style', 'z', 'foreground'].map(key => event[key])].join('\t');
+  fs.writeFileSync(path.join(directory, 'windows/windows.tsv'), `start\t90\n${trace([window('show', 200, 12, 'ConsoleWindowClass')]).events.map(row).join('\n')}\nstop\t5100\n`);
+  fs.writeFileSync(path.join(directory, 'doctor.json'), JSON.stringify(doctor));
+  fs.writeFileSync(path.join(directory, 'position-phases.json'), JSON.stringify([{ name: 'activate-long-reading', start: 150, end: 5000, shell: 1, repro: true }]));
+  const header = ['frame', 1, 160, 1, 1, ...Array(12).fill(0)].join('\t') + '\n';
+  for (const [body, expected] of [['end\t1\t170\n', 'passed'], ['block\t1\t0\tm\t0\t0\t20\t100\t100\t900\t800\nend\t1\t170\n', 'failed'], ['', 'incomplete']]) {
+    fs.writeFileSync(path.join(directory, 'paints/frames.tsv'), header + body);
+    const run = require('node:child_process').spawnSync(process.execPath, [__filename, directory], { encoding: 'utf8' });
+    const report = JSON.parse(fs.readFileSync(path.join(directory, 'native-console.json'), 'utf8'));
+    assert.equal(report.status, expected, run.stderr);
+    assert.equal(run.status, expected === 'passed' ? 0 : 1);
+    if (expected !== 'incomplete') assert.equal(report.allFlashes.length, 1);
+  }
 });
 
 test('missing chat, native windows, or observation coverage cannot pass', () => {
