@@ -49,3 +49,10 @@ test('click and confirmation still use their explicit chosen rows', () => {
   assert.match(click, /g_chat_ac\.sel = row \+ app_state\.g_chat_ac\.top;[\s\S]*?chatAcAccept\(\)/);
   assert.match(composer, /fn chatAcAccept\(\) bool \{[\s\S]*?entries\[app_state\.g_chat_ac\.idx\[app_state\.g_chat_ac\.sel\]\]/);
 });
+
+test('Enter confirms the visible palette row before a queued refresh can invalidate it', () => {
+  const enter = main.match(/if \(wp == 0x0D\) \{\s*(_ = (?:Post|Send)MessageW\(hwnd, WM_APP_SEARCH_CONFIRM[^\n]+)[\s\S]*?return 0;/);
+  assert.ok(enter, 'palette Enter handler exists');
+  assert.match(enter[1], /SendMessageW/);
+  assert.match(main, /if \(lp != 0 and \(lp != @as\(isize, @intCast\(app_state\.g_search_revision\)\)/, 'queued mouse confirmations still reject stale revisions');
+});

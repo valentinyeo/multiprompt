@@ -4235,7 +4235,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (wp == 0x0D) {
-                    _ = PostMessageW(hwnd, WM_APP_SEARCH_CONFIRM, @as(usize, app_state.g_search_sel) + 1, @intCast(app_state.g_search_revision));
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CONFIRM, @as(usize, app_state.g_search_sel) + 1, @intCast(app_state.g_search_revision));
                     return 0;
                 }
                 if (wp == 0x1B) {
@@ -10195,9 +10195,6 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) != 0);
     app_state.g_search_scroll = 0;
     _ = wndProc(hwnd, WM_KEYDOWN, 0x0D, 0);
-    _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp + 3);
-    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
-    try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) != 0);
-    _ = wndProc(hwnd, message.message, message.wParam, message.lParam);
     try std.testing.expect(!app_state.g_search_theme_mode);
+    try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) == 0);
 }

@@ -101,3 +101,45 @@ test('batched builds replay only the named repair and isolate the historical exp
   assert.doesNotMatch(head, /matrix\./);
   assert.match(parent, /break_it_features: '\["chat-working-live"\]'/);
 });
+
+test('large journey sets keep every outcome and historical variation in the judge input', t => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'judge-break-it-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const evidence = path.join(directory, 'evidence');
+  const history = '5ce536b45569e8cb4394e8e967067f19bf3d49d0';
+  const features = ['chat-working-live', ...Array.from({ length: 80 }, (_, i) => `journey-${String(i).padStart(2, '0')}`)];
+  const write = (name, data) => {
+    const file = path.join(evidence, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, data);
+  };
+  for (const name of [...features.map(feature => `verify-${feature}`), `verify-chat-working-live-${history}`]) {
+    write(`${name}/result.json`, JSON.stringify({ status: 'passed', checks: ['original assertions', 'x'.repeat(12000)] }));
+    write(`${name}/doctor.json`, JSON.stringify({ alive: true }));
+    for (let i = 0; i < 12; i++) write(`${name}/shot-${i}.png`, 'png');
+  }
+  const root = `verify-chat-working-live-${history}/break-it`;
+  const variations = ['resize', 'maximize', 'fast-switch', 'long-chat', 'stream-scroll', 'busy-send', 'reconnect'].map(name => {
+    write(`${root}/${name}/after.png`, 'png');
+    write(`${root}/${name}/journey.mp4`, 'video');
+    write(`${root}/${name}/video.json`, JSON.stringify({ streams: [{ width: 1024, height: 768 }] }));
+    write(`${root}/${name}/break-it-input.json`, JSON.stringify({ actions: ['physical input'] }));
+    return { name, status: name === 'maximize' ? 'failed' : 'passed', error: name === 'maximize' ? 'missing inline dots' : '', cleanup: 'complete', actions: 1 };
+  });
+  write(`${root}/result.json`, JSON.stringify({ feature: 'chat-working-live', status: 'failed', variations }));
+  fs.writeFileSync(path.join(directory, 'selection.json'), JSON.stringify({ features, breakItHistory: history, compareBase: false }));
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', evidence, path.join(directory, 'selection.json'), 'b'.repeat(40), directory], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const material = fs.readFileSync(path.join(directory, 'judge-inputs.md'), 'utf8');
+  assert.ok(material.length <= 60000);
+  for (const feature of features) assert.ok(material.includes(`${feature}: head passed`), feature);
+  assert.match(material, /historical.*ordinary passed/i);
+  for (const { name } of variations) {
+    assert.ok(material.includes(`break-it/${name}/journey.mp4`), name);
+    assert.ok(material.includes(`break-it/${name}/video.json`), name);
+    assert.ok(material.includes(`break-it/${name}/break-it-input.json`), name);
+  }
+  assert.match(material, /maximize.*failed.*missing inline dots/);
+});

@@ -1483,3 +1483,35 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
 });
+
+test('full-history latency starts at guarded input rather than Doctor setup', () => {
+  const press = drive.match(/function Press\([\s\S]*?\n}\n/)[0];
+  assert.match(press, /\[Diagnostics\.Stopwatch\]\$Clock/);
+  assert.ok(press.indexOf('$Clock.Restart()') > press.lastIndexOf('Refusing keyboard input'));
+  assert.ok(press.indexOf('$Clock.Restart()') < press.indexOf('[ChatDeliveryDesktop]::Chord'));
+  assert.match(drive, /Press @\(0x12, 0x43\) 'Alt\+C: open Chat View' -Clock \$latestClock/);
+  assert.match(drive, /if \(-not \$isHistory\) \{ Doctor \$true \}/);
+  assert.match(drive, /if \(\$latestClock.ElapsedMilliseconds -gt 2000\)/);
+  const pwsh = process.env.PWSH || (process.platform === 'win32' ? 'powershell.exe' : '');
+  if (!pwsh) return;
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public static class ChatDeliveryDesktop {
+  public static System.Diagnostics.Stopwatch Clock;
+  public static System.IntPtr GetForegroundWindow() { return new System.IntPtr(1); }
+  public static void Chord(int[] keys) { if (!Clock.IsRunning) throw new System.Exception("Input was not timed"); }
+}'
+$main = [IntPtr]1
+$plan = @{ name = 'history' }
+$actions = [Collections.Generic.List[object]]::new()
+$latestClock = [Diagnostics.Stopwatch]::new()
+[ChatDeliveryDesktop]::Clock = $latestClock
+function Doctor { if ($latestClock.IsRunning) { throw 'Doctor setup consumed the input budget' } }
+function Start-Sleep {}
+${press}
+Press @(0x12, 0x43) 'Alt+C: open Chat View' -Clock $latestClock
+if (-not $latestClock.IsRunning -or $actions.Count -ne 1) { throw 'Timed input evidence missing' }
+'GUARDED_INPUT_CLOCK_OK'
+`;
+  assert.match(execFileSync(pwsh, ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 30000 }), /GUARDED_INPUT_CLOCK_OK/);
+});

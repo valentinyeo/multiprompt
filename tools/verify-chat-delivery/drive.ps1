@@ -132,7 +132,7 @@ function Doctor([bool]$Chat = $false) {
     $identity = @{pid=$app.Id; exe=$app.Path; hwnd=$main.ToInt64(); title=$title; version=$ExpectedVersion; sha256=$ExpectedHash; tmux=$true; chat=$Chat; focus=$(if ($Chat) { $focus } else { @() }); composer=$(if ($Chat) { $composer.ToInt64() } else { 0 })}
     Save $identity "$caseDir/doctor.json"
 }
-function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
+function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false, [Diagnostics.Stopwatch]$Clock = $null) {
     if ($Label.StartsWith('Alt+C:') -and (Get-Variable toggleReady -Scope Script -ErrorAction SilentlyContinue)) {
         [void](Wait-For 'existing Alt+C debounce elapsed' { [DateTime]::UtcNow -ge $script:toggleReady })
     }
@@ -148,6 +148,7 @@ function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
     if ($Label.StartsWith('Alt+C:')) {
         $script:toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
     }
+    if ($null -ne $Clock) { $Clock.Restart() }
     [ChatDeliveryDesktop]::Chord($Keys)
     Start-Sleep -Milliseconds 100
 }
@@ -693,11 +694,11 @@ foreach ($plan in $plans) {
         Press @(0x11, 0x31) 'Ctrl+1: select saved tmux tab'
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }
-        $latestClock = [Diagnostics.Stopwatch]::StartNew()
-        Press @(0x12, 0x43) 'Alt+C: open Chat View'
+        $latestClock = [Diagnostics.Stopwatch]::new()
+        Press @(0x12, 0x43) 'Alt+C: open Chat View' -Clock $latestClock
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
-        Doctor $true
+        if (-not $isHistory) { Doctor $true }
         if ($env:MP_BREAK_IT_VARIATION -in @('resize', 'maximize', 'fast-switch')) {
             Invoke-BreakItWindow $main $app.Id { param($keys) Press $keys 'Break-it: native window or session variation' } { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)

@@ -120,7 +120,9 @@ function describeBreakIt(directory) {
         fs.statSync(path.join(folder, 'journey.mp4')).size > 0;
     } catch {}
     return { ...item, screenshots: files.filter(file => /\.png$/i.test(file)),
-      video: `break-it/${name}/journey.mp4`, videoVerified };
+      video: `break-it/${name}/journey.mp4`, videoVerified,
+      videoReceipt: files.includes('video.json') ? `break-it/${name}/video.json` : '',
+      inputReceipt: files.includes('break-it-input.json') ? `break-it/${name}/break-it-input.json` : '' };
   }) };
 }
 
@@ -233,14 +235,26 @@ function evidenceMarkdown(summary, selection) {
   const lines = ['# Journey evidence', ''];
   if (!selection.features.length) lines.push('No desktop journeys were selected by source mapping or mandatory gates. This is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch; required Tests and independent review still apply.', '');
   for (const row of journeyRows(summary, selection.compareBase, selection.features)) {
-    lines.push(`## ${row.feature}: head ${row.head}, base ${row.base}`, '');
-    for (const side of ['head', 'base']) {
-      for (const run of summary[side][row.feature]) {
-        lines.push(`- ${side} artifact ${run.artifact}: status ${run.status}, checks ${run.checks}, cleanup ${run.cleanup || 'none recorded'}${run.error ? `, error ${run.error}` : ''}`);
-        for (const shot of run.screenshots.slice(0, 12)) lines.push(`  - evidence/${run.artifact}/${shot}`);
+    lines.push(`- ${row.feature}: head ${row.head}, base ${row.base}${row.inherited ? ' (matching inherited failure)' : ''}`);
+  }
+  lines.push('', '## Adversarial replays', '');
+  const replays = [...(summary.history || []).map(run => ({ side: 'historical', run })),
+    ...Object.values(summary.head).flat().filter(run => run.breakIt).map(run => ({ side: 'head', run }))];
+  for (const { side, run } of replays) {
+    lines.push(`- ${side} ${run.artifact}: ordinary ${runOutcome(run)}; result evidence/${run.artifact}/result.json`);
+    for (const item of run.breakIt?.variations || []) {
+      const root = `evidence/${run.artifact}/`;
+      lines.push(`  - ${item.name}: ${item.status}${item.error ? `, ${oneLine(item.error)}` : ''}; actions ${item.actions || 0}; cleanup ${item.cleanup || 'missing'}; video verified ${!!item.videoVerified}; ${root}${item.video}; ffprobe ${item.videoReceipt ? root + item.videoReceipt : 'missing'}; input ${item.inputReceipt ? root + item.inputReceipt : 'missing'}; screenshot ${item.screenshots?.length ? root + `break-it/${item.name}/` + item.screenshots[0] : 'missing'}`);
+    }
+  }
+  lines.push('', '## Ordinary artifacts', '');
+  for (const side of ['head', 'base']) {
+    for (const runs of Object.values(summary[side])) {
+      for (const run of runs) {
+        lines.push(`- ${side} evidence/${run.artifact}/result.json: ${run.status}; checks ${run.checks}; cleanup ${run.cleanup || 'missing'}${run.error ? `; ${run.error}` : ''}`);
+        if (run.screenshots.length) lines.push(`  - evidence/${run.artifact}/${run.screenshots[0]}`);
       }
     }
-    lines.push('');
   }
   return lines.join('\n');
 }
@@ -572,7 +586,7 @@ function judgeInputs(outDir, evidenceDir) {
   const parts = [];
   for (const name of ['pr.md', 'evidence.md']) {
     const file = path.join(outDir, name);
-    if (fs.existsSync(file)) parts.push(`### ${name}\n${readCapped(file)}`);
+    if (fs.existsSync(file)) parts.push(`### ${name}\n${readCapped(file, name === 'evidence.md' ? 36000 : MAX_FILE_CHARS)}`);
   }
   const selection = path.join(outDir, 'selection.json');
   if (fs.existsSync(selection)) {
@@ -590,9 +604,9 @@ function judgeInputs(outDir, evidenceDir) {
     }
   }
   if (fs.existsSync(evidenceDir)) {
-    for (const file of listFiles(evidenceDir)) {
-      if (/(^|\/)(result|doctor)\.json$/.test(file)) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
-    }
+    const files = listFiles(evidenceDir).filter(file => /(^|\/)(result|doctor|video|break-it-input)\.json$/.test(file));
+    files.sort((left, right) => Number(right.includes('/break-it/')) - Number(left.includes('/break-it/')));
+    for (const file of files) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
   }
   return parts.join('\n\n').slice(0, 60000);
 }
@@ -608,6 +622,7 @@ function judgeMessages(material) {
     'FAIL: a product regression on head or evidence contradicting a Done-when line. An identical journey failure on head and base is inherited, not a PR failure; judge the remaining evidence and name it in a note.',
     'BLOCKED: infrastructure prevented verification, including timeout, cancellation, missing evidence, harness error or runner queue. Missing cleanup evidence is BLOCKED, not a product FAIL.',
     'selection.features is the authoritative execution plan; picker suggestions in reason or doneWhen do not add planned journeys.',
+    'Head adversarial replays are required only for selection.breakItFeatures, not every mapped journey. selection.breakItHistory independently requires an ordinary historical pass followed by a product variation failure with video, input and cleanup evidence. The Adversarial replays summary reports evidence read from those artifacts, not claims from the PR description.',
     'An empty selection.features is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch instead of requiring desktop result.json, doctor.json or base comparisons.',
     'Use PASS+NOTES for behavior not covered by the CI-only evidence. Still use FAIL for a regression shown by the patch or checks, and BLOCKED for missing required CI evidence or an API failure.',
     'CI snapshots include supplementary pending checks and expected negative controls. Interpret them using the patch and aggregate gates; do not mistake them for missing selected journeys or automatically treat a negative control as a regression.',
