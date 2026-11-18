@@ -177,45 +177,6 @@ def missing_response(q, reason):
 def visible_prompt(text):
     return _TRACKED_ID.sub("", text) if isinstance(text, str) else text
 
-def command_reply(command, arguments):
-    lines = arguments.splitlines()
-    quote = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if line.startswith(">"):
-            quote.append(line)
-            index += 1
-            continue
-        if quote and not line.strip():
-            nxt = index + 1
-            while nxt < len(lines) and not lines[nxt].strip():
-                nxt += 1
-            if nxt < len(lines) and lines[nxt].startswith(">"):
-                quote.append(line)
-                index += 1
-                continue
-        break
-    if not quote:
-        return (command + " " + arguments).strip()
-    while index < len(lines) and not lines[index].strip():
-        index += 1
-    own = "\n".join(lines[index:]).strip()
-    body = command if not own else command + (" " if "\n" not in own else "\n") + own
-    return "\n".join(quote).rstrip() + "\n\n" + body
-
-def quote_skill_key(text):
-    skills = []
-    rest = []
-    for word in text.split():
-        if len(word) > 1 and word.startswith("/") and all(c.isalnum() or c in ":_-" for c in word[1:]):
-            skills.append(word)
-        else:
-            rest.append(word)
-    if not skills or not any(word == ">" or word.startswith(">") for word in rest):
-        return None
-    return " ".join(skills + rest)
-
 def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
         text = re.sub(r"^[ \t]*</?pasted_content\b[^>]*>[ \t]*\r?\n?", "", text, flags=re.I | re.M)
@@ -228,9 +189,7 @@ def clean_command_markup(text):
             if command and not command.startswith("/"):
                 command = "/" + command
             arguments = args.group(1).strip() if args else ""
-            if not command:
-                return arguments
-            return command_reply(command, arguments)
+            return (command + " " + arguments).strip()
     if "<local-command-" in text:
         text = _LOCAL_COMMAND.sub("", text)
     return text
@@ -3139,7 +3098,7 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") in ("login", "login_answer") and provider != "pi":
+    if query.get("op") == "login" and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
@@ -3183,7 +3142,7 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -4730,10 +4689,6 @@ def host_handle_request(provider, sid, tmux, session, request):
         if provider != "pi":
             return host_refuse("unsupported_provider")
         return host_pi_login(provider, sid, tmux, session, request)
-    if operation == "login_answer":
-        if provider != "pi":
-            return host_refuse("unsupported_provider")
-        return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
         if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
@@ -5400,23 +5355,6 @@ def host_pi_login(provider, sid, tmux, session, request):
         session.pop("pi_login", None)
         return dict(status="error", reason="stdin_write_failed")
     return dict(status="ok")
-
-
-def host_pi_login_answer_op(provider, sid, tmux, session, request):
-    if "command" in request or "text" in request:
-        return host_refuse("invalid_answer")
-    data = request.get("data")
-    if not isinstance(data, str) or not data.strip() or "\x00" in data:
-        return host_refuse("invalid_answer")
-    dialog = session.get("pi_login_dialog")
-    if not isinstance(dialog, dict) or not isinstance(dialog.get("id"), str):
-        reason = "already_answered" if session.get("pi_login_answered") else "no_dialog"
-        return dict(status="final", reason=reason)
-    sent = host_pi_login_answer(provider, sid, tmux, session, dialog, data)
-    if sent.get("status") != "ok":
-        return sent
-    session["pi_login_answered"] = True
-    return dict(status="final")
 
 
 def host_pi_login_answer(provider, sid, tmux, session, dialog, text):
@@ -7555,9 +7493,6 @@ def settle_response(q, source=None, as_owner=False):
                     text = " ".join(message["text"].split())
                     open_targets = [i for i, target in enumerate(targets) if rows[i]["line"] == 0]
                     hits = [i for i in open_targets if text == targets[i] or text == chained[i]]
-                    shown = quote_skill_key(text)
-                    if shown and not hits:
-                        hits = [i for i in open_targets if shown == quote_skill_key(targets[i])]
                     if not hits:
                         padded = f" {text} "
                         hits = [i for i in open_targets if len(targets[i]) >= SETTLE_SUFFIX_MIN and f" {targets[i]} " in padded]
@@ -8039,7 +7974,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -8147,7 +8082,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 128
+RUNTIME_GENERATION = 126
 
 if __name__ == '__main__':
     import base64 as _base64
