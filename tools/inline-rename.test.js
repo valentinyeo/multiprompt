@@ -55,6 +55,8 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /tabs\[\$state\.active_tab\]\.cv/);
   assert.match(driver, /ZigShellChatTranscript/);
   assert.match(driver, /Rename-ClickNoEdit[^]*?'the first sidebar session name'/);
+  assert.match(driver, /Get-SessionSidebarRect \$sid/);
+  assert.doesNotMatch(driver, /Rename-ClickNoEdit[^\n]*120 \* \$scale/);
   assert.match(driver, /Rename-ClickNoEdit \$titlePoint\[0\] \$titlePoint\[1\] 'the chat title'/);
   assert.doesNotMatch(driver, /Alt\+C:.*shell view/);
   assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-(?!inbox-)/m);

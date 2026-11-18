@@ -52,7 +52,11 @@
             Rename-WaitChatView
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
             Doctor
-            Rename-ClickNoEdit ([int](100 * $scale)) ([int](120 * $scale)) 'the first sidebar session name'
+            $sideRect = Get-SessionSidebarRect $sid
+            $sideNameX = [int]($sideRect.right + 12 * $scale)
+            $sideNameY = [int](($sideRect.top + $sideRect.bottom) / 2)
+            Save-Json @{ shellId = $sid; geometry = $sideRect.geometry; point = @($sideNameX, $sideNameY) } 'rename-sidebar-target.json'
+            Rename-ClickNoEdit $sideNameX $sideNameY 'the first sidebar session name'
             Press @(0x71) 'F2: locate the sidebar editor'
             $sidePoint = Rename-EditPoint $current
             Press @(0x1B) 'Esc: cancel sidebar geometry probe'

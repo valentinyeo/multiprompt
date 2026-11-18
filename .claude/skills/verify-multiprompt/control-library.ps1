@@ -118,6 +118,22 @@ function Read-Session {
     return $null
 }
 
+function Get-SessionSidebarRect([uint32]$SessionId) {
+    $state = Read-Session
+    if ($null -eq $state -or ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)) { throw 'Session target requires a visible expanded sidebar' }
+    $indices = @(for ($i = 0; $i -lt @($state.tabs).Count; $i++) { if ([uint32]$state.tabs[$i].shell_id -eq $SessionId) { $i } })
+    if ($indices.Count -ne 1) { throw 'Sidebar target is not one saved session' }
+    $pattern = '\[photo-proof\] expanded target=' + $indices[0] + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'
+    $rects = [regex]::Matches((Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')), $pattern)
+    if ($rects.Count -eq 0) { throw 'No painted geometry for the sidebar session target' }
+    $rect = $rects[$rects.Count - 1]
+    $left = [int]$rect.Groups[1].Value; $top = [int]$rect.Groups[2].Value
+    $right = [int]$rect.Groups[3].Value; $bottom = [int]$rect.Groups[4].Value
+    $client = New-Object VerifyNative+Rect
+    if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or $left -lt $client.Left -or $top -lt $client.Top -or $right -le $left -or $bottom -le $top -or $right -gt $client.Right -or $bottom -gt $client.Bottom) { throw 'Sidebar target rectangle is outside the visible client' }
+    return @{ shellId = $SessionId; index = $indices[0]; geometry = $rect.Value; left = $left; top = $top; right = $right; bottom = $bottom }
+}
+
 function Read-Inbox {
     $path = Join-Path $scratch 'roaming/ZigShell/inbox-default.json'
     if (Test-Path $path) {
