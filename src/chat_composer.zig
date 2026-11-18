@@ -367,7 +367,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = left + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
+    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH();
     return .{
         .pane = slot,
         .transcript = .{
