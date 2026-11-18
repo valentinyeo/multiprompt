@@ -15,6 +15,7 @@ test('large desktop batches retain every result and the fixture and cleanup evid
   fs.writeFileSync(path.join(out, 'pr.md'), 'Default seeded profile and streamed reply must be verified.');
   fs.writeFileSync(path.join(out, 'evidence.md'), 'Large journey summaries.\n'.repeat(1000));
   const artifacts = Array.from({ length: 70 }, (_, i) => `verify-case-${String(i).padStart(2, '0')}`);
+  artifacts.push(...artifacts.slice(0, 40).map(name => `${name}-${'b'.repeat(40)}`));
   artifacts.push('verify-chat-real-size', `verify-chat-still-${'b'.repeat(40)}`);
   for (const artifact of artifacts) {
     const dir = path.join(evidence, artifact);
@@ -24,6 +25,14 @@ test('large desktop batches retain every result and the fixture and cleanup evid
       status: 'failed', error: `failure-${artifact}`, cleanup: 'owned processes stopped',
     }));
     fs.writeFileSync(path.join(dir, 'doctor.json'), JSON.stringify({ version: '1.0', sha256: 'a'.repeat(64), log: 'x'.repeat(10000) }));
+    const phase = path.join(dir, 'working-live');
+    fs.mkdirSync(phase);
+    fs.writeFileSync(path.join(phase, 'doctor.json'), '{"version":"1.0"}');
+    fs.writeFileSync(path.join(phase, 'cleanup.json'), '{"remaining_owned_processes":0}');
+    fs.writeFileSync(path.join(phase, 'fixture-manifest.json'), '{"sessions":64,"messages":19872}');
+    const archive = path.join(dir, 'data', 'roaming', 'ZigShell');
+    fs.mkdirSync(archive, { recursive: true });
+    fs.writeFileSync(path.join(archive, 'fixture-manifest.json'), '{"archived":"ARCHIVE_DUPLICATE"}');
   }
   const chat = path.join(evidence, 'verify-chat-real-size');
   fs.writeFileSync(path.join(chat, 'result.json'), JSON.stringify({ status: 'passed', checks: [
@@ -34,7 +43,8 @@ test('large desktop batches retain every result and the fixture and cleanup evid
   fs.writeFileSync(path.join(chat, 'cleanup.json'), JSON.stringify({ scratch_removed: true, remaining_owned_processes: 0, evidence_preserved: true }));
   fs.writeFileSync(path.join(chat, 'journey.json'), JSON.stringify({ journey: 'chat-real-size', status: 'passed', seed: 'real-size-v1' }));
   const material = judgeInputs(out, evidence);
-  assert.ok(material.length <= 60000, 'retain the existing model input budget');
+  assert.ok(material.length <= 120000, 'use no more context than the existing journey picker');
+  assert.ok(!material.includes('ARCHIVE_DUPLICATE'), 'preserved profile copies must not crowd out authoritative evidence');
   for (const artifact of artifacts) {
     const section = material.split(`### evidence/${artifact}/result.json\n`)[1]?.split('\n\n### ')[0];
     assert.ok(section, `missing result for ${artifact}`);
@@ -61,7 +71,7 @@ test('unreadable evidence remains visible instead of being converted into a pass
 test('an evidence inventory that cannot fit is blocked explicitly rather than dropping journeys', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-overflow-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 600; i++) {
     const dir = path.join(root, `verify-${String(i).padStart(3, '0')}-${'x'.repeat(180)}`);
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'result.json'), '{"status":"failed"}');

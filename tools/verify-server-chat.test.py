@@ -1,3 +1,4 @@
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -94,7 +95,7 @@ ConvertTo-Json -InputObject $values -Compress
                     return dict(status='sent')
                 reader = dict(claude_project_folder=lambda cwd: 'server-chat', host_cli=Mock(return_value=dict(status='enabled')), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send))
                 def load(path, **kwargs):
-                    return reader if str(path).endswith('src/chat_history_reader.py') else execute(path, **kwargs)
+                    return reader if Path(path) == ROOT / 'src/chat_history_reader.py' else execute(path, **kwargs)
                 with patch('runpy.run_path', side_effect=load), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT)]):
                     if will_be_ready:
                         execute(str(seed))
@@ -144,9 +145,11 @@ ConvertTo-Json -InputObject $values -Compress
             self.assertIn('Server received: server seed', wire)
             store = home / '.local/state/multiprompt/shared-messages/store.sqlite3'
             store.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(store) as db:
+            with closing(sqlite3.connect(store)) as db, db:
                 for table in ('message_chats', 'message_resets', 'shared_messages'):
                     db.execute('CREATE TABLE ' + table + ' (id TEXT)')
+            with self.assertRaises(sqlite3.ProgrammingError, msg='The fixture connection must close before Windows removes its profile'):
+                db.execute('SELECT 1')
             before = transcript.read_bytes()
             snapshot = json.loads(subprocess.check_output([sys.executable, str(ROOT / 'tools/verify-server-chat/snapshot.py')], env=dict(os.environ, HOME=str(home), USERPROFILE=str(home)), text=True))
             self.assertEqual(snapshot['fixture']['transcriptMessages'], 2402)

@@ -7,8 +7,15 @@ function Copy-RealSize([string]$Stage, [string]$Expected) {
     $copied = Wait-For 'expected text copied from the native transcript' {
         $offset = (Read-Shared "$settings/debug.log").Length
         Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text'
+        [void](Wait-For 'select-all palette opened' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
         $query = 'chat view select all'
-        foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+        $typed = ''
+        foreach ($letter in $query.ToCharArray()) {
+            $letterOffset = (Read-Shared "$settings/debug.log").Length
+            $typed += $letter
+            [ChatDeliveryDesktop]::Character($letter)
+            [void](Wait-For 'palette character handled' { (Read-Shared "$settings/debug.log").Substring($letterOffset) -match ('\[palette\] ready chars=' + $typed.Length + ' count=') })
+        }
         [void](Wait-For 'select-all palette row ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
         Press @(0x0D) 'Enter: select all transcript text'
         [Windows.Forms.Clipboard]::Clear()
