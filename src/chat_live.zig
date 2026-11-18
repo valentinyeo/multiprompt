@@ -1009,11 +1009,14 @@ pub fn dismissedQuestionLine(shell_id: u32, a: std.mem.Allocator, provider: []co
     return null;
 }
 
-pub fn questionsOpen(shell_id: u32) bool {
+pub fn questionResolved(shell_id: u32, identity: u64) bool {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id) return live.request.open and live.request.kind == .question;
+        if (live.used and live.shell_id == shell_id) {
+            return !live.request.open and live.request.kind == .question and live.request.id_len != 0 and
+                std.hash.Wyhash.hash(0, live.request.idSlice()) == identity;
+        }
     }
     return false;
 }
@@ -1075,6 +1078,7 @@ test "D3 answers are stored per question and only a full set builds the reply" {
     _ = begin(77, 0, "11111111-2222-3333-4444-666666666666");
     const a = std.testing.allocator;
     const sid = "11111111-2222-3333-4444-666666666666";
+    try std.testing.expect(!questionResolved(77, std.hash.Wyhash.hash(0, "terminal-question")));
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_5\",\"questions\":[" ++
         "{\"question\":\"Which colour?\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}," ++
         "{\"question\":\"Which devices?\",\"multiSelect\":true,\"options\":[{\"label\":\"Desktop\"},{\"label\":\"Phone\"}]}]}}}]}}"));
@@ -1091,7 +1095,8 @@ test "D3 answers are stored per question and only a full set builds the reply" {
     );
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"question.resolved\",\"payload\":{\"request_id\":\"req_5\",\"answers\":{},\"dismissed\":false}}}]}}"));
     try std.testing.expect(questionAnswerLine(77, a, "claude") == null);
-    try std.testing.expect(!questionsOpen(77));
+    try std.testing.expect(questionResolved(77, std.hash.Wyhash.hash(0, "req_5")));
+    try std.testing.expect(!questionResolved(77, std.hash.Wyhash.hash(0, "terminal-question")));
 }
 
 test "D3 a question longer than a display line still answers under its id" {

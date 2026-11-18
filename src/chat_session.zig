@@ -1015,9 +1015,42 @@ fn chatLiveSyncQuestion() void {
         app_state.shells[app_state.active_shell].chat_question_identity = prompt.identity;
         return;
     }
-    if (entry.history.status.question.count == 0 or live.questionsOpen(shell_id)) return;
+    if (entry.history.status.question.count == 0 or !live.questionResolved(shell_id, entry.history.status.question.identity)) return;
     entry.history.status.question = .{};
     app_state.shells[app_state.active_shell].chat_question_identity = 0;
+}
+
+test "SOFT-2713 live subscription does not resolve a terminal question" {
+    const live = @import("chat_live.zig");
+    const options = @import("chat_options.zig");
+    const saved = .{ .shell = app_state.shells[0], .count = app_state.shell_count, .active = app_state.active_shell, .histories = app_state.g_chat_histories };
+    app_state.g_chat_histories = .empty;
+    defer {
+        live.release(2713);
+        chatHistoryForget(2713);
+        app_state.g_chat_histories.deinit(std.heap.page_allocator);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = 2713;
+    const sid = "11111111-2222-3333-4444-666666666666";
+    @memcpy(app_state.shells[0].claude_sid[0..sid.len], sid);
+    app_state.shells[0].claude_sid_len = sid.len;
+    const entry = chatHistoryEntry(chatFileIdentity()) orelse return error.TestUnexpectedResult;
+    entry.history.status.question = options.Prompt.fromWire(.{
+        .id = "terminal-question",
+        .questions = &.{.{ .question = "Which colour?", .options = &.{.{ .label = "Orange" }} }},
+    });
+    const expected = entry.history.status.question;
+    _ = live.begin(2713, 0, sid);
+    chatLiveSyncQuestion();
+    try std.testing.expectEqualDeep(expected, entry.history.status.question);
 }
 
 var g_chat_live_card_request: [96]u8 = @splat(0);
