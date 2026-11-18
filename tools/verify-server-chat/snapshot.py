@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 
 home = Path.home()
 with sqlite3.connect(f'file:{home}/.local/state/multiprompt/shared-messages/store.sqlite3?mode=ro', uri=True) as db:
@@ -21,7 +23,15 @@ for path in (home / '.local/state/multiprompt/agent-host').glob('*.state.json'):
     host['freshPhase'] = (state.get('fresh_start') or {}).get('phase')
     hosts.append(host)
 
-print(json.dumps(dict(hosts=hosts, tables=tables, inputs=rows('provider-input.jsonl'), controls=rows('provider-control.jsonl'),
+pane = {}
+if '--pane' in sys.argv[1:]:
+    probe = subprocess.run(['tmux', 'display-message', '-p', '-t', '=live-ci:', '#{pane_current_command}\t#{pane_pid}'], capture_output=True, text=True)
+    pane = dict(exists=probe.returncode == 0, exit=probe.returncode)
+    if probe.returncode == 0:
+        command, pid = probe.stdout.strip().split('\t')
+        pane.update(command=command, pid=int(pid))
+
+print(json.dumps(dict(hosts=hosts, pane=pane, tables=tables, inputs=rows('provider-input.jsonl'), controls=rows('provider-control.jsonl'),
                       received=rows('provider-received.jsonl'), queued=rows('provider-queued.jsonl'), discarded=rows('provider-discarded.jsonl'),
                       provider=json.loads((home / 'provider-state.json').read_text()) if (home / 'provider-state.json').exists() else None,
                       seed=json.loads((home / 'server-seed.json').read_text()))))

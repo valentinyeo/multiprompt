@@ -70,20 +70,36 @@ class ProviderTest(unittest.TestCase):
             self.assertEqual(len(snapshot['inputs']), 1)
             self.assertEqual(snapshot['queued'], [requests[1]])
             self.assertEqual(snapshot['discarded'], [requests[1]])
+            pane_script = '''import runpy,subprocess,sys
+from unittest.mock import patch
+with patch('subprocess.run', return_value=subprocess.CompletedProcess([], int(sys.argv[2]), stdout=sys.argv[3], stderr='')) as native:
+    runpy.run_path(sys.argv[1], run_name='__main__')
+    native.assert_called_once_with(['tmux', 'display-message', '-p', '-t', '=live-ci:', '#{pane_current_command}\\t#{pane_pid}'], capture_output=True, text=True)
+'''
+            for code, stdout, expected in ((0, 'sleep\t42\n', dict(exists=True, exit=0, command='sleep', pid=42)), (0, 'bash\t42\n', dict(exists=True, exit=0, command='bash', pid=42)), (1, '', dict(exists=False, exit=1))):
+                pane = json.loads(subprocess.check_output([sys.executable, '-c', pane_script, str(ROOT / 'tools/verify-server-chat/snapshot.py'), str(code), stdout, '--pane'], env=dict(os.environ, HOME=home, USERPROFILE=home), text=True))
+                self.assertEqual(pane['pane'], expected)
 
     def test_busy_reproduction_rejects_received_processed_queued_or_cancelled_prompts(self):
         import copy
         follow_up = 'follow-up during busy turn'
         request = dict(message=dict(content=[dict(type='text', text=follow_up)]))
-        snapshot = dict(provider=dict(pid=9, busy=True), seed=dict(messages=2400), received=[], inputs=[], queued=[], discarded=[], controls=[])
+        old, new = 'old-public', 'new-public'
+        hosts = [dict(sid=old, pid=100, alive=False), dict(sid=new, native_session=new, tmux='live-ci', pid=200, alive=True)]
+        snapshot = dict(hosts=hosts, pane=dict(exists=True, command='sleep', pid=42), provider=dict(pid=10, busy=True), seed=dict(messages=2400), received=[], inputs=[dict(sid=new, pid=10, text='busy server turn')], queued=[], discarded=[], controls=[])
         files = {
             'result.json': dict(feature='server-chat-busy', status='failed', cases=[dict(name=name, passed=True) for name in ('open', 'send')], cleanup=dict(activeAfterStop=0), keyRemoved=True, videoExit=0),
             'fixture-manifest.json': dict(sessions=64, longChats=8, messages=19872),
             'send-server.json': dict(inputs=[dict(text='windows send proof')]),
             'busy-before-stop.json': snapshot, 'busy-after-stop.json': snapshot,
+            'busy-start.json': dict(provider=dict(pid=9, busy=True), hosts=[dict(sid=old, pid=100, alive=True)]),
+            'busy-owner-replacement.json': dict(mode='busy-owner-ended', old=old, new=new, oldWasBusy=True, oldHostPid=100, oldAgentPid=9, oldHostGone=True, oldAgentGone=True, newAgentPid=10, tmux='live-ci', paneCommand='sleep', parkedPanePid=42),
+            'busy-tab-original.json': dict(tabs=[dict(name='Runner server chat', tmux_session='live-ci', csid=old)]),
+            'busy-tab-before-stop.json': dict(tabs=[dict(name='Runner server chat', tmux_session='live-ci', csid=old)]),
             'reproduction.json': dict(notSent=True, stopIneffective=True, matchesReport=True, providerReceivedBeforeStop=False, providerProcessedBeforeStop=False, providerDiscardedAfterStop=False, waitedMilliseconds=611000, stopMilliseconds=10000),
-            'actions.json': [dict(input='click painted Stop')],
+            'actions.json': [dict(input='end busy owner and start replacement through production CLI'), dict(input='type', text='newer follow-up before Stop'), dict(input='click painted Stop')],
             'busy-outbox.json': dict(queues=[dict(messages=[dict(t=follow_up, v1=1, s=2, phase='sent')])]),
+            'busy-stop-outbox.json': dict(queues=[dict(messages=[dict(t=follow_up, v1=1, s=2, phase='sent'), dict(t='newer follow-up before Stop', v1=1, s=0, phase='queued')])]),
             'key-acl.json': dict(protected=True, owner='runner', rules=[dict(sid='runner')]),
             'doctor.json': dict(sha256='abc'), 'build.json': dict(sha256='abc'),
             'server-start.stdout.log': dict(kernel='microsoft-standard-WSL2', blockedWriter='SQLITE_BUSY', integrity='ok', writes=2),
@@ -93,12 +109,12 @@ class ProviderTest(unittest.TestCase):
             evidence = Path(folder)
             for name, text in {'open-copied.txt': 'Server received: server seed Synthetic chat 00 answer 1199.', 'send-copied.txt': 'Server received: windows send proof', 'ssh-preflight.txt': 'Linux tmux Python', 'sshd.log': 'Accepted publickey for mpverify'}.items():
                 (evidence / name).write_text(text)
-            for name in ('send.png', 'busy-before-stop.png', 'busy-after-stop.png'):
+            for name in ('send.png', 'busy-owner-before.png', 'busy-replacement-ready.png', 'busy-expired.png', 'busy-before-stop.png', 'busy-after-stop.png'):
                 (evidence / name).write_bytes(b'x' * 1001)
-            for name in ('ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate'):
+            for name in ('ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate', 'busy-owner-replacement'):
                 (evidence / (name + '.exit-code.txt')).write_text('0')
                 (evidence / (name + '.stderr.log')).write_text('')
-            for fault in ('none', 'received', 'processed', 'queued', 'cancelled', 'missing receipt evidence'):
+            for fault in ('none', 'received', 'processed', 'queued', 'cancelled', 'missing receipt evidence', 'old owner alive', 'replacement idle', 'bare shell', 'wrong saved tab', 'same provider', 'newer arrived', 'no newer pending'):
                 values = copy.deepcopy(files)
                 if fault == 'received':
                     values['busy-before-stop.json']['received'] = [dict(text=follow_up, pid=9)]
@@ -110,6 +126,20 @@ class ProviderTest(unittest.TestCase):
                     values['busy-after-stop.json']['discarded'] = [request]
                 elif fault == 'missing receipt evidence':
                     values['busy-before-stop.json'].pop('received')
+                elif fault == 'old owner alive':
+                    values['busy-before-stop.json']['hosts'][0]['alive'] = True
+                elif fault == 'replacement idle':
+                    values['busy-before-stop.json']['inputs'] = []
+                elif fault == 'bare shell':
+                    values['busy-before-stop.json']['pane']['command'] = 'bash'
+                elif fault == 'wrong saved tab':
+                    values['busy-tab-before-stop.json']['tabs'][0]['csid'] = new
+                elif fault == 'same provider':
+                    values['busy-owner-replacement.json']['oldAgentPid'] = 10
+                elif fault == 'newer arrived':
+                    values['busy-before-stop.json']['received'] = [dict(text='newer follow-up before Stop', pid=10)]
+                elif fault == 'no newer pending':
+                    values['busy-stop-outbox.json']['queues'][0]['messages'] = []
                 for name, value in values.items():
                     (evidence / name).write_text(json.dumps(value))
                 result = subprocess.run(['node', '-e', script, str(ROOT / 'tools/verify-server-chat/check-evidence.cjs'), str(evidence)], text=True, capture_output=True)
@@ -118,10 +148,11 @@ class ProviderTest(unittest.TestCase):
             values = copy.deepcopy(files)
             values['result.json']['status'] = 'passed'
             values['result.json']['cases'] += [dict(name=name, passed=True) for name in ('busy-message-kept', 'stop-interrupts', 'busy-follow-up')]
-            values['busy-after-stop.json'] = dict(provider=dict(pid=9, busy=False), received=[], discarded=[], controls=[dict(request=dict(subtype='interrupt'))])
+            values['busy-after-stop.json'] = dict(hosts=hosts, provider=dict(pid=10, busy=False), received=[], discarded=[], controls=[dict(request=dict(subtype='interrupt'))])
+            values['busy-tab-before-stop.json']['tabs'][0]['csid'] = new
             values['reproduction.json'].update(notSent=False, stopIneffective=False, matchesReport=False, stopMilliseconds=200)
             values['busy-outbox.json']['queues'][0]['messages'][0].update(s=3, phase='accepted')
-            values['busy-follow-up.json'] = dict(received=[dict(text=follow_up, pid=9)], inputs=[dict(text=follow_up, pid=9)])
+            values['busy-follow-up.json'] = dict(received=[dict(text=follow_up, pid=10)], inputs=[dict(text=follow_up, pid=10)])
             for name, value in values.items():
                 (evidence / name).write_text(json.dumps(value))
             (evidence / 'busy-follow-up-copied.txt').write_text('Server received: ' + follow_up)
@@ -382,6 +413,55 @@ try { Fresh-Chat } catch { $freshError = $_.ToString() }
                         metadata = json.loads((Path(home) / 'server-seed.json').read_text())
                         self.assertEqual(metadata['messages'], 2400 if large else 0)
                         self.assertEqual(metadata['runtime'], str(ROOT))
+
+    def test_busy_replacement_requires_a_busy_old_owner_and_a_busy_new_process(self):
+        from contextlib import redirect_stdout
+        import io
+        execute = runpy.run_path
+        old = 'a1b2c3d4-2567-4000-8000-000000002567'
+        new = 'a1b2c3d4-2566-4000-8000-000000002566'
+        program = ROOT / 'tools/verify-server-chat/replace-chat.py'
+        for fault in ('none', 'old idle', 'wrong old process', 'pane not parked', 'replacement idle'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as folder:
+                home = Path(folder)
+                (home / 'server-seed.json').write_text(json.dumps(dict(runtime=str(ROOT))))
+                (home / 'provider-state.json').write_text(json.dumps(dict(pid=1 if fault == 'wrong old process' else 0, busy=fault != 'old idle')))
+                commands = []
+                def cli(argv):
+                    commands.append(argv[0])
+                    return dict(status=dict(disable='disabled', enable='enabled', start='started')[argv[0]])
+                def send(provider, sid, text, tmux):
+                    self.assertEqual(commands, ['disable', 'enable', 'start'])
+                    self.assertEqual((sid, tmux), (new, 'live-ci'))
+                    with (home / 'provider-input.jsonl').open('a') as out:
+                        out.write(json.dumps(dict(sid=sid, text=text, pid=1)) + '\n')
+                    if text == 'busy server turn':
+                        (home / 'provider-state.json').write_text(json.dumps(dict(pid=1, busy=fault != 'replacement idle')))
+                    return dict(status='sent')
+                def native(argv, **kwargs):
+                    self.assertEqual(argv[0], 'tmux')
+                    return subprocess.CompletedProcess(argv, 0, stdout=('bash' if fault == 'pane not parked' else 'sleep') + '\t42\n', stderr='')
+                reader = dict(host_cli=Mock(side_effect=cli), host_session_state=Mock(return_value=dict(pid=0, agent_pid=0)), host_paths=Mock(return_value=dict(config=home / 'config.json')), host_read=Mock(return_value={}), host_write=Mock(), message_events_page=Mock(return_value=dict(events=[dict(event=dict(kind='host.status', payload=dict(state='ready')))])), host_send=Mock(side_effect=send))
+                output = io.StringIO()
+                with patch('runpy.run_path', return_value=reader), patch('subprocess.run', side_effect=native), patch('time.sleep'), patch.object(Path, 'home', return_value=home), patch.object(sys, 'argv', [str(program), str(ROOT), '--busy']), redirect_stdout(output):
+                    if fault in ('old idle', 'wrong old process'):
+                        with self.assertRaisesRegex(AssertionError, 'Old owner must still'):
+                            execute(str(program))
+                        self.assertEqual(commands, [])
+                    elif fault == 'pane not parked':
+                        with self.assertRaisesRegex(RuntimeError, 'parked sleep'):
+                            execute(str(program))
+                        self.assertEqual(commands, [])
+                    elif fault == 'replacement idle':
+                        with self.assertRaisesRegex(RuntimeError, 'replacement provider.*busy'):
+                            execute(str(program))
+                    else:
+                        execute(str(program))
+                        proof = json.loads(output.getvalue())
+                        self.assertEqual((proof['old'], proof['new'], proof['mode']), (old, new, 'busy-owner-ended'))
+                        self.assertTrue(proof['oldHostGone'] and proof['oldAgentGone'] and proof['oldWasBusy'])
+                        self.assertEqual((proof['oldAgentPid'], proof['newAgentPid'], proof['paneCommand']), (0, 1, 'sleep'))
+                        self.assertEqual([call.args[2] for call in reader['host_send'].call_args_list], ['fresh replacement seed', 'busy server turn'])
 
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')

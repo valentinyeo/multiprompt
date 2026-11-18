@@ -36,6 +36,35 @@ if (busy) {
   const before = json('busy-before-stop.json');
   const after = json('busy-after-stop.json');
   const observed = json('reproduction.json');
+  const started = json('busy-start.json');
+  const replacement = json('busy-owner-replacement.json');
+  assert.equal(replacement.mode, 'busy-owner-ended');
+  assert.equal(replacement.oldWasBusy, true);
+  assert.equal(replacement.oldHostGone, true);
+  assert.equal(replacement.oldAgentGone, true);
+  assert.ok(replacement.oldHostPid > 0 && replacement.oldAgentPid > 0 && replacement.newAgentPid > 0);
+  assert.notEqual(replacement.old, replacement.new);
+  assert.notEqual(replacement.oldAgentPid, replacement.newAgentPid);
+  assert.equal(started.provider.busy, true);
+  assert.equal(started.provider.pid, replacement.oldAgentPid);
+  assert.ok(started.hosts.some(host => host.sid === replacement.old && host.pid === replacement.oldHostPid && host.alive));
+  for (const snapshot of [before, after]) {
+    assert.ok(!snapshot.hosts.some(host => host.sid === replacement.old && host.alive));
+    assert.equal(snapshot.hosts.filter(host => host.sid === replacement.new && host.alive && host.tmux === replacement.tmux).length, 1);
+    assert.equal(snapshot.provider.pid, replacement.newAgentPid);
+  }
+  assert.equal(before.inputs.filter(row => row.sid === replacement.new && row.pid === before.provider.pid && row.text === 'busy server turn').length, 1);
+  assert.equal(replacement.paneCommand, 'sleep');
+  assert.equal(before.pane.exists, true);
+  assert.equal(before.pane.command, 'sleep');
+  assert.equal(before.pane.pid, replacement.parkedPanePid);
+  const original = json('busy-tab-original.json').tabs.find(row => row.name === 'Runner server chat');
+  const selected = json('busy-tab-before-stop.json').tabs.find(row => row.name === 'Runner server chat');
+  assert.equal(original?.csid, replacement.old);
+  assert.equal(selected?.tmux_session, replacement.tmux);
+  assert.equal(selected?.csid, reproduction ? replacement.old : replacement.new);
+  assert.ok(json('actions.json').some(action => action.input === 'end busy owner and start replacement through production CLI'));
+  for (const name of ['busy-owner-before.png', 'busy-replacement-ready.png']) assert.ok(fs.statSync(path.join(root, name)).size > 1000);
   assert.equal(before.provider.busy, true);
   assert.equal(before.seed.messages, 2400);
   assert.equal(after.provider.pid, before.provider.pid);
@@ -43,11 +72,18 @@ if (busy) {
   assert.equal(observed.providerReceivedBeforeStop, before.received.some(row => row.text === 'follow-up during busy turn'), 'Provider receipt before Stop');
   assert.equal(observed.providerProcessedBeforeStop, before.inputs.some(row => row.text === 'follow-up during busy turn'), 'Provider processing before Stop');
   assert.equal(observed.providerDiscardedAfterStop, after.discarded.some(row => row.message.content.some(block => block.text === 'follow-up during busy turn')), 'Provider cancellation after Stop');
+  assert.ok(json('actions.json').some(action => action.input === 'type' && action.text === 'newer follow-up before Stop'));
+  assert.ok(fs.statSync(path.join(root, 'busy-expired.png')).size > 1000);
   if (reproduction) {
+    const waiting = ['follow-up during busy turn', 'newer follow-up before Stop'];
     for (const snapshot of [before, after]) {
-      for (const name of ['received', 'inputs']) assert.equal(snapshot[name].filter(row => row.text === 'follow-up during busy turn').length, 0, `Follow-up already reached the provider: ${name}`);
-      for (const name of ['queued', 'discarded']) assert.equal(snapshot[name].filter(row => row.message.content.some(block => block.text === 'follow-up during busy turn')).length, 0, `Follow-up already reached the provider: ${name}`);
+      for (const name of ['received', 'inputs']) assert.equal(snapshot[name].filter(row => waiting.includes(row.text)).length, 0, `Follow-up already reached the provider: ${name}`);
+      for (const name of ['queued', 'discarded']) assert.equal(snapshot[name].filter(row => row.message.content.some(block => waiting.includes(block.text))).length, 0, `Follow-up already reached the provider: ${name}`);
     }
+    const newer = json('busy-stop-outbox.json').queues.flatMap(queue => queue.messages).filter(row => row.t === 'newer follow-up before Stop');
+    assert.equal(newer.length, 1);
+    assert.equal(newer[0].v1, 1);
+    assert.ok([0, 1].includes(newer[0].s), 'The newer send must still be pending beside the older failed send');
   }
   assert.equal(observed.notSent, reproduction);
   assert.equal(observed.stopIneffective, reproduction);
@@ -115,7 +151,7 @@ assert.equal(locks.blockedWriter, 'SQLITE_BUSY');
 assert.equal(locks.integrity, 'ok');
 assert.equal(locks.writes, 2);
 const nativeLogs = fs.readdirSync(root).filter(name => name.endsWith('.exit-code.txt'));
-for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'evidence-path', 'server-stop', 'wsl-terminate', ...(busy || fresh ? ['profile-seed'] : []), ...(fresh ? ['replacement-start'] : [])]) {
+for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'evidence-path', 'server-stop', 'wsl-terminate', ...(busy || fresh ? ['profile-seed'] : []), ...(busy ? ['busy-owner-replacement'] : []), ...(fresh ? ['replacement-start'] : [])]) {
   assert.ok(nativeLogs.includes(`${name}.exit-code.txt`), `Missing native command evidence: ${name}`);
 }
 for (const name of nativeLogs) {

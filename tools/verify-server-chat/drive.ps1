@@ -86,7 +86,8 @@ function Send-Line([string]$Text, [switch]$DuringTurn) {
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
 function Server-Snapshot([string]$Name) {
-    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
+    $paneArgument = if ($Busy) { ' --pane' } else { '' }
+    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py$paneArgument") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
     $snapshot = ($raw -join "`n") | ConvertFrom-Json
     Save $snapshot "$Evidence/$Name.json"
     return $snapshot
@@ -189,6 +190,13 @@ try {
     if ($Busy) {
         Send-Line 'busy server turn'
         [void](Wait-For 'provider is still inside the busy turn' { (Server-Snapshot 'busy-start').provider.busy })
+        Copy-Item "$settings/session.json" "$Evidence/busy-tab-original.json"
+        Shot 'busy-owner-before'
+        $actions.Add(@{ input = 'end busy owner and start replacement through production CLI'; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
+        $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/replace-chat.py $repo --busy") -Evidence $Evidence -Name 'busy-owner-replacement'
+        Save (($raw -join "`n") | ConvertFrom-Json) "$Evidence/busy-owner-replacement.json"
+        [void](Server-Snapshot 'busy-replacement-ready')
+        Shot 'busy-replacement-ready'
         Send-Line 'follow-up during busy turn' -DuringTurn
         $busyClock = [Diagnostics.Stopwatch]::StartNew()
         while ($busyClock.Elapsed.TotalSeconds -lt 611) {
@@ -202,7 +210,11 @@ try {
         $outbox = $outboxText | ConvertFrom-Json
         $pending = @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq 'follow-up during busy turn' })
         $notSent = @($pending | Where-Object { $_.v1 -eq 1 -and $_.s -ne 4 -and ($_.s -eq 2 -or $_.phase -ceq 'failed' -or ($_.s -ne 3 -and $_.phase -notin @('accepted', 'started'))) }).Count -gt 0
+        Shot 'busy-expired'
+        Send-Line 'newer follow-up before Stop' -DuringTurn
+        Copy-Item "$settings/chat-outbox.json" "$Evidence/busy-stop-outbox.json"
         $beforeStop = Server-Snapshot 'busy-before-stop'
+        Copy-Item "$settings/session.json" "$Evidence/busy-tab-before-stop.json"
         $providerReceived = @($beforeStop.received | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -gt 0
         $providerProcessed = @($beforeStop.inputs | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -gt 0
         Shot 'busy-before-stop'
