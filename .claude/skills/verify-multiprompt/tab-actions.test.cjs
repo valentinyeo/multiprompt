@@ -209,7 +209,11 @@ else if (process.argv[2] === '--evidence') {
       function Read-SharedText { return $script:log }
       function Wait-Until($Condition, $Label) { for ($n=0; $n -lt 5; $n++) { if (& $Condition) { return } }; throw $Label }
       function Press($Keys, $Label) {
-        if ($Keys[0] -eq 0x24) { $script:selected = 0 }
+        if ($Keys[0] -eq 0x12 -and $Keys[1] -eq 0x4D) {
+          if (-not $script:log.Contains('[palette] confirm target=1')) { throw 'Focus return preceded selection' }
+          $script:ready = $true
+        }
+        elseif ($Keys[0] -eq 0x24) { $script:selected = 0 }
         elseif ($Keys[0] -eq 0x28) { $script:selected++; $script:downs++ }
         elseif ($Keys[0] -eq 13) {
           $target = $script:selectable[$script:selected]
@@ -223,7 +227,7 @@ else if (process.argv[2] === '--evidence') {
       function Assert-Foreground { }
       function Record { }
       Add-Type 'public static class VerifyNative { public static System.Action Receive; public static void ClickClient(System.IntPtr w, int x, int y) { if (w.ToInt64() != 202 || x != 280 || y != 328) throw new System.Exception("Wrong session row"); Receive(); } }'
-      [VerifyNative]::Receive = { $script:log += "[palette] confirm target=1\n"; $script:ready = $true }
+      [VerifyNative]::Receive = { $script:log += "[palette] confirm target=1\n"; $script:ready = $false }
       function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) { if (-not $script:ready -or $Workspace -ne 0 -or $Tab -ne 1 -or $Chat) { throw 'Wrong native receiving surface' } }
       ${confirm}
       ${select}

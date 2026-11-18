@@ -116,6 +116,7 @@ function Select-ActionTab([long]$Id) {
     Open-ActionPalette 'global' $Id
     [void](Confirm-ActionRow $indices[0])
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -eq $Id } 'selected saved chat identity'
+    Press @(0x12, 0x4D) 'Alt+M: return input to the selected console'
     $state = Read-Session
     Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
 }
