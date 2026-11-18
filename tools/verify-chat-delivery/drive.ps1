@@ -1175,6 +1175,11 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-reopened'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
+            [void](Wait-For 'source removal reloaded through the ordinary reader' {
+                $log = Read-Shared "$settings/debug.log"
+                $log.Length -gt $gapLogStart -and $log.Substring($gapLogStart) -match '\[chat\] transcript load shell=\d+ ok'
+            })
+            Press @(0x11, 0x30) 'Ctrl+0: inspect the retained read anchor' $true
             $dividerProof.gap = Require-Divider 1 0 'known anchor survives source removal' $gapLogStart
             if ($dividerProof.gap.marker -cne $savedMarker) { throw 'History gap overwrote the saved anchor' }
             [void](Wait-For 'resynced cache retains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and $bytes.Contains($readId) })

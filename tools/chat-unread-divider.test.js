@@ -84,6 +84,9 @@ test('IGSH-814 existing messages-only recipe exercises real reopen, restart, gap
   assert.match(driver, /Copy-Item \$cache.FullName "\$caseDir\/app-cache-reopened.jsonl"/);
   assert.match(driver, /Copy-Item "\$settings\/session.json" "\$caseDir\/session-read-anchor.json"/);
   assert.match(driver, /Require-Divider 1 0 'one divider on reopen'/);
+  const removal = driver.slice(driver.indexOf("Shell-Input 'forget-message' $readId"), driver.indexOf("$dividerProof.gap = Require-Divider"));
+  assert.match(removal, /Wait-For 'source removal reloaded through the ordinary reader'[\s\S]*\$log.Substring\(\$gapLogStart\)[\s\S]*transcript load shell/);
+  assert.match(removal, /Press @\(0x11, 0x30\) 'Ctrl\+0: inspect the retained read anchor'/);
   assert.match(driver, /\$divider.offset -ne \$unreadOffset/);
   assert.match(read('.github/workflows/verify.yml'), /node --test tools\/chat-unread-divider.test.js/);
   const proof = read('tools/chat-messages-only-proof.mjs');
