@@ -86,6 +86,20 @@ test('wrong journey and fabricated citations fail even with the expected verdict
   assert.equal(result.checks.file_backed_evidence, false);
 });
 
+test('palette evidence instructions distinguish action identity from an unproven routing cause', () => {
+  const instructions = fs.readFileSync(new URL(`../${skill}/SKILL.md`, import.meta.url), 'utf8');
+  const appearance = fs.readFileSync(new URL(`../${skill}/features/appearance.md`, import.meta.url), 'utf8');
+  assert.match(instructions, /`target` is an action ID, not a row position/);
+  for (const text of [instructions, appearance]) {
+    assert.match(text, /label-to-ID mapping for the same build/);
+    assert.match(text, /leave the cause unproven/);
+  }
+  const labels = ['response-with-unsupported-cause'];
+  const rejected = { verdict: 'FAIL', results: [{ label: labels[0], passed: false, reason: 'Different action IDs do not establish a wrong action.' }] };
+  assert.equal(judgePassed({ passed: true }, rejected, labels), false);
+  assert.equal(judgePassed({ passed: true }, { ...rejected, verdict: 'PASS' }, labels), false);
+});
+
 test('recipe citations can explain observations but cannot replace product evidence', () => {
   const fixture = proof(cases[0]);
   fixture.answer.evidence.push({ file: `${skill}/features/appearance.md`, observation: 'The recipe requires a saved Light choice.' });
