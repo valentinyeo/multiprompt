@@ -64,7 +64,7 @@ async function reportNightly({ api, failures, runUrl, sha }) {
 async function main(env = process.env) {
   const gh = args => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const repo = env.GITHUB_REPOSITORY;
-  const run = env.GITHUB_RUN_ID;
+  const run = env.NIGHTLY_RUN_ID || env.GITHUB_RUN_ID;
   const pages = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/actions/runs/${run}/jobs?per_page=100`]));
   const jobs = pages.flatMap(page => page.jobs);
   const failures = jobs.filter(job => ['failure', 'cancelled', 'timed_out'].includes(job.conclusion)).map(job => job.name);
@@ -81,7 +81,7 @@ async function main(env = process.env) {
     }
   } else failures.push('Feature discovery did not complete');
   if (failures.length && !env.HYPERTASK_AGENT_TOKEN) throw new Error('HYPERTASK_AGENT_TOKEN is required');
-  const outcome = await reportNightly({ api: boardApi(env.HYPERTASK_AGENT_TOKEN), failures: [...new Set(failures)], runUrl: `https://github.com/${repo}/actions/runs/${run}`, sha: env.GITHUB_SHA });
+  const outcome = await reportNightly({ api: boardApi(env.HYPERTASK_AGENT_TOKEN), failures: [...new Set(failures)], runUrl: `https://github.com/${repo}/actions/runs/${run}`, sha: env.NIGHTLY_SHA || env.GITHUB_SHA });
   console.log(`Nightly verification: ${outcome}`);
 }
 

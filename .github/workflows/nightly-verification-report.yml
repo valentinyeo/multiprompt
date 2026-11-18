@@ -1,0 +1,39 @@
+name: Nightly verification report
+
+on:
+  workflow_run:
+    workflows: [Verify desktop]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nightly-verification-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event.workflow_run.event == 'schedule' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - id: features
+        run: node tools/verify-features.cjs
+      - name: File or update nightly feature failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          FEATURES: ${{ steps.features.outputs.available }}
+          NIGHTLY_RUN_ID: ${{ github.event.workflow_run.id }}
+          NIGHTLY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: node tools/nightly-verification-ticket.cjs

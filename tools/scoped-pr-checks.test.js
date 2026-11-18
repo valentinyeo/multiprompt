@@ -55,13 +55,19 @@ test('PR performance probes are nightly and do not block the cheap aggregate', (
   assert.match(workflow.split('\n  test-windows-update:\n')[1], /if: github.event_name != 'pull_request'/);
 });
 
-test('nightly feature failures are reported on board 2060', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
-  assert.match(workflow, /nightly-report:[\s\S]*github.event_name == 'schedule'[\s\S]*nightly-verification-ticket\.cjs/);
+test('nightly feature failures are reported without raising reusable caller permissions', () => {
+  assert.ok(fs.existsSync(path.join(root, '.github/workflows/nightly-verification-report.yml')), 'Nightly reporting is isolated from reusable verification');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/nightly-verification-report.yml'), 'utf8');
+  assert.match(workflow, /workflow_run:[\s\S]*workflows: \[Verify desktop\][\s\S]*branches: \[master\]/);
+  assert.match(workflow, /github.event.workflow_run.event == 'schedule'/);
+  assert.match(workflow, /nightly-verification-ticket\.cjs/);
+  const reusable = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.doesNotMatch(reusable, /nightly-report:|actions: read/);
 });
 
 test('nightly reporting creates one board 2060 ticket, updates it, and deduplicates retries', async () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.ok(fs.existsSync(path.join(root, '.github/workflows/nightly-verification-report.yml')), 'Nightly failures reach the board');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/nightly-verification-report.yml'), 'utf8');
   assert.match(workflow, /nightly-verification-ticket\.cjs/);
   const { reportNightly } = require('./nightly-verification-ticket.cjs');
   const tasks = [];
