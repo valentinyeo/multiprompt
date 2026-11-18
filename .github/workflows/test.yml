@@ -38,7 +38,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: node tools/check-commit-identities.mjs "$BASE" "$HEAD"
       - name: Test touched-journey selection and workflow cancellation
-        run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
+        run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/pr-verifier-ci.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
       - name: Test automatic crash report triage
         run: node --test tools/crash-report-tickets.test.js
       - name: Install video validation tools
