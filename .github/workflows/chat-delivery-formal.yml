@@ -15,6 +15,7 @@ on:
       - 'src/chat_connectors/claude.py'
       - 'tools/chat-history-reader-test.py'
       - 'tools/multibot-feedback-test.py'
+      - 'tools/scoped-pr-checks.test.js'
       - '.claude/skills/verify-chat-delivery-formal/**'
       - '.github/workflows/chat-delivery-formal.yml'
   workflow_dispatch:
@@ -43,6 +44,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Check the scoped PR workflow policy
+        run: node --test tools/scoped-pr-checks.test.js
       - name: Install the production decision replay compiler
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
