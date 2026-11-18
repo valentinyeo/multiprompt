@@ -10,11 +10,14 @@ on:
       - 'tools/room-checks/**'
       - 'src/room_service.py'
       - 'src/room_bridge.py'
+      - 'src/room_frontend.zig'
+      - 'src/room_view.zig'
       - 'tools/room_service_test.py'
       - 'tools/room_bridge_test.py'
       - 'tools/room-routing.test.py'
       - 'tools/room-design-a.test.py'
       - 'tools/room-review-access.test.js'
+      - 'tools/room-input-focus.test.js'
 
 permissions:
   contents: read
@@ -47,8 +50,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Test Room review access
-        run: node --test tools/room-review-access.test.js
+      - name: Test Room review access and keyboard handoff
+        run: node --test tools/room-review-access.test.js tools/room-input-focus.test.js
       - name: Run room tests
         shell: bash
         run: |

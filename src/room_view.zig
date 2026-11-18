@@ -483,6 +483,7 @@ pub const View = struct {
 
     pub fn chooseRecipient(self: *View) void {
         if (self.mode != .room or self.model.loading or self.pending != null) return;
+        refreshHits(self);
         const menu = w.CreatePopupMenu() orelse return;
         defer _ = w.DestroyMenu(menu);
         _ = w.AppendMenuW(menu, if (self.recipient.len == 0) 8 else 0, 1, L("Everyone"));
@@ -507,6 +508,7 @@ pub const View = struct {
 
     pub fn openMenu(self: *View) void {
         if (self.mode != .room or self.model.loading or self.pending != null) return;
+        refreshHits(self);
         const menu = w.CreatePopupMenu() orelse return;
         defer _ = w.DestroyMenu(menu);
         _ = w.AppendMenuW(menu, 0, 1, L("Add or remove sessions..."));
@@ -1056,6 +1058,10 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
     }
     if (msg == w.WM_KEYDOWN) {
         if (w.GetKeyState(0x11) < 0 and w.GetKeyState(0x12) >= 0) {
+            if (wp == 'A') {
+                _ = w.SendMessageW(hwnd, 0x00b1, 0, -1);
+                return 0;
+            }
             if (wp == 'K') {
                 _ = w.PostMessageW(@import("app_state.zig").g_main_hwnd, w.WM_APP_SEARCH_OPEN, if (w.GetKeyState(0x10) < 0) 1 else 0, 0);
                 return 0;
@@ -1117,7 +1123,7 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
             return 0;
         }
     }
-    if (msg == 0x0102 and (wp == 0x0b or wp == 0x09 or wp == 0x1b or (wp == 0x0d and (hwnd != view.composer or w.GetKeyState(0x10) >= 0)))) return 0;
+    if (msg == 0x0102 and (wp == 0x01 or wp == 0x0b or wp == 0x09 or wp == 0x1b or (wp == 0x0d and (hwnd != view.composer or w.GetKeyState(0x10) >= 0)))) return 0;
     return w.CallWindowProcW(original, hwnd, msg, wp, lp);
 }
 

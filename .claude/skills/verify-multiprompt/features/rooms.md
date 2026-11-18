@@ -32,13 +32,13 @@ Run only on hosted GitHub Windows. The build enables `-Drooms-preview=true`. The
 
 The fixture generates 12 Rooms, 32 candidate sessions, and 1,476 events. The largest history has 1,201 events. The real account Worker and production RoomStore/RoomBridge run behind disclosed synthetic SSH and agent-runtime boundaries. This does not prove real SSH, real AI timing, authentication, or POSIX file permissions.
 
-The initial creation/add/send/reply steps retain the typing regression. Switching requires the native selected title. Independent To, leave/undo, and delete/cancel steps start from seeded Rooms even when creation fails. The real-session-row step clicks the first member row using the default sidebar geometry, then requires that actual published session ID and a hidden Room view. Each step records its own failure. `rooms-steps.json`, timestamped findings, screenshots, and `journey.mp4` remain after owned-process cleanup. Review sidebar rows and status chips in the video; database assertions alone do not prove their appearance.
+The initial creation/add/send/reply steps retain the typing regression. Agent selection checks the native search text before and after Ctrl+A replacement, then requires exactly two persisted members and two replies. Switching requires the native selected title. Independent To, leave/undo, and delete/cancel steps start from seeded Rooms even when creation fails. The real-session-row step clicks the first member row using the default sidebar geometry, then requires that actual published session ID and a hidden Room view. Each step records its own failure. `rooms-steps.json`, timestamped findings, screenshots, and `journey.mp4` remain after owned-process cleanup. Review sidebar rows and status chips in the video; database assertions alone do not prove their appearance.
 
 The independent `send-while-away` step sends to a seeded Room, switches to Inbox before the receipt returns, and requires both replies without reopening it. The synthetic transport holds that receipt for two seconds and agent completion for five seconds. The product dispatches accepted posts immediately and uses bounded pending-reply reads while the conversation is hidden. This is not proof of real-agent timing.
 
 ### recipients
 
-Open the seeded Room, choose **Room recipients**, then Home, Down, Enter to target its first session. Send ordinary text and require one delivery. Choose recipients again, Home then Enter for Everyone, and require two deliveries even when the message contains an at sign.
+Open the seeded Room and choose **Room recipients**. Press Down to enter native menu keyboard navigation, then Home, Down, Enter to target its first session. Capture `to-one-selected.png`. Send ordinary text and require exactly that member's ID as the sole recipient. Choose recipients again, then Down, Home, Enter for Everyone, and require two deliveries even when the message contains an at sign.
 
 ### room menu
 
