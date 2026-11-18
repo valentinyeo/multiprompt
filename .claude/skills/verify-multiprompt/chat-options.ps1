@@ -15,6 +15,13 @@ function Find-Transcript {
     return [IntPtr]$element.Current.NativeWindowHandle
 }
 function Click-Card([int]$Index) {
+    Invoke-JourneyCommand 'Jump to newest message'
+    Wait-Until {
+        $cards = (Read-Choices).cards
+        $rect = New-Object VerifyNative+Rect
+        [VerifyNative]::GetClientRect($script:transcript, [ref]$rect) -and $cards.Count -gt $Index -and
+            $cards[$Index].top -ge 0 -and $cards[$Index].bottom -le $rect.Bottom
+    } 'the requested answer card is inside the owned transcript'
     $card = (Read-Choices).cards[$Index]
     [VerifyNative]::ClickClient($script:transcript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
 }
