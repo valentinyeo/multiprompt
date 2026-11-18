@@ -230,7 +230,9 @@ else if (process.argv[2] === '--evidence') {
     assert.equal(run.status, 0, run.stderr);
   });
   test('a palette refresh between Home and Down cannot confirm the Back row', t => {
-    const text = fs.readFileSync(path.join(__dirname, 'control-feature-tab-actions.ps1'), 'utf8');
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
     const helper = text.slice(text.indexOf('function Confirm-ActionRow('), text.indexOf('function Select-ActionRow('));
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
