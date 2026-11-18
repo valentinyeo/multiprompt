@@ -75,7 +75,7 @@ function Focus {}
 function Log { $trace }
 function Wait-For($Name,$Check) {
     if ($Name -eq 'seven ordered context actions') {
-        $script:trace += $(if ($ordered) { '[palette] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7197 7112' } else { '[palette] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7112 7197' })+"\n"
+        $script:trace += $(if ($ordered) { '[palette] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7110 7112' } else { '[palette] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7112 7110' })+"\n"
     }
     $value=& $Check
     if (!$value) { throw "Timed out: $Name" }
@@ -178,4 +178,40 @@ test('opening anchor does not override bottom follow after initial history is re
   for (const match of held) assert.equal(match[1], 'app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready');
   assert.match(source, /for \(3\.\.5\) \|turn\|/);
   assert.match(source, /expectEqual\(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y\)/);
+});
+
+
+test('context journey expects the current shared action IDs in their exact production order', () => {
+  const state = read('src/app_state.zig');
+  const table = read('src/command_palette.zig').split('pub const chat_actions =')[1].split('pub fn chatActionLabel')[0];
+  const targets = [...table.matchAll(/\.target = (?:app_state\.)?(SEARCH_\w+)/g)].map(match => {
+    const value = state.match(new RegExp(`pub const ${match[1]}: usize = (\\d+);`));
+    assert.ok(value, match[1]);
+    return Number(value[1]);
+  });
+  assert.equal(targets.length, 7);
+  assert.ok(read('tools/verify-session-actions/drive.ps1').includes(`count=7 ids=${targets.join(' ')}`));
+});
+
+test('server group owns launch: its dispatch returns without overwriting evidence and propagates failure', { skip: process.platform !== 'win32' && !process.env.PWSH }, () => {
+  const source = read('.claude/skills/verify-multiprompt/control.ps1');
+  const clause = source.match(/        'server-open-group' \{[^]*?\n        \}/)?.[0];
+  assert.ok(clause, 'dedicated group dispatch exists');
+  const delegated = clause.replace(". (Join-Path $PSScriptRoot 'control-feature-server-open-group.ps1')", "$script:visits++; if ($fail) { throw 'delegated failure' }; $script:receipt='passed'");
+  assert.notEqual(delegated, clause);
+  assert.match(run(`
+$Feature='server-open-group'; $visits=0; $receipt=$null
+foreach ($fail in @($false,$true)) {
+    $rejected=$false
+    try {
+        & { switch ($Feature) { ${delegated} }; throw 'generic launch overwrote evidence' }
+    } catch {
+        if ($_.Exception.Message -ne 'delegated failure') { throw }
+        $rejected=$true
+    }
+    if ($rejected -ne $fail) { throw 'Incorrect delegated error result' }
+}
+if ($visits -ne 2 -or $receipt -ne 'passed') { throw 'Dedicated evidence was not retained' }
+'GROUP_DISPATCH_OK'
+`), /GROUP_DISPATCH_OK/);
 });
