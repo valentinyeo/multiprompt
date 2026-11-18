@@ -12,9 +12,14 @@ test('releases have an executable candidate journey gate', () => {
   assert.equal(typeof checkEvidence, 'function', 'Release publication must check candidate journeys before publishing');
 });
 
-test('every Linux video-checking job installs the decoder', () => {
+test('every Linux video-checking job installs pinned standalone decoders without a package upgrade', () => {
   for (const workflow of ['test.yml', 'check-red-run.yml', 'release.yml']) {
-    assert.match(fs.readFileSync(`.github/workflows/${workflow}`, 'utf8'), /sudo apt-get install -y ffmpeg/, workflow);
+    const source = fs.readFileSync(`.github/workflows/${workflow}`, 'utf8');
+    const install = source.split('      - name: Install video validation tools\n')[1]?.split('\n      - ')[0] || '';
+    assert.match(install, /uses: FedericoCarboni\/setup-ffmpeg@[a-f0-9]{40}/, workflow);
+    assert.match(install, /ffmpeg-version: '7\.0\.2'/, workflow);
+    assert.match(install, /github-token: ''/, workflow);
+    assert.doesNotMatch(install, /apt-get/, workflow);
   }
 });
 
