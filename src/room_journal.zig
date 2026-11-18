@@ -411,7 +411,7 @@ fn roundTrips(scope: Scope, record: Record) !bool {
     defer allocator.free(bytes);
     var parsed = try std.json.parseFromSlice(Envelope, allocator, bytes, .{ .allocate = .alloc_always });
     defer parsed.deinit();
-    if (!std.mem.eql(u8, parsed.value.record.request, record.request) or parsed.value.record.kind != .post) return false;
+    if (!std.mem.eql(u8, parsed.value.record.request, record.request) or parsed.value.record.kind != record.kind) return false;
     return validate(scope, parsed.value);
 }
 

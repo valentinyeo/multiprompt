@@ -39,8 +39,22 @@
             $tabRowsBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count
             Doctor
             Assert-Foreground
+            $tabState = Read-Session
+            $tabIndices = @(for ($i = 0; $i -lt @($tabState.tabs).Count; $i++) { if ([int]$tabState.tabs[$i].shell_id -eq [int]$tabState.active_shell_id) { $i } })
+            if ($tabIndices.Count -ne 1) { throw 'Tab actions target is not one saved active session' }
+            $tabPattern = '\[photo-proof\] expanded target=' + $tabIndices[0] + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'
+            $tabRects = [regex]::Matches((Read-SharedText $debugLog), $tabPattern)
+            if ($tabRects.Count -eq 0) { throw 'No painted geometry for the active tab actions target' }
+            $tabRect = $tabRects[$tabRects.Count - 1]
+            $left = [int]$tabRect.Groups[1].Value; $top = [int]$tabRect.Groups[2].Value
+            $right = [int]$tabRect.Groups[3].Value; $bottom = [int]$tabRect.Groups[4].Value
+            $client = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or $left -lt $client.Left -or $top -lt $client.Top -or $right -le $left -or $bottom -le $top -or $right -gt $client.Right -or $bottom -gt $client.Bottom) { throw 'Tab actions target rectangle is outside the visible client' }
+            $x = [int][Math]::Floor(($left + $right) / 2.0)
+            $y = [int][Math]::Floor(($top + $bottom) / 2.0)
+            Save-Json @{ shellId = $tabState.active_shell_id; geometry = $tabRect.Value; center = @($x, $y) } 'palette-tab-target.json'
             Record 'Right-click the tab row for tab actions'
-            [VerifyNative]::RightClickClient($script:window, 100, 127)
+            [VerifyNative]::RightClickClient($script:window, $x, $y)
             Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $tabRowsBefore } 'tab actions palette opened'
             Type-Text 'move chat'
             Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' }).Count -gt 0 } 'tab actions filtered by move chat'
