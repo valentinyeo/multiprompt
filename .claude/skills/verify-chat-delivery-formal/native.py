@@ -20,6 +20,13 @@ def tick(source):
     return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n" + body[start:end] + "\n    return changed;\n}\n"
 
 
+def load(source):
+    body = function(source, "chatOutboxParseJson")
+    start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
+    end = body.index("\n                        }", start) + len("\n                        }")
+    return "fn resume(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
+
+
 def tables(root, output):
     echo = (root / "src/chat_echo.zig").read_text()
     send = (root / "src/chat_send.zig").read_text()
@@ -29,13 +36,15 @@ const ChatOutboxEntry = struct {
     state: chat_echo.OutboxState = .queued,
     sent_tick_ms: i64 = 1000,
     message_v1: bool = true,
+    message_phase: [16]u8 = @splat(0),
+    reset_pending: bool = false,
     write_started: bool = true,
     channel_sent: bool = false,
     channel_pending: bool = false,
     retryable: bool = false,
 };
 '''
-    source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send)
+    source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send) + load(send)
     source += '''test "formal source decisions" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("synthetic delivery probe");
     const block = [_]chat_echo.UserBlock{.{ .text = text, .stamp_ms = 200, .message_id = 1 }};
@@ -51,7 +60,9 @@ const ChatOutboxEntry = struct {
     var sending = ChatOutboxEntry{ .state = .sending };
     try std.testing.expect(timeout(&queued, 601000));
     try std.testing.expect(timeout(&sending, 601000));
-    std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\"}}\\n", .{
+    var empty_phase = ChatOutboxEntry{ .state = .sending };
+    resume(&empty_phase);
+    std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
         chatEchoWaitsOnTranscript(.{}) and picked[0] != null,
         @tagName(chat_echo.stateOnLoad(0, true)),
         @tagName(chat_echo.stateOnLoad(1, true)),
@@ -62,6 +73,8 @@ const ChatOutboxEntry = struct {
         chat_echo.mayType(.queued, true, false, false),
         @tagName(queued.state),
         @tagName(sending.state),
+        @tagName(empty_phase.state),
+        empty_phase.write_started,
     });
 }
 '''

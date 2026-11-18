@@ -16,7 +16,7 @@ The goal is one visible copy per sent message, with no false **Not sent** copy. 
 
 `chatOutboxTick` changes an unconfirmed v1 entry to `.not_sent` based on elapsed time. Neither that branch nor `showsNotSent` checks whether the agent actually accepted the message. A lost connection can hide the acceptance receipt. This is a decision-level counterexample, not a captured Windows screen.
 
-## Restart before the acceptance receipt
+## Restart after a send receipt but before acceptance arrives
 
 The resume-only /statechart report checks the same invariant with the timeout action disabled:
 
@@ -25,10 +25,13 @@ The resume-only /statechart report checks the same invariant with the timeout ac
 2. The app starts sending.
 3. The host stores it.
 4. The host hands it to the agent.
-5. The agent accepts it.
-6. You restart the app before its receipt arrives. The written `.sending` entry loads as `.not_sent` and the app labels it **Not sent**.
+5. The app receives the **sent** receipt. It saves a written `.queued` entry with phase `sent`.
+6. The agent accepts it, but that acceptance receipt is delayed.
+7. You restart the app. The entry loads as `.not_sent` and the app labels it **Not sent**.
 
-`chatOutboxParseJson` calls `stateOnLoad` with the saved state and write reservation. `stateOnLoad(1, true)` returns `.not_sent`; `showsNotSent(true, .not_sent, "sent", ...)` then returns true. Reconnection can correct the state later, but the earlier false failure already breaks the promise.
+`chatOutboxParseJson` calls `stateOnLoad` with the saved state and write reservation. `stateOnLoad(0, true)` returns `.not_sent`. The parser requeues an empty-phase send, but not one with phase `sent`. `showsNotSent(true, .not_sent, "sent", ...)` then returns true. Reconnection can correct the state later, but the earlier false failure already breaks the promise.
+
+The empty-phase case is a passing control, not a finding. The native replay executes the real parser guard to distinguish it.
 
 These are separate source decisions and need separate product tickets. Do not change the invariant or product code in this verification PR.
 
@@ -40,7 +43,7 @@ The native decisions are compiled from the checkout, not hand-reimplemented. Eve
 
 `--self-test` plants a missing reconciliation decision in real source and requires two visible copies. It also plants a delivered-message failure label in real source and requires an accepted-message false failure in the reliable control. Both must replay. Restoring the original source must return to its original results.
 
-The current all-events model has 278 reachable states. The resume-only model has 100. `SingleVisibleCopy` holds in the stated exact-text, single-message scope. It does not prove assistant reply reconciliation, all message strings or real Windows painting. The chart hides disconnect/reconnect and other steps that do not change its visible labels.
+The current all-events model has 576 reachable states. The resume-only model has 142. `SingleVisibleCopy` holds in the stated exact-text, single-message scope. It does not prove assistant reply reconciliation, all message strings or real Windows painting. The chart hides disconnect/reconnect and other steps that do not change its visible labels.
 
 ## Statechart
 
@@ -57,31 +60,65 @@ stateDiagram-v2
   class lg1 bugPath
   s0: Nothing sent
   s1: Waiting to send
-  s2: Marked Not sent, no receipt
-  s3: Sending
-  s4: Accepted, echo pending
-  s5: Accepted, marked Not sent
-  s6: Shown once from chat
+  s2: Sending
+  s3: Accepted, echo pending
+  s4: Accepted, marked Not sent
   [*] --> s0
   s0 --> s1: You send a message
-  s1 --> s2: Ten minutes pass
-  s1 --> s3: The app starts sending
-  s3 --> s2: Ten minutes pass or You restart the app
-  s3 --> s3: The host stores it
-  s2 --> s3: You send again or The app receives the receipt
-  s3 --> s4: The agent accepts it
-  s2 --> s5: The agent accepts it
-  s4 --> s5: Ten minutes pass or You restart the app
-  s4 --> s6: The saved chat arrives
-  s5 --> s4: The app receives the receipt
-  s5 --> s6: The saved chat arrives
+  s1 --> s2: The app starts sending
+  s2 --> s2: The host stores it or The host hands it to the agent
+  s2 --> s3: The agent accepts it
+  s3 --> s4: Ten minutes pass
   classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
   class s0 bugPath
   class s1 bugPath
+  class s2 bugPath
   class s3 bugPath
+  class s4 breaks
   class s4 bugPath
-  class s5 breaks
-  class s5 bugPath
 ```
 
-This is the generated all-events chart. The numbered reports above distinguish the timeout and restart paths. Use pstack /statechart on each generated config for the complete chart and numbered report. Do not infer a pass from the chart alone. The raw TLC result and successful source replay are required.
+This is the generated all-events bug-path chart. Its 576 states exceed /statechart's full-chart budget. The numbered reports above distinguish the timeout and restart paths. Use pstack /statechart on each generated config for the complete chart and numbered report. Do not infer a pass from the chart alone. The raw TLC result and successful source replay are required.
+
+### Resume-only chart
+
+```mermaid
+---
+title: "One sent message, delayed receipt"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks NoFalseNotSent
+    lg1: Path to the NoFalseNotSent bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: Nothing sent
+  s1: Waiting to send
+  s2: Sending
+  s3: Accepted, echo pending
+  s4: Marked Not sent, no receipt
+  s5: Shown once from chat
+  s6: Accepted, marked Not sent
+  [*] --> s0
+  s0 --> s1: You send a message
+  s1 --> s2: The app starts sending or The app receives the receipt
+  s2 --> s1: You restart the app
+  s2 --> s2: The host stores it or The host hands it to the agent or The app receives the receipt
+  s2 --> s3: The agent accepts it
+  s2 --> s4: You restart the app
+  s1 --> s3: The agent accepts it
+  s3 --> s5: The saved chat arrives
+  s4 --> s2: You send again or The app receives the receipt
+  s4 --> s6: The agent accepts it
+  s3 --> s6: You restart the app
+  s6 --> s3: The app receives the receipt
+  s6 --> s5: The saved chat arrives
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 bugPath
+  class s2 bugPath
+  class s3 bugPath
+  class s6 breaks
+  class s6 bugPath
+```

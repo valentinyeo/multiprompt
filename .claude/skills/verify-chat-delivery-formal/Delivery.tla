@@ -2,61 +2,64 @@
 EXTENDS Naturals, Sequences, TLC
 CONSTANTS Reconciles, LoadQueued, LoadSending, ShowQueuedOld, ShowNotSent,
           ShowDelivered, CanSendQueued, CanSendWritten, TimeoutQueued,
-          TimeoutSending, Scenario
+          TimeoutSending, LoadEmpty, LoadEmptyWritten, Scenario
 VARIABLES state, written, pending, host, transcript, age, restarted, retried,
-          submitted, wire, hostWires, connected
+          submitted, wire, hostWires, connected, phase
 vars == <<state, written, pending, host, transcript, age, restarted, retried,
-          submitted, wire, hostWires, connected>>
+          submitted, wire, hostWires, connected, phase>>
 Init == /\ state = "empty" /\ written = FALSE /\ pending = FALSE
         /\ host = "empty" /\ transcript = FALSE /\ age = FALSE
         /\ restarted = FALSE /\ retried = FALSE /\ submitted = FALSE
-        /\ wire = 1 /\ hostWires = {} /\ connected = TRUE
+        /\ wire = 1 /\ hostWires = {} /\ connected = TRUE /\ phase = "empty"
 Send == /\ state = "empty"
         /\ state' = "queued" /\ pending' = TRUE
-        /\ UNCHANGED <<written, host, transcript, age, restarted, retried,
+        /\ UNCHANGED <<phase, written, host, transcript, age, restarted, retried,
                         submitted, wire, hostWires, connected>>
 Submit == /\ pending /\ connected /\ ~submitted
           /\ IF written THEN CanSendWritten ELSE state = "queued" /\ CanSendQueued
           /\ state' = "sending" /\ written' = TRUE /\ submitted' = TRUE
-          /\ UNCHANGED <<pending, host, transcript, age, restarted, retried,
+          /\ UNCHANGED <<phase, pending, host, transcript, age, restarted, retried,
                           wire, hostWires, connected>>
 HostReceives == /\ submitted /\ wire \notin hostWires
                 /\ host' = "queued" /\ hostWires' = hostWires \cup {wire}
-                /\ UNCHANGED <<state, written, pending, transcript, age,
+                /\ UNCHANGED <<phase, state, written, pending, transcript, age,
                                 restarted, retried, submitted, wire, connected>>
 HostDispatch == /\ host = "queued" /\ host' = "sent"
-                /\ UNCHANGED <<state, written, pending, transcript, age,
+                /\ UNCHANGED <<phase, state, written, pending, transcript, age,
                                 restarted, retried, submitted, wire, hostWires, connected>>
 HostAccepts == /\ host = "sent" /\ host' = "accepted"
-               /\ UNCHANGED <<state, written, pending, transcript, age,
+               /\ UNCHANGED <<phase, state, written, pending, transcript, age,
                                restarted, retried, submitted, wire, hostWires, connected>>
 Receipt == /\ connected /\ pending /\ host \in {"queued", "sent", "accepted"}
            /\ state' = IF host = "accepted" THEN "delivered" ELSE "queued"
-           /\ written' = TRUE
+           /\ written' = TRUE /\ phase' = host
            /\ UNCHANGED <<pending, host, transcript, age, restarted, retried,
                            submitted, wire, hostWires, connected>>
 Disconnect == /\ connected /\ connected' = FALSE
-              /\ UNCHANGED <<state, written, pending, host, transcript, age,
+              /\ UNCHANGED <<phase, state, written, pending, host, transcript, age,
                               restarted, retried, submitted, wire, hostWires>>
 Reconnect == /\ ~connected /\ connected' = TRUE
-             /\ UNCHANGED <<state, written, pending, host, transcript, age,
+             /\ UNCHANGED <<phase, state, written, pending, host, transcript, age,
                              restarted, retried, submitted, wire, hostWires>>
 Wait == /\ Scenario = "all" /\ pending /\ ~age /\ age' = TRUE
         /\ state' = CASE state = "queued" -> TimeoutQueued
                       [] state = "sending" -> TimeoutSending
                       [] OTHER -> state
-        /\ UNCHANGED <<written, pending, host, transcript, restarted,
+        /\ UNCHANGED <<phase, written, pending, host, transcript, restarted,
                         retried, submitted, wire, hostWires, connected>>
 Resume == /\ Scenario # "reliable" /\ pending /\ ~restarted /\ written
           /\ restarted' = TRUE
-          /\ state' = CASE state = "sending" -> LoadSending
+          /\ state' = CASE phase = "empty" -> LoadEmpty
+                        [] state = "sending" -> LoadSending
                         [] state = "queued" -> LoadQueued
                         [] OTHER -> state
-          /\ UNCHANGED <<written, pending, host, transcript, age, retried,
-                          submitted, wire, hostWires, connected>>
+          /\ written' = IF phase = "empty" THEN LoadEmptyWritten ELSE written
+          /\ submitted' = IF phase = "empty" THEN FALSE ELSE submitted
+          /\ UNCHANGED <<phase, pending, host, transcript, age, retried,
+                          wire, hostWires, connected>>
 Echo == /\ connected /\ host = "accepted" /\ ~transcript
         /\ transcript' = TRUE /\ pending' = IF Reconciles THEN FALSE ELSE pending
-        /\ UNCHANGED <<state, written, host, age, restarted, retried,
+        /\ UNCHANGED <<phase, state, written, host, age, restarted, retried,
                         submitted, wire, hostWires, connected>>
 NotSent == pending /\ CASE state = "not_sent" -> ShowNotSent
                           [] state = "delivered" -> ShowDelivered
@@ -64,10 +67,10 @@ NotSent == pending /\ CASE state = "not_sent" -> ShowNotSent
 Retry == /\ NotSent /\ ~retried /\ connected
          /\ retried' = TRUE
          /\ IF host = "accepted"
-               THEN UNCHANGED <<state, written, submitted, wire, host>>
+               THEN UNCHANGED <<phase, state, written, submitted, wire, host>>
                ELSE /\ wire' = 2 /\ state' = "sending" /\ written' = TRUE
-                    /\ submitted' = TRUE /\ host' = "empty"
-         /\ UNCHANGED <<pending, transcript, age, restarted, hostWires, connected>>
+                    /\ submitted' = TRUE /\ host' = "empty" /\ phase' = "empty"
+         /\ UNCHANGED << pending, transcript, age, restarted, hostWires, connected>>
 Done == UNCHANGED vars
 Next == Send \/ Submit \/ HostReceives \/ HostDispatch \/ HostAccepts \/ Receipt \/ Disconnect
         \/ Reconnect \/ Wait \/ Resume \/ Echo \/ Retry \/ Done

@@ -4,7 +4,7 @@ import pathlib
 import subprocess
 import tempfile
 
-from native import function, tick
+from native import function, tick, load
 
 
 def replay(root, results, output, source_root=None):
@@ -19,13 +19,15 @@ const ChatOutboxEntry = struct {
     state: chat_echo.OutboxState = .queued,
     sent_tick_ms: i64 = 1000,
     message_v1: bool = true,
+    message_phase: [16]u8 = @splat(0),
+    reset_pending: bool = false,
     write_started: bool = false,
     channel_sent: bool = false,
     channel_pending: bool = false,
     retryable: bool = false,
 };
 '''
-    source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send)
+    source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send) + load(send)
     source += "fn receipt(entry: *ChatOutboxEntry, phase: []const u8) void {\n" + state_line + "\n}\n"
     for rule, result in results.items():
         if result["status"] != "FAIL":
@@ -43,8 +45,9 @@ const ChatOutboxEntry = struct {
                 source += "    try std.testing.expect(chat_echo.mayType(entry.state, entry.write_started, false, false));\n    entry.state = .sending; entry.write_started = true;\n"
             elif action == "Receipt":
                 source += f'    receipt(&entry, "{values["host"]}"); entry.write_started = true;\n'
+                source += f'    @memset(&entry.message_phase, 0); @memcpy(entry.message_phase[0..{len(values["phase"])}], "{values["phase"]}");\n'
             elif action == "Resume":
-                source += "    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n"
+                source += "    resume(&entry);\n"
             elif action == "Wait":
                 source += "    now = 601000; _ = timeout(&entry, now);\n"
             elif action == "Echo":
@@ -59,15 +62,17 @@ const ChatOutboxEntry = struct {
     }
 '''
             elif action == "Retry" and values["host"] != "accepted":
-                source += "    entry.state = .sending; entry.write_started = true;\n"
+                source += "    entry.state = .sending; entry.write_started = true; @memset(&entry.message_phase, 0);\n"
             if values["state"] != "empty":
                 source += f'    try std.testing.expectEqual(chat_echo.OutboxState.{values["state"]}, entry.state);\n'
                 source += f'    try std.testing.expectEqual({str(values["pending"]).lower()}, pending);\n'
+                source += f'    try std.testing.expectEqual({str(values["written"]).lower()}, entry.write_started);\n'
+                phase = "" if values["phase"] == "empty" else values["phase"]
+                source += f'    try std.testing.expectEqualStrings("{phase}", std.mem.sliceTo(&entry.message_phase, 0));\n'
         last = result["trace"][-1]["values"]
         expected_copies = int(last["pending"]) + int(last["transcript"])
         source += f"    try std.testing.expectEqual(@as(u32, {expected_copies}), @as(u32, @intFromBool(pending)) + @as(u32, @intFromBool(transcript)));\n"
-        phase = "accepted" if last["state"] == "delivered" else "sent"
-        source += f'    const not_sent = pending and chat_echo.showsNotSent(true, entry.state, "{phase}", 1000, now);\n'
+        source += f'    const not_sent = pending and chat_echo.showsNotSent(true, entry.state, std.mem.sliceTo(&entry.message_phase, 0), 1000, now);\n'
         source += f"    try std.testing.expectEqual({str(rule.startswith('NoFalseNotSent')).lower()}, not_sent);\n}}\n"
     (output / "replay.zig").write_text(source)
     with tempfile.TemporaryDirectory(prefix="delivery-replay-") as directory:

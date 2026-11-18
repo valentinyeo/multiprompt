@@ -25,7 +25,8 @@
       "chatEchoSendAgain",
       "chatEchoMatchActive",
       "chatOutboxParseJson",
-      "chatOutboxTick (v1 timeout branch only)"
+      "chatOutboxTick (v1 timeout branch only)",
+      "sendTextToShellVerifiedAt (reviewed mapping)"
     ],
     "src/chat_render.zig": [
       "chatRelayout",

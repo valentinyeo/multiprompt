@@ -8,5 +8,7 @@
   "CanSendQueued": true,
   "CanSendWritten": false,
   "TimeoutQueued": "not_sent",
-  "TimeoutSending": "not_sent"
+  "TimeoutSending": "not_sent",
+  "LoadEmpty": "queued",
+  "LoadEmptyWritten": false
 }
