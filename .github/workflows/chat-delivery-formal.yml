@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.claude/skills/verify-chat-delivery-formal/**'
+      - '.claude/skills/verify-multiprompt/features/chat-delivery-formal.md'
       - '.github/workflows/chat-delivery-formal.yml'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - 'tools/multibot-feedback-test.py'
       - 'tools/scoped-pr-checks.test.js'
       - '.claude/skills/verify-chat-delivery-formal/**'
+      - '.claude/skills/verify-multiprompt/features/chat-delivery-formal.md'
       - '.github/workflows/chat-delivery-formal.yml'
   workflow_dispatch:
 

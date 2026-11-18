@@ -48,7 +48,17 @@ The resume-only /statechart report checks the same invariant with the timeout ac
 
 The empty-phase requeue avoids a false **Not sent** label, but `chatEchoWaitsOnTranscript` returns false when `write_started`, `channel_sent` and `channel_pending` are all false. `chatEchoAssignForKey` then excludes the restored entry before matching. The ordinary user block and pending row remain eligible for layout. A later resubmit or receipt may repair the display; the earlier duplicate is the violation.
 
-These are three separate source decisions and need separate product tickets. Do not weaken the invariants or change product code in this verification PR.
+These three source decisions are filed separately as [SOFT-2724](https://app.hypertask.ai/detail/project-2060/2724), [SOFT-2725](https://app.hypertask.ai/detail/project-2060/2725) and [SOFT-2726](https://app.hypertask.ai/detail/project-2060/2726). Do not duplicate those tickets, weaken the invariants or change product code in this verification PR.
+
+## PR 1095 verifier routing investigation
+
+The [7f80535d verifier run](https://github.com/valentinyeo/multiprompt/actions/runs/44344408862) selected `chat-view` only because `view.mjs` had no owner. This did not exercise the formal check.
+
+Its executable hashes are expected to differ. `build.json` records head revision and embedded revision `7f80535d4619356475a4a9339ba1750b46288bf2`, versus `23c96fbf3085173cbe7db56c373a70e05aee506c` for the cached base. `verify.yml` passes each SHA as `-Drevision`; `build.zig` exports that value in `MPREVISION`. Product `src`, `build.zig`, `build.zig.zon`, the entire desktop driver tree and the delivery driver tree are byte-identical between those commits. Equal version numbers do not imply equal binary hashes.
+
+The head debug log at 16:29:15.752 records `message menu echo=2` and `Reply,Copy,Cancel message`. Its saved outbox contains the suggestion as a written, legacy (`v1=0`) `.delivered` entry awaiting reconciliation. The unchanged menu calls `cancellable`, which enables Cancel for `.delivered` with no removal timestamp. The journey waits for bytes on stdin, not for a particular outbox state, then clicks the pending echo. Its `Reply,Copy` assertion therefore races the app's send completion. The cached base log itself changes from `Reply,Copy` at 16:06:47.911 to `Add to chat,Reply,Copy,Cancel message` at 16:06:49.167 for that same echo. Cancel is not a new head-only menu item.
+
+The correction is explicit [formal-check ownership](../verify-multiprompt/features/chat-delivery-formal.md), successful exact-head CI evidence and the raw formal summary in the independent judge's inputs. It does not waive a selected UI failure, weaken its menu assertion, change product code or rerun that journey to pass. The unrelated menu journey's state precondition remains outside this formal-only change.
 
 ## Source replay and controls
 

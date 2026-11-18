@@ -65,6 +65,8 @@ Both counterexamples must replay through the changed production decisions. The o
 
 The current source violates `NoFalseNotSent` through timeout and restart, and `SingleVisibleCopy` after an empty-phase restart. [findings.md](findings.md) contains the /statechart paths and code mapping. Keep those findings; do not weaken the invariant to make the job green. For a modeling error, identify the impossible action or mismatching source operation and fix the model. For a real bug, file each counterexample separately and keep its trace and native replay.
 
+The [formal feature map](../verify-multiprompt/features/chat-delivery-formal.md) owns this skill and its workflow. The independent PR verifier requires the exact-head formal CI run and reads its raw summary, rather than substituting a nearest-name Windows journey.
+
 The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if **every guarded source file is byte-identical to that base**. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. Changed covered code, drift and replay errors never inherit. This classifies a verification-only PR's pre-existing bugs without calling them passes.
 
 After a source change that did not recheck this model, use pstack /maintain-formal-verification-skill.

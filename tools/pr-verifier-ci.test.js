@@ -57,6 +57,40 @@ test('CI-owned checks supply exact-head raw findings to the judge and fail close
   }
 });
 
+test('CI artifact download uses the successful exact-head workflow, not a desktop artifact', { skip: process.platform === 'win32' }, t => {
+  const dir = scratch(t);
+  const evidence = path.join(dir, 'evidence');
+  fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features: [], ciWorkflows: ['chat-delivery-formal.yml'] }));
+  fs.writeFileSync(path.join(dir, 'pr.json'), JSON.stringify({ headRefOid: head }));
+  const archive = path.join(dir, 'formal.zip');
+  const zip = spawnSync('python3', ['-c', 'import sys, zipfile; z=zipfile.ZipFile(sys.argv[1], "w"); z.writestr("summary.json", "{\\"failures\\":[\\"NoFalseNotSent\\"]}"); z.close()', archive], { encoding: 'utf8' });
+  assert.equal(zip.status, 0, zip.stderr);
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\\n');
+const url = args[1];
+if (url.includes('/actions/runs/999/artifacts')) process.exit(0);
+if (url.includes('/chat-delivery-formal.yml/runs?')) console.log(JSON.stringify([{id: 7, head_sha: process.env.HEAD_SHA, status: 'completed', conclusion: 'success'}]));
+else if (url.includes('/actions/runs/7/artifacts')) console.log(JSON.stringify([{id: 77, name: 'chat-delivery-formal', expired: false}]));
+else if (url.endsWith('/actions/artifacts/77/zip')) process.stdout.write(fs.readFileSync(process.env.ARCHIVE));
+else process.exit(3);
+`, { mode: 0o755 });
+  const requests = path.join(dir, 'requests');
+  const result = spawnSync(process.execPath, [path.join(root, 'tools/pr-verifier.cjs'), 'download', path.join(dir, 'selection.json'), evidence, 'b'.repeat(40)], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, REQUESTS: requests, ARCHIVE: archive, HEAD_SHA: head, RUN_ID: '999', REPO: 'owner/repo' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const summary = path.join(evidence, 'chat-delivery-formal/summary.json');
+  assert.ok(fs.existsSync(summary), 'The selected CI workflow must supply its raw formal findings');
+  assert.deepEqual(JSON.parse(fs.readFileSync(summary, 'utf8')).failures, ['NoFalseNotSent']);
+  const [receipt] = JSON.parse(fs.readFileSync(path.join(evidence, 'ci-workflows.json'), 'utf8'));
+  assert.equal(receipt.head_sha, head);
+  assert.equal(receipt.id, 7);
+  assert.equal(receipt.artifact_id, 77);
+  assert.match(fs.readFileSync(requests, 'utf8'), /event=pull_request/);
+});
+
 test('CI-only review fails closed without its CI snapshot or source patch', t => {
   const dir = scratch(t);
   fs.writeFileSync(path.join(dir, 'selection.json'), '{"features":[]}');
