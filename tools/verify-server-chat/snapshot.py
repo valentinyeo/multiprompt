@@ -22,6 +22,6 @@ for path in (home / '.local/state/multiprompt/agent-host').glob('*.state.json'):
     hosts.append(host)
 
 print(json.dumps(dict(hosts=hosts, tables=tables, inputs=rows('provider-input.jsonl'), controls=rows('provider-control.jsonl'),
-                      queued=rows('provider-queued.jsonl'),
+                      received=rows('provider-received.jsonl'), queued=rows('provider-queued.jsonl'), discarded=rows('provider-discarded.jsonl'),
                       provider=json.loads((home / 'provider-state.json').read_text()) if (home / 'provider-state.json').exists() else None,
                       seed=json.loads((home / 'server-seed.json').read_text()))))

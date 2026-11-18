@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 import uuid
 
 args = sys.argv[1:]
@@ -71,6 +72,9 @@ for line in sys.stdin:
         continue
     if request.get('type') != 'user':
         continue
+    content = request['message']['content']
+    text = content if isinstance(content, str) else '\n'.join(block.get('text', '') for block in content)
+    record('provider-received.jsonl', dict(sid=sid, text=text, pid=os.getpid(), at=time.time_ns() // 1_000_000))
     if busy:
         pending.append(request)
         record('provider-queued.jsonl', request)

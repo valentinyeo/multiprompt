@@ -203,6 +203,8 @@ try {
         $pending = @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq 'follow-up during busy turn' })
         $notSent = @($pending | Where-Object { $_.v1 -eq 1 -and $_.s -ne 4 -and ($_.s -eq 2 -or $_.phase -ceq 'failed' -or ($_.s -ne 3 -and $_.phase -notin @('accepted', 'started'))) }).Count -gt 0
         $beforeStop = Server-Snapshot 'busy-before-stop'
+        $providerReceived = @($beforeStop.received | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -gt 0
+        $providerProcessed = @($beforeStop.inputs | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -gt 0
         Shot 'busy-before-stop'
         $stop = Wait-For 'painted Stop button' {
             $frame = ((Log-Text) -split '\[chat\] composer card')[-1]
@@ -240,12 +242,17 @@ try {
                 $received = $true
             } catch { $result.followUpError = $_.Exception.Message }
         }
-        $result.reproduction = @{ notSent = $notSent; stopIneffective = -not $stopEffective; matchesReport = $notSent -and -not $stopEffective; waitedMilliseconds = $busyClock.ElapsedMilliseconds; stopMilliseconds = $stopClock.ElapsedMilliseconds; providerPid = $beforeStop.provider.pid }
+        $providerDiscarded = @($afterStop.discarded | Where-Object { @($_.message.content | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -gt 0 }).Count -gt 0
+        $result.reproduction = @{ notSent = $notSent; stopIneffective = -not $stopEffective; matchesReport = $notSent -and -not $providerReceived -and -not $stopEffective; providerReceivedBeforeStop = $providerReceived; providerProcessedBeforeStop = $providerProcessed; providerDiscardedAfterStop = $providerDiscarded; waitedMilliseconds = $busyClock.ElapsedMilliseconds; stopMilliseconds = $stopClock.ElapsedMilliseconds; providerPid = $beforeStop.provider.pid }
+        if ($providerDiscarded) { $result.followUpError = 'The provider received the follow-up while busy, then cancel_queued discarded it after Stop; this does not prove a message never reached the session' }
         $result.cases += @{ name = 'busy-message-kept'; passed = -not $notSent; detail = 'Native pending state and screenshot after the real ten-minute delivery budget' }
         $result.cases += @{ name = 'stop-interrupts'; passed = $stopEffective; detail = 'Real Stop click, independent provider control receipt and production interrupted event within ten seconds' }
         $result.cases += @{ name = 'busy-follow-up'; passed = $received; detail = 'Exactly one provider receipt and copied reply after interrupting the previous turn' }
         Save $result.reproduction "$Evidence/reproduction.json"
-        if (@($result.cases | Where-Object { -not $_.passed }).Count) { throw 'Busy server chat regression; inspect reproduction.json, native outbox, server snapshots and video' }
+        if (@($result.cases | Where-Object { -not $_.passed }).Count) {
+            if ($result.reproduction.matchesReport) { throw 'Busy server chat regression; inspect reproduction.json, native outbox, server snapshots and video' }
+            throw 'The exact busy report was not reproduced; inspect receipt, processing, cancellation and Stop evidence in reproduction.json and server snapshots'
+        }
     }
     $result.status = 'passed'
 } catch {

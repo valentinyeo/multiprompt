@@ -39,6 +39,7 @@ class ProviderTest(unittest.TestCase):
                 self.assertEqual(transcripts[0].parent.name, folder)
 
     def test_busy_provider_accepts_control_without_a_second_turn_and_records_cancelled_input(self):
+        import sqlite3
         with tempfile.TemporaryDirectory() as home:
             program = ROOT / 'tools/verify-server-chat/provider.py'
             script = 'import os,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); runpy.run_path(sys.argv[0],run_name="__main__")'
@@ -49,8 +50,81 @@ class ProviderTest(unittest.TestCase):
             self.assertEqual([row['subtype'] for row in events if row['type'] == 'result'], ['error_during_execution'])
             self.assertEqual(json.loads((Path(home) / 'provider-state.json').read_text())['busy'], False)
             self.assertEqual(len((Path(home) / 'provider-input.jsonl').read_text().splitlines()), 1)
+            received = [json.loads(line) for line in (Path(home) / 'provider-received.jsonl').read_text().splitlines()]
+            self.assertEqual([row['text'] for row in received], ['busy server turn', 'follow-up during busy turn'])
+            self.assertTrue(all(row['sid'] == 'busy-fixture' and isinstance(row['at'], int) for row in received))
+            self.assertEqual(len({row['pid'] for row in received}), 1)
             self.assertEqual(json.loads((Path(home) / 'provider-control.jsonl').read_text())['request']['subtype'], 'interrupt')
             self.assertEqual(json.loads((Path(home) / 'provider-discarded.jsonl').read_text()), requests[1])
+            store = Path(home) / '.local/state/multiprompt/shared-messages/store.sqlite3'
+            store.parent.mkdir(parents=True)
+            with sqlite3.connect(store) as db:
+                for name in ('message_chats', 'message_resets', 'shared_messages', 'message_events'):
+                    db.execute('CREATE TABLE ' + name + ' (id TEXT)')
+            (Path(home) / 'server-seed.json').write_text('{}')
+            snapshot = json.loads(subprocess.check_output([sys.executable, str(ROOT / 'tools/verify-server-chat/snapshot.py')], env=dict(os.environ, HOME=home, USERPROFILE=home), text=True))
+            self.assertEqual(snapshot['received'], received)
+            self.assertEqual(len(snapshot['inputs']), 1)
+            self.assertEqual(snapshot['queued'], [requests[1]])
+            self.assertEqual(snapshot['discarded'], [requests[1]])
+
+    def test_busy_reproduction_rejects_received_processed_queued_or_cancelled_prompts(self):
+        import copy
+        follow_up = 'follow-up during busy turn'
+        request = dict(message=dict(content=[dict(type='text', text=follow_up)]))
+        snapshot = dict(provider=dict(pid=9, busy=True), seed=dict(messages=2400), received=[], inputs=[], queued=[], discarded=[], controls=[])
+        files = {
+            'result.json': dict(feature='server-chat-busy', status='failed', cases=[dict(name=name, passed=True) for name in ('open', 'send')], cleanup=dict(activeAfterStop=0), keyRemoved=True, videoExit=0),
+            'fixture-manifest.json': dict(sessions=64, longChats=8, messages=19872),
+            'send-server.json': dict(inputs=[dict(text='windows send proof')]),
+            'busy-before-stop.json': snapshot, 'busy-after-stop.json': snapshot,
+            'reproduction.json': dict(notSent=True, stopIneffective=True, matchesReport=True, providerReceivedBeforeStop=False, providerProcessedBeforeStop=False, providerDiscardedAfterStop=False, waitedMilliseconds=611000, stopMilliseconds=10000),
+            'actions.json': [dict(input='click painted Stop')],
+            'busy-outbox.json': dict(queues=[dict(messages=[dict(t=follow_up, v1=1, s=2, phase='sent')])]),
+            'key-acl.json': dict(protected=True, owner='runner', rules=[dict(sid='runner')]),
+            'doctor.json': dict(sha256='abc'), 'build.json': dict(sha256='abc'),
+            'server-start.stdout.log': dict(kernel='microsoft-standard-WSL2', blockedWriter='SQLITE_BUSY', integrity='ok', writes=2),
+        }
+        script = 'require("node:child_process").spawnSync=()=>({status:0,stdout:JSON.stringify({streams:[{codec_type:"video",nb_frames:"6120"}],format:{duration:"612"}}),stderr:""});process.argv=["node",process.argv[1],process.argv[2],"--repro"];require(process.argv[1]);'
+        with tempfile.TemporaryDirectory() as folder:
+            evidence = Path(folder)
+            for name, text in {'open-copied.txt': 'Server received: server seed Synthetic chat 00 answer 1199.', 'send-copied.txt': 'Server received: windows send proof', 'ssh-preflight.txt': 'Linux tmux Python', 'sshd.log': 'Accepted publickey for mpverify'}.items():
+                (evidence / name).write_text(text)
+            for name in ('send.png', 'busy-before-stop.png', 'busy-after-stop.png'):
+                (evidence / name).write_bytes(b'x' * 1001)
+            for name in ('ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate'):
+                (evidence / (name + '.exit-code.txt')).write_text('0')
+                (evidence / (name + '.stderr.log')).write_text('')
+            for fault in ('none', 'received', 'processed', 'queued', 'cancelled', 'missing receipt evidence'):
+                values = copy.deepcopy(files)
+                if fault == 'received':
+                    values['busy-before-stop.json']['received'] = [dict(text=follow_up, pid=9)]
+                elif fault == 'processed':
+                    values['busy-before-stop.json']['inputs'] = [dict(text=follow_up, pid=9)]
+                elif fault == 'queued':
+                    values['busy-before-stop.json']['queued'] = [request]
+                elif fault == 'cancelled':
+                    values['busy-after-stop.json']['discarded'] = [request]
+                elif fault == 'missing receipt evidence':
+                    values['busy-before-stop.json'].pop('received')
+                for name, value in values.items():
+                    (evidence / name).write_text(json.dumps(value))
+                result = subprocess.run(['node', '-e', script, str(ROOT / 'tools/verify-server-chat/check-evidence.cjs'), str(evidence)], text=True, capture_output=True)
+                with self.subTest(fault=fault):
+                    self.assertEqual(result.returncode == 0, fault == 'none', result.stderr)
+            values = copy.deepcopy(files)
+            values['result.json']['status'] = 'passed'
+            values['result.json']['cases'] += [dict(name=name, passed=True) for name in ('busy-message-kept', 'stop-interrupts', 'busy-follow-up')]
+            values['busy-after-stop.json'] = dict(provider=dict(pid=9, busy=False), received=[], discarded=[], controls=[dict(request=dict(subtype='interrupt'))])
+            values['reproduction.json'].update(notSent=False, stopIneffective=False, matchesReport=False, stopMilliseconds=200)
+            values['busy-outbox.json']['queues'][0]['messages'][0].update(s=3, phase='accepted')
+            values['busy-follow-up.json'] = dict(received=[dict(text=follow_up, pid=9)], inputs=[dict(text=follow_up, pid=9)])
+            for name, value in values.items():
+                (evidence / name).write_text(json.dumps(value))
+            (evidence / 'busy-follow-up-copied.txt').write_text('Server received: ' + follow_up)
+            positive = script.replace(',"--repro"', '')
+            result = subprocess.run(['node', '-e', positive, str(ROOT / 'tools/verify-server-chat/check-evidence.cjs'), str(evidence)], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_large_seed_preserves_the_selected_session(self):
         import runpy

@@ -40,6 +40,15 @@ if (busy) {
   assert.equal(before.seed.messages, 2400);
   assert.equal(after.provider.pid, before.provider.pid);
   assert.ok(observed.waitedMilliseconds >= 611000);
+  assert.equal(observed.providerReceivedBeforeStop, before.received.some(row => row.text === 'follow-up during busy turn'), 'Provider receipt before Stop');
+  assert.equal(observed.providerProcessedBeforeStop, before.inputs.some(row => row.text === 'follow-up during busy turn'), 'Provider processing before Stop');
+  assert.equal(observed.providerDiscardedAfterStop, after.discarded.some(row => row.message.content.some(block => block.text === 'follow-up during busy turn')), 'Provider cancellation after Stop');
+  if (reproduction) {
+    for (const snapshot of [before, after]) {
+      for (const name of ['received', 'inputs']) assert.equal(snapshot[name].filter(row => row.text === 'follow-up during busy turn').length, 0, `Follow-up already reached the provider: ${name}`);
+      for (const name of ['queued', 'discarded']) assert.equal(snapshot[name].filter(row => row.message.content.some(block => block.text === 'follow-up during busy turn')).length, 0, `Follow-up already reached the provider: ${name}`);
+    }
+  }
   assert.equal(observed.notSent, reproduction);
   assert.equal(observed.stopIneffective, reproduction);
   assert.equal(observed.matchesReport, reproduction);
@@ -56,6 +65,7 @@ if (busy) {
   } else {
     assert.ok(observed.stopMilliseconds <= 10000);
     assert.equal(interrupts.length, 1);
+    assert.equal(json('busy-follow-up.json').received.filter(row => row.text === 'follow-up during busy turn').length, 1);
     assert.equal(json('busy-follow-up.json').inputs.filter(row => row.text === 'follow-up during busy turn').length, 1);
     assert.ok(text('busy-follow-up-copied.txt').includes('Server received: follow-up during busy turn'));
     for (const name of ['busy-message-kept', 'stop-interrupts', 'busy-follow-up']) assert.equal(result.cases.find(row => row.name === name)?.passed, true, name);
