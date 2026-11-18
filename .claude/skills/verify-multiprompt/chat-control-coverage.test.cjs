@@ -111,7 +111,8 @@ if (process.argv[2]) {
     assert.match(text, /controls.Count -ne 12/);
     assert.match(text, /bypassPermissions/);
     assert.match(text, /FindWindowEx\(\$script:window, \[IntPtr\]::Zero, 'MultiPromptPlusMenu'/);
-    assert.match(text, /Press @\(0x26\)/);
+    assert.match(text, /mode_ask rect=\(\[0-9\]\+\),\(\[0-9\]\+\),\(\[0-9\]\+\),\(\[0-9\]\+\)/);
+    assert.match(text, /ClickClient\(\$plusWindow, \$x, \$y\)/);
     assert.match(text, /Wait-SlashMode \$choice.mode 'Keep this mode draft' 'palette'/);
     assert.match(text, /Wait-SlashMode \$choice.mode 'Keep this mode draft' 'plus'/);
     assert.match(text, /--mode-evidence \$Evidence/);

@@ -117,13 +117,21 @@ foreach ($choice in @(
     Wait-SlashMode $choice.mode 'Keep this mode draft' 'palette'
     Snapshot ('mode-palette-' + $choice.mode + '-applied')
 }
-foreach ($choice in @(@{mode='plan'; up=2}, @{mode='manual'; up=4}, @{mode='acceptEdits'; up=3}, @{mode='bypassPermissions'; up=1})) {
+foreach ($choice in @(@{mode='plan'; row=2}, @{mode='manual'; row=0}, @{mode='acceptEdits'; row=1}, @{mode='bypassPermissions'; row=3})) {
     $offset = (Read-SharedText $script:slashLog).Length
     Invoke-JourneyCommand 'Chat View: Plus Menu'
-    Wait-Until { [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptPlusMenu', $null) -ne [IntPtr]::Zero -and (Read-SharedText $script:slashLog).Substring($offset) -match '\[chat\] plus menu mode_ask rect=' } 'owned Plus menu has permission choices'
-    for ($step = 0; $step -lt $choice.up; $step++) { Press @(0x26) 'Up: choose a permission row from the bottom of Plus' }
+    Wait-Until { [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptPlusMenu', $null) -ne [IntPtr]::Zero -and (Read-SharedText $script:slashLog).Substring($offset) -match '\[chat\] plus menu mode_ask rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+)' } 'owned Plus menu has permission choices'
+    $plusWindow = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptPlusMenu', $null)
+    $rows = [regex]::Matches((Read-SharedText $script:slashLog).Substring($offset), '\[chat\] plus menu mode_ask rect=([0-9]+),([0-9]+),([0-9]+),([0-9]+)')
+    $rect = $rows[$rows.Count - 1].Groups
+    $left = [int]$rect[1].Value; $top = [int]$rect[2].Value; $right = [int]$rect[3].Value; $bottom = [int]$rect[4].Value
+    $x = [int](($left + $right) / 2)
+    $y = [int](($top + $bottom) / 2) + $choice.row * ($bottom - $top)
     Snapshot ('mode-plus-' + $choice.mode)
-    Press @(0x0D) 'Enter: choose the Plus permission mode'
+    Doctor
+    Assert-Foreground
+    Record ('Click Plus permission mode ' + $choice.mode + ' at ' + $x + ',' + $y)
+    [VerifyNative]::ClickClient($plusWindow, $x, $y)
     Wait-SlashMode $choice.mode 'Keep this mode draft' 'plus'
     Snapshot ('mode-plus-' + $choice.mode + '-applied')
 }

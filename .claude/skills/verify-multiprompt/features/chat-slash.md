@@ -24,7 +24,7 @@ Use the automatic PR verifier's `chat-slash` Windows journey. It invokes `contro
 1. Select the isolated live chat. Type all five slash commands through the owned composer. Require visible pickers and notices.
 2. Choose Plan and Ask, then Accept edits and Bypass through `/permissions`. Require one successful acknowledgement per choice and an empty composer after each acknowledgement.
 3. Type `Keep this mode draft`. Select each of the four global palette mode entries through Ctrl+K, search, arrows and Enter. Require that exact draft after every acknowledgement.
-4. Open **Chat View: Plus Menu** through Ctrl+K for each mode. From its initial unselected state, press Up twice for Plan, four times for Ask, three times for Accept edits and once for Bypass. Press Enter. Require the same draft and one acknowledgement per choice.
+4. Open **Chat View: Plus Menu** through Ctrl+K for each mode. Click the permission row using the owned menu's reported Ask rectangle and row height. Require the same draft and one acknowledgement per choice. This route covers mouse choices, not Plus-menu keyboard navigation.
 5. Open Plus again and press Escape. Require the unchanged draft and no thirteenth control.
 6. Require exactly twelve receiving controls and twelve successful acknowledgements for the saved originating SID. The ordered modes are `plan,manual,acceptEdits,bypassPermissions`, repeated for slash, palette and Plus. No slash command may enter the ordinary outbox.
 
