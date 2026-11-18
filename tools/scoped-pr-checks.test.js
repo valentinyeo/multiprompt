@@ -32,8 +32,12 @@ test('an unknown tool does not expand an already mapped plan', () => {
 });
 
 test('the CI repair receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
-  const source = fs.readFileSync(path.join(root, '.github/workflows/ci-repair-receipt.yml'), 'utf8');
-  const map = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'), 'utf8');
+  const receiptPath = path.join(root, '.github/workflows/ci-repair-receipt.yml');
+  const mapPath = path.join(root, '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md');
+  assert.ok(fs.existsSync(receiptPath), 'The CI repair receipt workflow must be installed');
+  assert.ok(fs.existsSync(mapPath), 'The CI repair receipt feature map must exist');
+  const source = fs.readFileSync(receiptPath, 'utf8');
+  const map = fs.readFileSync(mapPath, 'utf8');
   assert.match(source, /^  pull_request:\n    paths:/m);
   assert.match(source, /name: ci-repair-receipt\n/);
   assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
