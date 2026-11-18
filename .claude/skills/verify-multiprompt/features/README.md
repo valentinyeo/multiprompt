@@ -32,6 +32,10 @@ Start with one feature, then pick a named journey. The area files keep the refer
 
 Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/command_palette.zig`, and `openwiki/architecture/features.md`. Use `drive.ps1 <feature> <journey>` with the identity/evidence arguments shown in each map. It reuses existing control helpers. The new maps link existing journeys and mark missing full paths unreachable; they do not add product behavior or claim those paths passed. GitHub `verify.yml -f feature=appearance` and `-f feature=command-palette` now use this entry point and retain video. Other workflow routes remain in the [migration inventory](../inventory.md) for follow-up. Do not claim those routes already produce video or that Rooms passed offline.
 
+## Real server journey
+
+- [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
+
 ## Source feature coverage
 
 Run `node tools/check-feature-coverage.mjs --base <clean-master-checkout>` from the repository root. It prints numeric coverage and every gap from `SHORTCUT_ROWS`, palette source rows and row families, and the shipped architecture features. Shortcut section headings, palette group headings, test-only rows and Future Features are not actions. Dynamic session names are instances of their source row family, not separate features.

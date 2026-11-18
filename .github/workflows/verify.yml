@@ -129,6 +129,14 @@ on:
         type: string
   workflow_call:
     inputs:
+      base_cache:
+        description: Publish complete baseline evidence for reuse by another PR
+        type: boolean
+        default: false
+      harness_version:
+        description: Content hash of the baseline journey harness
+        type: string
+        default: ''
       features:
         description: JSON array of mapped journeys sharing one application build
         required: false
@@ -535,8 +543,15 @@ jobs:
       - name: Check workspace focus journey contract
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
+      - name: Install runner-owned Linux server
+        if: env.FEATURE == 'server-chat'
+        uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: '2'
+          additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || startsWith(env.FEATURE, 'generated-') || inputs.candidate_artifact != ''
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || startsWith(env.FEATURE, 'generated-') || inputs.candidate_artifact != ''
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -726,9 +741,12 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
+        if: env.FEATURE == 'server-chat' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
+      - name: Check the deterministic provider boundary
+        if: env.FEATURE == 'server-chat'
+        run: python tools/verify-server-chat.test.py
       - name: Prepare usage pace SSH boundary
         if: env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
         shell: pwsh
@@ -1050,6 +1068,9 @@ jobs:
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
+      - name: Check real server chat evidence
+        if: env.FEATURE == 'server-chat'
+        run: node tools/verify-server-chat/check-evidence.cjs evidence
       - name: Save paired session views
         if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
         shell: powershell
@@ -1206,6 +1227,32 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Check out the workflow's baseline cache tooling
+        if: always() && inputs.base_cache && inputs.app_revision != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: base-cache-tools
+          sparse-checkout: tools
+          persist-credentials: false
+      - name: Seal complete baseline evidence for reuse
+        id: base-cache
+        if: always() && inputs.base_cache && inputs.app_revision != ''
+        env:
+          VARIANT: ${{ toJSON(matrix) }}
+          HARNESS_VERSION: ${{ inputs.harness_version }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: node base-cache-tools/tools/base-journey-cache.cjs stamp evidence
+      - name: Store reusable baseline evidence
+        if: always() && steps.base-cache.outputs.name != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.base-cache.outputs.name }}
+          path: evidence/
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: error
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
