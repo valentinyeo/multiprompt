@@ -159,6 +159,13 @@ else if (process.argv[2] === '--evidence') {
     assert.match(text, /Substring\(\$script:tabPaletteOffset\)/);
     for (const name of ['copy-', 'rename-', 'unread-', 'face', 'color', 'group-new', 'workspace-existing', 'archive-context', 'delete-keyboard']) assert.ok(text.includes(name), name);
   });
+  test('palette match collections use nonnegative indexes on Windows PowerShell 5.1', () => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const helper = text.slice(text.indexOf('function Confirm-ActionRow('), text.indexOf('function Select-ActionRow('));
+    assert.doesNotMatch(helper, /\$(?:currentRows|paint|newRows|ready)\[\s*-\d+\s*\]/, 'Windows PowerShell 5.1 passes negative indexes to MatchCollection.Item and throws');
+  });
   test('context geometry follows current placement after pin and unpin', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');

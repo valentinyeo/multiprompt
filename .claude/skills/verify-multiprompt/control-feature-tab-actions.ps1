@@ -68,12 +68,12 @@ function Confirm-ActionRow([int]$Target, [string]$Query = '') {
         Wait-Until {
             $fresh = (Read-SharedText $script:tabLog).Substring($script:tabPaletteOffset)
             $currentRows = [regex]::Matches($fresh, '\[palette\] rows chars=(\d+) count=\d+ ids=([^\r\n]+)')
-            if ($currentRows.Count -eq 0 -or [int]$currentRows[-1].Groups[1].Value -ne $Query.Length -or $currentRows[-1].Groups[2].Value.Trim() -cne ($rowIds -join ' ')) { return $false }
-            $start = [Math]::Max($Since, $script:tabPaletteOffset + $currentRows[-1].Index + $currentRows[-1].Length)
+            if ($currentRows.Count -eq 0 -or [int]$currentRows[$currentRows.Count - 1].Groups[1].Value -ne $Query.Length -or $currentRows[$currentRows.Count - 1].Groups[2].Value.Trim() -cne ($rowIds -join ' ')) { return $false }
+            $start = [Math]::Max($Since, $script:tabPaletteOffset + $currentRows[$currentRows.Count - 1].Index + $currentRows[$currentRows.Count - 1].Length)
             $paint = [regex]::Matches((Read-SharedText $script:tabLog).Substring($start), ('\[palette-row\] target=' + $Target + ' session=[01] left=(-?\d+) top=(-?\d+) height=(\d+) text=(-?\d+)'))
-            if ($paint.Count -eq 0 -or [int]$paint[-1].Groups[3].Value -le 0) { return $false }
-            $point.x = [int]$paint[-1].Groups[4].Value
-            $point.y = [int]$paint[-1].Groups[2].Value + [int][Math]::Floor([int]$paint[-1].Groups[3].Value / 2)
+            if ($paint.Count -eq 0 -or [int]$paint[$paint.Count - 1].Groups[3].Value -le 0) { return $false }
+            $point.x = [int]$paint[$paint.Count - 1].Groups[4].Value
+            $point.y = [int]$paint[$paint.Count - 1].Groups[2].Value + [int][Math]::Floor([int]$paint[$paint.Count - 1].Groups[3].Value / 2)
             return $true
         } 'fresh painted target row in the unchanged native menu'
         Assert-Foreground
@@ -91,8 +91,8 @@ function Confirm-ActionRow([int]$Target, [string]$Query = '') {
         $ready = [regex]::Matches($refresh, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
         # A refresh can invalidate a queued click. Reconfirm only an unchanged row, never an accepted action.
         if (-not $confirmation.retried -and $trace -notmatch '\[palette\] confirm target=' -and $newRows.Count -gt 0 -and $ready.Count -gt 0 -and
-            [int]$newRows[-1].Groups[1].Value -eq $Query.Length -and $newRows[-1].Groups[2].Value.Trim() -ceq ($rowIds -join ' ') -and
-            [int]$ready[-1].Groups[1].Value -eq $Query.Length -and [int]$ready[-1].Groups[2].Value -eq $target) {
+            [int]$newRows[$newRows.Count - 1].Groups[1].Value -eq $Query.Length -and $newRows[$newRows.Count - 1].Groups[2].Value.Trim() -ceq ($rowIds -join ' ') -and
+            [int]$ready[$ready.Count - 1].Groups[1].Value -eq $Query.Length -and [int]$ready[$ready.Count - 1].Groups[2].Value -eq $target) {
             $confirmation.retried = $true
             & $clickRow $nextOffset
         }
