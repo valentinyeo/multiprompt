@@ -245,7 +245,7 @@ function Edge-Blends([Drawing.Bitmap]$Bitmap, [Drawing.Color]$Photo, [Drawing.Co
     $span = $dr * $dr + $dg * $dg + $db * $db
     if ($span -lt 3000) { return 0 }
     $half = [int]($Bitmap.Width / 2) - 1
-    $inset = 2
+    $inset = 0
     $count = 0
     for ($y = $inset; $y -lt $half; $y++) {
         for ($x = $inset; $x -lt $half; $x++) {
@@ -511,7 +511,7 @@ try {
     Copy-Item $first.FullName (Join-Path $Evidence 'normalized-tall.png')
     Copy-Item $second.FullName (Join-Path $Evidence 'normalized-wide.png')
     Check 'second-bot-does-not-change-first' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
-    Focus; Press @(0x11, 0x4b); Query 'close tab' '(7197|6232)'; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'close tab' '7110'; Press @(0x0d)
     [void](Wait-For 'second local tab closed' { @((State).tabs | Where-Object { $_.name -eq 'Photo Beta' }).Count -eq 0 })
     Focus; Press @(0x11, 0x10, 0x54)
     [void](Wait-For 'second local tab reopened with same identity' { @((State).tabs | Where-Object { $_.name -ceq 'Photo Beta' -and $_.PSObject.Properties['avatar_local_id'] -and $_.avatar_local_id -ceq $secondId }).Count -eq 1 })

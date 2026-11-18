@@ -139,10 +139,9 @@ function Context([int]$Index) {
     $pair = Wait-For 'painted sidebar target' {
         $lines = (Log) -split '\r?\n'
         $found = $null
-        for ($i=0; $i -lt $lines.Count-1; $i++) {
-            if ($lines[$i] -match ('\[sidebar-avatar\] target='+$Index+' face=(\d+) color=(\d+)$')) {
-                $face=$Matches[1]; $color=$Matches[2]
-                if ($lines[$i+1] -match ('\[bots\] face='+$face+' color='+$color+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]) }
+        foreach ($line in $lines) {
+            if ($line -match ('\[photo-proof\] expanded target='+$Index+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) {
+                $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4])
             }
         }
         if ($found) { return ,$found }

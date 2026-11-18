@@ -19,6 +19,8 @@ $serviceProcess = $null
 $cert = $null
 $rootCertAdded = $false
 $failure = $null
+$privateValues = [Collections.Generic.List[string]]::new()
+$result = @{ status='failed'; error=$null; cleanup='pending'; version=$ExpectedVersion }
 $hostsFile = Join-Path $env:SystemRoot 'System32/drivers/etc/hosts'
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
 $savedEnv = @{}
@@ -29,6 +31,12 @@ function Read-ServerGroupText([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { return '' }
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     try { return (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+}
+function Protect-ServerGroupText([string]$Text) {
+    foreach ($value in $privateValues) { if ($value) { $Text = $Text.Replace($value, '[redacted]') } }
+    $Text = $Text -replace '(?i)Bearer\s+[^\s"'']+', 'Bearer [redacted]'
+    $Text = $Text -replace 'mpk_[A-Za-z0-9_-]+', '[redacted]'
+    return $Text
 }
 function Get-ServerGroupSession {
     $text = Read-ServerGroupText (Join-Path $settings 'session-server-group.json')
@@ -79,7 +87,7 @@ function Invoke-ServerGroupNode([string[]]$NodeArgs) {
     $nodeProcess = Start-Process -FilePath 'node' -ArgumentList (Format-ServerGroupArgs $NodeArgs) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     $combined = (Read-ServerGroupText $outputPath) + (Read-ServerGroupText $errorPath)
     Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
-    if ($nodeProcess.ExitCode -ne 0 -or $combined -match 'mpk_') { throw 'server group command failed' }
+    if ($nodeProcess.ExitCode -ne 0 -or $combined -match 'mpk_') { throw ('server group command failed: ' + (Protect-ServerGroupText $combined)) }
     return $combined
 }
 try {
@@ -99,6 +107,7 @@ try {
     $secure = New-Object Security.SecureString
     foreach ($char in ([guid]::NewGuid().ToString('N')).ToCharArray()) { $secure.AppendChar($char) }
     $plain = [Runtime.InteropServices.Marshal]::PtrToStringUni([Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($secure))
+    $privateValues.Add($plain)
     $pfx = Join-Path $workRoot 'account.pfx'
     $pem = Join-Path $workRoot 'account.pem'
     Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $secure | Out-Null
@@ -116,6 +125,7 @@ try {
     }
     if (-not $ready) { throw 'account service did not start' }
     $secrets = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    foreach ($property in $secrets.PSObject.Properties) { $privateValues.Add([string]$property.Value) }
     $credential = [Text.Encoding]::UTF8.GetBytes((@{ refresh_token = $secrets.refresh_token } | ConvertTo-Json -Compress))
     [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), [Security.Cryptography.ProtectedData]::Protect($credential, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
     $env:NODE_EXTRA_CA_CERTS = $pem
@@ -160,10 +170,14 @@ try {
     if (-not (Test-ServerGroupReady $second)) { throw 'second import lost the Runners group' }
     Save-ServerGroupShot (Join-Path $Evidence 'after.png')
     Copy-Item -LiteralPath (Join-Path $settings 'session-server-group.json') -Destination (Join-Path $Evidence 'session.json')
-    @{ verdict = 'pass'; group = 'Runners'; group_id = $runnerId; tabs = $firstTabs; groups = $firstGroups; second_import = 'unchanged'; version = $ExpectedVersion } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
+    $result.status = 'passed'
+    $result.group = 'Runners'
+    $result.group_id = $runnerId
+    $result.tabs = $firstTabs
+    $result.groups = $firstGroups
+    $result.second_import = 'unchanged'
 } catch {
     $failure = $_
-    @{ verdict = 'fail'; error = 'server group journey failed' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
 } finally {
     foreach ($ownedProcess in @($appProcess, $serviceProcess)) {
         if ($ownedProcess) {
@@ -171,11 +185,24 @@ try {
                 $ownedProcess.Refresh()
                 if (!$ownedProcess.HasExited) {
                     & taskkill.exe /PID $ownedProcess.Id /T /F 2>&1 | Out-Null
-                    [void]$ownedProcess.WaitForExit(10000)
+                    if (!$ownedProcess.WaitForExit(10000)) { throw 'Owned process survived server group cleanup' }
                 }
-            } catch {}
+            } catch { if (!$failure) { $failure = $_ } }
         }
     }
+    try {
+        foreach ($entry in @(
+            @{source=$logPath; name='debug.log'},
+            @{source=(Join-Path $workRoot 'desktop.log'); name='desktop.log'},
+            @{source=(Join-Path $workRoot 'desktop.err.log'); name='desktop.err.log'},
+            @{source=(Join-Path $workRoot 'service.log'); name='service.log'},
+            @{source=(Join-Path $workRoot 'service.err.log'); name='service.err.log'}
+        )) {
+            if (Test-Path -LiteralPath $entry.source) {
+                [IO.File]::WriteAllText((Join-Path $Evidence $entry.name), (Protect-ServerGroupText (Read-ServerGroupText $entry.source)))
+            }
+        }
+    } catch { if (!$failure) { $failure = $_ } }
     try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { if (!$failure) { $failure = $_ } }
     foreach ($envName in @($savedEnv.Keys)) { [Environment]::SetEnvironmentVariable($envName, $savedEnv[$envName], 'Process') }
     if ($cert) {
@@ -186,5 +213,11 @@ try {
     }
     try { if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction Stop } } catch { if (!$failure) { $failure = $_ } }
 }
-if ($failure) { throw 'Server group journey failed' }
+$result.cleanup = if (!(Test-Path -LiteralPath $workRoot)) { 'scratch removed' } else { 'scratch retained' }
+if ($failure) {
+    $result.status = 'failed'
+    $result.error = Protect-ServerGroupText ($failure.Exception.Message + ' at line ' + $failure.InvocationInfo.ScriptLineNumber)
+}
+$result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
+if ($failure) { throw $result.error }
 return
