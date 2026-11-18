@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ const github = 'noreply@github.com';
 const oldWorker = '2713+soft-worker@users.noreply.github.com';
 
 function fixture(t) {
+  assert.ok(existsSync(checker), 'PR commit identity enforcement must provide its CLI');
   const cwd = mkdtempSync(join(tmpdir(), 'commit-identities-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
