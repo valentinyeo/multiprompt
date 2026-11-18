@@ -460,6 +460,18 @@ function download(env, selectionFile, evidenceDir, baseSha) {
   const listed = gh(['api', `repos/${repo}/actions/runs/${env.RUN_ID}/artifacts`, '--paginate', '--jq', '.artifacts[] | {id,name,created_at,expired}'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
   const wanted = latestArtifacts(listed, selection, baseSha);
+  const ciReceipts = [];
+  for (const workflow of selection.ciWorkflows || []) {
+    const pr = JSON.parse(fs.readFileSync(path.join(path.dirname(selectionFile), 'pr.json'), 'utf8'));
+    const run = ciWorkflowRun(env, workflow, pr.headRefOid);
+    if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`CI workflow evidence is not successful: ${workflow}`);
+    const name = workflow.replace(/\.yml$/, '');
+    const artifacts = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${run.id}/artifacts`, '--jq', '.artifacts']));
+    const artifact = artifacts.filter(item => item.name === name && !item.expired).sort((a, b) => Number(b.id) - Number(a.id))[0];
+    if (!artifact) throw new Error(`CI workflow evidence artifact missing: ${name}`);
+    wanted.push(artifact);
+    ciReceipts.push({ workflow, ...run, artifact: name, artifact_id: artifact.id });
+  }
   fs.mkdirSync(evidenceDir, { recursive: true });
   for (const artifact of wanted) {
     const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
@@ -476,6 +488,7 @@ function download(env, selectionFile, evidenceDir, baseSha) {
       fs.renameSync(content, target);
     } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
   }
+  if (ciReceipts.length) fs.writeFileSync(path.join(evidenceDir, 'ci-workflows.json'), JSON.stringify(ciReceipts, null, 2));
   process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
 }
 
@@ -493,7 +506,23 @@ function judgeInputs(outDir, evidenceDir) {
   const selection = path.join(outDir, 'selection.json');
   if (fs.existsSync(selection)) {
     parts.push(`### selection.json\n${readCapped(selection)}`);
-    if (JSON.parse(fs.readFileSync(selection, 'utf8')).features?.length === 0) {
+    const plan = JSON.parse(fs.readFileSync(selection, 'utf8'));
+    if (plan.ciWorkflows?.length) {
+      const receiptFile = path.join(evidenceDir, 'ci-workflows.json');
+      if (!fs.existsSync(receiptFile)) throw new Error('CI workflow evidence receipts missing');
+      const receipts = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+      const pr = JSON.parse(fs.readFileSync(path.join(outDir, 'pr.json'), 'utf8'));
+      parts.push(`### evidence/ci-workflows.json\n${readCapped(receiptFile)}`);
+      for (const workflow of plan.ciWorkflows) {
+        const artifact = workflow.replace(/\.yml$/, '');
+        const receipt = receipts.find(item => item.workflow === workflow && item.artifact === artifact && item.head_sha === pr.headRefOid && item.conclusion === 'success');
+        const summary = path.join(evidenceDir, artifact, 'summary.json');
+        if (!receipt || !fs.existsSync(summary) || !fs.statSync(summary).size) throw new Error(`CI workflow evidence missing or stale: ${workflow}`);
+        JSON.parse(fs.readFileSync(summary, 'utf8'));
+        parts.push(`### evidence/${artifact}/summary.json\n${readCapped(summary)}`);
+      }
+    }
+    if (plan.features?.length === 0) {
       for (const [name, limit] of [['ci.json', 12000], ['diff.patch', 30000]]) {
         const file = path.join(outDir, name);
         if (!fs.existsSync(file) || !fs.statSync(file).size) throw new Error(`CI-only review is missing required evidence: ${name}`);
@@ -525,6 +554,7 @@ function judgeMessages(material) {
     'BLOCKED: infrastructure prevented verification, including timeout, cancellation, missing evidence, harness error or runner queue. Missing cleanup evidence is BLOCKED, not a product FAIL.',
     'selection.features is the authoritative execution plan; picker suggestions in reason or doneWhen do not add planned journeys.',
     'An empty selection.features is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch instead of requiring desktop result.json, doctor.json or base comparisons.',
+    'Selected ciWorkflows provide exact-head run receipts and raw summary.json evidence. A successful verification workflow may report inherited source findings; those remain findings, not property passes. Judge them against the patch and inheritance proof.',
     'Use PASS+NOTES for behavior not covered by the CI-only evidence. Still use FAIL for a regression shown by the patch or checks, and BLOCKED for missing required CI evidence or an API failure.',
     'CI snapshots include supplementary pending checks and expected negative controls. Interpret them using the patch and aggregate gates; do not mistake them for missing selected journeys or automatically treat a negative control as a regression.',
     'Reply with one JSON object only: {"verdict":"PASS"|"PASS+NOTES"|"FAIL"|"BLOCKED","evidence":[at most 8 plain sentences, each naming the file or journey it comes from]}.',
@@ -638,6 +668,12 @@ function testsRuns(env, headSha, suites) {
   return runs;
 }
 
+function ciWorkflowRun(env, workflow, head) {
+  if (!/^[a-z0-9-]+\.yml$/.test(workflow) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('Invalid CI workflow or head');
+  const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/${workflow}/runs?head_sha=${head}&event=pull_request&per_page=20`, '--jq', '[.workflow_runs[] | {id, head_sha, status, conclusion}]']));
+  return runs.filter(run => run.head_sha === head).sort((a, b) => Number(b.id) - Number(a.id))[0];
+}
+
 async function waitForTests(env) {
   let head = String(env.HEAD_SHA || '').trim();
   if (!/^[0-9a-f]{40}$/.test(head)) {
@@ -651,14 +687,19 @@ async function waitForTests(env) {
   const maxPoll = Number(env.MAX_POLL_MS || 300000);
   if (!Number.isFinite(poll) || poll <= 0 || !Number.isFinite(maxPoll) || maxPoll < poll) throw new Error('POLL_MS must be positive and MAX_POLL_MS must be at least POLL_MS');
   for (;;) {
-    const decision = testsGate(testsRuns(env, head));
-    process.stdout.write(`${decision.reason}\n`);
-    if (decision.action === 'pass') return setOutputs({ result: 'PASS', head_sha: head });
-    if (decision.action === 'fail' || decision.action === 'blocked') {
-      const error = new Error(decision.reason);
-      error.verdict = decision.action === 'fail' ? 'FAIL' : 'BLOCKED';
+    const decisions = [testsGate(testsRuns(env, head)), ...JSON.parse(env.CI_WORKFLOWS || '[]').map(workflow => {
+      const run = ciWorkflowRun(env, workflow, head);
+      const decision = testsGate(run ? [run] : []);
+      return { ...decision, reason: `${workflow}: ${decision.reason}` };
+    })];
+    for (const decision of decisions) process.stdout.write(`${decision.reason}\n`);
+    const failure = decisions.find(decision => decision.action === 'fail' || decision.action === 'blocked');
+    if (failure) {
+      const error = new Error(failure.reason);
+      error.verdict = failure.action === 'fail' ? 'FAIL' : 'BLOCKED';
       throw error;
     }
+    if (decisions.every(decision => decision.action === 'pass')) return setOutputs({ result: 'PASS', head_sha: head });
     if (Date.now() + poll > deadline) throw new Error('Tests did not pass before the wait ended');
     await new Promise(resolveWait => setTimeout(resolveWait, poll));
     poll = Math.min(poll * 2, maxPoll);
@@ -692,6 +733,7 @@ async function main(argv, env) {
     selection.compareBase = selection.features.length > 0;
     selection.unmapped = mapped.unmapped;
     selection.nearest = mapped.nearest || [];
+    selection.ciWorkflows = mapped.ciWorkflows || [];
     if (selection.nearest.length) {
       const note = `No file ownership matched; nearest feature by map: ${selection.nearest.map(entry => `${entry.feature} for ${entry.file}`).join(', ')}.`;
       selection.reason = note;
@@ -703,7 +745,7 @@ async function main(argv, env) {
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
     const base = selection.compareBase ? selection.features : [];
-    setOutputs({ features: JSON.stringify(selection.features), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
+    setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
     return undefined;
   }
   if (command === 'pick-deepseek') return pickDeepseek(env, rest[0]);

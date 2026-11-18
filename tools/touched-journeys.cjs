@@ -5,12 +5,16 @@ const { discoverFeatures } = require('./verify-features.cjs');
 function touchedJourneys(files, directory = path.join(__dirname, '../.claude/skills/verify-multiprompt/features')) {
   const { available } = discoverFeatures(directory);
   const selected = new Set();
+  const ciWorkflows = new Set();
   const unmapped = [];
-  const maps = available.map(feature => {
-    const text = fs.readFileSync(path.join(directory, `${feature}.md`), 'utf8');
+  const maps = fs.readdirSync(directory).filter(file => file.endsWith('.md')).flatMap(file => {
+    const feature = path.basename(file, '.md');
+    const text = fs.readFileSync(path.join(directory, file), 'utf8');
+    const ciWorkflow = text.match(/^CI workflow: ([a-z0-9-]+\.yml)$/m)?.[1];
+    if (!available.includes(feature) && !ciWorkflow) return [];
     const sources = text.match(/^Source files: (.+)$/m)?.[1].split(', ') || [];
     const covers = text.match(/^Covers: (.+)$/m)?.[1].split(', ').filter(entry => /^(?:src|tools|extension|\.github|\.claude)\//.test(entry)) || [];
-    return { feature, sources: [...sources, ...covers] };
+    return [{ feature, ciWorkflow, sources: [...sources, ...covers] }];
   });
   for (const file of files) {
     if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) continue;
@@ -18,13 +22,16 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
       const pattern = source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
       return new RegExp(`^${pattern}$`).test(file);
     }));
-    for (const map of matches) selected.add(map.feature);
+    for (const map of matches) {
+      if (map.ciWorkflow) ciWorkflows.add(map.ciWorkflow);
+      else selected.add(map.feature);
+    }
     if (!matches.length) unmapped.push(file);
   }
   const nearest = [];
-  if (!selected.size && files.length) {
+  if (!selected.size && !ciWorkflows.size && files.length) {
     const tokens = value => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2 && !['src', 'tools', 'github', 'workflows', 'claude', 'skill', 'skills', 'verify', 'multiprompt', 'feature', 'features', 'control', 'test', 'readme', 'zig', 'ps1', 'cjs', 'mjs', 'yml'].includes(word)));
-    const ranked = maps.flatMap(map => {
+    const ranked = maps.filter(map => !map.ciWorkflow).flatMap(map => {
       const names = tokens(map.feature);
       const sources = tokens(map.sources.join(' '));
       return (unmapped.length ? unmapped : files).map(file => {
@@ -35,7 +42,7 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
     selected.add(ranked[0].feature);
     nearest.push({ file: ranked[0].file, feature: ranked[0].feature });
   }
-  return { features: [...selected].sort(), unmapped, ...(nearest.length ? { nearest } : {}) };
+  return { features: [...selected].sort(), unmapped, ...(nearest.length ? { nearest } : {}), ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
 }
 
 async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {

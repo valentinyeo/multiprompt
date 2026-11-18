@@ -31,8 +31,8 @@ test('an unknown tool does not expand an already mapped plan', () => {
   assert.ok(result.unmapped.includes('tools/new-ci-tool.cjs'));
 });
 
-test('only cheap gates and the fixed path-filtered stillness journey run on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml']);
+test('only cheap gates and fixed path-filtered checks run on pull requests', () => {
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml']);
   assert.match(fs.readFileSync(path.join(root, '.github/workflows/chat-still.yml'), 'utf8'), /^  pull_request:/m, 'The fixed stillness gate must run on chat PRs');
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
@@ -60,6 +60,22 @@ test('only cheap gates and the fixed path-filtered stillness journey run on pull
     assert.match(source, /^  workflow_dispatch:/m, name);
     assert.match(source, /^  schedule:\n    - cron: '[^']+ \* \* \*'/m, name);
   }
+});
+
+test('formal delivery PR checks stay bounded, source-filtered and Linux-only', () => {
+  const workflowPath = path.join(root, '.github/workflows/chat-delivery-formal.yml');
+  assert.ok(fs.existsSync(workflowPath), 'The required formal delivery workflow must be installed');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const coverage = JSON.parse(fs.readFileSync(path.join(root, '.claude/skills/verify-chat-delivery-formal/coverage.json'), 'utf8'));
+  const paths = workflow.split('\n  pull_request:\n')[1].split('\n  workflow_dispatch:')[0];
+  for (const file of Object.keys(coverage.files)) assert.ok(paths.includes(`'${file}'`), file);
+  assert.match(paths, /paths:\n/);
+  const formal = workflow.split('\n  formal:\n')[1].split('\n  comment-review:')[0];
+  assert.match(formal, /runs-on: ubuntu-latest/);
+  assert.match(formal, /timeout-minutes: 10/);
+  assert.match(formal, /check\.py --self-test --inherit-from/);
+  assert.doesNotMatch(workflow, /windows-latest|uses: .*verify\.yml/);
+  assert.match(workflow.split('\n  comment-review:\n')[1], /if: github.event_name == 'workflow_dispatch'/);
 });
 
 test('PR performance probes are nightly and do not block the cheap aggregate', () => {

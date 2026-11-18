@@ -31,6 +31,33 @@ test('source-file mapping runs only the touched journeys', t => {
   assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory).features, ['chat-view']);
 });
 
+test('formal verification owns its files without selecting an unrelated desktop journey', t => {
+  const directory = maps(t);
+  fs.writeFileSync(path.join(directory, 'chat-delivery-formal.md'), '# Formal chat delivery\nSource files: .claude/skills/verify-chat-delivery-formal/*, .github/workflows/chat-delivery-formal.yml\nCI workflow: chat-delivery-formal.yml\n');
+  for (const file of ['.claude/skills/verify-chat-delivery-formal/view.mjs', '.claude/skills/verify-chat-delivery-formal/Delivery.tla', '.github/workflows/chat-delivery-formal.yml', '.claude/skills/verify-multiprompt/features/chat-delivery-formal.md']) {
+    assert.deepEqual(touchedJourneys([file], directory), { features: [], unmapped: [], ciWorkflows: ['chat-delivery-formal.yml'] });
+    assert.deepEqual(touchedJourneys([file, 'src/themes.zig'], directory), { features: ['appearance'], unmapped: [], ciWorkflows: ['chat-delivery-formal.yml'] });
+  }
+  assert.ok(!discoverFeatures(directory).available.includes('chat-delivery-formal'));
+});
+
+test('the verifier preserves CI ownership in its execution plan', t => {
+  const directory = maps(t);
+  const out = path.join(directory, 'out');
+  fs.mkdirSync(out);
+  fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Formal chat check', body: '', labels: [] }));
+  fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: [], unmapped: [], ciWorkflows: ['chat-delivery-formal.yml'] }));
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: '{"features":[],"compare_base":true}' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
+  assert.deepEqual(selection.features, []);
+  assert.deepEqual(selection.ciWorkflows, ['chat-delivery-formal.yml']);
+  assert.equal(selection.compareBase, false);
+  assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /ci_workflows=\["chat-delivery-formal.yml"\]/);
+});
+
 test('unknown application files choose one nearest journey and disclose the gap', t => {
   const directory = maps(t);
   assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: ['appearance'], unmapped: ['src/new_feature.zig'], nearest: [{ file: 'src/new_feature.zig', feature: 'appearance' }] });
