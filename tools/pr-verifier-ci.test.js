@@ -94,23 +94,22 @@ test('the workflow collects all exact-head CI checks once and never reuses an ol
   assert.ok(step, 'CI-only verdicts need current-head CI evidence');
   assert.match(step, /if: .*needs\.select\.outputs\.features == '\[\]'/);
   assert.match(step, /HEAD_SHA: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/);
+  assert.match(step, /shell: bash/);
   const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
   fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\\n');
+if (args.includes('--slurp') && args.includes('--jq')) process.exit(2);
 if (process.env.API_ERROR) process.exit(7);
-const output = spawnSync('jq', [args[args.indexOf('--jq') + 1]], { input: process.env.PAGES, encoding: 'utf8' });
-process.stdout.write(output.stdout || '');
-process.stderr.write(output.stderr || '');
-process.exit(output.status);
+for (const page of JSON.parse(process.env.PAGES)) console.log(JSON.stringify(page));
+if (process.env.PARTIAL_API_ERROR) process.exit(7);
 `, { mode: 0o755 });
   const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, REQUESTS: path.join(dir, 'requests'), HEAD_SHA: head, REPO: 'owner/repo', PAGES: JSON.stringify([
     { check_runs: [{ name: 'test', head_sha: head, status: 'completed', conclusion: 'success', details_url: 'https://example.test/tests' }, { name: 'pstack-verifier', head_sha: head, conclusion: 'failure' }] },
     { check_runs: [{ name: 'counters', head_sha: head, status: 'completed', conclusion: 'success', details_url: 'https://example.test/counters' }] },
   ]) };
-  const run = extra => spawnSync('bash', ['-e', '-c', script], { cwd: dir, env: { ...env, ...extra }, encoding: 'utf8' });
+  const run = extra => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd: dir, env: { ...env, ...extra }, encoding: 'utf8' });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   const snapshot = JSON.parse(fs.readFileSync(path.join(dir, 'verifier-out/ci.json'), 'utf8'));
@@ -120,8 +119,10 @@ process.exit(output.status);
   assert.equal(calls.length, 1);
   assert.ok(calls[0].includes(`repos/owner/repo/commits/${head}/check-runs?filter=latest&per_page=100`));
   assert.ok(calls[0].includes('--paginate'));
-  assert.ok(calls[0].includes('--slurp'));
-  assert.equal(run({ API_ERROR: '1' }).status, 7);
+  assert.equal(calls[0].includes('--slurp'), false);
+  assert.equal(calls[0].includes('--jq'), false);
+  assert.notEqual(run({ API_ERROR: '1' }).status, 0);
   assert.equal(fs.readFileSync(path.join(dir, 'verifier-out/ci.json'), 'utf8'), '');
   assert.notEqual(run({ PAGES: '[{"check_runs":[]}]' }).status, 0);
+  assert.equal(run({ PARTIAL_API_ERROR: '1' }).status, 7);
 });

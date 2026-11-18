@@ -282,14 +282,14 @@ jobs:
           path: evidence
       - name: Collect current-head CI evidence
         if: steps.selection.outcome == 'success' && needs.select.outputs.features == '[]'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
         run: |
-          gh api --paginate --slurp \
-            "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100" \
-            --jq '{checks: [.[].check_runs[] | select(.name | startswith("pstack-verifier") | not) | {name, head_sha, status, conclusion, details_url}]} | if .checks | length == 0 then error("No current-head CI evidence") else . end' > verifier-out/ci.json
+          gh api --paginate "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100" |
+            jq -cs '{checks: [.[].check_runs[] | select(.name | startswith("pstack-verifier") | not) | {name, head_sha, status, conclusion, details_url}]} | if .checks | length == 0 then error("No current-head CI evidence") else . end' > verifier-out/ci.json
       - name: Download the journey evidence
         id: evidence
         continue-on-error: true
