@@ -120,7 +120,7 @@ test('a missing credential or bad arguments fail before any board call', async t
 });
 
 test('the workflow gives the board step only its own agent secret and GitHub calls use the job token', () => {
-  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'auto-revert-master.yml'), 'utf8');
+  const workflow = fs.readFileSync(path.join(__dirname, '..', 'tools', 'workflow-archive', 'auto-revert-master.yml'), 'utf8');
   assert.match(workflow, /HYPERTASK_AGENT_TOKEN: \$\{\{ secrets\.HYPERTASK_AGENT_TOKEN \}\}/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.ok(!/secrets\.(?!HYPERTASK_AGENT_TOKEN\b)/.test(workflow));

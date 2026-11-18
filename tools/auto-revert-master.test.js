@@ -424,7 +424,7 @@ test('revert PR dispatches exactly the required workflows on its branch after cr
   }
   const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
   assert.deepEqual(required, ['click-through', 'no-comments', 'secret-scan', 'test', 'verify (appearance)']);
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+  const workflow = fs.readFileSync(`${__dirname}/../tools/workflow-archive/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  actions: write\n/);
 });
 
@@ -548,8 +548,9 @@ for (const [name, failure, blocked] of [
   assert.equal(result.process.exitCode, 1);
 });
 
-test('auto-revert stays manual-only and never reacts to a failed or cancelled master push', () => {
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+test('auto-revert is archived outside GitHub workflow discovery', () => {
+  assert.ok(!fs.existsSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`));
+  const workflow = fs.readFileSync(`${__dirname}/../tools/workflow-archive/auto-revert-master.yml`, 'utf8');
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
   assert.match(events, /^  workflow_dispatch:\n/m);
   assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch|schedule):/m);
@@ -557,7 +558,7 @@ test('auto-revert stays manual-only and never reacts to a failed or cancelled ma
 });
 
 test('auto-revert workflow grants contents and pull-request writes with the existing token', () => {
-  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+  const workflow = fs.readFileSync(`${__dirname}/../tools/workflow-archive/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  contents: write\n/);
   assert.match(workflow, /\n  pull-requests: write\n/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
