@@ -260,8 +260,6 @@ pub fn headerClick(x: i32, y: i32) bool {
         close();
         return true;
     }
-    const started = w.GetTickCount64();
-    @import("diagnostics.zig").debugLog("workspace-menu open begin");
     focus.cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
     workspaces.refreshMenuEntries();
@@ -290,8 +288,6 @@ pub fn headerClick(x: i32, y: i32) bool {
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(hwnd);
     _ = w.InvalidateRect(hwnd, null, 0);
-    var log: [80]u8 = undefined;
-    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "workspace-menu open ready elapsed_ms={d}", .{w.GetTickCount64() - started}) catch "workspace-menu open ready");
     return true;
 }
 
