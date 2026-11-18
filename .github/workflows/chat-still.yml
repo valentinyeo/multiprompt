@@ -1,6 +1,23 @@
 name: Chat stillness
 
 on:
+  pull_request:
+    paths:
+      - 'src/chat*'
+      - 'src/app_state.zig'
+      - 'src/main.zig'
+      - 'src/layout.zig'
+      - 'src/window_layout.zig'
+      - 'src/browser_pane.zig'
+      - 'src/drawing.zig'
+      - 'tools/chat-still/**'
+      - 'tools/verify-chat-delivery/**'
+      - 'tools/verify-chat-still'
+      - 'tools/pr-verifier*'
+      - '.claude/skills/verify-multiprompt/**'
+      - '.github/workflows/chat-still.yml'
+      - '.github/workflows/verify.yml'
+      - '.github/workflows/pr-verifier.yml'
   schedule:
     - cron: '0 5 * * *'
   workflow_dispatch:
