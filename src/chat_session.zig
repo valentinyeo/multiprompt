@@ -2070,7 +2070,7 @@ pub fn refreshChatTranscript(force: bool) void {
     const old_content_h = app_state.g_chat_content_h;
     const old_top_pad = app_state.g_chat_layout_top_pad;
     const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready;
-    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force, app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
+    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force or (app_state.g_chat_read_hold and app_state.g_chat_read_open_ready), app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
     const anchor = if (old_content_h > 0 and (!follow_bottom or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y) else null;
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
@@ -2627,7 +2627,8 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     var viewport: RECT = undefined;
     @import("chat_render.zig").chatViewClientRect(&viewport);
     const viewport_h = viewport.bottom - viewport.top;
-    app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h;
+    app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h - 100;
+    app_state.g_chat_scrolled_up = true;
     for (3..5) |turn| {
         var arrival = try perfWire(a, "term-4", 2048, @intCast(turn), entries[last].history.offset);
         defer arrival.deinit(a);
