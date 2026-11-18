@@ -3,6 +3,7 @@
 Reach the same session, workspace, chat, browser, and window actions without the mouse.
 
 Journeys: chat-focus, workspace-focus
+Release paths: src/shortcuts.zig, src/focus.zig, src/key*.zig, src/main.zig, build.zig
 
 ## Sub-features
 - `reference` opens the keyboard shortcut list.

@@ -3,6 +3,7 @@
 Restore saved work after reopening and install a verified update without losing sessions.
 
 Journeys: session-restore, safe-updates
+Release paths: src/startup.zig, src/update*, src/release_signing_public_key.txt, src/main.zig, build.zig
 
 ## Sub-features
 - `restore` reopens saved sessions, workspace selection, and views.
