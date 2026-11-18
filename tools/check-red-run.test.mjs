@@ -26,7 +26,7 @@ test('red-run reserves a bounded hosted budget for video dependencies and mandat
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/check-red-run.yml'), 'utf8');
   const job = workflow.split('\n  check-red-run:\n')[1];
   assert.match(job, /timeout-minutes: 20\n/);
-  assert.match(job, /sudo apt-get update -qq && sudo apt-get install -y ffmpeg/);
+  assert.match(job, /run: bash tools\/ensure-video-tools\.sh/);
   assert.match(job, /run: node --test tools\/check-red-run\.test\.mjs/);
   assert.match(job, /run: node tools\/check-red-run\.mjs "\$BASE" "\$HEAD"/);
   assert.doesNotMatch(job, /continue-on-error:/);

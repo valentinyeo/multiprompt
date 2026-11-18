@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 const gateFile = new URL('./release-journeys.mjs', import.meta.url);
 const { releaseMaps, releasePlan, collectPlan, checkEvidence, evidenceNotes } = fs.existsSync(gateFile) ? await import(gateFile.href) : {};
@@ -14,8 +14,41 @@ test('releases have an executable candidate journey gate', () => {
 
 test('every Linux video-checking job installs the decoder', () => {
   for (const workflow of ['test.yml', 'check-red-run.yml', 'release.yml']) {
-    assert.match(fs.readFileSync(`.github/workflows/${workflow}`, 'utf8'), /sudo apt-get install -y ffmpeg/, workflow);
+    assert.match(fs.readFileSync(`.github/workflows/${workflow}`, 'utf8'), /run: bash tools\/ensure-video-tools\.sh/, workflow);
   }
+});
+
+test('Linux video setup reuses working tools without waiting on the package mirror', { skip: process.platform !== 'linux' }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-tools-present-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const tool of ['ffmpeg', 'ffprobe']) fs.writeFileSync(path.join(dir, tool), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, 'sudo'), '#!/bin/sh\necho "unexpected package mirror request" >&2\nexit 71\n', { mode: 0o755 });
+  for (const workflow of ['test.yml', 'check-red-run.yml', 'release.yml']) {
+    const source = fs.readFileSync(`.github/workflows/${workflow}`, 'utf8');
+    const command = source.match(/- name: Install video validation tools\n\s+run: (.+)/)?.[1];
+    assert.ok(command, workflow);
+    assert.doesNotThrow(() => execFileSync('/bin/bash', ['-e', '-c', command], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNNER_TEMP: dir, GITHUB_PATH: path.join(dir, 'github-path') }, stdio: 'pipe',
+    }), workflow);
+  }
+});
+
+test('Linux video setup rejects a corrupt download before extracting or publishing tools', { skip: process.platform !== 'linux' }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-tools-corrupt-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  for (const tool of ['uname', 'mkdir', 'sha256sum']) fs.symlinkSync(`/usr/bin/${tool}`, path.join(bin, tool));
+  fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/bash\nwhile [ "$#" -gt 0 ]; do\n if [ "$1" = --output ]; then printf corrupt > "$2"; exit 0; fi\n shift\ndone\nexit 1\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'tar'), `#!/bin/bash\nprintf extracted > '${dir}/extracted'\n`, { mode: 0o755 });
+  const githubPath = path.join(dir, 'github-path');
+  const result = spawnSync('/bin/bash', ['tools/ensure-video-tools.sh'], {
+    env: { ...process.env, PATH: bin, RUNNER_TEMP: dir, GITHUB_PATH: githubPath }, encoding: 'utf8',
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /checksum|FAILED/);
+  assert.equal(fs.existsSync(path.join(dir, 'extracted')), false);
+  assert.equal(fs.existsSync(githubPath), false);
 });
 
 const sha = 'a'.repeat(40);

@@ -34,7 +34,7 @@ jobs:
       - name: Test automatic crash report triage
         run: node --test tools/crash-report-tickets.test.js
       - name: Install video validation tools
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+        run: bash tools/ensure-video-tools.sh
       - name: Test release candidate video gate
         run: node --test tools/release-journeys.test.mjs
       - name: Test release tag publication
