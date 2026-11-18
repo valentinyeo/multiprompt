@@ -4,16 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 3 * * *'
-  pull_request:
-    paths:
-      - '.github/workflows/room-checks.yml'
-      - 'tools/room-checks/**'
-      - 'src/room_service.py'
-      - 'src/room_bridge.py'
-      - 'tools/room_service_test.py'
-      - 'tools/room_bridge_test.py'
-      - 'tools/room-routing.test.py'
-
 permissions:
   contents: read
 

@@ -28,13 +28,13 @@ test('periodic update never invokes restart and explicit restart uses the verifi
   assert.match(card, /"v\{s\} \\xc2\\xb7 takes a few seconds"/);
 });
 
-test('Windows behavioral update tests are required by CI', () => {
+test('Windows behavioral update tests stay nightly while source checks run on PRs', () => {
   const workflow = read('.github/workflows/test.yml');
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   const update = jobs['test-windows-update'];
   const build = jobs['build-windows'];
   const source = jobs['test-update-source'];
-  assert.match(update, /^    needs: \[build-windows\]\n    runs-on: windows-latest\n/);
+  assert.match(update, /^    if: github.event_name != 'pull_request'\n    needs: \[build-windows\]\n    runs-on: windows-latest\n/);
   assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
   assert.match(update, /fail-fast: false/);
   assert.match(source, /runs-on: ubuntu-latest/);

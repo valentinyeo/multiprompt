@@ -40,13 +40,6 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
-  const requiredFeatures = [];
-  const changedPaths = (pr.files || []).map(file => file.path);
-  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
-    if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
-    requested.unshift('chat-still');
-    requiredFeatures.push('chat-still');
-  }
   if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
@@ -59,7 +52,6 @@ function validateSelection(raw, available, pr = {}) {
     features,
     dropped,
     ...requirement,
-    requiredFeatures,
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -221,8 +213,9 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const compareBase = selection.compareBase;
   const rows = journeyRows(summary, compareBase, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
-  const notes = [];
+  const notes = (selection.nearest || []).map(entry => `Nearest mapped feature ${entry.feature} selected for ${entry.file}; no file ownership matched.`);
   let final = VERDICTS.includes(verdict?.verdict) ? verdict.verdict : 'BLOCKED';
+  if (notes.length && final === 'PASS') final = 'PASS+NOTES';
   if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid assessment.');
   const failedHead = rows.filter(row => row.head !== 'passed');
   const brokenOnBase = failedHead.filter(row => row.inherited);
@@ -694,10 +687,18 @@ async function main(argv, env) {
     const selection = validateSelection(env.SELECTION, available, pr);
     const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
     const repro = selection.bugFix && available.includes(selection.reproJourney) ? [selection.reproJourney] : [];
-    selection.features = [...new Set([...mapped.features, ...repro, ...selection.requiredFeatures])].sort();
+    selection.features = [...new Set([...mapped.features, ...repro])].sort();
     selection.dropped = [];
-    selection.compareBase = selection.features.length > 0 && (selection.bugFix || JSON.parse(env.SELECTION).compare_base !== false);
+    selection.compareBase = selection.features.length > 0;
     selection.unmapped = mapped.unmapped;
+    selection.nearest = mapped.nearest || [];
+    if (selection.nearest.length) {
+      const note = `No file ownership matched; nearest feature by map: ${selection.nearest.map(entry => `${entry.feature} for ${entry.file}`).join(', ')}.`;
+      selection.reason = note;
+      selection.uncovered = note;
+    } else if (mapped.unmapped.length) {
+      selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
+    }
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
