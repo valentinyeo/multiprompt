@@ -2092,8 +2092,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         paired = pair_tool_rows(rows)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
-    shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
-    header = f"@mp\t{rid}\thistory\tok\t{sid}\t{base}\t{end}\t{info.st_ino}\t{int(more)}\t{shown_agent}\t{tmux or '-'}\t{info.st_mtime_ns}\t{probe}\t{mode}\t{oldest}"
+    header = f"@mp\t{rid}\thistory\tok\t{sid}\t{base}\t{end}\t{info.st_ino}\t{int(more)}\t{agent}\t{tmux or '-'}\t{info.st_mtime_ns}\t{probe}\t{mode}\t{oldest}"
     return "\n".join((header, *(wire_row(row) for row in paired), *((wire_row(status),) if status else ()), END, ""))
 
 
@@ -4068,9 +4067,6 @@ def host_switch_handover(rows, provider, target):
 
 
 def host_switch_ai(provider, sid, target):
-    moved = host_switch_follow(sid)
-    if moved is not None:
-        provider, sid = moved
     if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
         return dict(status="refused", reason="unsupported_provider")
     config = host_config(provider, sid)
@@ -6045,7 +6041,7 @@ def host_cli(argv):
     provider, sid = rest[0], rest[1]
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
-    if command not in ("enable", "disable"):
+    if command not in ("enable", "disable", "switch-ai"):
         moved = host_switch_follow(sid)
         if moved is not None:
             provider, sid = moved
@@ -7901,11 +7897,8 @@ def serve_request(line, source, subscriptions, lock):
         if type(rid) is not int or rid < 0:
             rid = 0
             raise ValueError("invalid request id")
-        moved = host_switch_follow(query.get("sid"))
+        moved = host_switch_follow(query.get("sid")) if query.get("op") != "switch_ai" else None
         if moved is not None:
-            asked = query.get("provider")
-            if asked in HOST_PROVIDERS:
-                query["_asked_provider"] = asked
             query["provider"], query["sid"] = moved
         if query.get("op") == "engine_info":
             serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1], room_message_protocols=[ROOM_MESSAGE_PROTOCOL]))
@@ -8047,7 +8040,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 124
+RUNTIME_GENERATION = 122
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8150,13 +8143,6 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    zsb_source = globals().get('ZSB_SOURCE')
-                    if isinstance(zsb_source, str) and zsb_source:
-                        try:
-                            publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
-                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
