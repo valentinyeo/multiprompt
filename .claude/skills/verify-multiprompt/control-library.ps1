@@ -576,7 +576,7 @@ function Invoke-JourneyCommand {
         if ($trace -notmatch '\[palette\] ready chars=0 count=\d+ target=\d+') { return $false }
         Doctor
         Assert-Foreground
-        [void][VerifyNative]::SetForegroundWindow($script:window)
+        if ([VerifyNative]::GetForegroundWindow() -ne $script:window) { [VerifyNative]::BringToForeground($script:window) }
         $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
     } 'command palette initialized and owned frame focused' 20
     Type-Text $query

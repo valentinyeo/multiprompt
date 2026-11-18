@@ -119,6 +119,28 @@ test('each generated driver row selects and executes with both JSON array output
   }
 });
 
+test('palette activation recovers a hidden owned console without weakening focus checks', async t => {
+  await generator();
+  const { spawnSync } = await import('node:child_process');
+  const shell = process.env.PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
+  const available = spawnSync(shell, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' });
+  if (available.error?.code === 'ENOENT' && process.platform !== 'win32') return t.skip('PowerShell execution is required by Windows CI');
+  assert.equal(available.status, 0, available.stderr);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'palette-focus-unit-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  for (const [blocked, ready] of [[false, false], [true, false], [false, true]]) {
+    const run = spawnSync(shell, ['-NoProfile', '-File', path.join(root, 'tools/fixtures/SOFT-2666/palette-focus-unit.ps1'), '-Library', path.join(root, skill, 'control-library.ps1'), '-Scratch', scratch, ...(blocked ? ['-BlockFocus'] : []), ...(ready ? ['-AlreadyFocused'] : [])], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    const observed = JSON.parse(run.stdout);
+    assert.equal(observed.status, blocked ? 'failed' : 'passed', JSON.stringify(observed));
+    assert.equal(observed.typed, blocked ? '' : 'themes');
+    assert.equal(observed.confirmed, !blocked);
+    assert.equal(observed.foreground, blocked ? 29 : 17);
+    assert.equal(observed.activations, ready ? 0 : 1);
+    if (blocked) assert.match(observed.error, /command palette initialized and owned frame focused/);
+  }
+});
+
 test('hosted desktop routing runs generated rows and rejects a mutation failing for the wrong reason', async () => {
   await generator();
   const workflow = read('.github/workflows/verify.yml');
