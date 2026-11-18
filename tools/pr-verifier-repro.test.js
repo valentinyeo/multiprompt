@@ -94,6 +94,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.ok(calls.some(args => args.includes(`repos/owner/repo/statuses/${'a'.repeat(40)}`) && args.includes('state=pending') && args.includes('context=pstack-verifier')), 'a metadata rerun must invalidate a previous green status on the same head');
     run(['prepare', dir]);
     assert.equal(fs.existsSync(path.join(dir, 'mapped.json')), true, 'Preparation retains the touched-source selection alongside the required repro');
+    assert.equal(fs.existsSync(path.join(dir, 'diff.patch')), true, 'Preparation saves the actual diff for independent CI-only review');
     const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [], compare_base: false }) });
     assert.match(selected, /repro_features=\["appearance"\]/);
     assert.match(selected, /features=\["appearance"\]/);
