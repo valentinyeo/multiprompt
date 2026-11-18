@@ -42,23 +42,21 @@ function Open-ActionPalette([string]$Route, [long]$Id) {
     }
     Wait-Until { (Read-SharedText $script:tabLog).Substring($offset) -match '\[palette\] rows chars=0 count=\d+ ids=' } 'fresh native palette rows'
 }
-function Select-ActionRow([string]$Symbol, [string]$Query = '', [int]$Choice = 0) {
-    $property = $script:tabTargets.PSObject.Properties[$Symbol]
-    if ($null -eq $property) { throw "Unknown tab action symbol $Symbol" }
-    $target = [int]$property.Value + $Choice
+function Confirm-ActionRow([int]$Target, [string]$Query = '') {
     $offset = (Read-SharedText $script:tabLog).Length
     if ($Query) { Type-Text $Query }
     $pattern = '\[palette\] rows chars=' + $Query.Length + ' count=\d+ ids=([^\r\n]+)'
     Wait-Until {
         $rows = [regex]::Matches((Read-SharedText $script:tabLog).Substring($script:tabPaletteOffset), $pattern)
         $rows.Count -gt 0 -and @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ') -contains [string]$target
-    } "native menu contains $Symbol choice $Choice"
+    } "native menu contains target $Target"
     $rows = [regex]::Matches((Read-SharedText $script:tabLog).Substring($script:tabPaletteOffset), $pattern)
-    $ids = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ')
+    $rowIds = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ')
+    $ids = @($rowIds | Where-Object { $_ -notmatch '^h\d+$' })
     Press @(0x24) 'Home: first visible action'
     for ($i = 0; $i -lt [Array]::IndexOf($ids, [string]$target); $i++) { Press @(0x28) 'Down: requested action row' }
     $nextOffset = (Read-SharedText $script:tabLog).Length
-    Press @(0x0D) "Enter: $Symbol choice $Choice"
+    Press @(0x0D) "Enter: native palette target $Target"
     $confirmation = @{ retried = $false }
     Wait-Until {
         $log = Read-SharedText $script:tabLog
@@ -69,20 +67,30 @@ function Select-ActionRow([string]$Symbol, [string]$Query = '', [int]$Choice = 0
         $ready = [regex]::Matches($refresh, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
         # A refresh can invalidate queued Enter. Reconfirm only an unchanged row, never an accepted action.
         if (-not $confirmation.retried -and $trace -notmatch '\[palette\] confirm target=' -and $newRows.Count -gt 0 -and $ready.Count -gt 0 -and
-            [int]$newRows[-1].Groups[1].Value -eq $Query.Length -and $newRows[-1].Groups[2].Value.Trim() -ceq ($ids -join ' ') -and
+            [int]$newRows[-1].Groups[1].Value -eq $Query.Length -and $newRows[-1].Groups[2].Value.Trim() -ceq ($rowIds -join ' ') -and
             [int]$ready[-1].Groups[1].Value -eq $Query.Length -and [int]$ready[-1].Groups[2].Value -eq $target) {
             $confirmation.retried = $true
-            Press @(0x0D) "Enter: reconfirm refreshed $Symbol choice $Choice"
+            Press @(0x0D) "Enter: reconfirm refreshed palette target $Target"
         }
         return $false
     } 'production palette confirms the selected routing ID'
     $script:tabPaletteOffset = $nextOffset
-    $script:tabInputs += @{ symbol=$Symbol; choice=$Choice; target=$target; query=$Query; trace=(Read-SharedText $script:tabLog).Substring($offset) }
+    return (Read-SharedText $script:tabLog).Substring($offset)
+}
+function Select-ActionRow([string]$Symbol, [string]$Query = '', [int]$Choice = 0) {
+    $property = $script:tabTargets.PSObject.Properties[$Symbol]
+    if ($null -eq $property) { throw "Unknown tab action symbol $Symbol" }
+    $target = [int]$property.Value + $Choice
+    $trace = Confirm-ActionRow $target $Query
+    $script:tabInputs += @{ symbol=$Symbol; choice=$Choice; target=$target; query=$Query; trace=$trace }
     Save-Json @($script:tabInputs) 'tab-inputs.json'
 }
 function Select-ActionTab([long]$Id) {
-    $tab = Get-ActionTab $Id
-    Invoke-JourneyCommand $tab.name -Session
+    $tabs = @((Read-Session).tabs)
+    $indices = @(for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].chat_id -eq $Id) { $i } })
+    if ($indices.Count -ne 1) { throw "Expected one saved tab for identity $Id" }
+    Open-ActionPalette 'global' $Id
+    [void](Confirm-ActionRow $indices[0])
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -eq $Id } 'selected saved chat identity'
     $state = Read-Session
     Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false

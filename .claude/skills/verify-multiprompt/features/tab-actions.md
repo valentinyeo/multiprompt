@@ -43,6 +43,8 @@ The driver runs `tab-actions.test.cjs --evidence <evidence>` against retained ap
 
 These are real local CMD processes. No account, remote server, provider, SSH or tmux boundary is substituted. Local Archive and Delete close a local process; they do not prove remote agent termination or remote history retention. Appearance checks cover local saved choices, not synchronization to another device.
 
+Session selection uses the persistent chat identity to find the current numeric row in the unfiltered palette. It skips section headers and requires the receiving confirmation; automatic tab-title changes cannot invalidate a typed name query because no name is typed.
+
 The saved home workspace omits the tab's `workspace` field; omission means workspace zero. Moving the active target home restores the home workspace's remembered session. Check its saved `last_shell` identity rather than expecting the moved target to remain selected. A palette refresh can invalidate queued Enter. The driver reconfirms once only after fresh receipts show the same query, row order and selected target with no accepted action. A missing or changed menu still fails.
 
 Retained labels without result insertion are not driven or counted. In particular, this journey does not claim legacy context mute, reconnect, keep-alive, group-new or group-remove IDs. Browser, permission, Stop, provider switching, remote launch and page actions remain separate journeys. The broad right-click-tab shortcut row is not claimed because its retained mute and reattach alternatives are absent from the current menu.

@@ -180,11 +180,53 @@ else if (process.argv[2] === '--evidence') {
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the driver geometry helper');
     assert.equal(run.status, 0, run.stderr);
   });
+  test('session selection survives an automatic title change and skips palette headers', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const select = text.slice(text.indexOf('function Select-ActionTab('), text.indexOf('function Rename-ActionTab('));
+    const confirm = text.includes('function Confirm-ActionRow(') ? text.slice(text.indexOf('function Confirm-ActionRow('), text.indexOf('function Select-ActionRow(')) : '';
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:state = '{"active_workspace":0,"active_tab":1,"tabs":[{"chat_id":101,"name":"Control"},{"chat_id":202,"name":"CMD 7"}]}' | ConvertFrom-Json
+      $script:tabLog = ''; $script:log = ''; $script:tabPaletteOffset = 0; $script:selected = 0; $script:ready = $false
+      $script:selectable = @(6301, 0, 1); $script:downs = 0
+      function Read-Session { return $script:state }
+      function Get-ActionTab($Id) { return @($script:state.tabs | Where-Object { $_.chat_id -eq $Id })[0] }
+      function Invoke-JourneyCommand { $script:state.tabs[1].name = 'auto-renamed-folder'; throw 'The mutable CMD 7 query no longer contains the session' }
+      function Open-ActionPalette {
+        $script:log = "[palette] rows chars=0 count=5 ids=h0 6301 h1 0 1\n[palette] ready chars=0 count=5 target=6301\n"
+        $script:state.tabs[1].name = 'auto-renamed-folder'
+      }
+      function Type-Text { throw 'Session identity must not depend on typing its mutable name' }
+      function Read-SharedText { return $script:log }
+      function Wait-Until($Condition, $Label) { for ($n=0; $n -lt 5; $n++) { if (& $Condition) { return } }; throw $Label }
+      function Press($Keys, $Label) {
+        if ($Keys[0] -eq 0x24) { $script:selected = 0 }
+        elseif ($Keys[0] -eq 0x28) { $script:selected++; $script:downs++ }
+        elseif ($Keys[0] -eq 13) {
+          $target = $script:selectable[$script:selected]
+          $script:log += "[palette] confirm target=$target\n"
+          $script:ready = $target -eq 1
+        }
+      }
+      function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) { if (-not $script:ready -or $Workspace -ne 0 -or $Tab -ne 1 -or $Chat) { throw 'Wrong native receiving surface' } }
+      ${confirm}
+      ${select}
+      Select-ActionTab 202
+      if ($script:downs -ne 2 -or $script:state.tabs[1].name -ne 'auto-renamed-folder') { throw 'Header-aware session selection was not exercised' }
+      $rejected = $false
+      try { Select-ActionTab 999 } catch { $rejected = $true }
+      if (-not $rejected) { throw 'Missing persistent identity was accepted' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute stable session selection');
+    assert.equal(run.status, 0, run.stderr);
+  });
   test('a refreshed unchanged palette row can confirm once more without replaying accepted or changed actions', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
     const text = fs.readFileSync(file, 'utf8');
-    const helper = text.slice(text.indexOf('function Select-ActionRow('), text.indexOf('function Select-ActionTab('));
+    const helper = text.slice(text.indexOf('function Confirm-ActionRow('), text.indexOf('function Select-ActionTab('));
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
       $Evidence = ''
@@ -262,8 +304,9 @@ else if (process.argv[2] === '--evidence') {
           $script:renameOpen = $true
         }
       }
-      function Invoke-JourneyCommand($Name, [switch]$Session) {
-        if (-not $Session -or $Name -ne 'CMD 4') { throw 'Wrong workspace peer session action' }
+      function Invoke-JourneyCommand { throw 'Workspace peer selection must not depend on its automatic title' }
+      function Confirm-ActionRow($Target, $Query = '') {
+        if ($Target -ne 0 -or $Query -ne '') { throw 'Wrong workspace peer row identity' }
         $script:consoleSelected = $true
       }
       function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) {
@@ -306,6 +349,10 @@ else if (process.argv[2] === '--evidence') {
         }
       }
       function Open-ActionPalette { }
+      function Confirm-ActionRow($Target, $Query = '') {
+        if ($Target -ne 1 -or $Query -ne '') { throw 'Wrong newly created session row identity' }
+        $script:consoleSelected = $true
+      }
       function Select-ActionRow { $script:state.tabs[1].chat_id = 202 }
       function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
       function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) { if (-not $script:consoleSelected -or $Tab -ne 1) { throw 'Saved active tab has not received console focus' } }
