@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
-const { touchedJourneys } = require('./touched-journeys.cjs');
+const { touchedJourneysForDiff } = require('./touched-journeys.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -490,7 +490,7 @@ function availableFeatures(env) {
   return (env.FEATURES_DIR ? discoverFeatures(env.FEATURES_DIR) : discoverFeatures()).available;
 }
 
-function prepare(env, outDir) {
+async function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
   fs.mkdirSync(outDir, { recursive: true });
@@ -512,8 +512,7 @@ function prepare(env, outDir) {
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
   fs.writeFileSync(path.join(outDir, 'pr.json'), JSON.stringify(pr));
-  const files = execFileSync('git', ['diff', '--name-only', '-z', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).split('\0').filter(Boolean);
-  const mapped = touchedJourneys(files, env.FEATURES_DIR);
+  const mapped = await touchedJourneysForDiff(env.BASE_SHA, 'HEAD', env.FEATURES_DIR);
   fs.writeFileSync(path.join(outDir, 'mapped.json'), JSON.stringify(mapped, null, 2));
   fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(mapped.features, null, 2));
 }
@@ -833,7 +832,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { breakItVariations, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { breakItVariations, describeRun, runOutcome, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

@@ -42,8 +42,8 @@ test('retry collection selects one newest artifact ID per journey and revision',
   assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
   assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection, artifacts.baseSha), selected);
-  const fallbackComparison = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
-  assert.deepEqual(fallbackComparison, selected, 'a picker forecast cannot discard a completed comparison against the captured base');
+  const automaticBase = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
+  assert.deepEqual(automaticBase, selected, 'failed-head baseline evidence must survive an initial head-only selection');
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {

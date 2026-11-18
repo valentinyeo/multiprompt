@@ -3,6 +3,7 @@
 Open, name, group, pin, reorder, archive, and delete sessions without losing their saved chat history.
 
 Journeys: sessions, session-actions, session-tabs, favorites-groups, group-rail, bot-photo
+Release paths: src/sidebar.zig, src/session*.zig, src/rename.zig, src/archive*.zig, src/favorites*.zig, src/main.zig, src/app_state.zig, build.zig
 
 ## Sub-features
 - `open-select` opens a session and preserves its chosen server, folder, and view.

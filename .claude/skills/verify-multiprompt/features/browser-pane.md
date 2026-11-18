@@ -3,6 +3,7 @@
 Open a session browser beside chat or shell, navigate, type, switch focus, and close the pane.
 
 Journeys: browser-pane-locked, browser-typing, browser-own-profile
+Release paths: src/browser*.zig, src/bridge*.zig, extension/*, src/main.zig, build.zig
 
 ## Sub-features
 - `open-navigate` opens the session’s browser and changes its page or address.
