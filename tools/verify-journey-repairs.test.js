@@ -177,7 +177,8 @@ test('opening anchor does not override bottom follow after initial history is re
   assert.equal(held.length, 2);
   for (const match of held) assert.equal(match[1], 'app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready');
   assert.match(source, /for \(3\.\.5\) \|turn\|/);
-  assert.match(source, /expectEqual\(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y\)/);
+  assert.match(source, /chatViewClientRect\(&client\);\s+const viewport_h = client.bottom - client.top;/);
+  assert.match(source, /expectEqual\(app_state.g_chat_content_h - viewport_h, app_state.g_chat_scroll_y\)/);
 });
 
 

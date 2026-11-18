@@ -2635,13 +2635,16 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_read_open_ready = true;
     app_state.g_chat_scrolled_up = false;
     chatRelayout(800);
-    app_state.g_chat_scroll_y = app_state.g_chat_content_h - 600;
+    var client: RECT = std.mem.zeroes(RECT);
+    @import("chat_render.zig").chatViewClientRect(&client);
+    const viewport_h = client.bottom - client.top;
+    app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h;
     for (3..5) |turn| {
         var arrival = try perfWire(a, "term-4", 2048, @intCast(turn), entries[last].history.offset);
         defer arrival.deinit(a);
         try entries[last].history.apply(a, arrival.items, @intCast(turn), chat_transcript.Identity.initTmux(87404, 0, false, "term-4", ""));
         refreshChatTranscript(false);
-        try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+        try std.testing.expectEqual(app_state.g_chat_content_h - viewport_h, app_state.g_chat_scroll_y);
         try std.testing.expect(!app_state.g_chat_scrolled_up);
     }
 }

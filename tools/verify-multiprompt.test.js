@@ -1104,7 +1104,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
     }
     assert.doesNotMatch(recipe, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage|Remove-Item/);
     for (const shot of ['action', 'normal-close-after', 'kill-action', 'after']) assert.ok(recipe.includes(`Snapshot '${shot}'`));
-    assert.ok(driver.indexOf("'process-kill-after.inbox.json'") < driver.indexOf("    $result.status = 'passed'"));
+    assert.ok(driver.indexOf("'process-kill-after.inbox.json'") < driver.indexOf("    $result.status = 'passed'\n} catch {"));
     assert.match(driver, /feature = \$Feature; status = 'failed'/);
   }
   contract(control, workflow);
@@ -1791,7 +1791,7 @@ test('ISSUE-569 cross-workspace favorite journey requires the saved pair on clos
     assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|Start-Sleep/);
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
     assert.doesNotMatch(restart, /session\.json\.launch\.json|\$launch\.starred|\$launch\.active/);
-    assert.ok(driver.indexOf("name = 'favorite-cross-workspace-selection'") < driver.indexOf("    $result.status = 'passed'"));
+    assert.ok(driver.indexOf("name = 'favorite-cross-workspace-selection'") < driver.indexOf("    $result.status = 'passed'\n} catch {"));
     for (const word of ['favorite-cross-workspace-selection', 'workspace A', 'workspace B', 'starred_view', 'launch snapshot', 'all six checks']) assert.ok(map.includes(word), word);
   }
   const map = read(skill + 'features/session-restore.md');
