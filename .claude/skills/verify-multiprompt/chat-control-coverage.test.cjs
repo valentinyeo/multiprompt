@@ -141,6 +141,21 @@ if (process.argv[2]) {
     }
   });
 
+  test('mode palette queries can be typed and match the actual mode rows', () => {
+    const run = spawnSync(process.execPath, ['tools/journey-commands.mjs'], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const catalog = JSON.parse(run.stdout);
+    const palette = fs.readFileSync('src/command_palette.zig', 'utf8');
+    const labels = [...palette.matchAll(/\.target = SEARCH_CHAT_MODE_\w+_OFFSET, \.label = "([^"]+)"/g)];
+    assert.equal(labels.length, 4);
+    for (const [, label] of labels) {
+      const entry = catalog[label.toLowerCase()];
+      assert.ok(entry, label);
+      assert.match(entry.query, /^[a-z ]+$/i, `${label}: native palette ignores punctuation such as colon`);
+      assert.ok(label.toLowerCase().includes(entry.query.toLowerCase()), `${label}: query must match the result-insertion label`);
+    }
+  });
+
   function fixture(run) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-control-proof-'));
     const write = (file, data) => fs.writeFileSync(path.join(dir, file), typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data));
