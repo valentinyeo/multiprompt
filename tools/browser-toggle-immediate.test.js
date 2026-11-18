@@ -61,7 +61,16 @@ test('IGSH-1126 pane loading never blocks a released shortcut', () => {
 test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', () => {
   const journey = read('.claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1');
   for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair(50)', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
-  assert.match(read('.github/workflows/verify.yml'), /name: Install browser toggle recorder\n\s+if: env\.FEATURE == 'browser-pane-stuck'[\s\S]*choco install ffmpeg --version=7\.1\.1/);
+  const workflow = read('.github/workflows/verify.yml');
+  const install = workflow.split('name: Install browser toggle recorder')[1].split('      - name:')[0];
+  assert.match(install, /if: env\.FEATURE == 'browser-pane-stuck'/);
+  assert.match(install, /https:\/\/github\.com\/GyanD\/codexffmpeg\/releases\/download\/7\.1\.1\/ffmpeg-7\.1\.1-essentials_build\.zip/);
+  assert.match(install, /Get-FileHash \$archive -Algorithm SHA256/);
+  assert.match(install, /04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4.*throw 'FFmpeg archive checksum mismatch'/);
+  assert.ok(install.indexOf('Get-FileHash') < install.indexOf('Expand-Archive'));
+  assert.match(install, /@\('ffmpeg', 'ffprobe'\)/);
+  assert.match(install, /\$LASTEXITCODE -ne 0/);
+  assert.match(install, /\$bin \| Out-File \$env:GITHUB_PATH/);
   assert.doesNotMatch(journey, /\$job\.Start\(/);
   const recordingSeconds = Number(journey.match(/-t (\d+) -vf/)[1]);
   const settleMilliseconds = Number(journey.match(/\$recorder\.WaitForExit\((\d+)\)/)[1]);

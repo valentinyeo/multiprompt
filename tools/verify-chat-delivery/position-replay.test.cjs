@@ -257,6 +257,25 @@ test('fails the dirty first paint movement and reports expected follow-bottom mo
   assert.throws(() => replay(directory, [phase]), /ENOENT/);
 });
 
+test('stable activation retains completed content without requiring another paint and still catches movement', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'position-proof-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(directory, 'frames.tsv'), tsv(first));
+  fs.writeFileSync(path.join(directory, 'paint-000001.bmp'), imageA);
+  const phase = { name: 'activate-long-open', start: 150, end: 3200, shell: 2, policy: 'stable', requirePaint: false };
+  const retained = replay(directory, [phase]);
+  assert.equal(retained.status, 'passed');
+  assert.equal(retained.observations[0].first, 1);
+  assert.deepEqual(retained.observations[0].paints, []);
+  assert.throws(() => replay(directory, [{ ...phase, requirePaint: true }]), /Missing target paint/);
+  fs.writeFileSync(path.join(directory, 'frames.tsv'), tsv(first) + tsv(second));
+  fs.writeFileSync(path.join(directory, 'paint-000002.bmp'), imageB);
+  const moved = replay(directory, [phase]);
+  assert.equal(moved.status, 'failed');
+  assert.equal(moved.observations[0].moves[0].from, 1);
+  assert.equal(moved.observations[0].moves[0].to, 2);
+});
+
 test('fails stale session content even if the next target frame does not move', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'position-proof-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

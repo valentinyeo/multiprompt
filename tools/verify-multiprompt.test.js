@@ -2535,6 +2535,15 @@ test('IGSH-1176 browser warning times out before its job cancellation boundary',
 });
 
 
+test('SOFT-2557 manual replay can build master with the selected branch harness', () => {
+  const dispatch = workflow.slice(workflow.indexOf('  workflow_dispatch:'), workflow.indexOf('  workflow_call:'));
+  assert.match(dispatch, /      app_revision:\n[\s\S]*?        required: false\n        type: string/);
+  const build = workflow.slice(workflow.indexOf('  build-app:'), workflow.indexOf('  chat-sync-audit-changes:'));
+  assert.match(build, /ref: \$\{\{ inputs\.app_revision \|\| inputs\.revision \|\| github\.sha \}\}/);
+  assert.match(build, /ref: \$\{\{ inputs\.revision \|\| github\.sha \}\}\n          path: probe-source/);
+  assert.match(build, /inputs\.app_revision && 'probe-source\/'/);
+});
+
 test('IGSH-1176 forced browser timeout proof fits the GitHub dispatch input limit', () => {
   const dispatch = workflow.slice(workflow.indexOf('  workflow_dispatch:'), workflow.indexOf('  workflow_call:'));
   assert.ok([...dispatch.matchAll(/^      [a-z_]+:$/gm)].length <= 25);

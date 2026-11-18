@@ -186,6 +186,33 @@ if ($assignment.Count -ne 1) { throw 'Expected the real server open receipt' }
                     self.assertEqual((proof['questions'], proof['homes'], proof['ends']), expected)
                     self.assertEqual(proof['answers'], expected[0])
 
+    def test_stable_observations_do_not_require_another_paint(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type 'public static class ChatDeliveryDesktop { public static ulong GetTickCount64() { return 100; } }'
+$phases = [Collections.Generic.List[object]]::new()
+$positionShell = 2
+function Doctor {}
+function Save {}
+function Shot {}
+function Wait-For {}
+$tokens=$null; $errors=$null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/position.ps1'), [ref]$tokens, [ref]$errors)
+$helper = $ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Observe-ServerPosition'}, $true)
+. ([scriptblock]::Create($helper.Extent.Text))
+Observe-ServerPosition 'activate-long-open' 'stable' {} 0
+Observe-ServerPosition 'idle-long-open' 'stable' {} 0
+Observe-ServerPosition 'scroll-old-history' 'user-scroll' {} 0
+Observe-ServerPosition 'real-send' 'send' {} 0
+$phases.ToArray() | ConvertTo-Json -Compress
+"""
+        phases = json.loads(subprocess.check_output([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT)), text=True))
+        self.assertEqual([phase['requirePaint'] for phase in phases], [False, False, True, True])
+        self.assertTrue(all(phase['repro'] and phase['shell'] == 2 for phase in phases))
+
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         if shell is None:

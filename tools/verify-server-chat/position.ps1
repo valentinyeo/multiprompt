@@ -11,7 +11,7 @@ $frame = Read-PositionFrame
 $positionShell = [long]$frame[3]
 function Observe-ServerPosition([string]$Name, [string]$Policy, [scriptblock]$Action, [int]$Seconds = 3) {
     Doctor
-    $phase = @{name=$Name; policy=$Policy; requirePaint=($Name -notlike 'idle-*'); repro=$true; start=[ChatDeliveryDesktop]::GetTickCount64(); end=0; shell=$positionShell}
+    $phase = @{name=$Name; policy=$Policy; requirePaint=($Policy -ne 'stable'); repro=$true; start=[ChatDeliveryDesktop]::GetTickCount64(); end=0; shell=$positionShell}
     $phases.Add($phase)
     Save $phases.ToArray() "$Evidence/position-phases.json"
     try {
