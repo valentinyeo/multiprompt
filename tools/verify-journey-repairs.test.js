@@ -215,3 +215,10 @@ if ($visits -ne 2 -or $receipt -ne 'passed') { throw 'Dedicated evidence was not
 'GROUP_DISPATCH_OK'
 `), /GROUP_DISPATCH_OK/);
 });
+
+
+test('session deletion uses the current visible palette label and exact delete action', () => {
+  assert.match(read('tools/verify-session-actions/drive.ps1'), /Palette 'delete session' 7112/);
+  assert.match(read('src/command_palette.zig'), /\.target = SEARCH_TABCTX_END_TMUX, \.label = "Delete session"/);
+  assert.match(read('src/app_state.zig'), /SEARCH_TABCTX_END_TMUX: usize = 7112/);
+});
