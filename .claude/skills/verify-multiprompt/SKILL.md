@@ -21,6 +21,12 @@ Before desktop launch, the shared `control.ps1` entry runs `node --test .claude/
 
 Part A (`w-2567a`, SOFT-2567) owns new real-size seed data. Part B (`w-2567b`, SOFT-2567) owns real SSH/tmux on the hosted runner. Reuse their data/host when available; never replace a missing prerequisite with another undocumented stand-in. Save source-reader returns, actual journeys exercised, screenshot review and triage in scratch notes. Do not commit per-run notes or turn historical coverage into a new live-pass claim.
 
+## Part B: runner-owned server chat
+
+Use the [server-chat map](features/server-chat.md) for real Windows-to-Linux SSH/tmux journeys. `control.ps1 -Feature server-chat` opens the persisted server chat, sends a message, sends `/clear`, and sends again. The Windows job installs WSL1 Ubuntu, OpenSSH and tmux; it never reaches a shared VPS. A new per-job key is locked to the runner SID before authentication, with inheritance removed on its directory and file. The private key is deleted during cleanup and never uploaded.
+
+The app, SSH client/server, tmux, reader, connectors and host are real. Only the paid Claude process is a deterministic provider. `/clear` evidence proves transport and the subsequent usable conversation, not Claude context erasure or the separate SOFT-2420 fix. Do not claim otherwise. Require the Windows run, `verify-server-chat/journey.mp4`, matching copied replies, independent server receipts, key ACL, executable identity and owned cleanup. Failed runs retain diagnostics and video too. The PR verifier selects the map through its ordinary push-triggered run; do not dispatch duplicates.
+
 ## Feature control ownership
 
 - `control.ps1` keeps options, setup, dispatch and cleanup.
@@ -194,6 +200,8 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 - `stdout.log`, `stderr.log`, and `data/`: the isolated app's saved files, debug/session-audit logs and any file created by the user journey, copied before scratch removal.
 
 A proof requires the real user path, action plus resulting state, and independently read side effects. A screenshot alone, a green unit test, a log claiming an action, or hand-written app state is insufficient. For appearance, require both a persisted `light` preference and the visible sidebar becoming substantially brighter than the user-selected Dark baseline. Other journeys assert their own saved state/files/window titles. Download and look at the screenshots yourself; reject blank, occluded, login-only, wrong-build or unchanged images even if JSON says passed. A screenshot's existence or luminance is not a substitute for that review.
+
+Cite only evidence files you successfully opened. A filename returned by a journey is not a file read. If your client cannot display images, do not cite PNGs or describe their pixels. Read native measurements in `result.json` and the saved state, attribute each observation to that exact file, and state that screenshots remain unreviewed. An image-capable independent reviewer must inspect those screenshots. Never infer what `action.png` or `after.png` shows from its filename or another file's assertions.
 
 For example:
 
