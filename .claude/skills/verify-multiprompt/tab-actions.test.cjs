@@ -298,10 +298,14 @@ else if (process.argv[2] === '--evidence') {
       function Wait-Foreground { }
       function Assert-Foreground { }
       function Record { }
-      function Press($Keys, $Label) { if ($script:scenario -ne 'no-fresh-paint') { Paint } }
+      function Press($Keys, $Label) {
+        if ($script:scenario -eq 'reordered-before-click') { $script:log += "[palette] rows chars=13 count=2 ids=6302 6301\n[palette] ready chars=13 count=2 target=6301\n" }
+        if ($script:scenario -eq 'missing-before-click') { $script:log += "[palette] rows chars=13 count=1 ids=6302\n[palette] ready chars=13 count=1 target=6302\n" }
+        if ($script:scenario -ne 'no-fresh-paint') { Paint }
+      }
       function Receive-Click {
         $script:clicks++
-        if ($script:scenario -eq 'accepted' -or ($script:scenario -eq 'refreshed' -and $script:clicks -eq 2)) { $script:log += "[palette] confirm target=6301\n" }
+        if ($script:scenario -in @('accepted', 'reordered-before-click') -or ($script:scenario -eq 'refreshed' -and $script:clicks -eq 2)) { $script:log += "[palette] confirm target=6301\n" }
         elseif ($script:scenario -eq 'refreshed' -or $script:scenario -eq 'keeps-refreshing') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
         elseif ($script:scenario -eq 'changed') { $script:log += "[palette] rows chars=13 count=1 ids=6302\n[palette] ready chars=13 count=1 target=6302\n" }
         elseif ($script:scenario -eq 'selection-changed') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6302\n" }
@@ -314,15 +318,15 @@ else if (process.argv[2] === '--evidence') {
       [VerifyNative]::Receive = { Receive-Click }
       $script:window = [IntPtr]202
       ${helper}
-      foreach ($scenario in @('refreshed', 'accepted', 'silent', 'changed', 'selection-changed', 'query-changed', 'reordered', 'other-confirmed', 'keeps-refreshing', 'no-fresh-paint')) {
+      foreach ($scenario in @('refreshed', 'accepted', 'silent', 'changed', 'selection-changed', 'query-changed', 'reordered', 'other-confirmed', 'keeps-refreshing', 'no-fresh-paint', 'reordered-before-click', 'missing-before-click')) {
         $script:scenario = $scenario; $script:log = "[palette-row] target=6301 session=0 left=1 top=999 height=39 text=15\n"; $script:clicks = 0
         $script:tabLog = ''; $script:tabPaletteOffset = 0; $script:tabInputs = @()
         $script:tabTargets = [pscustomobject]@{ SEARCH_GROUPMOVE_MENU_OFFSET = 6301 }
         $passed = $false
         try { Select-ActionRow 'SEARCH_GROUPMOVE_MENU_OFFSET' 'move to group'; $passed = $true } catch { }
-        $expected = $scenario -in @('refreshed', 'accepted')
+        $expected = $scenario -in @('refreshed', 'accepted', 'reordered-before-click')
         if ($passed -ne $expected) { throw "$scenario receiving-confirm result was $passed" }
-        $count = if ($scenario -in @('refreshed', 'keeps-refreshing')) { 2 } elseif ($scenario -eq 'no-fresh-paint') { 0 } else { 1 }
+        $count = if ($scenario -in @('refreshed', 'keeps-refreshing')) { 2 } elseif ($scenario -in @('no-fresh-paint', 'missing-before-click')) { 0 } else { 1 }
         if ($script:clicks -ne $count) { throw "$scenario sent $script:clicks clicks, expected $count" }
       }
     `], { encoding: 'utf8' });
