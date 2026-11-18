@@ -126,6 +126,17 @@ try {
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
+    $sourceRepo = if ($env:VERIFY_APP_REVISION) { "$repo/app-source" } else { $repo }
+    $rotationRaw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/rotate.py $sourceRepo") -Evidence $Evidence -Name 'host-rotation'
+    $rotation = ($rotationRaw -join "`n") | ConvertFrom-Json
+    Save $rotation "$Evidence/host-rotation.json"
+    $result.cases += @{ name = 'host-rotation'; passed = $rotation.passed; detail = 'The spawned host executes the same rotation path used by the nightly restart and publishes a new start state' }
+    if (-not $rotation.passed) { throw "Hosted chat rotation failed: $($rotation.result.status); $($rotation.stderr)" }
+    Send-Line 'windows after rotation'
+    [void](Wait-For 'server receipt after rotation' { $snapshot = Server-Snapshot 'after-rotation-server'; @($snapshot.inputs | Where-Object { $_.text -ceq 'windows after rotation' }).Count -eq 1 })
+    [void](Wait-For 'painted reply after rotation' { (Copy-Chat 'after-rotation-copied').Contains('Server received: windows after rotation') } 30)
+    Shot 'after-rotation'
+    $result.cases += @{ name = 'after-rotation'; passed = $true; detail = 'Exactly one provider receipt and a copied rendered reply after host rotation' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
