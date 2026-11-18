@@ -2,7 +2,8 @@ name: Click-through journeys
 run-name: click-through ${{ github.head_ref || github.ref_name }}
 
 on:
-  pull_request:
+  schedule:
+    - cron: '4 5 * * *'
   workflow_dispatch:
 
 permissions:

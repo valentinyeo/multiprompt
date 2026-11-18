@@ -217,16 +217,13 @@ test('Windows PowerShell UTF-8 counter files are accepted', () => {
   }
 });
 
-test('every pull request runs the gate and the aggregate requires its result', () => {
+test('idle proof runs outside pull requests without delaying the cheap aggregate', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/test.yml'), 'utf8');
   const idle = workflow.split('\n  idle-budget:\n')[1].split(/\n  [\w-]+:\n/)[0];
-  assert.match(idle, /if: github\.event_name == 'pull_request'\n/);
+  assert.match(idle, /if: github\.event_name != 'pull_request'/);
   assert.match(idle, /tools\/idle-budget\.ps1 -Exe zig-out\/bin\/multiprompt\.exe/);
   const aggregate = workflow.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[[^\n]*\bidle-budget\]/);
-  assert.match(aggregate, /IDLE: \$\{\{ needs\.idle-budget\.result \}\}/);
-  assert.match(aggregate, /if \[ "\$EVENT" != pull_request \] && \[ "\$IDLE" = skipped \]; then IDLE=success; fi/);
-  assert.match(aggregate, /require_jobs "\$WINDOWS"[^\n]* "\$IDLE"/);
+  assert.doesNotMatch(aggregate, /needs\.idle-budget|\$IDLE/);
   assert.match(aggregate, /\[ "\$result" = success \] \|\| return 1/);
 });
 

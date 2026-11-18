@@ -21,9 +21,13 @@ function verifyRouting(text) {
   for (const name of names) {
     const job = jobs[name];
     assert.ok(job, name);
-    assert.doesNotMatch(job, /^    if:/m);
-    if (name === 'test-windows-update') assert.match(job, /^    needs: \[build-windows\]$/m);
-    else assert.doesNotMatch(job, /^    needs:/m);
+    if (name === 'test-windows-update') {
+      assert.match(job, /^    if: github.event_name != 'pull_request'$/m);
+      assert.match(job, /^    needs: \[build-windows\]$/m);
+    } else {
+      assert.doesNotMatch(job, /^    if:/m);
+      assert.doesNotMatch(job, /^    needs:/m);
+    }
     const steps = job.split(/(?=^      - )/m).filter(step => step.startsWith('      - '));
     const checkout = steps.findIndex(step => step.includes('uses: actions/checkout@'));
     assert.ok(checkout >= 0, name);
