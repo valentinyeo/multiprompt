@@ -4923,6 +4923,9 @@ def host_claude_event(provider, sid, tmux, session, event):
                              dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
                 session["state"]["native_session"] = event["session_id"]
+                config = host_config(provider, sid)
+                if config is not None:
+                    host_write(host_paths(provider, sid)["config"], dict(config, native_session=event["session_id"]))
             host_state_write(provider, sid, session["state"])
             host_log(provider, sid, "init", dict(session=event.get("session_id")))
             host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
@@ -8124,7 +8127,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 130
 
 if __name__ == '__main__':
     import base64 as _base64
