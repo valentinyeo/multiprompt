@@ -42,7 +42,6 @@
                 $editor = [VerifyNative]::GetFocusedWindow($script:window)
                 if ($editor -eq [IntPtr]::Zero -or [VerifyNative]::Class($editor) -cne 'Edit' -or [VerifyNative]::GetAncestor($editor, 2) -ne $script:window) { throw "$Label needs the focused owned rename Edit" }
                 for ($attempt = 1; $attempt -le 3; $attempt++) {
-                    if ($attempt -gt 1) { Record "$Label: Esc attempt $attempt because the rename editor was still open" }
                     Press @(0x1B) $Label
                     try {
                         Wait-Until { -not [VerifyNative]::IsWindowVisible($editor) } "rename editor closed by Esc attempt $attempt" 3
