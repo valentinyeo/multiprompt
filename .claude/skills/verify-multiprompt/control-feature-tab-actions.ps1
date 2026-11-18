@@ -89,13 +89,8 @@ function Select-ActionTab([long]$Id) {
 }
 function Rename-ActionTab([string]$Name) {
     Wait-Until { $h = [VerifyNative]::GetFocusedWindow($script:window); [VerifyNative]::Class($h) -ceq 'Edit' -and [VerifyNative]::GetAncestor($h, 2) -eq $script:window } 'owned native rename editor'
-    Doctor
-    Wait-Foreground
     $editor = [VerifyNative]::GetFocusedWindow($script:window)
-    $rect = New-Object VerifyNative+Rect
-    if (-not [VerifyNative]::GetClientRect($editor, [ref]$rect)) { throw 'Native rename editor rectangle unavailable' }
-    [VerifyNative]::ClickClient($editor, [int](($rect.Right - $rect.Left) / 2), [int](($rect.Bottom - $rect.Top) / 2))
-    Press @(0x11, 0x41) 'Ctrl+A: select the native rename text'
+    # The app already selected the rename text; clicking would discard that selection.
     Type-Text $Name
     Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $editor -and [VerifyNative]::EditText($editor) -ceq $Name } 'native rename editor received the requested name'
     Press @(0x0D) 'Enter: save the native rename'

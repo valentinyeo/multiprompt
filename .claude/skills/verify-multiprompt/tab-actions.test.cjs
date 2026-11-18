@@ -328,11 +328,13 @@ else if (process.argv[2] === '--evidence') {
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the process-exit observation');
     assert.equal(run.status, 0, run.stderr);
   });
-  test('native rename focuses and reads the editor before committing', t => {
+  test('native rename uses the focused selected editor without requiring mouse geometry', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
     const text = fs.readFileSync(file, 'utf8');
     const helper = text.slice(text.indexOf('function Rename-ActionTab('), text.indexOf('function New-ActionTab('));
+    const rename = fs.readFileSync(path.resolve(__dirname, '../../../src/rename.zig'), 'utf8');
+    assert.match(rename, /SendMessageW\(app_state\.g_edit_hwnd, 0x00B1, 0,/, 'the app selects the native editor contents when opening rename');
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
       Add-Type 'public class VerifyNative {
@@ -341,7 +343,7 @@ else if (process.argv[2] === '--evidence') {
         public static System.IntPtr GetFocusedWindow(System.IntPtr window) { return new System.IntPtr(202); }
         public static string Class(System.IntPtr window) { return "Edit"; }
         public static System.IntPtr GetAncestor(System.IntPtr window, uint flag) { return new System.IntPtr(101); }
-        public static bool GetClientRect(System.IntPtr window, ref Rect rect) { rect.Right = 300; rect.Bottom = 24; return true; }
+        public static bool GetClientRect(System.IntPtr window, ref Rect rect) { return false; }
         public static void ClickClient(System.IntPtr window, int x, int y) { if (window.ToInt64() != 202 || x != 150 || y != 12) throw new System.Exception("Wrong editor click"); Clicked = true; }
         public static string EditText(System.IntPtr window) { return Value; }
       }'
@@ -349,14 +351,14 @@ else if (process.argv[2] === '--evidence') {
       function Doctor { }
       function Wait-Foreground { }
       function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
-      function Type-Text($Text) { if (-not $script:drop -and [VerifyNative]::Clicked -and [VerifyNative]::Selected) { [VerifyNative]::Value = $Text } }
+      function Type-Text($Text) { if (-not $script:drop -and [VerifyNative]::Selected) { [VerifyNative]::Value = $Text } }
       function Press($Keys, $Label) {
         if ($Keys[0] -eq 0x11) { [VerifyNative]::Selected = $true }
         if ($Keys[0] -eq 13) { [VerifyNative]::Commits++; if ([VerifyNative]::Value -ne 'Disconnected context') { throw 'Unreceived rename committed' } }
       }
       ${helper}
       foreach ($drop in @($false, $true)) {
-        $script:drop = $drop; [VerifyNative]::Clicked = $false; [VerifyNative]::Selected = $false
+        $script:drop = $drop; [VerifyNative]::Clicked = $false; [VerifyNative]::Selected = $true
         [VerifyNative]::Commits = 0; [VerifyNative]::Value = 'CMD 5'
         $passed = $false
         try { Rename-ActionTab 'Disconnected context'; $passed = $true } catch { }
