@@ -380,7 +380,7 @@ jobs:
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
-          (cd dist && sha256sum *.exe *.zip release-notes.json release-journeys.json > SHA256SUMS.txt)
+          (cd dist && sha256sum -- *.exe *.zip release-notes.json release-journeys.json > SHA256SUMS.txt)
       - name: Sign checksum manifest
         env:
           MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
