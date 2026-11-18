@@ -2432,7 +2432,8 @@ def message_expire(db, provider, sid):
         if host_turn_busy(provider, sid):
             return []
         held = host_held(provider, sid)
-        return [row for row in rows if row[0] not in held]
+        hosted_queue = provider == 'claude' and host_dispatch_switch(provider, sid) and host_owned(provider, sid)
+        return [row for row in rows if row[0] not in held and not (hosted_queue and row[6] == 'queued')]
     now = time.time()
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND deadline IS NOT NULL AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state IN ('queued','sent')", (row[0],))
@@ -8139,7 +8140,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 131
+RUNTIME_GENERATION = 132
 
 if __name__ == '__main__':
     import base64 as _base64

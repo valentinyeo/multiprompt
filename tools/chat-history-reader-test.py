@@ -4065,6 +4065,29 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'accepted', 'a message the bot was still going to read was marked Not sent')
         self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
 
+    def test_SOFT_2566_owned_queue_survives_the_busy_turn_and_dispatches_after_stop(self):
+        self.submit()
+        db = reader.message_store_db('fixture')
+        try:
+            with db:
+                db.execute("UPDATE shared_messages SET deadline=?,created=?", (time.time() - 601, time.time() - 616))
+            with patch.object(reader, 'host_dispatch_switch', return_value=True), \
+                    patch.object(reader, 'host_owned', return_value=True), \
+                    patch.object(reader, 'host_turn_busy', return_value=True):
+                self.assertEqual(self.status()['state'], 'queued')
+                with patch.object(reader, 'host_turn_busy', return_value=False), \
+                        patch.object(reader, 'host_dispatch_start', return_value=dict(status='owned')), \
+                        patch.object(reader, 'host_deliver', return_value=dict(status='sent')) as delivered:
+                    self.request('dispatch')
+                    delivered.assert_called_once()
+                    self.assertEqual(db.execute("SELECT state FROM shared_messages WHERE id='message_fixture_0001'").fetchone()[0], 'sent')
+            with db:
+                db.execute("UPDATE shared_messages SET state='queued',deadline=?,created=?", (time.time() - 601, time.time() - 616))
+            with patch.object(reader, 'host_owned', return_value=False):
+                self.assertEqual(self.status()['state'], 'failed')
+        finally:
+            db.close()
+
     def test_SOFT_2566_busy_durable_queue_outlives_the_worker_watchdog(self):
         self.submit()
         started = time.monotonic()

@@ -4011,7 +4011,6 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const entry = &app_state.g_chat_outbox.items[found.?];
     if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
     _ = json_reader.copyString(message, "state", &entry.message_phase);
-    entry.state = chat_echo.v1ServerState(phase);
     if (entry.anchor.sent_ms == 0) {
         const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
         entry.anchor.sent_ms = chatMessageSentMs(message, wall_ms);
@@ -4024,6 +4023,7 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
         chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, found.?);
         return true;
     }
+    entry.state = chat_echo.v1ServerState(phase);
     return true;
 }
 
@@ -4279,7 +4279,10 @@ fn chatTmuxSendFinish() void {
             if (!std.mem.eql(u8, &entry.message_wire_id, &job.message_wire_id)) return;
             entry.channel_pending = false;
             if (job.retry and job.message_state[0] != 0) entry.retry_nonce = 0;
-            if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.message_state[0] != 0) .queued else .not_sent;
+            if (entry.message_phase[0] == 0 and job.message_state[0] != 0) {
+                entry.message_phase = job.message_state;
+                entry.state = chat_echo.v1ServerState(std.mem.sliceTo(&job.message_state, 0));
+            }
             if (job.message_state[0] == 0 and job.message_replaces[0] != 0) {
                 entry.message_wire_id = job.message_replaces;
                 entry.message_replaces = @splat(0);
