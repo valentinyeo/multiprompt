@@ -1031,9 +1031,9 @@ test "cache-first switch-back live revision keeps measured history" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   const current = fn('refreshChatBlockCache');
   const broken = current.replace(
-    /const previous_history_revision =[^]*?\n    if \(from_file and app_state/,
-    'app_state.g_chat_layout_reuse = 0;\n    if (from_file and app_state',
-  ).replace('    const previous_live_revision = g_chat_live_drawn_revision;\n', '');
+    '@min(g_chat_layout_reuse, if (history_revision',
+    '0 * @min(g_chat_layout_reuse, if (history_revision',
+  );
   assert.notEqual(broken, current);
   const rejected = runHarness(fn('chatDeferTranscriptLoad'), null, cases, undefined, undefined, broken);
   assert.notEqual(rejected.status, 0);
