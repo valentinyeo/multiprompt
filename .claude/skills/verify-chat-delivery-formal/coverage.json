@@ -5,7 +5,7 @@
     "src/chat_send.zig": "33d4fc603a662000d71547ea08701221f7f100ba0ce5d1356d129ca8086240a2",
     "src/chat_render.zig": "4a84d3d626456da81b9337cf2fe0450c1fd30e727161b9325dc336b521eb3fb5",
     "src/chat_history_reader.py": "e7f130e6d709884868f3b57f7293a8cc9e2990fcd1230e71596c07915c7fe92f",
-    "src/app_state.zig": "aa64f38d2aad8503a23f63791aac8fdb18d5609a8b34ed037e1d5320cb3ec952",
+    "src/app_state.zig": "1cb247bf8a22629c3ba63dfca1766e51354a32ecb9d8920d166d314276e1fe2e",
     "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",
     "tools/chat-history-reader-test.py": "29831b0bc61837884688940f45c2a7b9bf20ee5f529d79bd2675443e0ea22219",
     "tools/multibot-feedback-test.py": "b7a26553ff1648413356bd2369e917b28bc6d283dbbdfe1c280124e11a688404"
