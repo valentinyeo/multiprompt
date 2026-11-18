@@ -13,7 +13,7 @@ Source files: src/chat*, src/tmux*, src/message*, src/command_palette.zig, src/m
 
 ## How to get to it (user POV)
 
-Open the server chat. Choose **Chat View: Fresh start** in Ctrl+K. Keep its tab open while the previous chat ends and a new live chat takes its place in the same server pane. Choose Fresh start and send from the existing tab. It must follow the current chat rather than keep an old chat selected or wait forever for its reply.
+Open the server chat. In Ctrl+K, search `fresh start` and choose **Chat View: Fresh start**. Keep its tab open while the previous chat ends and a new live chat takes its place in the same server pane. Choose Fresh start and send from the existing tab. It must follow the current chat rather than keep an old chat selected or wait forever for its reply.
 
 ## Driving it with control.ps1
 

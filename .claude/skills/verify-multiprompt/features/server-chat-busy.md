@@ -7,7 +7,7 @@ Source files: src/chat*, src/tmux*, src/message*, src/command_palette.zig, src/m
 
 - Open a real Linux-hosted Claude chat from a 64-session, eight-workspace profile seeded with PR 1070's generator. The selected server conversation contains 2,400 source messages.
 - Send a normal message through the Windows composer and real SSH before testing busy delivery.
-- Start a long turn, send a follow-up through the same composer, and observe it for 611 real seconds. No app clock, timeout, database or client state is patched.
+- Start a long turn, type a follow-up and press Enter without Escape, then observe it for 611 real seconds. Escape interrupts an active turn; completion dismissal is only used by ordinary idle sends. No app clock, timeout, database or client state is patched.
 - Click the actual painted Stop button. Require a provider interrupt receipt and the production interrupted-turn event within ten seconds, with the same provider process surviving.
 - Require the waiting follow-up to reach the provider once and its reply to appear in copied rendered text.
 - Retain native outbox state, read-only server snapshots, screenshots and a desktop video on both success and failure.

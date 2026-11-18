@@ -72,16 +72,16 @@ function Fresh-Chat {
     $offset = (Log-Text).Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     [void](Wait-For 'palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    Type-Text 'chat view fresh start'
-    [void](Wait-For 'fresh start command' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=21 count=\d+ target=6498(?:\s|$)' })
+    Type-Text 'fresh start'
+    [void](Wait-For 'fresh start command' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=11 count=\d+ target=6498(?:\s|$)' })
     Press @(0x0D) 'Enter: fresh start of this chat'
 }
-function Send-Line([string]$Text) {
+function Send-Line([string]$Text, [switch]$DuringTurn) {
     $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Type-Text $Text
     [void](Wait-For 'exact composer text' { [ChatDeliveryDesktop]::Text($composer) -ceq $Text })
-    Press @(0x1B) 'Escape: dismiss completion without changing the text'
+    if (-not $DuringTurn) { Press @(0x1B) 'Escape: dismiss completion without changing the text' }
     Press @(0x0D) 'Enter: send to real server'
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
@@ -189,7 +189,7 @@ try {
     if ($Busy) {
         Send-Line 'busy server turn'
         [void](Wait-For 'provider is still inside the busy turn' { (Server-Snapshot 'busy-start').provider.busy })
-        Send-Line 'follow-up during busy turn'
+        Send-Line 'follow-up during busy turn' -DuringTurn
         $busyClock = [Diagnostics.Stopwatch]::StartNew()
         while ($busyClock.Elapsed.TotalSeconds -lt 611) {
             Doctor

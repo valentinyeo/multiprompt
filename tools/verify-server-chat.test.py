@@ -180,6 +180,58 @@ ConvertTo-Json -InputObject $values -Compress
         self.assertEqual(paths, [r'D:\a path\multiprompt', r'D:\key path\id_ed25519.pub', r'D:\a path\multiprompt', r'D:\evidence path'])
 
 
+    def test_busy_follow_up_does_not_interrupt_and_fresh_start_query_matches_its_label(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type 'public static class ChatDeliveryDesktop { public static string Value = ""; public static System.IntPtr Composer(System.IntPtr main) { return main; } public static bool FocusOwnedWindow(System.IntPtr main, int pid, System.IntPtr composer) { return true; } public static string Text(System.IntPtr composer) { return Value; } }'
+$main = [IntPtr]1
+$app = [pscustomobject]@{ Id = 1 }
+$script:keys = [Collections.Generic.List[int]]::new()
+$script:paletteOpen = $false
+$script:log = ''
+$script:query = ''
+function Log-Text { $script:log }
+function Wait-For($Name, $Check) { $value = & $Check; if (-not $value) { throw "Missing fixture condition: $Name" }; $value }
+function Press($Keys, $Label) {
+    foreach ($key in $Keys) { $script:keys.Add($key) }
+    if ($Keys -contains 0x4B) { $script:paletteOpen = $true; $script:log += '[palette] ready chars=0 count=1 target=6498' }
+    if ($Keys -contains 0x0D) { [ChatDeliveryDesktop]::Value = ''; $script:paletteOpen = $false }
+}
+function Type-Text($Text) {
+    [ChatDeliveryDesktop]::Value = $Text
+    if ($script:paletteOpen) {
+        $script:query = $Text
+        $target = if ('Chat View: Fresh start'.IndexOf($Text, [StringComparison]::OrdinalIgnoreCase) -ge 0) { 6498 } else { 0 }
+        $script:log += "[palette] ready chars=$($Text.Length) count=1 target=$target"
+    }
+}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/drive.ps1'), [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+foreach ($name in @('Send-Line', 'Fresh-Chat')) {
+    $function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+    . ([scriptblock]::Create($function.Extent.Text))
+}
+Send-Line 'ordinary message'
+$ordinary = $script:keys.ToArray()
+$script:keys.Clear()
+Send-Line 'follow-up during busy turn' -DuringTurn
+$during = $script:keys.ToArray()
+$freshError = $null
+try { Fresh-Chat } catch { $freshError = $_.ToString() }
+@{ ordinary=$ordinary; during=$during; query=$script:query; freshError=$freshError } | ConvertTo-Json -Compress
+"""
+        result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT)), capture_output=True, text=True, check=True)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed['ordinary'], [27, 13])
+        self.assertEqual(observed['during'], [13], 'Escape would interrupt the busy turn before the real Stop click')
+        self.assertIsNone(observed['freshError'])
+        self.assertEqual(observed['query'], 'fresh start')
+
     def test_failed_server_journeys_run_the_strict_reproduction_checker(self):
         import textwrap
         shell = shutil.which('pwsh') or shutil.which('powershell')
