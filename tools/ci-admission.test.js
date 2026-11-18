@@ -7,7 +7,7 @@ const workflow = name => fs.readFileSync(path.join(root, '.github/workflows', na
 
 test('automerge is archived outside GitHub workflow discovery', () => {
   assert.ok(!fs.existsSync(path.join(root, '.github/workflows/automerge.yml')));
-  const text = fs.readFileSync(path.join(root, 'tools/workflow-archive/automerge.yml'), 'utf8');
+  const text = fs.readFileSync(path.join(root, 'tools/fixtures/SOFT-2713/automerge.yml'), 'utf8');
   const events = text.split('\non:\n')[1].split('\npermissions:')[0];
   assert.match(events, /^  workflow_dispatch:/m);
   assert.doesNotMatch(events, /^  (?:pull_request|push|schedule|workflow_run):/m);
@@ -33,7 +33,7 @@ for (const name of ['chat-bench-ab.yml', 'chat-table-bench.yml', 'probe-chrome-f
 }
 
 test('admission stays in the unchanged policy script', () => {
-  const text = fs.readFileSync(path.join(root, 'tools/workflow-archive/automerge.yml'), 'utf8');
+  const text = fs.readFileSync(path.join(root, 'tools/fixtures/SOFT-2713/automerge.yml'), 'utf8');
   assert.match(text, /node tools\/automerge-admit-run\.js/);
   const runnerPath = path.join(root, 'tools/automerge-admit-run.js');
   assert.ok(fs.existsSync(runnerPath), 'event-scoped runner exists');

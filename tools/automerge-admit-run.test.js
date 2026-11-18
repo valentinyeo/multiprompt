@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 const workflow = fs.readFileSync(path.join(root, process.env.AUTOMERGE_RED_CONTROL === '1'
-  ? 'tools/fixtures/IGSH-1042/automerge-before.yml' : 'tools/workflow-archive/automerge.yml'), 'utf8');
+  ? 'tools/fixtures/IGSH-1042/automerge-before.yml' : 'tools/fixtures/SOFT-2713/automerge.yml'), 'utf8');
 const sha = 'a'.repeat(40);
 const master = 'b'.repeat(40);
 const page = nodes => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
