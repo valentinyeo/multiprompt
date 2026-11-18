@@ -437,17 +437,30 @@ else if (process.argv[2] === '--evidence') {
   test('pinned CMD exit waits on the real session audit channel', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
-    const wait = fs.readFileSync(file, 'utf8').split('\n').find(line => line.includes("'real CMD exits and the app preserves its pinned disconnected row'"));
+    const text = fs.readFileSync(file, 'utf8');
+    const start = text.indexOf("Wait-Until { (Get-ActionTab $victim).pinned_top }");
+    assert.ok(start >= 0);
+    const prepare = text.slice(start, text.indexOf('    Select-ActionTab $script:controlId', start));
+    const wait = text.split('\n').find(line => line.includes("'real CMD exits and the app preserves its pinned disconnected row'"));
     assert.ok(wait);
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
       $script:tabLog = 'debug'; $script:tabAuditLog = 'audit'; $exitOffset = 0
-      $victimProcess = [pscustomobject]@{ HasExited = $true }
+      $victim = 202; $script:ready = $false
+      $victimProcess = [pscustomobject]@{ HasExited = $false }
+      function Get-ActionTab { return [pscustomobject]@{ pinned_top = $true } }
+      function Select-ActionTab($Id) { if ($Id -ne $victim) { throw 'Wrong exit target' }; $script:ready = $true }
+      function Type-Text($Text) { if (-not $script:ready -or $Text -ne 'exit') { throw 'Pin menu still owns input instead of the victim console' } }
+      function Press { $victimProcess.HasExited = $true }
       function Read-SharedText($Path) {
-        if ($Path -eq 'audit') { return 'reason=pinned-local-session-exited-preserved instance=default count=5 active=4' }
+        if ($Path -eq 'audit') {
+          if ($victimProcess.HasExited) { return 'reason=pinned-local-session-exited-preserved instance=default count=5 active=4' }
+          return ''
+        }
         return 'WM_APP_SHELL_EXITED id=5 kind=cmd reason=preserve exit_code=0 known=true'
       }
       function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      ${prepare}
       ${wait}
       $victimProcess.HasExited = $false
       $rejected = $false

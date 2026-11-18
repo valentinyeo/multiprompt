@@ -344,6 +344,7 @@ foreach ($route in @('context', 'global')) {
     Open-ActionPalette 'global' $victim
     Select-ActionRow 'SEARCH_TABCTX_PIN_TOP' 'pin'
     Wait-Until { (Get-ActionTab $victim).pinned_top } 'pin keeps the exited local tab available for cleanup'
+    Select-ActionTab $victim
     $exitOffset = (Read-SharedText $script:tabAuditLog).Length
     Type-Text 'exit'
     Press @(0x0D) 'Enter: exit only the disposable pinned CMD'
