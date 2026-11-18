@@ -146,11 +146,13 @@ try {
         [void](Focused-RoomEdit)
         Press @(0x09) 'Tab: Search agents'
         Type-Text 'Rooms agent 00'
+        if ([VerifyNative]::EditText((Focused-RoomEdit)) -cne 'Rooms agent 00') { throw 'Agent search did not accept the first exact name' }
         Start-Sleep -Seconds 12
         Snapshot 'agent-search-first'
         Press @(0x0D) 'Enter: select first agent'
         Press @(0x11,0x41) 'Ctrl+A: replace agent search'
         Type-Text 'Rooms agent 01'
+        if ([VerifyNative]::EditText((Focused-RoomEdit)) -cne 'Rooms agent 01') { throw 'Ctrl+A did not replace the agent search with the second exact name' }
         Start-Sleep -Seconds 2
         Press @(0x0D) 'Enter: select second agent'
         Snapshot 'agents-selected'
@@ -205,19 +207,23 @@ try {
     Audit-Step 'to-one-and-everyone' {
         Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
         Open-RoomByName 'Rooms history 01'
+        $recipient=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0].members[0].id
         Invoke-JourneyCommand 'Room recipients'
+        Press @(0x28) 'Down: enter native menu keyboard navigation'
         Press @(0x24) 'Home: everyone'
         Press @(0x28) 'Down: first session'
         Press @(0x0D) 'Enter: target just that session'
+        Snapshot 'to-one-selected'
         [void](Focused-RoomEdit)
         Type-Text 'ROOMS TO ONE SESSION'
         Press @(0x0D) 'Enter: send to one without adding a mention'
         Wait-Until {
             $room=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0]
             $sent=@($room.events | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'ROOMS TO ONE SESSION' })
-            $sent.Count -eq 1 -and @($sent[0].recipients).Count -eq 1
+            $sent.Count -eq 1 -and @($sent[0].recipients).Count -eq 1 -and $sent[0].recipients[0] -ceq $recipient
         } 'one delivery for the selected session'
         Invoke-JourneyCommand 'Room recipients'
+        Press @(0x28) 'Down: enter native menu keyboard navigation'
         Press @(0x24) 'Home: everyone'
         Press @(0x0D) 'Enter: everyone'
         Type-Text 'ROOMS TO EVERYONE @ordinary-text'

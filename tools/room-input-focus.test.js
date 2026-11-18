@@ -89,3 +89,30 @@ test('a blocked Room scope cannot change foreground or hide sessions', () => {
   assert.equal(enterRoom({ foreground: 'console', blocked: true }, calls), false);
   assert.deepEqual(calls, []);
 });
+
+test('Ctrl+A replaces the whole Room field while Ctrl+Alt+A leaves it alone', () => {
+  const source = fs.readFileSync('src/room_view.zig', 'utf8');
+  const start = source.indexOf('        if (w.GetKeyState(0x11) < 0 and w.GetKeyState(0x12) >= 0) {', source.indexOf('fn editProc('));
+  const end = source.indexOf('        refreshHits(view);', start);
+  assert.ok(start >= 0 && end > start);
+  const production = source.slice(start, end).replaceAll(' and ', ' && ').replaceAll('_ = ', '')
+    .replaceAll('@import("app_state.zig")', 'app_state')
+    .replaceAll('if (w.GetKeyState(0x10) < 0) 1 else 0', '(w.GetKeyState(0x10) < 0 ? 1 : 0)');
+  const handle = new Function('w', 'hwnd', 'wp', 'app_state', production);
+  for (const hwnd of ['search', 'name', 'composer']) {
+    let text = 'Rooms agent 00';
+    let selection = [text.length, text.length];
+    const native = {
+      GetKeyState: key => key === 0x11 ? -1 : 0,
+      SendMessageW(target, message, start, end) {
+        assert.equal(target, hwnd);
+        assert.equal(message, 0x00b1);
+        selection = [start, end < 0 ? text.length : end];
+      },
+    };
+    assert.equal(handle(native, hwnd, 'A', {}), 0);
+    text = text.slice(0, selection[0]) + 'Rooms agent 01' + text.slice(selection[1]);
+    assert.equal(text, 'Rooms agent 01');
+    assert.equal(handle({ ...native, GetKeyState: () => -1 }, hwnd, 'A', {}), undefined);
+  }
+});
