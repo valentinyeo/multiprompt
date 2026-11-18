@@ -63,11 +63,7 @@ try {
     Observe-ServerPosition 'idle-long-open' 'stable' {} 12
     Switch-ServerPosition 'activate-long-open' $peer.Handle
     Observe-ServerPosition 'scroll-old-history' 'user-scroll' {
-        $root = [Windows.Automation.AutomationElement]::FromHandle($main)
-        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-        $view = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-        if ($null -eq $view -or $view.Current.ProcessId -ne $app.Id -or $view.Current.IsOffscreen) { throw 'The owned long-chat transcript is not visible' }
-        $handle = [IntPtr]::new($view.Current.NativeWindowHandle)
+        $handle = Transcript-Window
         $rect = [ChatDeliveryDesktop+Rect]::new()
         if (-not [ChatDeliveryDesktop]::GetWindowRect($handle, [ref]$rect)) { throw 'The transcript viewport has no native rectangle' }
         [ChatDeliveryDesktop]::WheelTranscript($main, $app.Id, $handle, [int](($rect.Left + $rect.Right) / 2), [int](($rect.Top + $rect.Bottom) / 2), 12000)

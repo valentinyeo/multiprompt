@@ -68,6 +68,28 @@ function Copy-Chat([string]$Name) {
     Press @(0x1B) 'Escape: return to composer'
     return $text
 }
+function Transcript-Window {
+    $root = [Windows.Automation.AutomationElement]::FromHandle($main)
+    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $view = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($null -eq $view -or $view.Current.ProcessId -ne $app.Id -or $view.Current.IsOffscreen) { throw 'The owned long-chat transcript is not visible' }
+    return [IntPtr]::new($view.Current.NativeWindowHandle)
+}
+function Copy-LongChat {
+    Wait-For 'all 2400 PR 1070 messages in the real server transcript' {
+        $text = Copy-Chat 'open-copied'
+        if ([regex]::Matches($text, 'Synthetic chat 00 question \d{4}\.').Count -eq 1200 -and [regex]::Matches($text, 'Synthetic chat 00 answer \d{4}\.').Count -eq 1200) {
+            $view = Transcript-Window
+            if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Could not focus the owned transcript after loading history' }
+            Press @(0x23) 'End: return to newest after loading all real server history'
+            return $text
+        }
+        $view = Transcript-Window
+        if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Could not focus the owned transcript to load older history' }
+        Press @(0x24) 'Home: load older pages of the real server chat'
+        $false
+    } 120
+}
 function Send-Line([string]$Text) {
     $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
@@ -117,7 +139,7 @@ try {
     Press @(0x11, 0x31) 'Ctrl+1: open server tab'
     Press @(0x12, 0x43) 'Alt+C: open server Chat View'
     [void](Wait-For 'server transcript loaded' { (Log-Text) -match '\[chat\] transcript load shell=\d+ ok' })
-    $opened = Copy-Chat 'open-copied'
+    $opened = if ($env:CHAT_POSITION_REPLAY -eq '1') { Copy-LongChat } else { Copy-Chat 'open-copied' }
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }

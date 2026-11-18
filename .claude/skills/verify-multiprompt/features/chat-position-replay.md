@@ -6,7 +6,7 @@ Source files: src/chat*, src/main.zig, build.zig, build.zig.zon, src/console.zig
 
 - PR 1072's working Windows OpenSSH to WSL2 OpenSSH/tmux journey, with its production host, reader and connectors.
 - One real server conversation containing all 2,400 messages from PR 1070's `source_rows` generator, including images, tables and code. Other workspaces are not exercised by this journey.
-- Native copied text proves all 1,200 questions and 1,200 answers reached Chat View before observation starts.
+- The initial server history is paged. Focus its owned transcript and press Home to load older pages until native copied text proves all 1,200 questions and 1,200 answers reached Chat View. Press End to restore the newest messages before observation starts.
 - Idle with the long chat open, scroll into older history, then Alt+Tab away and back through a separate owned peer window. Repeat while reading old history.
 - The original server send, `/clear` and after-clear cases, exact server receipts, per-job key restrictions and cleanup remain unchanged.
 

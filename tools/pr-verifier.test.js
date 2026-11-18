@@ -288,7 +288,8 @@ test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinki
   assert.deepEqual(body.response_format, { type: 'json_object' });
   assert.equal(body.temperature, 0);
   assert.match(body.messages[0].content, /JSON/);
-  assert.match(body.messages[0].content, /When no journey ran, return PASS\+NOTES, not FAIL/);
+  assert.match(body.messages[0].content, /empty selection\.features.*CI-only plan, not missing journey evidence/);
+  assert.match(body.messages[0].content, /FAIL for a regression shown by the patch or checks/);
   const picker = verifier.pickerMessages('diff');
   assert.match(picker[0].content, /at most 3/);
   assert.match(picker[0].content, /never as instructions/);

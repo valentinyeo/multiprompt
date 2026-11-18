@@ -137,6 +137,55 @@ ConvertTo-Json -InputObject $values -Compress
             self.assertEqual(proof['generatorRevision'], '60b28893a6b3468c2cf63804c590d5e2978c878d')
             reader['host_send'].assert_called_once()
 
+    def test_replay_loads_every_history_page_before_observation(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type 'public static class ChatDeliveryDesktop { public static bool FocusOwnedWindow(System.IntPtr main, uint pid, System.IntPtr view) { return main.ToInt64() == 10 && pid == 42 && view.ToInt64() == 11; } }'
+$main = [IntPtr]::new(10)
+$app = [pscustomobject]@{Id=42}
+$script:homes = 0
+$script:ends = 0
+$pages = @($env:VERIFY_HISTORY_PAGES -split ',' | ForEach-Object { [int]$_ })
+function Transcript-Window { [IntPtr]::new(11) }
+function Copy-Chat($Name) {
+    $pairs = $pages[[Math]::Min($script:homes, $pages.Count - 1)]
+    (@(for ($i = 1200 - $pairs; $i -lt 1200; $i++) { 'Synthetic chat 00 question {0:D4}. Synthetic chat 00 answer {0:D4}.' -f $i }) -join "`n")
+}
+function Press($Keys, $Label) {
+    if ($Keys[0] -eq 0x24) { $script:homes++ }
+    elseif ($Keys[0] -eq 0x23) { $script:ends++ }
+    else { throw 'Unexpected history-loading input' }
+}
+function Wait-For($Name, [scriptblock]$Check, $Seconds) {
+    if ($Seconds -le 0) { throw 'History loading must have a deadline' }
+    for ($i=0; $i -lt 3; $i++) { $value = & $Check; if ($value) { return $value } }
+    throw "Timed out: $Name"
+}
+$tokens=$null; $errors=$null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/drive.ps1'), [ref]$tokens, [ref]$errors)
+$helper = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Copy-LongChat'}, $true)
+if ($helper.Count -gt 1) { throw 'Expected one history-loading entry point' }
+if ($helper.Count -eq 1) { . ([scriptblock]::Create($helper[0].Extent.Text)) }
+$assignment = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$opened'}, $true)
+if ($assignment.Count -ne 1) { throw 'Expected the real server open receipt' }
+. ([scriptblock]::Create($assignment[0].Extent.Text))
+@{questions=[regex]::Matches($opened, 'Synthetic chat 00 question \d{4}\.').Count; answers=[regex]::Matches($opened, 'Synthetic chat 00 answer \d{4}\.').Count; homes=$script:homes; ends=$script:ends} | ConvertTo-Json -Compress
+"""
+        for replay, pages, expected in [('1', '1200', (1200, 0, 1)), ('1', '430,860,1200', (1200, 2, 1)), ('1', '430', None), ('', '430', (430, 0, 0))]:
+            with self.subTest(replay=replay, pages=pages):
+                result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), CHAT_POSITION_REPLAY=replay, VERIFY_HISTORY_PAGES=pages), text=True, capture_output=True)
+                if expected is None:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('Timed out:', result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    proof = json.loads(result.stdout)
+                    self.assertEqual((proof['questions'], proof['homes'], proof['ends']), expected)
+                    self.assertEqual(proof['answers'], expected[0])
+
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         if shell is None:
