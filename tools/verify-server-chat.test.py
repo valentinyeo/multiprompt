@@ -39,6 +39,7 @@ class ProviderTest(unittest.TestCase):
                 self.assertEqual(transcripts[0].parent.name, folder)
 
     def test_busy_provider_accepts_control_without_a_second_turn_and_records_cancelled_input(self):
+        from contextlib import closing
         import sqlite3
         with tempfile.TemporaryDirectory() as home:
             program = ROOT / 'tools/verify-server-chat/provider.py'
@@ -58,9 +59,11 @@ class ProviderTest(unittest.TestCase):
             self.assertEqual(json.loads((Path(home) / 'provider-discarded.jsonl').read_text()), requests[1])
             store = Path(home) / '.local/state/multiprompt/shared-messages/store.sqlite3'
             store.parent.mkdir(parents=True)
-            with sqlite3.connect(store) as db:
+            with closing(sqlite3.connect(store)) as db:
                 for name in ('message_chats', 'message_resets', 'shared_messages', 'message_events'):
                     db.execute('CREATE TABLE ' + name + ' (id TEXT)')
+            with self.assertRaisesRegex(sqlite3.ProgrammingError, 'closed'):
+                db.execute('SELECT 1')
             (Path(home) / 'server-seed.json').write_text('{}')
             snapshot = json.loads(subprocess.check_output([sys.executable, str(ROOT / 'tools/verify-server-chat/snapshot.py')], env=dict(os.environ, HOME=home, USERPROFILE=home), text=True))
             self.assertEqual(snapshot['received'], received)
