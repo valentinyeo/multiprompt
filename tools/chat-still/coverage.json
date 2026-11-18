@@ -3,11 +3,11 @@
   "functions": {
     "refreshChatTranscript": {
       "file": "src/chat_session.zig",
-      "sha256": "8160357956a8e82b53a59ad4d33156474f6f853a2fd29224211a64623aafeaff"
+      "sha256": "dc8330f2ce16fe57721d1897383fbedb19d48239e4a86a3f53a67c420178d82e"
     },
     "chatRelayoutPreservingScroll": {
       "file": "src/chat_session.zig",
-      "sha256": "bdb0c70af35ccf54d4fd3d98d65b731354753979da1a6f2e460ca705bf712058"
+      "sha256": "26e104e5edbb2049e81ab9fcf75805268e14e2f09aa08ebb464714c8efc16ded"
     },
     "openScroll": {
       "file": "src/chat_history.zig",
@@ -24,6 +24,18 @@
     "scrollAfterLayout": {
       "file": "src/chat_history.zig",
       "sha256": "d7e6f4eb1ab7fafcda19c008f6a75c86c6bdacb3e4503fec65b6c44e2563a91f"
+    },
+    "readAnchor": {
+      "file": "src/chat_history.zig",
+      "sha256": "a2bb2fa9b5c6bea3e9fb408d5b23a28c0ad0efcff0f09795520c2f9b434b2c8c"
+    },
+    "readAnchorTop": {
+      "file": "src/chat_history.zig",
+      "sha256": "24c7f9fc86b7ede0b2d3de35e633a742f630e8cec92752a9824f36eaffa03347"
+    },
+    "chatSetTopPad": {
+      "file": "src/chat_render.zig",
+      "sha256": "bc3169a9aba3c83bffdb62191e73e2bec7d3cc0b200d9ea7b656dfeb03ff0b8b"
     }
   },
   "types": {
@@ -34,6 +46,10 @@
     "ReadBoundary": {
       "file": "src/chat_history.zig",
       "sha256": "1d4b981493f3bbd4901331775b0df32d7e5a90fe14d673836ea4de38addc0fae"
+    },
+    "ReadAnchor": {
+      "file": "src/chat_history.zig",
+      "sha256": "9fb242c18fa7e699ec174b3d35c649cd8bd8e8f6897fe37e3fe1c72a5c9fbfa1"
     }
   }
 }

@@ -77,7 +77,8 @@ def check(root, replay_code=False):
     session = (root / "src/chat_session.zig").read_text()
     history = (root / "src/chat_history.zig").read_text()
     bodies = {name: function(session, name) for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll")}
-    covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll")}}
+    covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "readAnchor", "readAnchorTop", "followBottom", "scrollAfterLayout", "openScroll")},
+               "chatSetTopPad": function((root / "src/chat_render.zig").read_text(), "chatSetTopPad")}
     recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
     for name, body in covered.items():
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
@@ -95,9 +96,9 @@ def check(root, replay_code=False):
             old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta = z3.Ints("old_h new_h viewport old_top new_top old_scroll divider pad delta")
             before, after = z3.Ints("previous_boundary next_boundary")
             old_newest, new_newest = z3.Ints("old_newest new_newest")
-            offset = old_scroll - old_top - delta
+            offset = old_scroll - old_newest
             values = {"old_content_h": old_h, "viewport_h": viewport, "previous_boundary.index": before,
-                      "app_state.g_chat_read_boundary.index": after, "top": new_top, "anchor_offset": offset,
+                      "app_state.g_chat_read_boundary.index": after, "top": new_newest, "anchor_offset": offset,
                       "old_scroll_y": old_scroll, "old_y": old_scroll, "anchor.?.offset": old_scroll - old_top,
                       "app_state.g_chat_layout_top_pad": pad + delta, "old_top_pad": pad}
             expression = anchor_expression.replace("anchor.?.offset", "anchor_offset_value")
@@ -146,8 +147,11 @@ def check(root, replay_code=False):
                 print("PASS", label, "all integer geometries within the stated bounds")
             else:
                 raise RuntimeError("SMT solver returned " + str(outcome))
-    if replay_code and witnesses:
-        replay(root, witnesses, function)
+    if replay_code:
+        if witnesses:
+            replay(root, witnesses, function)
+        else:
+            replay(root, json.loads((ROOT / "tools/chat-still/regressions.json").read_text()), function, preserved=True)
     return {"tool": "z3-solver==4.13.4.0", "failures": failures, "counterexamples": witnesses, "sync_commit": recorded["sync_commit"]}
 
 
@@ -164,9 +168,29 @@ def self_test(root, replay_code=False):
             source = source.replace(original, broken)
         (scratch / "src/chat_session.zig").write_text(source)
         (scratch / "src/chat_history.zig").write_text((root / "src/chat_history.zig").read_text())
+        (scratch / "src/chat_render.zig").write_text((root / "src/chat_render.zig").read_text())
         result = check(scratch, replay_code)
         assert len(result["failures"]) == 10, "Each anchor obligation must reject the real-source scratch break"
         print("MUTATION PASS: both production held_y guards were broken in scratch; every obligation rejected them")
+        if replay_code:
+            history = (root / "src/chat_history.zig").read_text()
+            render = (root / "src/chat_render.zig").read_text()
+            capture = function(history, "readAnchor")
+            for label in ("first visible row", "uncompensated cached padding"):
+                (scratch / "src/chat_session.zig").write_text((root / "src/chat_session.zig").read_text())
+                broken_history = history.replace(capture, capture.replace("result = .{", "if (result == null) result = .{")) if label == "first visible row" else history
+                broken_render = render.replace("const held_y = app_state.g_chat_scroll_y + delta;", "const held_y = app_state.g_chat_scroll_y;") if label == "uncompensated cached padding" else render
+                assert broken_history != history or broken_render != render
+                (scratch / "src/chat_history.zig").write_text(broken_history)
+                (scratch / "src/chat_render.zig").write_text(broken_render)
+                try:
+                    replay(scratch, json.loads((ROOT / "tools/chat-still/regressions.json").read_text()), function, preserved=True)
+                except ValueError as error:
+                    if "TestExpectedEqual" not in str(error):
+                        raise
+                    print("MUTATION PASS: native regressions rejected", label)
+                else:
+                    raise ValueError("Native regressions accepted " + label)
 
 
 if __name__ == "__main__":

@@ -131,6 +131,7 @@ var g_chat_read_visit_marker: u64 = 0;
 var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
 var g_chat_read_open_pending = false;
 var g_chat_read_hold = false;
+var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
 var g_chat_read_open_ready = false;
 var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
