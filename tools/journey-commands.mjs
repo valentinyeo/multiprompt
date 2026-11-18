@@ -43,6 +43,7 @@ const rows = [
   ['Servers', 'SEARCH_SERVERS_OFFSET', 'servers'],
   ['Chat View: Expand table', 'SEARCH_CHAT_EXPAND_TABLE_OFFSET', 'expand table'],
   ['Chat View: More Menu', 'SEARCH_CHAT_MORE_MENU_OFFSET', 'more menu'],
+  ['Jump to newest message', 'SEARCH_CHAT_NEWEST_OFFSET', 'jump to newest message'],
   ['Computer: Show or hide', 'SEARCH_COMPUTER_TOGGLE_OFFSET', 'computer'],
   ['Chat permission mode: Accept edits', 'SEARCH_CHAT_MODE_EDITS_OFFSET', 'accept edits'],
   ['Sidebar: hide', 'SEARCH_SIDEBAR_HIDE_OFFSET', 'hide sidebar'],
