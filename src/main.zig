@@ -1324,8 +1324,6 @@ comptime {
         _ = @import("smooth.zig");
         _ = @import("bot_avatar.zig");
         _ = @import("room_view.zig");
-        _ = @import("room_post.zig");
-        _ = @import("room_journal.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
@@ -4022,10 +4020,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("chat_send.zig").chatModeFinish(lp);
             return 0;
         },
-        app_state.WM_APP_CHAT_SWITCH_AI => {
-            @import("command_palette.zig").finishSwitchAi(lp);
-            return 0;
-        },
         app_state.WM_APP_PI_MODEL_RESULT => {
             @import("chat_send.zig").chatPiModelFinish(lp);
             return 0;
@@ -5495,16 +5489,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     _ = @import("command_palette.zig").startFreshChat(app_state.active_shell);
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_search_from_inbox = false;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = @import("command_palette.zig").startSwitchAi(app_state.active_shell, if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) 1 else if (target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) 2 else 3);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7487,7 +7471,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7517,8 +7501,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("chat_send.zig").chatStopAgent(ti);
                         } else if (target == app_state.SEARCH_TABCTX_FRESH_START) {
                             _ = @import("command_palette.zig").startFreshChat(ti);
-                        } else if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI) {
-                            _ = @import("command_palette.zig").startSwitchAi(ti, if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) 1 else if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) 2 else 3);
                         } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
                             _ = @import("chat_send.zig").chatRestartAi(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {
