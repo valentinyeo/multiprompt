@@ -5,7 +5,7 @@ Add-Type @'
 public static class VerifyNative {
     public static long GetAncestor(long handle, int flag) { return handle; }
     public static long GetForegroundWindow() { return 1; }
-    public static long GetFocusedWindow(long handle) { return handle; }
+    public static long GetFocusedWindow(long handle) { return 2; }
     public static bool SetForegroundWindow(long handle) { return true; }
 }
 '@

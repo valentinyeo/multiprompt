@@ -11,7 +11,7 @@ const { commandCatalog, root } = await import('./journey-commands.mjs');
 const { checkJourneyCommands, checkJourneys } = await import('./check-journey-commands.mjs');
 const catalog = commandCatalog();
 
-test('PowerShell helper selects the named row and rejects unchanged screens without a confirmation log', context => {
+test('PowerShell helper selects the named row with child focus and rejects unchanged screens', context => {
   const result = spawnSync(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-File', path.join(root, 'tools/test-journey-commands.ps1')], { encoding: 'utf8' });
   if (result.error?.code === 'ENOENT') return context.skip('PowerShell runs on GitHub-hosted runners');
   assert.equal(result.status, 0, result.stdout + result.stderr);

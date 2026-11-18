@@ -577,8 +577,8 @@ function Invoke-JourneyCommand {
         Doctor
         Assert-Foreground
         [void][VerifyNative]::SetForegroundWindow($script:window)
-        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-    } 'command palette initialized and owned frame focused' 20
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window
+    } 'command palette initialized in the owned foreground frame' 20
     Type-Text $query
     $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
     Wait-Until {
