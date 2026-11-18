@@ -10,8 +10,9 @@ The goal is one visible copy per sent message, with no false **Not sent** copy. 
 1. You send a message.
 2. The app starts sending.
 3. The host stores it.
-4. The agent accepts it.
-5. Ten minutes pass without the acceptance receipt or transcript reaching the app. The app labels it **Not sent**.
+4. The host hands it to the agent.
+5. The agent accepts it.
+6. Ten minutes pass without the acceptance receipt or transcript reaching the app. The app labels it **Not sent**.
 
 `chatOutboxTick` changes an unconfirmed v1 entry to `.not_sent` based on elapsed time. Neither that branch nor `showsNotSent` checks whether the agent actually accepted the message. A lost connection can hide the acceptance receipt. This is a decision-level counterexample, not a captured Windows screen.
 
@@ -23,8 +24,9 @@ The resume-only /statechart report checks the same invariant with the timeout ac
 1. You send a message.
 2. The app starts sending.
 3. The host stores it.
-4. The agent accepts it.
-5. You restart the app before its receipt arrives. The written `.sending` entry loads as `.not_sent` and the app labels it **Not sent**.
+4. The host hands it to the agent.
+5. The agent accepts it.
+6. You restart the app before its receipt arrives. The written `.sending` entry loads as `.not_sent` and the app labels it **Not sent**.
 
 `chatOutboxParseJson` calls `stateOnLoad` with the saved state and write reservation. `stateOnLoad(1, true)` returns `.not_sent`; `showsNotSent(true, .not_sent, "sent", ...)` then returns true. Reconnection can correct the state later, but the earlier false failure already breaks the promise.
 
@@ -38,7 +40,7 @@ The native decisions are compiled from the checkout, not hand-reimplemented. Eve
 
 `--self-test` plants a missing reconciliation decision in real source and requires two visible copies. It also plants a delivered-message failure label in real source and requires an accepted-message false failure in the reliable control. Both must replay. Restoring the original source must return to its original results.
 
-The current all-events model has 234 reachable states. The resume-only model has 84. `SingleVisibleCopy` holds in the stated exact-text, single-message scope. It does not prove assistant reply reconciliation, all message strings or real Windows painting. The chart hides disconnect/reconnect and other steps that do not change its visible labels.
+The current all-events model has 278 reachable states. The resume-only model has 100. `SingleVisibleCopy` holds in the stated exact-text, single-message scope. It does not prove assistant reply reconciliation, all message strings or real Windows painting. The chart hides disconnect/reconnect and other steps that do not change its visible labels.
 
 ## Statechart
 

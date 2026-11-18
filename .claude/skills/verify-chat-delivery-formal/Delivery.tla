@@ -24,10 +24,13 @@ HostReceives == /\ submitted /\ wire \notin hostWires
                 /\ host' = "queued" /\ hostWires' = hostWires \cup {wire}
                 /\ UNCHANGED <<state, written, pending, transcript, age,
                                 restarted, retried, submitted, wire, connected>>
-HostAccepts == /\ host = "queued" /\ host' = "accepted"
+HostDispatch == /\ host = "queued" /\ host' = "sent"
+                /\ UNCHANGED <<state, written, pending, transcript, age,
+                                restarted, retried, submitted, wire, hostWires, connected>>
+HostAccepts == /\ host = "sent" /\ host' = "accepted"
                /\ UNCHANGED <<state, written, pending, transcript, age,
                                restarted, retried, submitted, wire, hostWires, connected>>
-Receipt == /\ connected /\ pending /\ host \in {"queued", "accepted"}
+Receipt == /\ connected /\ pending /\ host \in {"queued", "sent", "accepted"}
            /\ state' = IF host = "accepted" THEN "delivered" ELSE "queued"
            /\ written' = TRUE
            /\ UNCHANGED <<pending, host, transcript, age, restarted, retried,
@@ -66,7 +69,7 @@ Retry == /\ NotSent /\ ~retried /\ connected
                     /\ submitted' = TRUE /\ host' = "empty"
          /\ UNCHANGED <<pending, transcript, age, restarted, hostWires, connected>>
 Done == UNCHANGED vars
-Next == Send \/ Submit \/ HostReceives \/ HostAccepts \/ Receipt \/ Disconnect
+Next == Send \/ Submit \/ HostReceives \/ HostDispatch \/ HostAccepts \/ Receipt \/ Disconnect
         \/ Reconnect \/ Wait \/ Resume \/ Echo \/ Retry \/ Done
 Spec == Init /\ [][Next]_vars
 SingleVisibleCopy == state = "empty" \/ (IF pending THEN 1 ELSE 0) + (IF transcript THEN 1 ELSE 0) = 1

@@ -60,7 +60,7 @@ jobs:
           path: ${{ runner.temp }}/delivery-formal/
           if-no-files-found: error
   comment-review:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: cursor/plugins
-          ref: bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7
+          ref: 2f87c854fe3e2fcda44ca86b46ede35aad3c46b7
           path: pstack
           persist-credentials: false
       - name: Run pstack no-comments

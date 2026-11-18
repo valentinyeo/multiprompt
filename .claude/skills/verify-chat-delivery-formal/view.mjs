@@ -14,4 +14,4 @@ export function state(v) {
   if (v.written) return 'Sending';
   return 'Waiting to send';
 }
-export const step = a => ({Send:'You send a message', Submit:'The app starts sending', HostReceives:'The host stores it', HostAccepts:'The agent accepts it', Receipt:'The app receives the receipt', Disconnect:'Connection drops', Reconnect:'Connection returns', Wait:'Ten minutes pass', Resume:'You restart the app', Echo:'The saved chat arrives', Retry:'You send again', Done:'No visible change'})[a] || a;
+export const step = a => ({Send:'You send a message', Submit:'The app starts sending', HostReceives:'The host stores it', HostDispatch:'The host hands it to the agent', HostAccepts:'The agent accepts it', Receipt:'The app receives the receipt', Disconnect:'Connection drops', Reconnect:'Connection returns', Wait:'Ten minutes pass', Resume:'You restart the app', Echo:'The saved chat arrives', Retry:'You send again', Done:'No visible change'})[a] || a;

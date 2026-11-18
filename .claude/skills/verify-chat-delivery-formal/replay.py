@@ -97,8 +97,11 @@ const ChatOutboxEntry = struct {
                     repeated = fixture.submit(token, "synthetic delivery probe")
                     if row != repeated or row["state"] != "queued":
                         raise ValueError("Host submit is not idempotent")
+                elif action == "HostDispatch":
+                    fixture.request("dispatch")
+                    if fixture.status(token)["state"] != "sent":
+                        raise ValueError("Host dispatch did not replay")
                 elif action == "HostAccepts":
-                    fixture.poll()
                     fixture.accept("synthetic delivery probe")
                     if fixture.status(token)["state"] != "accepted":
                         raise ValueError("Host acceptance did not replay")

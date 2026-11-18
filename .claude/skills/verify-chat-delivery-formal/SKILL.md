@@ -31,7 +31,7 @@ The failure depends on whether an acceptance receipt or saved chat arrives befor
 
 - One logical human message, at most two wire IDs, one explicit retry, one app restart and a ten-minute age boundary. Disconnect and reconnect may repeat; the finite state space closes those cycles.
 - One retained Claude chat and a fixed session identity. Receipts may be arbitrarily delayed or absent. The app's local outbox save succeeds. Host writes are transactional and wire IDs do not collide.
-- The agent accepts a queued message in a separate step. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
+- Host dispatch and native acceptance are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
 - Transcript installation and echo reconciliation are one UI-thread action, before painting. One pending bubble is replaced by that user block. The native probe also checks two identical pending texts cannot claim the same block.
 - The timeout action includes the production outbox timeout branch. Restart applies the persisted state through `stateOnLoad`. Retry of an already accepted host row is rejected by the real store. External connection and process lifecycle events remain modeled boundaries.
 
