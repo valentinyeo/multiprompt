@@ -47,7 +47,7 @@ const ChatOutboxEntry = struct {
                 source += f'    receipt(&entry, "{values["host"]}"); entry.write_started = true;\n'
                 source += f'    @memset(&entry.message_phase, 0); @memcpy(entry.message_phase[0..{len(values["phase"])}], "{values["phase"]}");\n'
             elif action == "Resume":
-                source += "    resume(&entry);\n"
+                source += "    restoreEntry(&entry);\n"
             elif action == "Wait":
                 source += "    now = 601000; _ = timeout(&entry, now);\n"
             elif action == "Echo":

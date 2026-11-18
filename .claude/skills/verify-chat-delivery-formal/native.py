@@ -24,7 +24,7 @@ def load(source):
     body = function(source, "chatOutboxParseJson")
     start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
     end = body.index("\n                        }", start) + len("\n                        }")
-    return "fn resume(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
+    return "fn restoreEntry(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
 
 
 def tables(root, output):
@@ -61,7 +61,7 @@ const ChatOutboxEntry = struct {
     try std.testing.expect(timeout(&queued, 601000));
     try std.testing.expect(timeout(&sending, 601000));
     var empty_phase = ChatOutboxEntry{ .state = .sending };
-    resume(&empty_phase);
+    restoreEntry(&empty_phase);
     std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
         chatEchoWaitsOnTranscript(.{}) and picked[0] != null,
         @tagName(chat_echo.stateOnLoad(0, true)),
