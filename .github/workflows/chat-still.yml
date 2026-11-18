@@ -11,6 +11,7 @@ on:
       - 'src/browser_pane.zig'
       - 'src/drawing.zig'
       - 'tools/chat-still/**'
+      - 'tools/fixtures/SOFT-2713/chat-still-regressions.json'
       - 'tools/verify-chat-delivery/**'
       - 'tools/verify-chat-still'
       - 'tools/pr-verifier*'

@@ -151,7 +151,7 @@ def check(root, replay_code=False):
         if witnesses:
             replay(root, witnesses, function)
         else:
-            replay(root, json.loads((ROOT / "tools/chat-still/regressions.json").read_text()), function, preserved=True)
+            replay(root, json.loads((ROOT / "tools/fixtures/SOFT-2713/chat-still-regressions.json").read_text()), function, preserved=True)
     return {"tool": "z3-solver==4.13.4.0", "failures": failures, "counterexamples": witnesses, "sync_commit": recorded["sync_commit"]}
 
 
@@ -184,7 +184,7 @@ def self_test(root, replay_code=False):
                 (scratch / "src/chat_history.zig").write_text(broken_history)
                 (scratch / "src/chat_render.zig").write_text(broken_render)
                 try:
-                    replay(scratch, json.loads((ROOT / "tools/chat-still/regressions.json").read_text()), function, preserved=True)
+                    replay(scratch, json.loads((ROOT / "tools/fixtures/SOFT-2713/chat-still-regressions.json").read_text()), function, preserved=True)
                 except ValueError as error:
                     if "TestExpectedEqual" not in str(error):
                         raise

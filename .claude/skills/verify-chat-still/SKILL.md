@@ -42,7 +42,7 @@ Each passive event is checked through both callers. History may add a divider; m
 
 ## Read failures
 
-Hosted Tests run `44342248357` at `9ef7d1c5` replayed six real findings for row-height changes, padding compensation and reconciliation across both callers. The earlier ten failures in that log are deliberate guard mutations, not ten product regressions. `regressions.json` retains the six real coordinates.
+Hosted Tests run `44342248357` at `9ef7d1c5` replayed six real findings for row-height changes, padding compensation and reconciliation across both callers. The earlier ten failures in that log are deliberate guard mutations, not ten product regressions. `tools/fixtures/SOFT-2713/chat-still-regressions.json` retains the six real coordinates. The fixture directory makes the same input available to the red-run gate on both base and head.
 
 The product now holds the newest initially visible message by identity instead of the first visible row. Padding is already included in its new top, so the scroll offset must not subtract padding again. The translation uses that message's old/new top and stored offset. All ten obligations, geometry bounds, content clamps and the exact Y invariant remain unchanged. The replay requires the original six witnesses to preserve their before-Y, then checks cached padding and an append followed by remeasurement without replacing the original anchor. Hosted confirmation at `5be4370e` passes in Tests run `44348905357` and Windows run `44348891482`.
 

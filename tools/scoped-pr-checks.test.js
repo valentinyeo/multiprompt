@@ -45,7 +45,7 @@ test('only cheap gates and the fixed path-filtered stillness journey run on pull
     assert.match(trigger, /^  pull_request:\n    paths:\n/);
     assert.deepEqual([...trigger.matchAll(/^      - '([^']+)'$/gm)].map(match => match[1]), [
       'src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig', 'src/drawing.zig',
-      'tools/chat-still/**', 'tools/verify-chat-delivery/**', 'tools/verify-chat-still', 'tools/pr-verifier*',
+      'tools/chat-still/**', 'tools/fixtures/SOFT-2713/chat-still-regressions.json', 'tools/verify-chat-delivery/**', 'tools/verify-chat-still', 'tools/pr-verifier*',
       '.claude/skills/verify-multiprompt/**', '.github/workflows/chat-still.yml', '.github/workflows/verify.yml', '.github/workflows/pr-verifier.yml',
     ]);
     assert.doesNotMatch(trigger, /paths-ignore:|branches:|types:/);

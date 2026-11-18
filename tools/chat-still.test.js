@@ -15,7 +15,7 @@ const read = file => {
 test('chat source changes always run the stillness journey without an AI picker', () => {
   const workflow = read('.github/workflows/chat-still.yml');
   const trigger = workflow.slice(workflow.indexOf('  pull_request:'), workflow.indexOf('  workflow_dispatch:'));
-  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig']) {
+  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig', 'tools/fixtures/SOFT-2713/chat-still-regressions.json']) {
     assert.ok(trigger.includes(`- '${file}'`), `${file} must trigger the fixed stillness gate`);
   }
   const desktop = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  comment-review:'));
@@ -79,7 +79,7 @@ test('formal findings inherit only from byte-identical modeled source', { skip: 
   fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
   const fixture = path.join(dir, 'fixture');
   copyZig(['chat_session.zig', 'chat_history.zig', 'chat_render.zig'], path.join(fixture, 'src'));
-  for (const file of ['tools/verify-chat-still', 'tools/chat-still/verify.py', 'tools/chat-still/replay.py', 'tools/chat-still/coverage.json', 'tools/chat-still/regressions.json']) {
+  for (const file of ['tools/verify-chat-still', 'tools/chat-still/verify.py', 'tools/chat-still/replay.py', 'tools/chat-still/coverage.json', 'tools/fixtures/SOFT-2713/chat-still-regressions.json']) {
     const target = path.join(fixture, file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(root, file), target);
