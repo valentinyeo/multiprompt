@@ -4,16 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 3 * * *'
-  pull_request:
-    paths:
-      - '.github/workflows/room-checks.yml'
-      - 'tools/room-checks/**'
-      - 'src/room_service.py'
-      - 'src/room_bridge.py'
-      - 'tools/room_service_test.py'
-      - 'tools/room_bridge_test.py'
-      - 'tools/room-routing.test.py'
-
 permissions:
   contents: read
 
@@ -60,9 +50,11 @@ jobs:
         run: |
           for log in room-check-results/*.log; do
             [ -f "$log" ] || continue
-            printf '\n### %s\n\n```\n' "$(basename "$log")" >> "$GITHUB_STEP_SUMMARY"
-            cat "$log" >> "$GITHUB_STEP_SUMMARY"
-            printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+            {
+              printf '\n### %s\n\n```\n' "$(basename "$log")"
+              cat "$log"
+              printf '\n```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
           done
       - name: Upload results
         if: always()

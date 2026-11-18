@@ -237,7 +237,7 @@ try {
     Start-App
     Palette 'copy chat id' 7196
     Check 'local-chat-id-survives-restart' ([Windows.Forms.Clipboard]::GetText() -ceq $localId)
-    Palette 'close tab' 7197
+    Palette 'close tab' 7110
     [void](Wait-For 'local CMD tab hidden' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 0 })
     Check 'close-tab-alias-keeps-both-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
     Palette 'Alpha' 0
