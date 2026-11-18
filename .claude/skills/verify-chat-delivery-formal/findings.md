@@ -43,20 +43,43 @@ The current all-events model has 234 reachable states. The resume-only model has
 ## Statechart
 
 ```mermaid
+---
+title: "One sent message, delayed receipt"
+---
 stateDiagram-v2
-  [*] --> NothingSent
-  NothingSent --> Waiting: You send a message
-  Waiting --> Sending: The app starts sending
-  Sending --> Sending: The host stores it
-  Sending --> Accepted: The agent accepts it
-  Accepted --> FalseFailure: Ten minutes pass or you restart
-  Accepted --> ShownOnce: The saved chat arrives
-  FalseFailure --> Accepted: The acceptance receipt arrives
-  FalseFailure --> ShownOnce: The saved chat arrives
-  FalseFailure: Accepted, marked Not sent
-  ShownOnce: Shown once from chat
-  classDef breaks fill:#ffecee,stroke:#e72e3b
-  class FalseFailure breaks
+  state "Legend" as legend {
+    lg0: Breaks NoFalseNotSent
+    lg1: Path to the NoFalseNotSent bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: Nothing sent
+  s1: Waiting to send
+  s2: Marked Not sent, no receipt
+  s3: Sending
+  s4: Accepted, echo pending
+  s5: Accepted, marked Not sent
+  s6: Shown once from chat
+  [*] --> s0
+  s0 --> s1: You send a message
+  s1 --> s2: Ten minutes pass
+  s1 --> s3: The app starts sending
+  s3 --> s2: Ten minutes pass or You restart the app
+  s3 --> s3: The host stores it
+  s2 --> s3: You send again or The app receives the receipt
+  s3 --> s4: The agent accepts it
+  s2 --> s5: The agent accepts it
+  s4 --> s5: Ten minutes pass or You restart the app
+  s4 --> s6: The saved chat arrives
+  s5 --> s4: The app receives the receipt
+  s5 --> s6: The saved chat arrives
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 bugPath
+  class s3 bugPath
+  class s4 bugPath
+  class s5 breaks
+  class s5 bugPath
 ```
 
-This abbreviated chart shows the two shortest counterexamples. Use pstack /statechart on each generated config for the complete chart and numbered report. Do not infer a pass from the chart alone. The raw TLC result and successful source replay are required.
+This is the generated all-events chart. The numbered reports above distinguish the timeout and restart paths. Use pstack /statechart on each generated config for the complete chart and numbered report. Do not infer a pass from the chart alone. The raw TLC result and successful source replay are required.
