@@ -213,10 +213,10 @@ test('the workflow starts on same-repository pull requests and on a dispatched p
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);
 });
 
-test('the Claude key reaches only the two action steps and never a script', () => {
+test('the Claude key reaches only the independent judge and never a script', () => {
   const lines = workflow.split('\n');
   const uses = lines.map((line, index) => [line, index]).filter(([line]) => line.includes('secrets.CLAUDE_CODE_OAUTH_TOKEN'));
-  assert.equal(uses.length, 2);
+  assert.equal(uses.length, 1);
   for (const [line, index] of uses) {
     assert.match(line, /^          claude_code_oauth_token: /);
     const action = lines.slice(index - 4, index).join('\n');
@@ -228,7 +228,7 @@ test('the Claude key reaches only the two action steps and never a script', () =
 
 test('Claude gets read tools and read-only git and gh only', () => {
   const allowed = [...workflow.matchAll(/--allowedTools "([^"]+)"/g)].map(match => match[1]);
-  assert.equal(allowed.length, 2);
+  assert.equal(allowed.length, 1);
   for (const tools of allowed) {
     assert.equal(tools, 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)');
   }
@@ -309,13 +309,12 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the DeepSeek key reaches the picker and the judge and the engine comes from the commits', () => {
+test('selection is deterministic and only the independent judge receives the DeepSeek key', () => {
   const lines = workflow.split('\n');
   const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
-  assert.equal(uses.length, 2);
-  assert.match(workflow, /id: deepseek-pick\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        env:\n          DEEPSEEK_API_KEY: /);
-  assert.match(workflow, /pr-verifier\.cjs pick-deepseek /);
-  assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
+  assert.equal(uses.length, 1);
+  assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
+  assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
@@ -540,24 +539,21 @@ test('job timeouts and cancellations block even when product result files passed
 });
 
 
-test('chat changes cannot omit the stillness journey or exceed the journey limit', () => {
-  const maps = [...available, 'chat-still'];
+test('validation does not add journeys outside file ownership or the declared repro', () => {
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
-  for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', 'tools/verify-chat-delivery/boundary.py', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
-    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette']);
+  for (const file of ['src/chat_render.zig', 'src/main.zig', 'tools/chat-still/observer.cs', 'docs/readme.md']) {
+    assert.deepEqual(verifier.validateSelection(raw, available, { files: [{ path: file }] }).features, raw.features);
   }
-  assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: 'docs/readme.md' }] }).features, raw.features);
-  assert.throws(() => verifier.validateSelection(raw, available, { files: [{ path: 'src/chat_render.zig' }] }), /require the chat-still journey/);
 });
 
 
-test('repair repro and mandatory chat stillness both survive a full picker selection', () => {
+test('the repair repro survives a full picker selection', () => {
   const result = verifier.validateSelection(
     { features: ['appearance', 'palette-order', 'chat-view'], compare_base: false },
     [...available, 'chat-still'],
     { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
   );
-  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance']);
+  assert.deepEqual(result.features, ['command-palette', 'appearance', 'palette-order']);
   assert.equal(result.compareBase, true);
 });
 

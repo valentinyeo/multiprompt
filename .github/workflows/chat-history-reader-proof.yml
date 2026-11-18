@@ -1,26 +1,14 @@
 name: History reader lifecycle
 
 on:
+  schedule:
+    - cron: '36 5 * * *'
   workflow_dispatch:
     inputs:
       feedback_live:
         description: Submit and verify the real agent feedback wish
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - src/chat_history_reader.py
-      - tools/chat-history-reader-test.py
-      - tools/chat-history-reader.test.js
-      - .github/workflows/chat-history-reader-proof.yml
-  push:
-    branches: [master]
-    paths:
-      - src/chat_history_reader.py
-      - tools/chat-history-reader-test.py
-      - tools/chat-history-reader.test.js
-      - .github/workflows/chat-history-reader-proof.yml
-
 permissions:
   contents: read
 

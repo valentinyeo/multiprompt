@@ -105,7 +105,15 @@ gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 timeout 3000 gh run watch <id> --interval 300
 ```
 
-DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
+The selector matches changed files to `Source files:` ownership in each runnable feature map, then adds the declared bug-fix repro journey. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector picks one nearest feature by map names and source paths and discloses the gap in the verdict.
+
+`verify.yml` runs only that set on head and parent with the same harness. Matching parent evidence is restored through the base cache before scheduling Windows jobs. DeepSeek Flash judges the patch and real evidence against the PR outcomes. Claude is the fallback when DeepSeek authored the patch. Green CI alone is never the verdict. One independent verifier posts PASS, PASS+NOTES or FAIL; missing evidence blocks passage. Only `pstack-verifier` is required.
+
+The full live drive of every feature is periodic, not a per-PR step. The nightly master run executes every runnable journey and files or updates a failure ticket on board 2060. The weekly `maintain-verification.yml` pass also reconciles source, feature maps and live evidence.
+
+### Emergency rollback before repair
+
+If an update prevents users from working, revert the bad change first. Do not leave the outage live while building a fix. `auto-revert-master.yml` contains the guarded rollback path and evidence; while its automatic job is disabled, perform the revert manually. Then reproduce the original bug on its matching surface, commit the failing repro before the real fix, and send the repair through normal PR verification on that same surface. Never bypass `pstack-verifier` for the repair.
 
 ### Reproduce before fixing
 
@@ -119,7 +127,7 @@ The gate treats titles containing `bug`, `bug fix`, `fix`, `fixes`, or `fixed`, 
 
 For these PRs, the named journey takes priority over the picker and runs against both head and the current master commit captured when verification starts. Both runs use the PR's journey harness. The journey must fail on master for a product assertion and pass on head. A master pass, missing result, infrastructure failure, unknown journey, or an omitted declaration makes `pstack-verifier` FAIL even if the judge says PASS. An unrelated failing journey and inherited failures on both revisions do not prove a repair. Keep the failure screenshots and result files in the uploaded artifacts.
 
-Other PRs retain the existing failed-head baseline comparison. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
+Other PRs compare the selected journeys with their parent, reusing matching cached results. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
 
 ## Doctor
 

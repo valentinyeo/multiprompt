@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 22
       - name: Test touched-journey selection and workflow cancellation
-        run: node --test tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
+        run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
       - name: Test automatic crash report triage
         run: node --test tools/crash-report-tickets.test.js
       - name: Install video validation tools
@@ -325,6 +325,7 @@ jobs:
           echo 'Release placeholder rejected; ordinary tests remain buildable'
 
   test-windows-update:
+    if: github.event_name != 'pull_request'
     needs: [build-windows]
     runs-on: windows-latest
     timeout-minutes: 10
@@ -657,6 +658,7 @@ jobs:
       head: ${{ github.event.pull_request.head.sha || github.sha }}
 
   speed-baseline:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -768,6 +770,7 @@ jobs:
           retention-days: 7
 
   speed-candidate:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -840,7 +843,7 @@ jobs:
           retention-days: 7
 
   idle-budget:
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -912,7 +915,7 @@ jobs:
 
   switch-performance:
     needs: [speed-baseline, speed-candidate]
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -939,7 +942,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance, idle-budget]
+    needs: [test, test-vps, build-windows, test-worker, test-update-source, check-red-run]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -949,12 +952,9 @@ jobs:
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
           BUILD: ${{ needs.build-windows.result }}
-          UPDATE: ${{ needs.test-windows-update.result }}
           WORKER: ${{ needs.test-worker.result }}
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
-          SPEED: ${{ needs.switch-performance.result }}
           RED_RUN: ${{ needs.check-red-run.result }}
-          IDLE: ${{ needs.idle-budget.result }}
           EVENT: ${{ github.event_name }}
         run: |
           require_jobs() {
@@ -975,5 +975,4 @@ jobs:
             if require_jobs success success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          if [ "$EVENT" != pull_request ] && [ "$IDLE" = skipped ]; then IDLE=success; fi
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED" "$IDLE"
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN"

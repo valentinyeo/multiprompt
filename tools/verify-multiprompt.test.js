@@ -119,11 +119,14 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
-test('IGSH-1113 the pull-request gate cannot be filtered out for any PR', () => {
-  const gate = read('.github/workflows/click-through.yml');
-  assert.match(gate, /^  pull_request:\r?\n  workflow_dispatch:/m);
-  assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore|types):|^      - ['"]?!/m);
-  assert.match(gate, /touchedJourneys/);
+test('PR verification stays unconditional while duplicate click-through drives stay nightly', () => {
+  const gate = read('.github/workflows/pr-verifier.yml');
+  assert.match(gate, /^  pull_request:/m);
+  assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore):/m);
+  const clickThrough = read('.github/workflows/click-through.yml');
+  assert.doesNotMatch(clickThrough, /^  pull_request:/m);
+  assert.match(clickThrough, /^  schedule:/m);
+  assert.match(clickThrough, /^  workflow_dispatch:/m);
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 

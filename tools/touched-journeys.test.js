@@ -28,19 +28,19 @@ test('source-file mapping runs only the touched journeys', t => {
   const directory = maps(t);
   assert.deepEqual(touchedJourneys(['src/themes.zig'], directory), { features: ['appearance'], unmapped: [] });
   assert.deepEqual(touchedJourneys(['src/chat_input.zig', 'tools/drive-chat.ps1', 'src/panes.zig'], directory), { features: ['chat-view', 'pane-layout'], unmapped: [] });
-  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory).features, ['appearance', 'chat-view', 'pane-layout']);
+  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory).features, ['chat-view']);
 });
 
-test('unknown application files run every available journey instead of losing coverage', t => {
+test('unknown application files choose one nearest journey and disclose the gap', t => {
   const directory = maps(t);
-  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: ['appearance', 'chat-view', 'pane-layout'], unmapped: ['src/new_feature.zig'] });
-  assert.equal(touchedJourneys(['extension/new.js'], directory).features.length, 3);
-  assert.equal(touchedJourneys(['.claude/skills/verify-multiprompt/new-driver.ps1'], directory).features.length, 3);
+  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: ['appearance'], unmapped: ['src/new_feature.zig'], nearest: [{ file: 'src/new_feature.zig', feature: 'appearance' }] });
+  assert.equal(touchedJourneys(['extension/new.js'], directory).features.length, 1);
+  assert.equal(touchedJourneys(['.claude/skills/verify-multiprompt/new-driver.ps1'], directory).features.length, 1);
 });
 
-test('documentation and CI-only changes do not launch unrelated desktop journeys', t => {
+test('a changed feature map selects its own journey without broadening for CI edits', t => {
   const directory = maps(t);
-  assert.deepEqual(touchedJourneys(['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs', '.claude/skills/verify-multiprompt/features/appearance.md', 'src/chat.test.js', 'tools/chat-dictation.test.js', 'tools/chat-history-reader-test.py'], directory), { features: [], unmapped: [] });
+  assert.deepEqual(touchedJourneys(['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs', '.claude/skills/verify-multiprompt/features/appearance.md', 'src/chat.test.js', 'tools/chat-dictation.test.js', 'tools/chat-history-reader-test.py'], directory), { features: ['appearance'], unmapped: ['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs'] });
 });
 
 test('diff routing excludes only proven edits inside existing top-level Zig tests', async t => {
@@ -86,7 +86,7 @@ test('diff routing excludes only proven edits inside existing top-level Zig test
   save('themes.zig', original);
   save('new_feature.zig', 'test "new" {}\n');
   head = commit();
-  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance', 'chat-view', 'pane-layout'], unmapped: ['src/new_feature.zig'] });
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance'], unmapped: ['src/new_feature.zig'], nearest: [{ file: 'src/new_feature.zig', feature: 'appearance' }] });
   fs.unlinkSync(path.join(root, 'src/themes.zig'));
   head = commit();
   assert.ok((await touchedJourneysForDiff(base, head, directory, root)).features.includes('appearance'));
@@ -131,7 +131,7 @@ test('the verifier runs every mapped journey, even when its picker proposes fewe
   assert.equal(selection.compareBase, true);
 });
 
-test('mandatory chat stillness survives an empty mapper and picker', t => {
+test('the mapper owns the plan and picker-only journeys cannot broaden it', t => {
   const directory = maps(t);
   fs.writeFileSync(path.join(directory, 'chat-still.md'), '# Stillness\nSource files: src/chat*.zig\nVerify on: pull_request\n## Driving it with control.ps1\n');
   const out = path.join(directory, 'out');
@@ -143,7 +143,7 @@ test('mandatory chat stillness survives an empty mapper and picker', t => {
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
-  assert.deepEqual(selection.features, ['chat-still']);
+  assert.deepEqual(selection.features, []);
 });
 
 test('shared build profiles and artifact names isolate instrumented and comparison apps', () => {

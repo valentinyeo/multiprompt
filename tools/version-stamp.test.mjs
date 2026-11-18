@@ -184,7 +184,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
       assert.match(compile, /restore-keys:/);
       assert.match(toolchain, /zig-toolchain-0.16.0/);
-      if (name === 'idle-budget') assert.match(job, /if: github\.event_name == 'pull_request'\n/);
+      if (name === 'idle-budget') assert.match(job, /if: github\.event_name != 'pull_request'/);
       if (name === 'build-windows' || name === 'idle-budget') continue;
       const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
       assert.ok(trim, name);
