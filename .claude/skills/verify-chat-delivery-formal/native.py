@@ -15,16 +15,16 @@ def function(source, name):
 
 def tick(source):
     body = function(source, "chatOutboxTick")
-    start = body.index("            if (chat_echo.v1SendingAbandoned(")
-    end = body.index("\n            }", start) + len("\n            }")
-    return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n" + body[start:end] + "\n    return changed;\n}\n"
+    start = body.index("        if (entry.message_v1) continue;")
+    decision = body[start:body.index("\n", start)].replace("continue;", "return false;")
+    return "fn timeout(entry: *ChatOutboxEntry, _: i64) bool {\n" + decision + "\n    return false;\n}\n"
 
 
 def load(source):
     body = function(source, "chatOutboxParseJson")
     start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
     end = body.index("\n                        }", start) + len("\n                        }")
-    return "fn restoreEntry(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
+    return "fn restoreEntry(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started, entry.message_v1);\n    entry.from_disk = true;\n" + body[start:end] + "\n}\n"
 
 
 def tables(root, output):
@@ -36,6 +36,7 @@ const ChatOutboxEntry = struct {
     state: chat_echo.OutboxState = .queued,
     sent_tick_ms: i64 = 1000,
     message_v1: bool = true,
+    from_disk: bool = false,
     message_phase: [16]u8 = @splat(0),
     reset_pending: bool = false,
     write_started: bool = true,
@@ -58,18 +59,18 @@ const ChatOutboxEntry = struct {
     try std.testing.expectEqual(@as(?usize, null), picked[1]);
     var queued = ChatOutboxEntry{};
     var sending = ChatOutboxEntry{ .state = .sending };
-    try std.testing.expect(timeout(&queued, 601000));
-    try std.testing.expect(timeout(&sending, 601000));
+    try std.testing.expect(!timeout(&queued, 601000));
+    try std.testing.expect(!timeout(&sending, 601000));
     var empty_phase = ChatOutboxEntry{ .state = .sending };
     restoreEntry(&empty_phase);
     std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"ReconcilesUnwritten\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
         chatEchoWaitsOnTranscript(.{}) and picked[0] != null,
-        chatEchoWaitsOnTranscript(.{ .write_started = false }) and picked[0] != null,
-        @tagName(chat_echo.stateOnLoad(0, true)),
-        @tagName(chat_echo.stateOnLoad(1, true)),
-        chat_echo.showsNotSent(true, .queued, "sent", 1000, 601000),
-        chat_echo.showsNotSent(true, .not_sent, "sent", 1000, 1001),
-        chat_echo.showsNotSent(true, .delivered, "accepted", 1000, 1001),
+        chatEchoWaitsOnTranscript(.{ .write_started = false, .from_disk = true }) and picked[0] != null,
+        @tagName(chat_echo.stateOnLoad(0, true, true)),
+        @tagName(chat_echo.stateOnLoad(1, true, true)),
+        chat_echo.showsNotSent(true, .queued, "sent"),
+        chat_echo.showsNotSent(true, .not_sent, "sent"),
+        chat_echo.showsNotSent(true, .delivered, "accepted"),
         chat_echo.mayType(.queued, false, false, false),
         chat_echo.mayType(.queued, true, false, false),
         @tagName(queued.state),
@@ -88,7 +89,7 @@ const ChatOutboxEntry = struct {
         result = subprocess.run(["zig", "test", "-j1", "decisions.zig", "--test-filter", "formal"], cwd=work, text=True, capture_output=True, timeout=90)
     (output / "native.log").write_text(result.stdout + result.stderr)
     if result.returncode:
-        raise ValueError("Production decision replay failed; see " + str(output / "native.log"))
+        raise ValueError(f"Production decision replay exited {result.returncode}; see " + str(output / "native.log"))
     match = re.search(r"FORMAL (\{[^\n]+\})", result.stderr)
     if match is None:
         raise ValueError("Production replay emitted no decision table")

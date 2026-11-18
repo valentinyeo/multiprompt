@@ -106,7 +106,7 @@ def self_test(root, output):
     if any(result["status"] != "PASS" for result in reliable.values()):
         raise ValueError("Reliable mutation control must pass before planting a break")
     mutations = {
-        "SingleVisibleCopy": ("src/chat_send.zig", "chatEchoWaitsOnTranscript", "    if (e.message_v1) return e.write_started or e.channel_sent or e.channel_pending;", "    if (e.message_v1) return false;"),
+        "SingleVisibleCopy": ("src/chat_send.zig", "chatEchoWaitsOnTranscript", "    if (e.message_v1) return e.from_disk or e.write_started or e.channel_sent or e.channel_pending;", "    if (e.message_v1) return false;"),
         "NoFalseNotSent": ("src/chat_echo.zig", "showsNotSent", "    if (!message_v1 or state == .cancelled) return false;", "    if (message_v1 and state == .delivered) return true;\n    if (!message_v1 or state == .cancelled) return false;"),
     }
     for rule, (file, name, before, after) in mutations.items():

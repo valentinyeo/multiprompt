@@ -19,6 +19,7 @@ const ChatOutboxEntry = struct {
     state: chat_echo.OutboxState = .queued,
     sent_tick_ms: i64 = 1000,
     message_v1: bool = true,
+    from_disk: bool = false,
     message_phase: [16]u8 = @splat(0),
     reset_pending: bool = false,
     write_started: bool = false,
@@ -36,7 +37,6 @@ const ChatOutboxEntry = struct {
         actions = {step["action"] for step in result["trace"]}
         source += "    var entry = ChatOutboxEntry{};\n    var pending = false;\n"
         source += "    " + ("var" if "Echo" in actions else "const") + " transcript = false;\n"
-        source += "    " + ("var" if "Wait" in actions else "const") + " now: i64 = 1001;\n"
         for step in result["trace"]:
             action, values = step["action"], step["values"]
             if action == "Send":
@@ -49,7 +49,7 @@ const ChatOutboxEntry = struct {
             elif action == "Resume":
                 source += "    restoreEntry(&entry);\n"
             elif action == "Wait":
-                source += "    now = 601000; _ = timeout(&entry, now);\n"
+                source += "    _ = timeout(&entry, 601000);\n"
             elif action == "Echo":
                 source += '''    transcript = true;
     if (chatEchoWaitsOnTranscript(entry)) {
@@ -73,7 +73,7 @@ const ChatOutboxEntry = struct {
         last = result["trace"][-1]["values"]
         expected_copies = int(last["pending"]) + int(last["transcript"])
         source += f"    try std.testing.expectEqual(@as(u32, {expected_copies}), @as(u32, @intFromBool(pending)) + @as(u32, @intFromBool(transcript)));\n"
-        source += f'    const not_sent = pending and chat_echo.showsNotSent(true, entry.state, std.mem.sliceTo(&entry.message_phase, 0), 1000, now);\n'
+        source += f'    const not_sent = pending and chat_echo.showsNotSent(true, entry.state, std.mem.sliceTo(&entry.message_phase, 0));\n'
         source += f"    try std.testing.expectEqual({str(rule.startswith('NoFalseNotSent')).lower()}, not_sent);\n}}\n"
     (output / "replay.zig").write_text(source)
     with tempfile.TemporaryDirectory(prefix="delivery-replay-") as directory:
