@@ -174,6 +174,25 @@ test('shared build profiles and artifact names isolate instrumented and comparis
   }
 });
 
+test('the steady-chat comparison downloads the selected journey artifacts from both revisions', () => {
+  const { runInNewContext } = require('node:vm');
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const caller = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify-chat-steady.yml'), 'utf8');
+  const artifact = workflow.match(/name: (verify-\$\{\{ matrix\.feature \}\}[^\n]+)/)[1];
+  const downloads = [...caller.matchAll(/name: (verify-[^\n]+)/g)].map(match => match[1]);
+  assert.equal(downloads.length, 2);
+  for (const [index, side] of ['before', 'after'].entries()) {
+    const job = caller.split(`\n  ${side}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+    const context = {
+      matrix: { feature: job.match(/feature: (\S+)/)[1], 'app-revision': job.match(/app_revision: (\S+)/)?.[1] || '' },
+      env: { FEATURE: 'chat-delivery' }, inputs: {},
+      format: (template, value) => template.replace('{0}', value),
+    };
+    const produced = artifact.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => runInNewContext(expression.replaceAll('matrix.app-revision', "matrix['app-revision']"), context));
+    assert.equal(downloads[index], produced, side);
+  }
+});
+
 test('mapped model and live-working journeys retain their chat-delivery driver', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   const condition = workflow.split('      - name: Select instant chat driver\n')[1].split('\n')[0].trim().slice(4);
