@@ -95,7 +95,6 @@ function Confirm-ActionRow([int]$Target, [string]$Query = '') {
         $refresh = $log.Substring($nextOffset)
         $newRows = [regex]::Matches($refresh, '\[palette\] rows chars=(\d+) count=\d+ ids=([^\r\n]+)')
         $ready = [regex]::Matches($refresh, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
-        # A refresh can invalidate a queued click. Reconfirm only an unchanged row, never an accepted action.
         if (-not $confirmation.retried -and $trace -notmatch '\[palette\] confirm target=' -and $newRows.Count -gt 0 -and $ready.Count -gt 0 -and
             [int]$newRows[$newRows.Count - 1].Groups[1].Value -eq $Query.Length -and $newRows[$newRows.Count - 1].Groups[2].Value.Trim() -ceq $selection.rows -and
             [int]$ready[$ready.Count - 1].Groups[1].Value -eq $Query.Length -and [int]$ready[$ready.Count - 1].Groups[2].Value -eq $target) {
@@ -129,7 +128,6 @@ function Select-ActionTab([long]$Id) {
 function Rename-ActionTab([string]$Name) {
     Wait-Until { $h = [VerifyNative]::GetFocusedWindow($script:window); [VerifyNative]::Class($h) -ceq 'Edit' -and [VerifyNative]::GetAncestor($h, 2) -eq $script:window } 'owned native rename editor'
     $editor = [VerifyNative]::GetFocusedWindow($script:window)
-    # The app already selected the rename text; clicking would discard that selection.
     Type-Text $Name
     Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $editor -and [VerifyNative]::EditText($editor) -ceq $Name } 'native rename editor received the requested name'
     Press @(0x0D) 'Enter: save the native rename'

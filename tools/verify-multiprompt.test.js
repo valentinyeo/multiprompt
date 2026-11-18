@@ -2040,7 +2040,7 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('remind-me'));
   assert.ok(featureMatrix(workflow).full.includes('remind-me'));
-  const journey = control.slice(control.indexOf("        'remind-me' {"), control.indexOf("        'group-rail' {"));
+  const journey = read(skill + 'control-feature-remind-me.ps1');
   assert.match(journey, /Press @\(0x11, 0x48\)/);
   assert.match(journey, /SEARCH_REMIND_PRESET_OFFSET/);
   assert.match(journey, /Snapshot 'action'[\s\S]*Snapshot 'after'/);
