@@ -68,8 +68,8 @@ function Focus {
 }
 function Press([int[]]$Keys) {
     Write-Host ('[session-actions] press: ' + (($Keys | ForEach-Object { '0x{0:X2}' -f $_ }) -join '+'))
-    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
-    if ($app.HasExited -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell' -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Keyboard owner mismatch' }
+    if ([VerifyNative]::GetAncestor([ChatDeliveryDesktop]::GetForegroundWindow(), 2) -ne $main) { Focus }
+    if ($app.HasExited -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell' -or [VerifyNative]::GetAncestor([ChatDeliveryDesktop]::GetForegroundWindow(), 2) -ne $main) { throw 'Keyboard owner mismatch' }
     $held=[Collections.Generic.List[int]]::new()
     try {
         for ($keyIndex=0; $keyIndex -lt $Keys.Length-1; $keyIndex++) {
@@ -81,7 +81,7 @@ function Press([int[]]$Keys) {
             $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='modifier-held'; key=$modifier})
         }
         $foreground=[ChatDeliveryDesktop]::GetForegroundWindow()
-        if ($foreground -ne $main) { throw 'Owned foreground changed while holding modifiers' }
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $main) { throw 'Owned foreground changed while holding modifiers' }
         foreach ($expectedModifier in @(0x10,0x11,0x12,0x5b,0x5c)) {
             if ([VerifyNative]::IsDown($expectedModifier) -ne $held.Contains($expectedModifier)) { throw 'Unexpected modifier state before action' }
         }

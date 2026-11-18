@@ -47,7 +47,7 @@ function Test-ServerGroupReady($state) {
     if ($null -eq $state -or $null -eq $state.PSObject.Properties['groups'] -or $null -eq $state.PSObject.Properties['tabs']) { return $false }
     $groups = @($state.groups | Where-Object { $_.name -ceq 'Runners' -and $_.id -gt 0 })
     if ($groups.Count -ne 1) { return $false }
-    return @($state.tabs | Where-Object { $_.tmux_session -ceq 'mp-runner-1' -and $_.group_id -eq $groups[0].id }).Count -eq 1
+    return @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'mp-runner-1' -and $_.PSObject.Properties['group_id'] -and $_.group_id -eq $groups[0].id }).Count -eq 1
 }
 function Wait-ServerGroup([string]$Description, [scriptblock]$Check, [int]$Seconds = 90) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)

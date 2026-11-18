@@ -101,3 +101,60 @@ if (!$text.Contains('Desktop process exited:')) { throw 'Actual exception discar
 'SANITIZED_OK'
 `), /SANITIZED_OK/);
 });
+
+
+test('group readiness accepts mixed local and remote tabs, but rejects missing, wrong and duplicate imports', { skip: process.platform !== 'win32' && !process.env.PWSH }, () => {
+  assert.match(run(`${extract}
+Set-StrictMode -Version Latest
+Import-Function '.claude/skills/verify-multiprompt/control-feature-server-open-group.ps1' 'Test-ServerGroupReady'
+foreach ($spec in @(
+    @{tabs=@(@{kind='cmd'},@{tmux_session='mp-runner-1';group_id=7});ok=$true},
+    @{tabs=@(@{kind='cmd'},@{tmux_session='mp-runner-1'});ok=$false},
+    @{tabs=@(@{kind='cmd'},@{tmux_session='mp-runner-1';group_id=8});ok=$false},
+    @{tabs=@(@{tmux_session='other';group_id=7});ok=$false},
+    @{tabs=@(@{tmux_session='mp-runner-1';group_id=7},@{tmux_session='mp-runner-1';group_id=7});ok=$false}
+)) {
+    $state=@{groups=@(@{name='Runners';id=7});tabs=$spec.tabs}|ConvertTo-Json -Depth 6|ConvertFrom-Json
+    if ((Test-ServerGroupReady $state) -ne $spec.ok) { throw 'Wrong grouped import readiness' }
+}
+'GROUP_READY_OK'
+`), /GROUP_READY_OK/);
+});
+
+test('shortcut input accepts its embedded console after restore but never a foreign foreground root', { skip: process.platform !== 'win32' && !process.env.PWSH }, () => {
+  assert.match(run(`${extract}
+Import-Function 'tools/verify-session-actions/drive.ps1' 'Press'
+Add-Type @'
+using System;
+public static class ChatDeliveryDesktop {
+    public static IntPtr Foreground=new IntPtr(1);
+    public static IntPtr GetForegroundWindow() { return Foreground; }
+    public static uint Owner(IntPtr h) { return 9; }
+    public static string Class(IntPtr h) { return "ZigShell"; }
+}
+public static class VerifyNative {
+    public static int Target, Actions, Held;
+    public static IntPtr GetAncestor(IntPtr h,int kind) { return h.ToInt64()==2?new IntPtr(1):h; }
+    public static void KeyDown(int k) { Held=k; ChatDeliveryDesktop.Foreground=new IntPtr(Target); }
+    public static void KeyUp(int k) { Held=0; }
+    public static bool IsDown(int k) { return Held==k; }
+    public static void Chord(int[] keys) { Actions++; }
+}
+'@
+$main=[IntPtr]1; $app=@{Id=9;HasExited=$false}
+$actions=[Collections.Generic.List[object]]::new()
+function Focus { throw 'Unexpected focus repair' }
+function Wait-For($name,$check) { if (!(& $check)) { throw $name }; $true }
+foreach ($target in @(2,3)) {
+    [ChatDeliveryDesktop]::Foreground=[IntPtr]1
+    [VerifyNative]::Target=$target; [VerifyNative]::Actions=0
+    $rejected=$false
+    try { Press @(0x11,0x57) } catch {
+        if ($_.Exception.Message -ne 'Owned foreground changed while holding modifiers') { throw }
+        $rejected=$true
+    }
+    if ($rejected -ne ($target -eq 3) -or [VerifyNative]::Actions -ne $(if ($target -eq 2) { 1 } else { 0 }) -or [VerifyNative]::Held -ne 0) { throw 'Wrong foreground ownership or modifier cleanup' }
+}
+'OWNED_SHORTCUT_OK'
+`), /OWNED_SHORTCUT_OK/);
+});
