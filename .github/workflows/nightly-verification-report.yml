@@ -11,8 +11,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: nightly-verification-report
-  cancel-in-progress: false
+  group: nightly-verification-report-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
 
 jobs:
   report:

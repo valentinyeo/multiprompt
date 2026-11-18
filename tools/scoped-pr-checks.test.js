@@ -60,6 +60,8 @@ test('nightly feature failures are reported without raising reusable caller perm
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/nightly-verification-report.yml'), 'utf8');
   assert.match(workflow, /workflow_run:[\s\S]*workflows: \[Verify desktop\][\s\S]*branches: \[master\]/);
   assert.match(workflow, /github.event.workflow_run.event == 'schedule'/);
+  assert.match(workflow, /group: nightly-verification-report-\$\{\{ github.event.workflow_run.id \}\}/);
+  assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /nightly-verification-ticket\.cjs/);
   const reusable = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.doesNotMatch(reusable, /nightly-report:|actions: read/);
