@@ -17,7 +17,7 @@ Select the saved server tab with Ctrl+1. Open Chat View with Alt+C. Type in the 
 
 ## Driving it with control.ps1
 
-Preconditions: GitHub `windows-latest`, the branch executable, WSL1 Ubuntu 24.04 with OpenSSH server, tmux and Python, Windows OpenSSH client, and FFmpeg. `verify.yml` installs these for `feature=server-chat`.
+Preconditions: GitHub `windows-latest`, the branch executable, WSL2 Ubuntu 24.04 with OpenSSH server, tmux and Python, Windows OpenSSH client, and FFmpeg. `verify.yml` installs these for `feature=server-chat`.
 
 `control.ps1 -Feature server-chat` delegates to `tools/verify-server-chat/drive.ps1`. This is a real networking journey, not the fake SSH/tmux boundary used by `chat-delivery` and `chat-slash`. The runner owns both ends of the loopback connection on port 2222. Linux uses a dedicated `mpverify` user, key-only authentication and a real tmux session. The unmodified production host and connectors dispatch to a deterministic stream-json provider instead of making paid Claude calls. The provider writes normal Claude transcript records and independently records its input.
 
@@ -30,5 +30,6 @@ Require `result.json` status `passed`, all four named cases passed, zero app pro
 - This proves real server transport and that the `/clear` journey runs through the UI, host and provider. It does **not** prove paid Claude context erasure, or fix the separate server-chat clear behavior tracked by SOFT-2420. The deterministic provider echoes `/clear`; it does not fabricate a reset acknowledgement or alter the production reader.
 - Initial saved-tab and provider configuration are seeded before launch. User actions after launch use SendInput, not UI setters or forged transport responses. Server snapshots are read-only SQLite reads over real SSH.
 - Never use a shared VPS, production key, real account, or user computer. WSL and its test user belong to this disposable GitHub runner.
-- WSL1 shares loopback with Windows. WSL2 would require separate reachability configuration; do not silently switch it.
+- WSL2 supplies the real Linux locking required by concurrent production SQLite writers. Before seeding, a cross-process probe must reject the second writer with `SQLITE_BUSY` and retain an intact two-write database. Windows keyscan and SSH preflight must independently prove localhost reachability.
+- Native commands run through `Invoke-ServerNative`, which retains complete stdout, stderr and exit codes without treating a successful SSH banner as an error. Cleanup retains Linux host logs even when startup fails.
 - A green source test is not Windows proof. The run and video are required.

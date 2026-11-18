@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const root = process.argv[2];
 const reproduction = process.argv[3] === '--repro';
@@ -25,7 +25,8 @@ assert.equal(manifest.sessions, 64);
 assert.equal(manifest.longChats, 8);
 assert.equal(manifest.messages, 19872);
 for (const [name, message] of [['send', 'windows send proof'], ...(!busy && !fresh ? [['clear', '/clear'], ['after-clear', 'windows after clear']] : [])]) {
-  assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === message).length, 1);
+  const wireText = name === 'clear' ? '/clear ' : message;
+  assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
   assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));
   assert.ok(fs.statSync(path.join(root, `${name}.png`)).size > 1000);
 }
@@ -96,9 +97,27 @@ const acl = json('key-acl.json');
 assert.equal(acl.protected, true);
 assert.equal(acl.rules.length, 1);
 assert.equal(acl.rules[0].sid, acl.owner);
+const locks = JSON.parse(text('server-start.stdout.log').split(/\r?\n/).find(line => line.includes('"blockedWriter"')));
+assert.match(locks.kernel, /WSL2/i);
+assert.equal(locks.blockedWriter, 'SQLITE_BUSY');
+assert.equal(locks.integrity, 'ok');
+assert.equal(locks.writes, 2);
+const nativeLogs = fs.readdirSync(root).filter(name => name.endsWith('.exit-code.txt'));
+for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate', ...(fresh ? ['replacement-start'] : [])]) {
+  assert.ok(nativeLogs.includes(`${name}.exit-code.txt`), `Missing native command evidence: ${name}`);
+}
+for (const name of nativeLogs) {
+  assert.equal(text(name).trim(), '0', `Native command failed: ${name}`);
+  assert.ok(fs.existsSync(path.join(root, name.replace('.exit-code.txt', '.stderr.log'))));
+}
 assert.match(text('ssh-preflight.txt'), /Linux[\s\S]*tmux[\s\S]*Python/);
 assert.match(text('sshd.log'), /Accepted publickey for mpverify/);
-const video = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path.join(root, 'journey.mp4')], { encoding: 'utf8' }));
+const probe = spawnSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path.join(root, 'journey.mp4')], { encoding: 'utf8' });
+fs.writeFileSync(path.join(root, 'ffprobe.stdout.log'), probe.stdout ?? '');
+fs.writeFileSync(path.join(root, 'ffprobe.stderr.log'), probe.stderr ?? String(probe.error ?? ''));
+fs.writeFileSync(path.join(root, 'ffprobe.exit-code.txt'), String(probe.status));
+assert.equal(probe.status, 0, `Video probe failed; see ${path.join(root, 'ffprobe.stderr.log')}`);
+const video = JSON.parse(probe.stdout);
 assert.ok(video.streams.some(stream => stream.codec_type === 'video' && Number(stream.nb_frames) > 0));
 assert.ok(Number(video.format.duration) > (busy ? 611 : 1));
 assert.equal(json('doctor.json').sha256.toLowerCase(), json('build.json').sha256.toLowerCase());

@@ -528,7 +528,7 @@ jobs:
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
-          wsl-version: '1'
+          wsl-version: '2'
           additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
         if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start') || inputs.candidate_artifact != ''
@@ -1047,8 +1047,19 @@ jobs:
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
       - name: Check real server chat evidence
-        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
-        run: node tools/verify-server-chat/check-evidence.cjs evidence
+        if: always() && !cancelled() && (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./tools/verify-server-chat/native.ps1
+          $result = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+          $arguments = @('tools/verify-server-chat/check-evidence.cjs', 'evidence')
+          $name = 'check-evidence'
+          if ($result.status -eq 'failed' -and $result.feature -in @('server-chat-busy', 'server-chat-fresh-start')) {
+            $arguments += '--repro'
+            $name = 'check-evidence-repro'
+          }
+          [void](Invoke-ServerNative -FilePath node -Arguments $arguments -Evidence "$pwd/evidence" -Name $name)
       - name: Save paired session views
         if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
         shell: powershell

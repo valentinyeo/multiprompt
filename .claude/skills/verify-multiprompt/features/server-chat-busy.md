@@ -18,13 +18,15 @@ Open the saved server chat. Send `busy server turn`, then `follow-up during busy
 
 ## Driving it with control.ps1
 
-The automatic `server-chat-busy` click-through job calls the shared `verify.yml` workflow. Do not dispatch extra runs. `control.ps1` calls `tools/verify-server-chat/drive.ps1 -Busy`, reusing PR 1072's runner-owned WSL1 Ubuntu OpenSSH server, real tmux and Windows OpenSSH. PR 1070's seed files are copied unchanged from `ff2aba50`; the server uses the same source-message factory.
+The automatic `server-chat-busy` click-through job calls the shared `verify.yml` workflow. Do not dispatch extra runs. `control.ps1` calls `tools/verify-server-chat/drive.ps1 -Busy`, reusing PR 1072's runner-owned WSL2 Ubuntu OpenSSH server, real tmux and Windows OpenSSH. PR 1070's seed files are copied unchanged from `ff2aba50`; the server uses the same source-message factory.
 
 Only the paid Claude process is synthetic. Its stream-json boundary holds one turn open, queues incoming stdin prompts, and accepts the normal interrupt control request. `cancel_queued` discards only prompts already handed to that provider, not messages in the production durable store. It neither rejects valid delivery nor ignores Stop to force a failure.
 
 When `app_revision` selects master, both the app and the server reader/connectors use that revision. The harness and deterministic provider stay identical. The current reproduction commit restores all application files to master; no fix may follow until the hosted artifact proves the report.
 
 A red workflow is not sufficient. Run `node tools/verify-server-chat/check-evidence.cjs <artifact> --repro` against the downloaded master artifact. It requires both `notSent=true` and `stopIneffective=true`, successful open/send preconditions, a real Stop click, the full observation budget, a still-busy provider with the same PID, native pending state, video and clean shutdown. Inspect `busy-before-stop.png` to confirm the visible Not sent label. Setup errors and a failure of only one symptom do not authorize a fix.
+
+The workflow runs the strict checker even after a failed desktop step and retains `check-evidence-repro.stdout.log`, stderr and exit status. Setup failures still fail admission. The verifier places the declared reproduction's head/master results and checker output before unrelated artifacts in its bounded input.
 
 The identical positive journey requires `result.json` passed, no Not sent state, the interrupt receipt/event, one follow-up receipt, its copied reply, and cleanup. The checker without `--repro` rejects partial results. Inspect `journey.mp4`, `busy-*.json`, `busy-*.png`, `fixture-manifest.json`, `actions.json`, `doctor.json` and `build.json`.
 

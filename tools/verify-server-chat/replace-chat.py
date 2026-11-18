@@ -24,6 +24,14 @@ config['command'] = ['python3', '-u', str(root / 'tools/verify-server-chat/provi
 reader['host_write'](paths['config'], config)
 result = reader['host_cli'](['start', 'claude', new])
 assert result['status'] in ('started', 'already'), result
+for _ in range(200):
+    events = reader['message_events_page']('claude', new, 0)['events']
+    ready = next((entry for entry in events if entry['event'].get('kind') == 'host.status' and entry['event'].get('payload', {}).get('state') == 'ready'), None)
+    if ready is not None:
+        break
+    time.sleep(0.1)
+else:
+    raise RuntimeError('The replacement provider did not become ready')
 result = reader['host_send']('claude', new, 'fresh replacement seed', 'live-ci')
 assert result['status'] in ('sent', 'queued', 'ok', 'accepted'), result
 for _ in range(300):

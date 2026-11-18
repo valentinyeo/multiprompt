@@ -19,6 +19,8 @@ Open the server chat. Choose **Chat View: Fresh start** in Ctrl+K. Keep its tab 
 
 The automatic `server-chat-fresh-start` click-through job calls `verify.yml`. Do not dispatch extra runs. `control.ps1` calls `tools/verify-server-chat/drive.ps1 -FreshStart`, using the same runner-owned Windows OpenSSH, WSL Linux OpenSSH server, real tmux, production reader and deterministic paid-provider boundary as `server-chat-busy`.
 
+WSL2 must pass the cross-process SQLite locking preflight before either host starts. Both the initial and replacement host must publish provider readiness before their seed is sent. Native commands retain stdout, stderr and checked exit status; the workflow also retains the strict checker output after a failed desktop step.
+
 The ended-owner scenario is explicit. `replace-chat.py` calls the production host CLI to disable the old chat and enable/start a different live chat on the same tmux pane. It does not edit the app's routing, tab, outbox or clock, drop SSH packets, or return a fake host status. This lifecycle setup models the ticket's dead old host and live replacement. Only the paid model process is synthetic.
 
 Both application and server runtime use the selected `app_revision`; the driver and fixture remain identical for master and head. Application changes remain withdrawn until real product failures are captured.

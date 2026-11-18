@@ -7,6 +7,7 @@ param(
     [switch]$FreshStart
 )
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/native.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use a GitHub Windows runner' }
 $Exe = (Resolve-Path $Exe).Path
@@ -85,15 +86,14 @@ function Send-Line([string]$Text) {
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
 function Server-Snapshot([string]$Name) {
-    $raw = & $ssh -F "$settings/ssh-key/config" remote-1 "python3 $repo/tools/verify-server-chat/snapshot.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Real SSH evidence read failed' }
+    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
     $snapshot = ($raw -join "`n") | ConvertFrom-Json
     Save $snapshot "$Evidence/$Name.json"
     return $snapshot
 }
 try {
+    $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'driver-repo-path').Trim()
     & "$PSScriptRoot/start.ps1" -Profile $profile -Evidence $Evidence
-    $repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $env:APPDATA = "$profile/roaming"
     $env:LOCALAPPDATA = "$profile/local"
@@ -103,8 +103,7 @@ try {
     $env:ZIGSHELL_DEBUG = '1'
     $env:IGSH_246 = '0'
     $env:PATH = (Split-Path $ssh) + ';' + $env:PATH
-    & python "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.py" --root $profile --home "$profile/home" --settings $settings --evidence $Evidence
-    if ($LASTEXITCODE -ne 0) { throw 'Large saved-chat seed failed' }
+    [void](Invoke-ServerNative -FilePath python -Arguments @("$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.py", '--root', $profile, '--home', "$profile/home", '--settings', $settings, '--evidence', $Evidence) -Evidence $Evidence -Name 'profile-seed')
     Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 }) } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
@@ -133,7 +132,8 @@ try {
     if (-not $Busy -and -not $FreshStart) { $scenarios += @(@{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' }) }
     foreach ($case in $scenarios) {
         Send-Line $case.text
-        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
+        $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
+        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
         [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
@@ -153,8 +153,7 @@ try {
         Shot 'fresh-after'
         $result.cases += @{ name = 'fresh-start-rotates'; passed = $true; detail = 'Actual palette Fresh start rotated the native provider process and retained the public tab history' }
         $actions.Add(@{ input = 'replace ended host through production CLI in the same tmux pane'; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
-        $raw = & $ssh -F "$settings/ssh-key/config" remote-1 "python3 $repo/tools/verify-server-chat/replace-chat.py $repo"
-        if ($LASTEXITCODE -ne 0) { throw 'Replacement chat lifecycle setup failed' }
+        $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/replace-chat.py $repo") -Evidence $Evidence -Name 'replacement-start'
         $replacement = ($raw -join "`n") | ConvertFrom-Json
         Save $replacement "$Evidence/replacement.json"
         [void](Server-Snapshot 'replacement-before')
@@ -262,14 +261,18 @@ try {
     }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     try {
-        $linuxEvidence = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $Evidence).Trim()
-        & wsl.exe -d Ubuntu-24.04 -u root --exec bash -c 'cp /tmp/mp-ci-sshd.log "$1/sshd.log"; pkill -u mpverify || true; kill "$(cat /tmp/mp-ci-sshd.pid)"' bash $linuxEvidence
-        if ($LASTEXITCODE -ne 0) { throw 'Linux evidence collection or cleanup failed' }
+        $linuxEvidence = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $Evidence) -Evidence $Evidence -Name 'evidence-path').Trim()
+        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/stop.sh", $linuxEvidence) -Evidence $Evidence -Name 'server-stop')
     } catch {
         $result.cleanupError = $_.ToString()
         $result.status = 'failed'
     }
-    & wsl.exe --terminate Ubuntu-24.04
+    try {
+        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $Evidence -Name 'wsl-terminate')
+    } catch {
+        $result.cleanupError = ($result['cleanupError'], $_.ToString() -join "`n")
+        $result.status = 'failed'
+    }
     Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
     $result.keyRemoved = -not (Test-Path "$settings/ssh-key/multibot_ed25519")
     if (-not $result.keyRemoved) { $result.status = 'failed'; $result.error = 'Private key cleanup failed' }

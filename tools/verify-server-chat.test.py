@@ -1,11 +1,13 @@
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -83,14 +85,18 @@ class ProviderTest(unittest.TestCase):
             'key-acl.json': dict(protected=True, owner='runner', rules=[dict(sid='runner')]),
             'doctor.json': dict(sha256='abc'), 'build.json': dict(sha256='abc'),
         }
-        script = 'require("node:child_process").execFileSync=()=>JSON.stringify({streams:[{codec_type:"video",nb_frames:"20"}],format:{duration:"2"}});process.argv=["node",process.argv[1],process.argv[2],process.argv[3]];require(process.argv[1]);'
+        files['server-start.stdout.log'] = dict(kernel='microsoft-standard-WSL2', blockedWriter='SQLITE_BUSY', integrity='ok', writes=2)
+        for name in ('ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate', 'replacement-start'):
+            files[name + '.exit-code.txt'] = 0
+            files[name + '.stderr.log'] = ''
+        script = 'require("node:child_process").spawnSync=()=>({status:0,stdout:JSON.stringify({streams:[{codec_type:"video",nb_frames:"20"}],format:{duration:"2"}}),stderr:""});process.argv=["node",process.argv[1],process.argv[2],process.argv[3]];require(process.argv[1]);'
         with tempfile.TemporaryDirectory() as folder:
             evidence = Path(folder)
             for name, text in {'open-copied.txt': 'Server received: server seed Synthetic chat 00 answer 1199.', 'send-copied.txt': 'Server received: windows send proof', 'fresh-copied.txt': 'Synthetic chat 00 answer 1199.', 'replacement-copied.txt': 'Server received: fresh replacement seed', 'replacement-reply-copied.txt': 'Server received: after fresh replacement', 'ssh-preflight.txt': 'Linux tmux Python', 'sshd.log': 'Accepted publickey for mpverify'}.items():
                 (evidence / name).write_text(text)
             for name in ('send.png', 'fresh-after.png', 'replacement-fresh-start.png', 'replacement-after.png'):
                 (evidence / name).write_bytes(b'x' * 1001)
-            for fault in ('none', 'missing handover', 'old host alive', 'wrong native receipt', 'cleanup failed'):
+            for fault in ('none', 'missing handover', 'old host alive', 'wrong native receipt', 'cleanup failed', 'native failed', 'lock exclusion missing'):
                 values = copy.deepcopy(files)
                 if fault == 'missing handover':
                     values['fresh-after.json']['inputs'] = []
@@ -100,6 +106,10 @@ class ProviderTest(unittest.TestCase):
                     values['replacement-after.json']['inputs'][0]['sid'] = 'old-context'
                 elif fault == 'cleanup failed':
                     values['result.json']['cleanupError'] = 'cleanup unavailable'
+                elif fault == 'native failed':
+                    values['server-start.exit-code.txt'] = 7
+                elif fault == 'lock exclusion missing':
+                    values['server-start.stdout.log']['blockedWriter'] = 'SQLITE_OK'
                 for name, value in values.items():
                     (evidence / name).write_text(json.dumps(value))
                 result = subprocess.run(['node', '-e', script, str(ROOT / 'tools/verify-server-chat/check-evidence.cjs'), str(evidence)], capture_output=True, text=True)
@@ -130,9 +140,9 @@ class ProviderTest(unittest.TestCase):
 $env:GITHUB_WORKSPACE = 'D:\a path\multiprompt'
 $key = 'D:\key path\id_ed25519'
 $Evidence = 'D:\evidence path'
-function wsl.exe {
-    if ($args -contains '--exec') { $args[-1] }
-    else { $args[-1] -replace '\\', '' }
+function Invoke-ServerNative($FilePath, $Arguments, $Evidence, $Name) {
+    if ($Arguments -contains '--exec') { $Arguments[-1] }
+    else { $Arguments[-1] -replace '\\', '' }
 }
 $values = @()
 foreach ($name in @('start.ps1', 'drive.ps1')) {
@@ -140,7 +150,7 @@ foreach ($name in @('start.ps1', 'drive.ps1')) {
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT ('tools/verify-server-chat/' + $name)), [ref]$tokens, [ref]$errors)
     if ($errors.Count -ne 0) { throw (($errors | ForEach-Object { $_.Message }) -join '; ') }
-    $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'wsl.exe' -and @($node.CommandElements | Where-Object { $_.Extent.Text -eq 'wslpath' }).Count -eq 1 }, $true)
+    $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Invoke-ServerNative' -and $node.Extent.Text -match 'wslpath' }, $true)
     foreach ($call in $calls) { $values += & ([scriptblock]::Create($call.Extent.Text)) }
 }
 ConvertTo-Json -InputObject $values -Compress
@@ -148,6 +158,154 @@ ConvertTo-Json -InputObject $values -Compress
         env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT))
         paths = json.loads(subprocess.check_output([shell, '-NoProfile', '-Command', command], env=env, text=True))
         self.assertEqual(paths, [r'D:\a path\multiprompt', r'D:\key path\id_ed25519.pub', r'D:\a path\multiprompt', r'D:\evidence path'])
+
+
+    def test_failed_server_journeys_run_the_strict_reproduction_checker(self):
+        import textwrap
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        step = workflow.split('      - name: Check real server chat evidence\n')[1].split('      - name: Save paired session views')[0]
+        self.assertIn('if: always() && !cancelled()', step)
+        script = textwrap.dedent(step.split('        run: |\n')[1])
+        for feature, status, repro in [('server-chat-busy', 'failed', True), ('server-chat-fresh-start', 'failed', True), ('server-chat-busy', 'passed', False), ('server-chat', 'failed', False)]:
+            with self.subTest(feature=feature, status=status), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                native = root / 'tools/verify-server-chat/native.ps1'
+                native.parent.mkdir(parents=True)
+                native.write_text("function Invoke-ServerNative($FilePath, $Arguments, $Evidence, $Name) { [IO.File]::WriteAllText((Join-Path $Evidence 'invocation.json'), (@{ file=$FilePath; arguments=$Arguments; name=$Name } | ConvertTo-Json)) }")
+                evidence = root / 'evidence'
+                evidence.mkdir()
+                (evidence / 'result.json').write_text(json.dumps(dict(feature=feature, status=status)))
+                subprocess.run([shell, '-NoProfile', '-Command', script], cwd=root, capture_output=True, text=True, check=True)
+                invocation = json.loads((evidence / 'invocation.json').read_text())
+                self.assertEqual(invocation['file'], 'node')
+                self.assertEqual(invocation['arguments'], ['tools/verify-server-chat/check-evidence.cjs', 'evidence'] + (['--repro'] if repro else []))
+                self.assertEqual(invocation['name'], 'check-evidence-repro' if repro else 'check-evidence')
+
+    @unittest.skipIf(os.name == 'nt', 'The lock preflight runs inside the Linux server')
+    def test_server_sqlite_lock_preflight(self):
+        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        self.assertIn("wsl-version: '2'", workflow, 'Concurrent SQLite writers require the WSL2 kernel, not WSL1 lock emulation')
+        with tempfile.TemporaryDirectory() as home:
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/verify-server-chat/check-locks.py')], env=dict(os.environ, HOME=home), text=True, capture_output=True, check=True)
+            proof = json.loads(result.stdout)
+            self.assertEqual(proof['blockedWriter'], 'SQLITE_BUSY')
+            self.assertEqual(proof['integrity'], 'ok')
+            self.assertEqual(proof['writes'], 2)
+            self.assertEqual(list(Path(home).iterdir()), [])
+
+    def test_seed_waits_for_persisted_provider_readiness(self):
+        execute = runpy.run_path
+        for name in ('seed.py', 'replace-chat.py'):
+            seed = ROOT / 'tools/verify-server-chat' / name
+            for will_be_ready in (True, False):
+                with self.subTest(program=name, ready=will_be_ready), tempfile.TemporaryDirectory() as home:
+                    transcript = Path(home) / '.claude/projects/fixture/sid.jsonl'
+                    transcript.parent.mkdir(parents=True)
+                    transcript.write_text('Server received: server seed')
+                    (Path(home) / 'server-seed.json').write_text(json.dumps(dict(runtime=str(ROOT))))
+                    observed = []
+                    def events(*args):
+                        observed.append('poll')
+                        if will_be_ready and len(observed) > 1:
+                            observed.append('ready')
+                            return dict(events=[dict(seq=2, event=dict(kind='host.status', payload=dict(state='ready')))])
+                        return dict(events=[])
+                    def send(provider, sid, text, tmux):
+                        self.assertIn('ready', observed, 'The seed was sent before provider readiness')
+                        (Path(home) / 'provider-input.jsonl').write_text(json.dumps(dict(sid=sid, text=text)) + '\n')
+                        return dict(status='sent')
+                    def cli(argv):
+                        return dict(status=dict(enable='enabled', disable='disabled', start='started')[argv[0]])
+                    reader = dict(host_cli=Mock(side_effect=cli), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_session_state=Mock(return_value=dict(pid=0)), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send), source_rows=Mock(return_value=[]))
+                    with patch('runpy.run_path', return_value=reader), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT), str(ROOT)]):
+                        if will_be_ready:
+                            execute(str(seed))
+                            reader['host_send'].assert_called_once()
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, 'provider.*ready'):
+                                execute(str(seed))
+                            reader['host_send'].assert_not_called()
+
+    def test_native_commands_preserve_stderr_and_check_exit_codes(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+. (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/native.ps1')
+$output = Invoke-ServerNative -FilePath $env:VERIFY_TEST_PYTHON -Arguments @($env:VERIFY_TEST_PROGRAM, 'a path', '', 'embedded"quote', 'trailing\', $env:VERIFY_TEST_EXIT) -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'native'
+if ($ErrorActionPreference -ne 'Stop') { throw 'Native execution changed PowerShell error policy' }
+$output
+"""
+        for exit_code in (0, 7):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory(prefix='server chat launch ') as evidence:
+                program = Path(evidence) / 'native child.py'
+                program.write_text("import json,subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(8)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(json.dumps(sys.argv[1:-1])); print('# 127.0.0.1:2222 SSH-2.0-OpenSSH',file=sys.stderr); print('traceback line 2',file=sys.stderr); sys.exit(int(sys.argv[-1]))")
+                env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_PYTHON=sys.executable, VERIFY_TEST_PROGRAM=str(program), VERIFY_TEST_EXIT=str(exit_code), VERIFY_TEST_EVIDENCE=evidence)
+                try:
+                    result = subprocess.run([shell, '-NoProfile', '-Command', command], env=env, text=True, capture_output=True, timeout=6)
+                except subprocess.TimeoutExpired:
+                    self.fail('Native execution waited for a background descendant instead of only its launcher')
+                self.assertEqual(result.returncode == 0, exit_code == 0, result.stderr)
+                self.assertEqual(json.loads((Path(evidence) / 'native.stdout.log').read_text()), ['a path', '', 'embedded"quote', 'trailing\\'])
+                self.assertEqual((Path(evidence) / 'native.stderr.log').read_text().splitlines(), ['# 127.0.0.1:2222 SSH-2.0-OpenSSH', 'traceback line 2'])
+                self.assertEqual((Path(evidence) / 'native.exit-code.txt').read_text().strip(), str(exit_code))
+                if exit_code:
+                    self.assertIn('exited 7', result.stderr)
+                else:
+                    self.assertEqual(json.loads(result.stdout), ['a path', '', 'embedded"quote', 'trailing\\'])
+
+    def test_wsl_switches_remain_unquoted_on_the_native_command_line(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+. (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/native.ps1')
+function Get-Command { @{ Source = 'wsl.exe' } }
+function Start-Process($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, [switch]$NoNewWindow, [switch]$PassThru) {
+    [IO.File]::WriteAllText($RedirectStandardOutput, '')
+    [IO.File]::WriteAllText($RedirectStandardError, '')
+    $process = [pscustomobject]@{ Handle = 1; ExitCode = 0 }
+    $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {}
+    $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {}
+    return $process
+}
+[void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', 'D:\a path\multiprompt') -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'path')
+[void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'terminate')
+"""
+        with tempfile.TemporaryDirectory() as evidence:
+            subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_EVIDENCE=evidence), check=True, text=True, capture_output=True)
+            self.assertEqual((Path(evidence) / 'path.command-line.txt').read_text(), '-d Ubuntu-24.04 -u root --exec wslpath -a "D:\\a path\\multiprompt"')
+            self.assertEqual((Path(evidence) / 'terminate.command-line.txt').read_text(), '--terminate Ubuntu-24.04')
+
+    def test_native_commands_cannot_bypass_the_shared_boundary(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+foreach ($path in Get-ChildItem (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/*.ps1')) {
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($path.FullName, [ref]$tokens, [ref]$errors)
+    if ($errors.Count) { throw ($errors | Out-String) }
+    $blocks = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.ParameterAst] -and $node.StaticType -eq [scriptblock] }, $true) | ForEach-Object { $_.Name.Extent.Text })
+    foreach ($call in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $name = $call.GetCommandName()
+        $scriptCall = $call.CommandElements[0].Extent.Text -match '\.ps1["'']?$'
+        if (($call.InvocationOperator -eq 'Ampersand' -and -not $scriptCall -and $call.CommandElements[0].Extent.Text -notin $blocks) -or $name -match '(?i)(\.exe$|^python[0-9]*$|^ssh|^ffmpeg|^ffprobe|^wsl$)' -or ($name -eq 'Start-Process' -and $path.Name -ne 'native.ps1')) {
+            throw "$($path.Name):$($call.Extent.StartLineNumber): Use Invoke-ServerNative for native commands so exit codes decide success and stderr reaches evidence"
+        }
+    }
+}
+"""
+        result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT)), text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':
