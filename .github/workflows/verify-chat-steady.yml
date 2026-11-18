@@ -1,9 +1,8 @@
 name: Verify steady chat
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/verify-chat-steady.yml
+  schedule:
+    - cron: '8 5 * * *'
   workflow_dispatch:
 
 permissions:

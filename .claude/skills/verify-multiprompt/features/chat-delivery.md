@@ -1,6 +1,6 @@
 # Chat delivery
 
-Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
 
 ## Sub-features
 
