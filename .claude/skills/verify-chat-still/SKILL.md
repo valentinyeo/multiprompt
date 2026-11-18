@@ -23,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last hosted-confirmed source/model sync commit is `608b7d62944fd39b79cbbaa2c83bc6e3251f590c`. PR #1094 updates the source mapping for a persistent newest-visible-message anchor. Hosted validation is pending, so the sync commit has not advanced. `tools/chat-still/coverage.json` records the reviewed function shapes.
+Last hosted-confirmed source/model sync commit is `5be4370e4d1dc44c3a80386954ee3b216b49819a`. Tests run `44348905357`, job `test-vps (1)`, passes all ten obligations, the ten guard-mutation replays, both native negative controls and nine exact-position regressions. Windows run `44348891482` passes the unchanged stillness journey; first/last message crops and the final screenshot were inspected. `tools/chat-still/coverage.json` records the reviewed function shapes.
 
 | Source and function | What the model uses |
 | --- | --- |
@@ -44,7 +44,7 @@ Each passive event is checked through both callers. History may add a divider; m
 
 Hosted Tests run `44342248357` at `9ef7d1c5` replayed six real findings for row-height changes, padding compensation and reconciliation across both callers. The earlier ten failures in that log are deliberate guard mutations, not ten product regressions. `regressions.json` retains the six real coordinates.
 
-The product now holds the newest initially visible message by identity instead of the first visible row. Padding is already included in its new top, so the scroll offset must not subtract padding again. The translation uses that message's old/new top and stored offset. All ten obligations, geometry bounds, content clamps and the exact Y invariant remain unchanged. The replay requires the original six witnesses to preserve their before-Y, then checks cached padding and an append followed by remeasurement without replacing the original anchor. Hosted confirmation is pending.
+The product now holds the newest initially visible message by identity instead of the first visible row. Padding is already included in its new top, so the scroll offset must not subtract padding again. The translation uses that message's old/new top and stored offset. All ten obligations, geometry bounds, content clamps and the exact Y invariant remain unchanged. The replay requires the original six witnesses to preserve their before-Y, then checks cached padding and an append followed by remeasurement without replacing the original anchor. Hosted confirmation at `5be4370e` passes in Tests run `44348905357` and Windows run `44348891482`.
 
 A counterexample lists old/new row tops, content height, viewport, divider, padding and the newest message's before/after Y. Tell it as opening the chat, receiving that update, and painting the changed Y. For a model error, show the mismatching production operation or impossible geometry and repair the mapping; keep the invariant. For a real bug, link the failing coordinates and native replay to the product ticket. Do not confuse replaying a synthetic measurement boundary with proving a production UI path.
 
