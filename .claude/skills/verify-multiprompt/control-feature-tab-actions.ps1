@@ -109,7 +109,7 @@ function New-ActionTab([string]$Name) {
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -gt 0 } 'native Copy chat ID initialized a persistent local identity'
     $state = Read-Session
     $id = [long]$state.tabs[$state.active_tab].chat_id
-    Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
+    Select-ActionTab $id
     Press @(0x71) 'F2: name the disposable local tab'
     Rename-ActionTab $Name
     Wait-Until { (Get-ActionTab $id).name -ceq $Name } 'new tab name saved'

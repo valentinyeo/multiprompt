@@ -270,6 +270,41 @@ else if (process.argv[2] === '--evidence') {
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute workspace peer creation');
     assert.equal(run.status, 0, run.stderr);
   });
+  test('a new tab is explicitly selected after Copy ID before requiring its console focus', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const select = text.slice(text.indexOf('function Select-ActionTab('), text.indexOf('function Rename-ActionTab('));
+    const create = text.slice(text.indexOf('function New-ActionTab('), text.indexOf('function Start-ActionStep('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:state = '{"active_workspace":0,"active_tab":0,"tabs":[{"chat_id":101,"shell_id":1,"name":"Control"}]}' | ConvertFrom-Json
+      $script:consoleSelected = $false
+      function Read-Session { return $script:state }
+      function Get-ActionTab($Id) { return @($script:state.tabs | Where-Object { $_.chat_id -eq $Id })[0] }
+      function Invoke-JourneyCommand($Name, [switch]$Session) {
+        if ($Session) {
+          if ($Name -ne 'CMD 2') { throw 'Wrong session selected' }
+          $script:consoleSelected = $true
+        } else {
+          $script:state.tabs += [pscustomobject]@{ chat_id=0; shell_id=2; name='CMD 2' }
+          $script:state.active_tab = 1
+        }
+      }
+      function Open-ActionPalette { }
+      function Select-ActionRow { $script:state.tabs[1].chat_id = 202 }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      function Wait-WorkspaceSurface($Workspace, $Tab, $Chat) { if (-not $script:consoleSelected -or $Tab -ne 1) { throw 'Saved active tab has not received console focus' } }
+      function Press { if (-not $script:consoleSelected) { throw 'F2 before the new console was activated' } }
+      function Rename-ActionTab($Name) { $script:state.tabs[1].name = $Name }
+      ${select}
+      ${create}
+      $id = New-ActionTab 'Disconnected context'
+      if ($id -ne 202 -or $script:state.tabs[1].name -ne 'Disconnected context' -or $script:state.tabs[0].name -ne 'Control') { throw 'New tab identity or rename changed the wrong session' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute new-tab focus handling');
+    assert.equal(run.status, 0, run.stderr);
+  });
   test('pinned CMD exit waits on the real session audit channel', t => {
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');

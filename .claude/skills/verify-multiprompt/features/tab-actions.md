@@ -26,7 +26,7 @@ Right-click the intended sidebar tab. The initial menu has seven actions. Type a
 
 Use the automatic PR verifier's `tab-actions` GitHub Windows journey. It invokes `control.ps1 -Feature tab-actions`. Follow the existing automatic run at intervals of at least 300 seconds; do not dispatch a duplicate run.
 
-1. Launch a fresh owned app with no saved-session fixtures. Create and name three local CMD tabs through actual input. Copy each ID through Ctrl+K so the app assigns its persistent local identity. Require distinct saved IDs.
+1. Launch a fresh owned app with no saved-session fixtures. Create and name three local CMD tabs through actual input. Copy each ID through Ctrl+K so the app assigns its persistent local identity. Select each new tab through its native session action before F2; a saved active tab does not prove its console has keyboard focus. Require distinct saved IDs.
 2. Keep the control CMD selected while targeting the inactive tab. Read the target's painted avatar rectangle from current app diagnostics, then ownership-check and right-click that point. Select each action by its current source-derived routing ID through Home, Down and Enter. Require a fresh production palette-confirm receipt.
 3. Rename through context, global palette and F2. Copy the active control ID globally, then copy the inactive target ID through context. Require the native clipboard to equal the corresponding saved `session:#` identity, not its title.
 4. Mark unread through context, global palette and Alt+U. Require the matching published Inbox `att` field. Toggle pin through context and global palette. Toggle favorite through context, global palette and Alt+S. Toggle global Inbox exclusion twice.
