@@ -1837,6 +1837,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const pw = paint_rc.right - paint_rc.left;
             const ph = paint_rc.bottom - paint_rc.top;
             if (pw <= 0 or ph <= 0) {
+                if (verboseLoggingEnabled() and app_state.g_search_active) debugLog("[frame] search paint has an empty update rectangle");
                 _ = EndPaint(hwnd, &ps);
                 return 0;
             }
@@ -1876,7 +1877,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("window_frame.zig").paint(hwnd, mem_dc);
             canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
-            _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
+            const presented = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
+            if (verboseLoggingEnabled() and (app_state.g_search_active or app_state.g_edit_hwnd != null)) {
+                var frame_log: [192]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&frame_log, "[frame] search={} edit={X} rect={d},{d},{d},{d} presented={} error={d}", .{ app_state.g_search_active, if (app_state.g_edit_hwnd) |edit| @intFromPtr(edit) else 0, paint_rc.left, paint_rc.top, pw, ph, presented, GetLastError() }) catch "[frame] log overflow");
+            }
             _ = EndPaint(hwnd, &ps);
             launch_cache.painted(false);
             return 0;
