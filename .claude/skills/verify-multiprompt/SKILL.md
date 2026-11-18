@@ -109,6 +109,8 @@ The selector matches changed files to `Source files:` ownership in each runnable
 
 `verify.yml` runs only that set on head and parent with the same harness. Matching parent evidence is restored through the base cache before scheduling Windows jobs. DeepSeek Flash judges the patch and real evidence against the PR outcomes. Claude is the fallback when DeepSeek authored the patch. Green CI alone is never the verdict. One independent verifier posts PASS, PASS+NOTES or FAIL; missing evidence blocks passage. Only `pstack-verifier` is required.
 
+A feature map with `CI workflow: <workflow>.yml` owns a non-desktop check through the same `Source files:` rules. It does not enter the Windows matrix. The verifier requires a successful exact-head pull-request run alongside Tests, downloads the artifact named after that workflow's file stem, and gives its `summary.json` and run receipt to the judge. Missing or stale CI evidence blocks verification. [Formal chat delivery](features/chat-delivery-formal.md) uses this route; its model findings are not UI passes.
+
 The full live drive of every feature is periodic, not a per-PR step. The nightly master run executes every runnable journey and files or updates a failure ticket on board 2060. The weekly `maintain-verification.yml` pass also reconciles source, feature maps and live evidence.
 
 ### Emergency rollback before repair

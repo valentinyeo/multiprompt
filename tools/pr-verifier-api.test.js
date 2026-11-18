@@ -22,6 +22,7 @@ function fixture(t, responses) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\n');
+if (args.some(arg => arg.includes('/chat-delivery-formal.yml/runs'))) { console.log(process.env.FORMAL_RUNS || '[]'); process.exit(0); }
 if (args.some(arg => arg.includes('/test.yml/runs'))) { console.log(process.env.WORKFLOW_RUNS || '[{"id":1,"status":"completed","conclusion":"success"}]'); process.exit(0); }
 if (!args.includes('graphql')) process.exit(2);
 const responses = JSON.parse(fs.readFileSync(process.env.RESPONSES, 'utf8'));
@@ -71,6 +72,22 @@ test('Tests waiting backs off from one minute to five minutes instead of polling
   assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /result=PASS/);
   assert.equal(f.requests().filter(args => args.includes('graphql')).length, 6);
   assert.equal(f.requests().filter(args => args.some(arg => arg.includes('/test.yml/runs'))).length, 1);
+});
+
+test('CI ownership requires its exact-head workflow to pass as well as Tests', t => {
+  for (const [runs, expected] of [
+    [[], 'BLOCKED'],
+    [[{ id: 2, head_sha: head, status: 'in_progress', conclusion: null }], 'BLOCKED'],
+    [[{ id: 2, head_sha: head, status: 'completed', conclusion: 'failure' }], 'FAIL'],
+    [[{ id: 2, head_sha: head, status: 'completed', conclusion: 'success' }], 'PASS'],
+    [[{ id: 2, head_sha: 'b'.repeat(40), status: 'completed', conclusion: 'success' }], 'BLOCKED'],
+  ]) {
+    const f = fixture(t, [state([suite(1, 'COMPLETED', 'SUCCESS')])]);
+    const result = spawnSync(process.execPath, [modulePath, 'wait-for-tests'], { env: { ...f.env, CI_WORKFLOWS: '["chat-delivery-formal.yml"]', FORMAL_RUNS: JSON.stringify(runs), WAIT_MS: '1' }, encoding: 'utf8' });
+    assert.equal(result.status, expected === 'PASS' ? 0 : 1, result.stderr);
+    assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), new RegExp(`result=${expected}`));
+    assert.ok(f.requests().some(args => args.some(arg => arg.includes(`/chat-delivery-formal.yml/runs?head_sha=${head}`))));
+  }
 });
 
 test('query failures and missing head state cannot produce a successful Tests result', t => {
