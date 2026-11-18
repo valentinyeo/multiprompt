@@ -1521,6 +1521,8 @@ fn browserFocusHotkey() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == 0x000B) altqLog("frame_redraw enable={d}", .{wp});
+    if (msg == WM_PAINT and app_state.g_search_active) altqLog("palette_paint entry", .{});
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
     if (msg == WM_TIMER and wp == @import("win32.zig").TIMER_CHAT_FILE_READY) {
         @import("win32.zig").chatFileReadyTimer(hwnd);
@@ -4408,7 +4410,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             _ = SetFocus(app_state.g_main_hwnd);
             altqLog("palette_focus wp={} foreground={X} frame={X} focus={X} rem={} wait_alt={}", .{ wp, altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
-            _ = InvalidateRect(hwnd, null, 0);
+            const invalidated = InvalidateRect(hwnd, null, 0);
+            altqLog("palette_redraw visible={} style={X} redraw={X} invalidated={}", .{ IsWindowVisible(hwnd), GetWindowLongPtrW(hwnd, GWL_STYLE), altqPtr(@import("win32.zig").GetPropW(hwnd, L("SysSetRedraw"))), invalidated });
             return 0;
         },
         WM_APP_SEARCH_CLOSE => {
