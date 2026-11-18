@@ -1047,6 +1047,23 @@ public static class GroupRailProof {
         }
         return proof;
     }
+    static int FirstLetterHeight(System.Drawing.Bitmap image, int left, int top, int right, int height) {
+        var background = image.GetPixel(right, top + height / 2);
+        int first = int.MaxValue, last = -1;
+        bool found = false;
+        for (int x = left; x < right; x++) {
+            bool ink = false;
+            for (int y = top + 1; y < top + height - 1; y++) {
+                if (Distance(image.GetPixel(x, y), background) <= 30) continue;
+                ink = true;
+                first = Math.Min(first, y);
+                last = Math.Max(last, y);
+            }
+            if (found && !ink) break;
+            found = found || ink;
+        }
+        return found ? last - first + 1 : 0;
+    }
     public static Dictionary<string, object> Labels(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int sectionTop, int headlineX, int rowHeight, int sidebarWidth) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
@@ -1055,7 +1072,7 @@ public static class GroupRailProof {
             int sectionHeight = S(42, dpi, scale), buttonHeight = S(32, dpi, scale);
             var muted = System.Drawing.Color.FromArgb(138, 138, 138);
             var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
-            int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, bottomInk = -1, inkColumns = 0;
+            int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, inkColumns = 0;
             var columnTops = new List<int>();
             var columnXs = new List<int>();
             for (int x = clientLeft + S(4, dpi, scale); x < right - S(8, dpi, scale); x++) {
@@ -1064,7 +1081,6 @@ public static class GroupRailProof {
                     var pixel = image.GetPixel(x, y);
                     if (Distance(pixel, sectionBackground) <= 30) continue;
                     inkPixels++;
-                    bottomInk = Math.Max(bottomInk, y);
                     if (Distance(pixel, muted) <= 16) mutedPixels++;
                     if (columnTop < 0) columnTop = y;
                 }
@@ -1090,16 +1106,9 @@ public static class GroupRailProof {
             bool capitals = present && capRatio > 0.75;
             bool mutedInk = mutedPixels >= 8;
             int groupTop = sectionTop - 2 * (sectionHeight + 2 * rowHeight);
-            int groupInkTop = int.MaxValue, groupInkBottom = -1;
-            var groupBackground = image.GetPixel(right, groupTop + sectionHeight / 2);
-            for (int y = groupTop + 1; y < groupTop + sectionHeight - 1; y++) {
-                for (int x = headlineX; x < right - S(8, dpi, scale); x++) {
-                    if (Distance(image.GetPixel(x, y), groupBackground) <= 30) continue;
-                    groupInkTop = Math.Min(groupInkTop, y);
-                    groupInkBottom = Math.Max(groupInkBottom, y);
-                }
-            }
-            bool sameLetterHeight = present && groupInkBottom >= groupInkTop && Math.Abs((bottomInk - topInk) - (groupInkBottom - groupInkTop)) <= Math.Max(1, S(2, dpi, scale));
+            int groupLetterHeight = FirstLetterHeight(image, headlineX, groupTop, right - S(8, dpi, scale), sectionHeight);
+            int sectionLetterHeight = FirstLetterHeight(image, firstInk, sectionTop, right - S(8, dpi, scale), sectionHeight);
+            bool sameLetterHeight = present && groupLetterHeight > 0 && sectionLetterHeight > 0 && Math.Abs(sectionLetterHeight - groupLetterHeight) <= Math.Max(1, S(2, dpi, scale));
             int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);
             int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1, buttonInk = 0;
@@ -1116,6 +1125,8 @@ public static class GroupRailProof {
             proof["noArrow"] = noArrow;
             proof["capitals"] = capitals;
             proof["mutedInk"] = mutedInk;
+            proof["groupLetterHeight"] = groupLetterHeight;
+            proof["sectionLetterHeight"] = sectionLetterHeight;
             proof["sameLetterHeight"] = sameLetterHeight;
             proof["sameStyle"] = present && sameLetterHeight && mutedInk && noArrow;
             proof["formerButtonRegionEmpty"] = formerButtonRegionEmpty;
