@@ -41,3 +41,7 @@ The orchestrator must keep the PR waiting on the existing delivery findings unde
 ## Remaining limits
 
 This review does not prove Windows pixels, assistant formatting, network delivery timing, Android, extra sends or any behavior outside the existing bounded model. The separate stillness proof does not establish delivery correctness.
+
+## Update after combining with SOFT-2724
+
+This branch now carries the SOFT-2724 delivery fixes together with this drift review. The `src/chat_echo.zig` and `src/chat_send.zig` hashes in `coverage.json` describe the fixed decisions, and the `src/chat_render.zig` hash describes the merge of both changes. The findings listed above are fixed by the same branch, so the check no longer relies on inheriting them from master. Strict whole-file inheritance is unchanged.

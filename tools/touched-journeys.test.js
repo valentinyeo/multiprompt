@@ -194,7 +194,7 @@ test('shared build profiles and artifact names isolate instrumented and comparis
   }
   for (const feature of ['appearance', 'chat-still', 'chat-working-live']) {
     for (const revision of ['', 'base-sha']) {
-      const context = { matrix: { profile: ['chat-still', 'chat-working-live'].includes(feature) ? 'chat-still' : 'normal' }, env: { FEATURE: feature }, inputs: { app_revision: revision } };
+      const context = { matrix: { feature, profile: ['chat-still', 'chat-working-live'].includes(feature) ? 'chat-still' : 'normal' }, env: { FEATURE: feature === 'chat-working-live' ? 'chat-delivery' : feature }, inputs: { app_revision: revision } };
       const actual = names.map(name => name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => runInNewContext(expression, context)));
       const expected = `verify-app${['chat-still', 'chat-working-live'].includes(feature) ? '-chat-still' : ''}${revision ? '-compare' : ''}`;
       assert.deepEqual(actual, [expected, expected]);
