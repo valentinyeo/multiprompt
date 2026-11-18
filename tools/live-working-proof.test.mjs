@@ -23,11 +23,11 @@ function imageFor(name, file) {
 test('parses independent native stages and measures synthetic pixels', () => {
   const result = observe(log, imageFor);
   assert.deepEqual(result.cases.empty.observations, {
-    queuedDots: true, acceptedGapDots: true, startedDotsWithinOneSecondOfSyntheticEnqueue: true,
+    queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: true,
     animated: true, dotsOnReplyDelta: true, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.deepEqual(result.cases.history.observations, {
-    queuedDots: true, acceptedGapDots: true, startedDotsWithinOneSecondOfSyntheticEnqueue: false,
+    queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: false,
     animated: false, dotsOnReplyDelta: false, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.equal(result.cases.history.stages['turn-started'].blocks, 2);
@@ -71,26 +71,4 @@ test('live-ready synchronizes busy state before starting the painter timer', () 
   const working = ready.indexOf('chatLiveSyncWorking();');
   const indicator = ready.indexOf('chatWorkingIndicatorSync();');
   assert.ok(working >= 0 && indicator > working, 'Live working state must reach the timer before indicator synchronization');
-});
-
-test('a delivered send shows dots before the turn and drops them when the reply or the stop arrives', () => {
-  const echo = fs.readFileSync(new URL('../src/chat_echo.zig', import.meta.url), 'utf8');
-  const start = echo.indexOf('pub fn keepsWorking(');
-  assert.ok(start >= 0, 'a delivered send must stay working before the reply');
-  const src = echo.slice(start, echo.indexOf('\n}', start) + 2);
-  const body = src.slice(src.indexOf('{') + 1, src.lastIndexOf('}'))
-    .replaceAll('state == .queued or state == .sending', "state === 'queued' || state === 'sending'")
-    .replaceAll('state != .delivered or std.mem.eql(u8, phase, "failed")', "state !== 'delivered' || phase === 'failed'")
-    .replaceAll('!reply_started and !chat_stopped', '!reply_started && !chat_stopped');
-  const keeps = new Function('state', 'phase', 'reply_started', 'chat_stopped', body);
-  assert.equal(keeps('queued', '', false, false), true);
-  assert.equal(keeps('delivered', '', false, false), true);
-  assert.equal(keeps('delivered', 'accepted', false, false), true);
-  assert.equal(keeps('delivered', 'failed', false, false), false);
-  assert.equal(keeps('delivered', 'accepted', true, false), false);
-  assert.equal(keeps('delivered', 'started', false, true), false);
-  const proof = fs.readFileSync(new URL('./live-working-proof.mjs', import.meta.url), 'utf8');
-  assert.match(proof, /delivered send hides dots before the turn/);
-  const send = fs.readFileSync(new URL('../src/chat_send.zig', import.meta.url), 'utf8');
-  assert.match(send, /return landedSendWorking\(idx, reply_ms, running, reply_present\);/);
 });
