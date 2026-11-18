@@ -495,12 +495,18 @@ function judgeInputs(outDir, evidenceDir) {
   const parts = [];
   for (const name of ['pr.md', 'evidence.md']) {
     const file = path.join(outDir, name);
-    if (fs.existsSync(file)) parts.push(`### ${name}\n${readCapped(file)}`);
+    if (fs.existsSync(file)) {
+      const text = name === 'evidence.md' ? fs.readFileSync(file, 'utf8').split('\n').filter(line => !line.startsWith('  - evidence/')).join('\n') : readCapped(file);
+      parts.push(`### ${name}\n${text}`);
+    }
   }
   const selection = path.join(outDir, 'selection.json');
+  let repro;
   if (fs.existsSync(selection)) {
-    parts.push(`### selection.json\n${readCapped(selection)}`);
-    if (JSON.parse(fs.readFileSync(selection, 'utf8')).features?.length === 0) {
+    const plan = JSON.parse(fs.readFileSync(selection, 'utf8'));
+    repro = plan.bugFix && plan.reproJourney ? featureDirPattern(plan.reproJourney) : null;
+    parts.push(`### selection.json\n${JSON.stringify(plan)}`);
+    if (plan.features?.length === 0) {
       for (const [name, limit] of [['ci.json', 12000], ['diff.patch', 30000]]) {
         const file = path.join(outDir, name);
         if (!fs.existsSync(file) || !fs.statSync(file).size) throw new Error(`CI-only review is missing required evidence: ${name}`);
@@ -512,12 +518,29 @@ function judgeInputs(outDir, evidenceDir) {
       if (!/^[0-9a-f]{40}$/.test(pr.headRefOid || '') || ci.checks.some(check => check.head_sha !== pr.headRefOid)) throw new Error('CI-only check evidence does not match the PR head');
     }
   }
+  const detailBudget = 60000 - 256;
+  let used = parts.join('\n\n').length;
+  if (used > detailBudget) throw new Error('Journey outcome index exceeds the judge input budget');
+  let omitted = 0;
   if (fs.existsSync(evidenceDir)) {
-    for (const file of listFiles(evidenceDir)) {
-      if (/(^|\/)(result|doctor)\.json$/.test(file)) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
+    const required = file => !!repro?.test(file.split('/')[0]);
+    const files = listFiles(evidenceDir).filter(file => /(^|\/)(result|doctor)\.json$/.test(file));
+    files.sort((left, right) => Number(required(right)) - Number(required(left)));
+    for (const file of files) {
+      const source = path.join(evidenceDir, file);
+      const text = required(file) ? fs.readFileSync(source, 'utf8').replace(/^﻿/, '') : readCapped(source);
+      const section = `### evidence/${file}\n${text}`;
+      if (used + section.length + 2 > detailBudget) {
+        if (required(file)) throw new Error('Required repro evidence exceeds the judge input budget');
+        omitted++;
+        continue;
+      }
+      parts.push(section);
+      used += section.length + 2;
     }
   }
-  return parts.join('\n\n').slice(0, 60000);
+  if (omitted) parts.push(`Supplementary evidence omitted from this bounded text input: ${omitted} result/doctor files. The complete journey outcome index is above; uploaded artifacts retain all raw files.`);
+  return parts.join('\n\n');
 }
 
 function judgeMessages(material) {

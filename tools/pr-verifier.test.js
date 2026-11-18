@@ -309,6 +309,45 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
+test('a wide selection keeps every journey outcome and both repro artifacts in bounded judge input', () => {
+  const features = [...Array.from({ length: 68 }, (_, i) => `journey-${String(i).padStart(2, '0')}`), 'rooms', 'zz-last'];
+  const entries = Object.fromEntries(features.map(feature => [`verify-${feature}`, { status: 'passed', checks: [{ name: `${feature} exact behavior`, detail: 'detail '.repeat(800) }] }]));
+  entries['verify-rooms'] = { status: 'passed', checks: [{ name: 'exact recipient and durable deletion' }] };
+  entries[`verify-rooms-${base}`] = { status: 'failed', error: 'recipient control absent on master' };
+  const dir = evidenceDir(entries);
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-wide-'));
+  try {
+    for (const name of Object.keys(entries)) fs.writeFileSync(path.join(dir, name, 'doctor.json'), JSON.stringify({ identity: `${name} owned process`, ok: true }));
+    fs.writeFileSync(path.join(out, 'selection.json'), JSON.stringify(selection(features, { bugFix: true, reproJourney: 'rooms' })));
+    fs.writeFileSync(path.join(out, 'evidence.md'), features.map(feature => `## ${feature}: head passed, base ${feature === 'rooms' ? 'failed' : 'not run'}\n` + Array.from({ length: 12 }, (_, i) => `  - evidence/verify-${feature}/journey-command-${i}-selected.png\n`).join('')).join('\n'));
+    const material = verifier.judgeInputs(out, dir);
+    for (const feature of features) assert.ok(material.includes(`## ${feature}: head passed`), feature);
+    for (const name of ['verify-rooms', `verify-rooms-${base}`]) {
+      for (const file of ['result.json', 'doctor.json']) assert.ok(material.includes(`### evidence/${name}/${file}\n`), `${name}/${file}`);
+    }
+    assert.match(material, /exact recipient and durable deletion/);
+    assert.match(material, /recipient control absent on master/);
+    assert.match(material, /Supplementary evidence omitted/);
+    assert.ok(material.length <= 60000);
+    assert.match(material, /\n\nSupplementary evidence omitted[^\n]+\n?$/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('oversized required repro evidence is refused instead of silently clipped', () => {
+  const dir = evidenceDir({ 'verify-rooms': { status: 'passed', checks: [{ detail: 'x'.repeat(61000) }] } });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-required-'));
+  try {
+    fs.writeFileSync(path.join(out, 'selection.json'), JSON.stringify(selection(['rooms'], { bugFix: true, reproJourney: 'rooms' })));
+    assert.throws(() => verifier.judgeInputs(out, dir), /Required repro evidence exceeds/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('the DeepSeek key reaches the picker and the judge and the engine comes from the commits', () => {
   const lines = workflow.split('\n');
   const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
