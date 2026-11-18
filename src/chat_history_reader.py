@@ -1636,8 +1636,11 @@ def live_fields(source, size, tmux, shown=None, sid=None):
 def pin_hosted_claude(q, agent, as_owner=False):
     if agent != "claude" or not q.get("tmux"):
         return q
-    if not q.get("sid") and not as_owner:
-        q["sid"] = host_sid_for_tmux(agent, q["tmux"]) or ""
+    sid = q.get("sid")
+    if not as_owner and (not sid or (isinstance(sid, str) and SESSION_ID.fullmatch(sid) and not host_owned(agent, sid) and not host_handed_over(agent, sid) and host_session_state(agent, sid))):
+        current = host_sid_for_tmux(agent, q["tmux"])
+        if not sid or current and current != sid and host_owned(agent, current):
+            q["sid"] = current or sid or ""
     sid = q.get("sid")
     if isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
         q["follow"] = False
@@ -1648,6 +1651,7 @@ def pin_hosted_claude(q, agent, as_owner=False):
 def resolve_response_path(q, source=None, as_owner=False):
     rid = q["id"]
     agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
+    pin_hosted_claude(q, agent, as_owner)
     sid, tmux, cwd = q["sid"], q["tmux"], q["cwd"]
     hosted = host_config(agent, sid) if isinstance(sid, str) and SESSION_ID.fullmatch(sid) else None
     if isinstance(hosted, dict) and isinstance(hosted.get("cwd"), str) and Path(hosted["cwd"]).is_absolute():
@@ -1671,7 +1675,6 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             return agent, sid, None, missing_response(q, "permission denied")
         return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
-    pin_hosted_claude(q, agent, as_owner)
     sid = q["sid"]
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
     denied = False
@@ -2889,7 +2892,7 @@ def host_located_chat(provider, sid):
 
 
 def host_chat_name(provider, sid):
-    config = host_config(provider, sid) or {}
+    config = host_config(provider, sid) or host_session_state(provider, sid)
     tmux = config.get("tmux")
     if isinstance(tmux, str) and TMUX_NAME.fullmatch(tmux):
         return tmux
@@ -3034,6 +3037,7 @@ def host_sid_for_tmux(provider, tmux):
     except OSError:
         return None
     found = set()
+    live = set()
     for path in configs:
         config = host_read(path)
         if not isinstance(config, dict) or config.get("enabled") is not True or config.get("tmux") != tmux:
@@ -3042,7 +3046,10 @@ def host_sid_for_tmux(provider, tmux):
         sid = config.get("sid", state.get("sid"))
         if config.get("provider", state.get("provider")) == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
             found.add(sid)
-    return found.pop() if len(found) == 1 else None
+            if host_owned(provider, sid):
+                live.add(sid)
+    candidates = live or found
+    return candidates.pop() if len(candidates) == 1 else None
 
 
 def host_handed_over(provider, sid):
@@ -3135,6 +3142,9 @@ def host_reply(query):
     provider, sid = query.get("provider"), query.get("sid")
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
+    routed = pin_hosted_claude(dict(query, tmux=query.get("tmux") or host_chat_name(provider, sid)), provider)
+    sid = routed.get("sid", sid)
+    query = dict(query, sid=sid)
     if query.get("op") == "switch_ai":
         return host_switch_ai(provider, sid, query.get("to"))
     if query.get("op") == "set_effort" and provider not in ("claude",):
@@ -6519,6 +6529,8 @@ def message_store_transaction(q):
             if not row:
                 return dict(epoch=epoch, seq=seq, message=None)
             hosting = host_dispatch_switch(provider, sid)
+            if hosting and provider == 'claude' and host_turn_busy(provider, sid):
+                return dict(epoch=epoch, seq=seq, message=message_row(row))
             scope_row = db.execute('SELECT scope FROM message_room_scopes WHERE id=?', (row[0],)).fetchone()
             if scope_row is not None and not hosting:
                 return dict(epoch=epoch, seq=seq, message=None)
@@ -6842,7 +6854,7 @@ def message_worker(tmux, provider, sid):
                             return
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
-                        held = pending is not None and pending[0] in host_held(provider, sid)
+                        held = pending is not None and (host_turn_busy(provider, sid) or pending[0] in host_held(provider, sid))
                         if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()
@@ -7643,6 +7655,9 @@ def watch_changes(q, resolved, source, as_owner):
         metadata = HOME / ".claude/sessions"
         metadata_watch = (libc.inotify_add_watch(fd, os.fsencode(metadata), 0x00000FCE)
                           if agent == "claude" and q.get("tmux") and metadata.is_dir() else -1)
+        registry = HOME / '.local/state/multiprompt/agent-host'
+        registry_watch = (libc.inotify_add_watch(fd, os.fsencode(registry), 0x00000FCE)
+                          if agent == 'claude' and q.get('tmux') and registry.is_dir() else -1)
         with selectors.DefaultSelector() as opened:
             selector = opened
             selector.register(fd, selectors.EVENT_READ, "file")
@@ -7697,7 +7712,7 @@ def watch_changes(q, resolved, source, as_owner):
                             at += 16 + length
                             if mask & 0x4000 or name == path.name:
                                 changed = True
-                            elif q.get("tmux") and not (as_owner and q.get("host_pinned")) and mask & 0x18A and (name.endswith(".jsonl") or _wd == metadata_watch and name.endswith(".json")):
+                            elif q.get("tmux") and not (as_owner and q.get("host_pinned")) and mask & 0x18A and (name.endswith(".jsonl") or _wd in (metadata_watch, registry_watch) and name.endswith(".json")):
                                 latest = resolve_response_path(dict(q, follow=True), source, as_owner)
                                 if latest[2] is None and as_owner:
                                     return
@@ -8124,7 +8139,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 131
 
 if __name__ == '__main__':
     import base64 as _base64

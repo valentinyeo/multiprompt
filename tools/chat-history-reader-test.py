@@ -1792,6 +1792,68 @@ class HistoryReaderTest(unittest.TestCase):
         lookup.assert_called_once_with('claude', 'term-1')
         self.assertEqual(read_owner.call_args.args[0]['sid'], sid)
 
+    def test_SOFT_2566_ended_owner_follows_unique_live_replacement_for_history_and_fresh_start(self):
+        old, new = str(uuid.uuid4()), str(uuid.uuid4())
+        self.write(self.event('old ended chat'))
+        self.path.rename(self.path.with_name(old + '.jsonl'))
+        self.path.with_name(new + '.jsonl').write_text(json.dumps(self.event('live replacement reply')) + '\n')
+        for sid in (old, new):
+            reader.host_write(reader.host_paths('claude', sid)['config'], dict(enabled=True, provider='claude', sid=sid, tmux='term-1'))
+        reader.host_write(reader.host_paths('claude', old)['state'], dict(provider='claude', sid=old, tmux='term-1', stopped=1))
+        self.query.update(sid=old, follow=True)
+        with patch.object(reader, 'host_owned', side_effect=lambda provider, sid: sid == new), \
+                patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('use the hosted registry')), \
+                patch.object(reader, 'host_request', return_value=dict(status='started')) as request:
+            wire = reader.response(self.query)
+            self.assertIn('live replacement reply', wire)
+            self.assertNotIn('old ended chat', wire)
+            self.assertEqual(self.query['sid'], new)
+            self.assertEqual(reader.host_reply(dict(op='fresh_start', provider='claude', sid=old))['status'], 'started')
+            self.assertEqual(request.call_args.args[:2], ('claude', new))
+            self.assertEqual(reader.pin_hosted_claude(dict(sid=old, tmux='term-1'), 'claude', as_owner=True)['sid'], old)
+        with patch.object(reader, 'host_owned', return_value=True):
+            self.assertEqual(reader.pin_hosted_claude(dict(sid=old, tmux='term-1'), 'claude')['sid'], old)
+        other = str(uuid.uuid4())
+        reader.host_write(reader.host_paths('claude', other)['config'], dict(enabled=True, provider='claude', sid=other, tmux='term-1'))
+        with patch.object(reader, 'host_owned', side_effect=lambda provider, sid: sid != old):
+            self.assertEqual(reader.pin_hosted_claude(dict(sid=old, tmux='term-1'), 'claude')['sid'], old)
+
+    def test_SOFT_2566_archived_history_watch_follows_a_replacement_registry_event(self):
+        from concurrent.futures import ThreadPoolExecutor
+        old, new = str(uuid.uuid4()), str(uuid.uuid4())
+        old_paths = reader.host_paths('claude', old)
+        reader.host_write(old_paths['config'], dict(enabled=True, provider='claude', sid=old, tmux='term-1'))
+        reader.host_write(old_paths['state'], dict(provider='claude', sid=old, tmux='term-1', display_history=True))
+        old_paths['history'].write_text(json.dumps(self.event('archived old reply')) + '\n')
+        self.path.with_name(new + '.jsonl').write_text(json.dumps(self.event('replacement reply')) + '\n')
+        self.query.update(sid=old, follow=False)
+        read_fd, write_fd = os.pipe()
+        stream = None
+        owners = {old}
+        try:
+            with patch.object(reader, 'host_owned', side_effect=lambda provider, sid: sid in owners), \
+                    patch.object(reader.sys, 'stdin', types.SimpleNamespace(fileno=lambda: read_fd)):
+                resolved = reader.resolve_response_path(self.query)
+                stream = reader.watch_changes(self.query, resolved, reader.READER_SOURCE, False)
+                self.assertEqual(next(stream)[1], old)
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(next, stream, None)
+                    try:
+                        owners.clear()
+                        owners.add(new)
+                        reader.host_write(reader.host_paths('claude', new)['config'], dict(enabled=True, provider='claude', sid=new, tmux='term-1'))
+                        current = future.result(timeout=3)
+                        self.assertEqual(current[1], new)
+                    finally:
+                        os.close(write_fd)
+                        write_fd = None
+        finally:
+            if stream is not None:
+                stream.close()
+            os.close(read_fd)
+            if write_fd is not None:
+                os.close(write_fd)
+
     def test_IGSH_1822_tab_lookup_reads_only_one_enabled_hosted_chat(self):
         self.assertTrue(callable(getattr(reader, 'host_sid_for_tmux', None)), 'hosted chat tab lookup is missing')
         with tempfile.TemporaryDirectory() as home:
@@ -4003,6 +4065,28 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'accepted', 'a message the bot was still going to read was marked Not sent')
         self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
 
+    def test_SOFT_2566_busy_durable_queue_outlives_the_worker_watchdog(self):
+        self.submit()
+        started = time.monotonic()
+        def host_state(provider, sid):
+            if time.monotonic() - started < 3:
+                return dict(inflight=dict(id='earlier-turn'), sends=['earlier-turn'])
+            db = reader.message_store_db('fixture')
+            with db:
+                db.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id='message_fixture_0001'")
+            db.close()
+            return dict(inflight=None, sends=[])
+        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
+                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
+                patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_session_state', side_effect=host_state), \
+                patch.object(reader, 'message_poll'), \
+                patch.object(reader, 'message_store_request'), \
+                patch.object(reader, 'host_log') as log:
+            reader.message_worker('fixture', 'claude', 'sid')
+        self.assertEqual(self.status()['state'], 'accepted')
+        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
+
     def test_submit_replay_has_one_handoff_and_global_id(self):
         first = self.submit()
         self.assertEqual(self.submit()['attempt'], first['attempt'])
@@ -5330,15 +5414,18 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         self.assertEqual(self.user_lines(), [self.text])
         self.assertEqual(len(self.host_events('delivered')), 1)
 
-    def test_host_writes_a_second_message_while_a_turn_is_in_flight(self):
+    def test_host_keeps_a_second_message_durable_until_the_busy_turn_ends(self):
         self.enable(mode='silent')
         self.seed(text='first prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt'])
         self.seed(token='host_fixture_message_02', text='second prompt')
         self.dispatch()
-        self.assertNotEqual(self.message('host_fixture_message_02')['state'], 'queued',
-                            'a hosted chat must take the next message while a turn runs')
+        self.assertEqual(self.message('host_fixture_message_02')['state'], 'queued')
+        self.assertEqual(self.user_lines(), ['first prompt'])
+        reader.host_stop(self.provider, self.sid)
+        os.environ['FAKE_AGENT_MODE'] = 'ok'
+        self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
         self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
         db = reader.message_store_db(self.tmux)
@@ -7493,12 +7580,18 @@ class AgentHostInterruptTest(AgentHostControlFixture, unittest.TestCase):
 
 
 class AgentHostMidTurnSendTest(AgentHostControlFixture, unittest.TestCase):
-    def test_a_second_message_starts_its_own_turn_in_the_event_log(self):
-        self.fake('silent')
+    def test_a_second_message_starts_its_own_turn_after_the_current_turn_is_interrupted(self):
+        self.fake('slow')
         self.seed(text='first prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt'])
+        self.wait_for(lambda: self.events('text.done'))
         self.seed(token='host_fixture_message_02', text='second prompt')
+        self.dispatch()
+        self.assertEqual(self.message('host_fixture_message_02')['state'], 'queued')
+        self.assertEqual(self.user_lines(), ['first prompt'])
+        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
+        self.wait_for(lambda: self.events('turn.ended'))
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
         started = self.events('turn.started')
@@ -7507,8 +7600,8 @@ class AgentHostMidTurnSendTest(AgentHostControlFixture, unittest.TestCase):
         self.assertEqual([row['payload']['text_sha256'] for row in started],
                          [hashlib.sha256(b'first prompt').hexdigest(), hashlib.sha256(b'second prompt').hexdigest()])
         self.wait_for(lambda: {row['item'] for row in self.events('text.delta')} == {'msg-1:text:0', 'msg-2:text:0'})
-        self.assertEqual({row['turn'] for row in self.events('text.delta')}, {'t-1'},
-                         'a queued message joins the turn that is already running')
+        self.assertEqual({row['turn'] for row in self.events('text.delta')}, {'t-1', 't-2'},
+                         'the queued message must stream in its own turn after Stop')
         self.assertEqual({row['item'] for row in self.events('text.delta')}, {'msg-1:text:0', 'msg-2:text:0'},
                          'each message streams under its own message id')
         self.assertEqual(self.host_events('delivered')[-1]['detail']['id'], 'host_fixture_message_02')

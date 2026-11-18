@@ -4011,7 +4011,7 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const entry = &app_state.g_chat_outbox.items[found.?];
     if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
     _ = json_reader.copyString(message, "state", &entry.message_phase);
-    entry.state = if (std.mem.eql(u8, phase, "failed")) .not_sent else if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) .delivered else .queued;
+    entry.state = chat_echo.v1ServerState(phase);
     if (entry.anchor.sent_ms == 0) {
         const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
         entry.anchor.sent_ms = chatMessageSentMs(message, wall_ms);

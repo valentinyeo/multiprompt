@@ -351,6 +351,24 @@ pub fn pendingExpired(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
 
 pub const NOT_SENT_WAIT_MS: i64 = 10 * 60 * 1000;
 
+pub fn v1ServerState(phase: []const u8) OutboxState {
+    if (std.mem.eql(u8, phase, "failed")) return .not_sent;
+    if (std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "sent") or phaseTaken(phase)) return .delivered;
+    return .queued;
+}
+
+test "SOFT-2566 a durable server queue does not turn into a local timeout failure" {
+    for ([_][]const u8{ "queued", "sent", "accepted", "started" }) |phase| {
+        const state = v1ServerState(phase);
+        try std.testing.expectEqual(OutboxState.delivered, state);
+        try std.testing.expect(!showsNotSent(true, state, phase, 1, 1 + NOT_SENT_WAIT_MS * 2));
+        try std.testing.expect(keepsWorking(state, phase, false, false));
+    }
+    try std.testing.expectEqual(OutboxState.not_sent, v1ServerState("failed"));
+    try std.testing.expect(showsNotSent(true, v1ServerState("failed"), "failed", 1, 2));
+    try std.testing.expect(showsNotSent(true, v1ServerState(""), "", 1, 1 + NOT_SENT_WAIT_MS));
+}
+
 pub fn showsNotSent(message_v1: bool, state: OutboxState, phase: []const u8, sent_tick_ms: i64, now_ms: i64) bool {
     if (!message_v1 or state == .cancelled) return false;
     if (state == .not_sent or std.mem.eql(u8, phase, "failed")) return true;
