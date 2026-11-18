@@ -4273,7 +4273,7 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
     return chatViewOwnsInput() and chat_code.copyKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
 }
 
-fn chatSendReaction(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
+pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
     if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
     var out: [256]u16 = undefined;
     const line = chat_reaction.format(emoji, reference, quote, &out) orelse return false;
@@ -4284,12 +4284,9 @@ fn chatSendReaction(reference: u64, quote: []const u16, emoji: chat_reaction.Emo
     return true;
 }
 
-pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
-    _ = chatSendReaction(reference, quote, emoji);
-}
-
 fn likeShown(reference: u64) bool {
     if (reference == 0) return false;
+    if (g_reaction_view.wishedLike(reference)) |wanted| return wanted;
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
         if (block.reaction_reference == reference and (g_reaction_view.mask(index) & chat_reaction.Emoji.like.bit()) != 0) return true;
     }
@@ -4300,7 +4297,15 @@ pub fn chatToggleReaction(reference: u64, quote: []const u16, emoji: chat_reacti
     if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
     const show = emoji != .like or !likeShown(reference);
     if (emoji == .like) g_reaction_view.wishLike(reference, show);
-    if (!chatSendReaction(reference, quote, emoji) and emoji == .like) g_reaction_view.wishLike(reference, !show);
+    if (!show) {
+        chatImageReady();
+        return;
+    }
+    if (!chatReactToMessage(reference, quote, emoji)) {
+        if (emoji == .like) g_reaction_view.wishLike(reference, !show);
+        return;
+    }
+    if (emoji == .like) chatImageReady();
 }
 
 pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
@@ -4312,7 +4317,7 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
             const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
             const display = chatBlockDisplayRange(buf, block);
             const quote = buf[display.start..][0..display.len];
-            if (emoji == .like) chatToggleReaction(block.reaction_reference, quote, emoji) else chatReactToMessage(block.reaction_reference, quote, emoji);
+            if (emoji == .like) chatToggleReaction(block.reaction_reference, quote, emoji) else _ = chatReactToMessage(block.reaction_reference, quote, emoji);
             return;
         }
     }
@@ -5813,7 +5818,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
             chatToggleReaction(reaction_reference, quote, .like);
         },
         9, 10 => if (reply_text) |quote| {
-            chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
+            _ = chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
         },
         11 => if (request_id) |id| chatCopyTextToClipboard(id),
         7 => if (link_text) |text| chatCopyTextToClipboard(text),
