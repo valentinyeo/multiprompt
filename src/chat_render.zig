@@ -2461,6 +2461,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 }
 
 pub fn chatRelayout(client_width: i32) void {
+    const layout_started = GetTickCount64();
     app_state.g_chat_layout_count +%= 1;
     g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
@@ -2521,6 +2522,7 @@ pub fn chatRelayout(client_width: i32) void {
             break :changed true;
         };
     };
+    @import("chat_session.zig").chatPerf("layout reactions", layout_started, app_state.g_chat_layout_reuse);
     if (reactions_changed) {
         app_state.g_chat_layout_reuse = 0;
         app_state.g_chat_find_ranges = @splat(null);
@@ -2569,6 +2571,7 @@ pub fn chatRelayout(client_width: i32) void {
             break;
         }
     }
+    @import("chat_session.zig").chatPerf("layout prepare", layout_started, reuse);
     for (reuse..app_state.g_chat_block_count) |i| {
         if (boundary.index == i) {
             app_state.g_chat_read_divider_y = y;
@@ -2595,6 +2598,7 @@ pub fn chatRelayout(client_width: i32) void {
         if (g_choice.present and !g_choice.prompt and g_choice.anchor == i) y = chatChoicesLayout(width, y);
     }
     if (g_choice.present and g_choice.prompt) y = chatChoicesLayout(width, y) else if (!g_choice.present) g_choice_rect_count = 0;
+    @import("chat_session.zig").chatPerf("layout measure", layout_started, app_state.g_chat_block_count - reuse);
     app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
     const old_echo_count = app_state.g_chat_echo_layout_count;
     const old_echo_ids = app_state.g_chat_echo_layout_ids;
