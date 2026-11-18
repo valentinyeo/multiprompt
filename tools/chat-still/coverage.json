@@ -1,13 +1,13 @@
 {
-  "sync_commit": "608b7d62944fd39b79cbbaa2c83bc6e3251f590c",
+  "sync_commit": "80cf5000fcd66fa2d1ce7b397c419e127e9f2409",
   "functions": {
     "refreshChatTranscript": {
       "file": "src/chat_session.zig",
-      "sha256": "8160357956a8e82b53a59ad4d33156474f6f853a2fd29224211a64623aafeaff"
+      "sha256": "d39db661c055269a544e70b0060f83fb4056015705698eff8d9fc66cbdb85645"
     },
     "chatRelayoutPreservingScroll": {
       "file": "src/chat_session.zig",
-      "sha256": "bdb0c70af35ccf54d4fd3d98d65b731354753979da1a6f2e460ca705bf712058"
+      "sha256": "9b8d76403f58b407d2418926560e9d55e723f7fe54d50ec069327af6016d7ee4"
     },
     "openScroll": {
       "file": "src/chat_history.zig",
@@ -24,6 +24,10 @@
     "scrollAfterLayout": {
       "file": "src/chat_history.zig",
       "sha256": "d7e6f4eb1ab7fafcda19c008f6a75c86c6bdacb3e4503fec65b6c44e2563a91f"
+    },
+    "visibleTailAnchor": {
+      "file": "src/chat_history.zig",
+      "sha256": "38b9e14b4fe62676c817acc6ee7708315da19c64c605fb40c1b1bfd7d35e2e53"
     }
   },
   "types": {

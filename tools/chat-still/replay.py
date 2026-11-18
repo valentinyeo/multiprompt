@@ -11,7 +11,7 @@ const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 800, bottom: i32
 const chat_history = struct {
     pub const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 '''
-    for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll"):
+    for name in ("scrollAnchor", "visibleTailAnchor", "followBottom", "scrollAfterLayout", "openScroll"):
         source += function(history, name) + "\n"
     source += '''pub const Anchor = struct { index: usize, offset: i32 };
 };
@@ -30,6 +30,7 @@ const app_state = struct {
     var g_chat_scroll_bottom_pending = false;
     var g_chat_scrolled_up = false;
     var g_chat_read_hold = true;
+    var g_chat_new_messages = struct { fn count(_: @This()) usize { return 0; } }{};
     var g_chat_prepend_pending = false;
     var g_chat_block_count: usize = 2;
     var g_chat_layout_rects = [_]RECT{.{}, .{}};
@@ -44,6 +45,8 @@ var next_boundary: chat_history.ReadBoundary = .{};
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{ .bottom = viewport }; }
 fn refreshChatBlockCache(_: bool) bool { return true; }
 fn chatEchoMatchActive() void {}
+fn verboseLoggingEnabled() bool { return false; }
+fn chatNewMessagesChanged(_: bool) void {}
 fn chatReadBoundary() chat_history.ReadBoundary { return next_boundary; }
 fn chatScrollStateChanged(_: i32) void {}
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
@@ -63,6 +66,8 @@ fn chatRelayout(_: i32) void {
         call = "refreshChatTranscript(false)" if w["property"].startswith("refreshChatTranscript/") else "chatRelayoutPreservingScroll(800, viewport)"
         source += f'''test "counterexample {index}" {{
     viewport = {w['viewport']};
+    app_state.g_chat_read_open_ready = {str(bool(w["read_ready"])).lower()};
+    app_state.g_chat_scrolled_up = {str(bool(w["scrolled_up"])).lower()};
     app_state.g_chat_scroll_y = {w['old_scroll']};
     app_state.g_chat_content_h = {w['old_h']};
     app_state.g_chat_layout_top_pad = {w['pad']};
