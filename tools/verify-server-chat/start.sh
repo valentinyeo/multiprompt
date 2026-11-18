@@ -2,6 +2,8 @@ set -euo pipefail
 repo=$1
 public=$2
 runtime=$3
+seed_args=("$repo" "$runtime")
+if [[ ${4:-0} == 1 ]]; then seed_args+=(--large); fi
 id mpverify >/dev/null 2>&1 || useradd -m -s /bin/bash mpverify
 passwd -d mpverify >/dev/null
 install -d -m 700 -o mpverify -g mpverify /home/mpverify/.ssh
@@ -26,4 +28,4 @@ CONFIG
 /usr/sbin/sshd -t -f /tmp/mp-ci-sshd.conf
 /usr/sbin/sshd -f /tmp/mp-ci-sshd.conf -E /tmp/mp-ci-sshd.log
 runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/check-locks.py"
-runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/seed.py" "$repo" "$runtime"
+runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/seed.py" "${seed_args[@]}"

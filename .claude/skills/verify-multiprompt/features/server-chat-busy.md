@@ -18,7 +18,7 @@ Open the saved server chat. Send `busy server turn`, then `follow-up during busy
 
 ## Driving it with control.ps1
 
-The automatic `server-chat-busy` click-through job calls the shared `verify.yml` workflow. Do not dispatch extra runs. `control.ps1` calls `tools/verify-server-chat/drive.ps1 -Busy`, reusing PR 1072's runner-owned WSL2 Ubuntu OpenSSH server, real tmux and Windows OpenSSH. PR 1070's seed files are copied unchanged from `ff2aba50`; the server uses the same source-message factory.
+The automatic `server-chat-busy` click-through job calls the shared `verify.yml` workflow. Do not dispatch extra runs. `control.ps1` calls `tools/verify-server-chat/drive.ps1 -Busy`, reusing PR 1072's runner-owned WSL2 Ubuntu OpenSSH server, real tmux and Windows OpenSSH. The merged PR 1072 ordinary journey remains unchanged when neither repro mode is selected. Busy mode explicitly enables the large seed. PR 1070's seed files are copied unchanged from `ff2aba50`; the server uses the same source-message factory.
 
 Only the paid Claude process is synthetic. Its stream-json boundary holds one turn open, queues incoming stdin prompts, and accepts the normal interrupt control request. `cancel_queued` discards only prompts already handed to that provider, not messages in the production durable store. It neither rejects valid delivery nor ignores Stop to force a failure.
 

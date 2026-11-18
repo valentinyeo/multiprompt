@@ -81,7 +81,7 @@ function Send-Line([string]$Text) {
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Type-Text $Text
     [void](Wait-For 'exact composer text' { [ChatDeliveryDesktop]::Text($composer) -ceq $Text })
-    if ($Text.StartsWith('/')) { Press @(0x1B) 'Escape: dismiss slash completion without changing the text' }
+    Press @(0x1B) 'Escape: dismiss completion without changing the text'
     Press @(0x0D) 'Enter: send to real server'
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
@@ -93,7 +93,7 @@ function Server-Snapshot([string]$Name) {
 }
 try {
     $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'driver-repo-path').Trim()
-    & "$PSScriptRoot/start.ps1" -Profile $profile -Evidence $Evidence
+    & "$PSScriptRoot/start.ps1" -Profile $profile -Evidence $Evidence -Large:($Busy -or $FreshStart)
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $env:APPDATA = "$profile/roaming"
     $env:LOCALAPPDATA = "$profile/local"
@@ -103,7 +103,9 @@ try {
     $env:ZIGSHELL_DEBUG = '1'
     $env:IGSH_246 = '0'
     $env:PATH = (Split-Path $ssh) + ';' + $env:PATH
-    [void](Invoke-ServerNative -FilePath python -Arguments @("$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.py", '--root', $profile, '--home', "$profile/home", '--settings', $settings, '--evidence', $Evidence) -Evidence $Evidence -Name 'profile-seed')
+    if ($Busy -or $FreshStart) {
+        [void](Invoke-ServerNative -FilePath python -Arguments @("$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.py", '--root', $profile, '--home', "$profile/home", '--settings', $settings, '--evidence', $Evidence) -Evidence $Evidence -Name 'profile-seed')
+    }
     Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 }) } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
@@ -125,7 +127,8 @@ try {
     Press @(0x12, 0x43) 'Alt+C: open server Chat View'
     [void](Wait-For 'server transcript loaded' { (Log-Text) -match '\[chat\] transcript load shell=\d+ ok' })
     $opened = Copy-Chat 'open-copied'
-    if (-not $opened.Contains('Server received: server seed') -or -not $opened.Contains('Synthetic chat 00 answer 1199.')) { throw 'Open did not show the real server reply and long seeded history' }
+    if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
+    if (($Busy -or $FreshStart) -and -not $opened.Contains('Synthetic chat 00 answer 1199.')) { throw 'Open did not show the long seeded history' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
     $scenarios = @(@{ name = 'send'; text = 'windows send proof' })

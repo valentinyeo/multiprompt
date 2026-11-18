@@ -19,11 +19,13 @@ assert.equal(result.cleanupError, undefined);
 assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
-assert.ok(text('open-copied.txt').includes('Synthetic chat 00 answer 1199.'));
-const manifest = json('fixture-manifest.json');
-assert.equal(manifest.sessions, 64);
-assert.equal(manifest.longChats, 8);
-assert.equal(manifest.messages, 19872);
+if (busy || fresh) {
+  assert.ok(text('open-copied.txt').includes('Synthetic chat 00 answer 1199.'));
+  const manifest = json('fixture-manifest.json');
+  assert.equal(manifest.sessions, 64);
+  assert.equal(manifest.longChats, 8);
+  assert.equal(manifest.messages, 19872);
+}
 for (const [name, message] of [['send', 'windows send proof'], ...(!busy && !fresh ? [['clear', '/clear'], ['after-clear', 'windows after clear']] : [])]) {
   const wireText = name === 'clear' ? '/clear ' : message;
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
@@ -103,7 +105,7 @@ assert.equal(locks.blockedWriter, 'SQLITE_BUSY');
 assert.equal(locks.integrity, 'ok');
 assert.equal(locks.writes, 2);
 const nativeLogs = fs.readdirSync(root).filter(name => name.endsWith('.exit-code.txt'));
-for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'profile-seed', 'evidence-path', 'server-stop', 'wsl-terminate', ...(fresh ? ['replacement-start'] : [])]) {
+for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'evidence-path', 'server-stop', 'wsl-terminate', ...(busy || fresh ? ['profile-seed'] : []), ...(fresh ? ['replacement-start'] : [])]) {
   assert.ok(nativeLogs.includes(`${name}.exit-code.txt`), `Missing native command evidence: ${name}`);
 }
 for (const name of nativeLogs) {

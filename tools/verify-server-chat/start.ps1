@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Profile, [Parameter(Mandatory)][string]$Evidence)
+param([Parameter(Mandatory)][string]$Profile, [Parameter(Mandatory)][string]$Evidence, [switch]$Large)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/native.ps1"
 $settings = Join-Path $Profile 'roaming/ZigShell'
@@ -25,7 +25,8 @@ if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].Id
 $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'start-repo-path').Trim()
 $public = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', "$key.pub") -Evidence $Evidence -Name 'public-key-path').Trim()
 $runtime = if ($env:VERIFY_APP_REVISION) { "$repo/app-source" } else { $repo }
-$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public, $runtime) -Evidence $Evidence -Name 'server-start'
+$seedMode = if ($Large) { '1' } else { '0' }
+$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public, $runtime, $seedMode) -Evidence $Evidence -Name 'server-start'
 Write-Host $started
 $config = @"
 Host remote-1

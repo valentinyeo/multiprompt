@@ -23,18 +23,20 @@ class ProviderTest(unittest.TestCase):
         self.assertEqual(selected, dict(features=['server-chat', 'server-chat-busy', 'server-chat-fresh-start'], unmapped=[]))
 
     def test_round_trip_and_clear_reach_the_provider_once(self):
-        with tempfile.TemporaryDirectory() as home:
-            program = ROOT / 'tools/verify-server-chat/provider.py'
-            script = 'import os,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); runpy.run_path(sys.argv[0],run_name="__main__")'
-            requests = [dict(type='user', uuid=f'user-{index}', message=dict(content=[dict(type='text', text=text)])) for index, text in enumerate(('windows send proof', '/clear', 'windows after clear'))]
-            result = subprocess.run([sys.executable, '-c', script, str(program), home, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=''.join(json.dumps(row) + '\n' for row in requests), text=True, capture_output=True, check=True, cwd=home)
-            events = [json.loads(line) for line in result.stdout.splitlines()]
-            self.assertEqual(events[0]['subtype'], 'init')
-            self.assertEqual([row['message']['content'][0]['text'] for row in events if row['type'] == 'assistant'], ['Server received: ' + request['message']['content'][0]['text'] for request in requests])
-            receipts = [json.loads(line) for line in (Path(home) / 'provider-input.jsonl').read_text().splitlines()]
-            self.assertEqual([row['text'] for row in receipts], ['windows send proof', '/clear', 'windows after clear'])
-            self.assertEqual(len(list((Path(home) / '.claude/projects').glob('*/*.jsonl'))), 1)
-
+        for cwd, folder in [('/home/mpverify', '-home-mpverify'), (r'D:\a\multiprompt\multiprompt', 'D--a-multiprompt-multiprompt'), (r'\\runner\share\work', '--runner-share-work')]:
+            with self.subTest(cwd=cwd), tempfile.TemporaryDirectory() as home:
+                program = ROOT / 'tools/verify-server-chat/provider.py'
+                script = 'import os,pathlib,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); cwd=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); pathlib.Path.cwd=classmethod(lambda cls: pathlib.PureWindowsPath(cwd) if "\\\\" in cwd else pathlib.PurePosixPath(cwd)); runpy.run_path(sys.argv[0],run_name="__main__")'
+                requests = [dict(type='user', uuid=f'user-{index}', message=dict(content=[dict(type='text', text=text)])) for index, text in enumerate(('windows send proof', '/clear', 'windows after clear'))]
+                result = subprocess.run([sys.executable, '-c', script, str(program), home, cwd, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=''.join(json.dumps(row) + '\n' for row in requests), text=True, capture_output=True, check=True, cwd=home)
+                events = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(events[0]['subtype'], 'init')
+                self.assertEqual([row['message']['content'][0]['text'] for row in events if row['type'] == 'assistant'], ['Server received: ' + request['message']['content'][0]['text'] for request in requests])
+                receipts = [json.loads(line) for line in (Path(home) / 'provider-input.jsonl').read_text().splitlines()]
+                self.assertEqual([row['text'] for row in receipts], ['windows send proof', '/clear', 'windows after clear'])
+                transcripts = list((Path(home) / '.claude/projects').glob('*/*.jsonl'))
+                self.assertEqual(len(transcripts), 1)
+                self.assertEqual(transcripts[0].parent.name, folder)
 
     def test_busy_provider_accepts_control_without_a_second_turn_and_records_cancelled_input(self):
         with tempfile.TemporaryDirectory() as home:
@@ -131,6 +133,24 @@ class ProviderTest(unittest.TestCase):
             values['fresh-tab-after.json']['tabs'][0]['csid'] = new
             (evidence / 'fresh-tab-after.json').write_text(json.dumps(values['fresh-tab-after.json']))
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+            values = copy.deepcopy(files)
+            values['result.json']['feature'] = 'server-chat'
+            values['result.json']['cases'] = [dict(name=name, passed=True) for name in ('open', 'send', 'clear', 'after-clear')]
+            for name in ('fixture-manifest.json', 'profile-seed.exit-code.txt'):
+                values.pop(name)
+                (evidence / name).unlink()
+            for name, text in [('clear', '/clear '), ('after-clear', 'windows after clear')]:
+                values[name + '-server.json'] = dict(inputs=[dict(text=text)])
+                (evidence / (name + '-copied.txt')).write_text('Server received: ' + text)
+                (evidence / (name + '.png')).write_bytes(b'x' * 1001)
+            for name, value in values.items():
+                (evidence / name).write_text(json.dumps(value))
+            (evidence / 'open-copied.txt').write_text('Server received: server seed')
+            ordinary = command[:-1]
+            result = subprocess.run(ordinary, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (evidence / 'clear-server.json').write_text(json.dumps(dict(inputs=[dict(text='/clear')])))
+            self.assertNotEqual(subprocess.run(ordinary, capture_output=True).returncode, 0)
 
     def test_wsl_path_arguments_survive_the_windows_shell_boundary(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
@@ -198,10 +218,11 @@ ConvertTo-Json -InputObject $values -Compress
 
     def test_seed_waits_for_persisted_provider_readiness(self):
         execute = runpy.run_path
-        for name in ('seed.py', 'replace-chat.py'):
+        source_rows = execute(str(ROOT / '.claude/skills/verify-multiprompt/seed-profile.py'))['source_rows']
+        for name, large in (('seed.py', False), ('seed.py', True), ('replace-chat.py', False)):
             seed = ROOT / 'tools/verify-server-chat' / name
             for will_be_ready in (True, False):
-                with self.subTest(program=name, ready=will_be_ready), tempfile.TemporaryDirectory() as home:
+                with self.subTest(program=name, large=large, ready=will_be_ready), tempfile.TemporaryDirectory() as home:
                     transcript = Path(home) / '.claude/projects/fixture/sid.jsonl'
                     transcript.parent.mkdir(parents=True)
                     transcript.write_text('Server received: server seed')
@@ -219,8 +240,8 @@ ConvertTo-Json -InputObject $values -Compress
                         return dict(status='sent')
                     def cli(argv):
                         return dict(status=dict(enable='enabled', disable='disabled', start='started')[argv[0]])
-                    reader = dict(host_cli=Mock(side_effect=cli), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_session_state=Mock(return_value=dict(pid=0)), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send), source_rows=Mock(return_value=[]))
-                    with patch('runpy.run_path', return_value=reader), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT), str(ROOT)]):
+                    reader = dict(host_cli=Mock(side_effect=cli), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_session_state=Mock(return_value=dict(pid=0)), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send), source_rows=Mock(side_effect=source_rows))
+                    with patch('runpy.run_path', return_value=reader), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT), str(ROOT)] + (['--large'] if large else [])):
                         if will_be_ready:
                             execute(str(seed))
                             reader['host_send'].assert_called_once()
@@ -228,6 +249,10 @@ ConvertTo-Json -InputObject $values -Compress
                             with self.assertRaisesRegex(RuntimeError, 'provider.*ready'):
                                 execute(str(seed))
                             reader['host_send'].assert_not_called()
+                    if name == 'seed.py':
+                        metadata = json.loads((Path(home) / 'server-seed.json').read_text())
+                        self.assertEqual(metadata['messages'], 2400 if large else 0)
+                        self.assertEqual(metadata['runtime'], str(ROOT))
 
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')

@@ -3,13 +3,14 @@ from collections import deque
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import uuid
 
 args = sys.argv[1:]
 sid = args[args.index('--resume') + 1] if '--resume' in args else args[args.index('--session-id') + 1]
 root = Path.home()
-folder = root / '.claude/projects' / str(Path.cwd()).replace('\\', '-').replace('/', '-').replace(':', '-')
+folder = root / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', str(Path.cwd()))
 folder.mkdir(parents=True, exist_ok=True)
 transcript = folder / (sid + '.jsonl')
 metadata = root / '.claude/sessions'
