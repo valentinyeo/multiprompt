@@ -49,9 +49,13 @@ function stepEvidence(step, before, after, inbox, groupId) {
   const old = tab(before, step.id), current = tab(after, step.id);
   assert.ok(old, `${step.name} starts with the real target`);
   assert.ok(Number.isSafeInteger(step.id) && step.id > 0);
-  if (step.route === 'context' || step.name === 'disconnected-global') {
+  if (step.name === 'workspace-existing') {
+    const home = before.tabs.find(row => row.shell_id === before.workspaces[0].last_shell);
+    assert.ok(home && (home.workspace || 0) === 0, 'home remembers a real home-workspace session');
+    assert.equal(after.tabs[after.active_tab].chat_id, home.chat_id, 'returning home restores its remembered session');
+  } else if (step.route === 'context' || step.name === 'disconnected-global') {
     assert.equal(after.tabs[after.active_tab].chat_id, before.tabs[before.active_tab].chat_id, `${step.name} preserves the active identity`);
-    if (step.name !== 'workspace-existing') assert.equal(after.active_workspace, before.active_workspace);
+    assert.equal(after.active_workspace, before.active_workspace);
   } else {
     assert.equal(before.tabs[before.active_tab].chat_id, step.id, `${step.name} acts on the selected identity`);
   }
@@ -216,9 +220,11 @@ else if (process.argv[2] === '--evidence') {
     assert.equal(run.status, 0, run.stderr);
   });
   test('returning to home accepts the app-written omitted workspace field', t => {
-    const before = { active_tab: 1, active_workspace: 2, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Target', workspace: 2 }] };
-    const after = structuredClone(before); after.active_workspace = 0; delete after.tabs[1].workspace;
-    stepEvidence({ name: 'workspace-existing', route: 'context', id: 202 }, before, after, {}, undefined);
+    const before = { active_tab: 1, active_workspace: 2, workspaces: [{ last_shell: 1 }], tabs: [{ chat_id: 101, shell_id: 1, name: 'Control' }, { chat_id: 202, shell_id: 2, name: 'Target', workspace: 2 }] };
+    const after = structuredClone(before); after.active_workspace = 0; after.active_tab = 0; delete after.tabs[1].workspace;
+    const step = { name: 'workspace-existing', route: 'context', id: 202 };
+    stepEvidence(step, before, after, {}, undefined);
+    assert.throws(() => stepEvidence(step, before, { ...after, active_tab: 1 }, {}, undefined), assert.AssertionError);
     const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
     assert.ok(fs.existsSync(file), 'executable native tab journey exists');
     const text = fs.readFileSync(file, 'utf8');
