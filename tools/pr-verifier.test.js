@@ -308,6 +308,33 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
+test('the declared reproduction stays visible when unrelated artifacts exceed the judge budget', () => {
+  const features = Array.from({ length: 20 }, (_, index) => `aa-feature-${index}`);
+  const entries = Object.fromEntries(features.map(feature => [`verify-${feature}`, { status: 'passed', padding: 'x'.repeat(6500) }]));
+  const repro = 'server-chat-busy';
+  entries[`verify-${repro}`] = { status: 'passed', marker: 'required head result' };
+  entries[`verify-${repro}-${base}`] = { status: 'failed', marker: 'required master result' };
+  const dir = evidenceDir(entries);
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-budget-'));
+  const selectionFile = path.join(out, 'selection.json');
+  fs.writeFileSync(selectionFile, JSON.stringify({ features: [...features, repro], compareBase: true, bugFix: true, reproJourney: repro }));
+  for (const artifact of [`verify-${repro}`, `verify-${repro}-${base}`]) {
+    fs.writeFileSync(path.join(dir, artifact, 'doctor.json'), JSON.stringify({ marker: `${artifact} doctor` }));
+    fs.writeFileSync(path.join(dir, artifact, 'reproduction.json'), JSON.stringify({ marker: `${artifact} observation` }));
+    fs.writeFileSync(path.join(dir, artifact, 'check-evidence-repro.stdout.log'), `${artifact} strict checker output`);
+    fs.writeFileSync(path.join(dir, artifact, 'check-evidence-repro.exit-code.txt'), '0');
+  }
+  const result = require('node:child_process').spawnSync(process.execPath, [modulePath, 'summarize', dir, selectionFile, base, out], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(path.join(out, 'evidence.md'), 'utf8');
+  assert.ok(summary.indexOf(`## ${repro}:`) < summary.indexOf('## aa-feature-0:'));
+  const material = verifier.judgeInputs(out, dir);
+  assert.ok(material.length <= 60000);
+  for (const marker of ['required head result', 'required master result', `verify-${repro} doctor`, `verify-${repro}-${base} doctor`, `verify-${repro} observation`, `verify-${repro}-${base} observation`, `verify-${repro} strict checker output`, `verify-${repro}-${base} strict checker output`]) {
+    assert.ok(material.includes(marker), marker);
+  }
+});
+
 test('the DeepSeek key reaches the picker and the judge and the engine comes from the commits', () => {
   const lines = workflow.split('\n');
   const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));

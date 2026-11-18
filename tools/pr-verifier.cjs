@@ -192,9 +192,10 @@ function failedHeadFeatures(jobs, features) {
   return failed;
 }
 
-function evidenceMarkdown(summary, compareBase) {
+function evidenceMarkdown(summary, compareBase, reproJourney) {
   const lines = ['# Journey evidence', ''];
-  for (const row of journeyRows(summary, compareBase)) {
+  const rows = journeyRows(summary, compareBase).sort((left, right) => Number(right.feature === reproJourney) - Number(left.feature === reproJourney));
+  for (const row of rows) {
     lines.push(`## ${row.feature}: head ${row.head}, base ${row.base}`, '');
     for (const side of ['head', 'base']) {
       for (const run of summary[side][row.feature]) {
@@ -496,10 +497,13 @@ function judgeInputs(outDir, evidenceDir) {
   }
   const selection = path.join(outDir, 'selection.json');
   if (fs.existsSync(selection)) parts.push(`### selection.json\n${readCapped(selection)}`);
+  const reproJourney = fs.existsSync(selection) ? JSON.parse(fs.readFileSync(selection, 'utf8')).reproJourney : '';
+  const reproPattern = reproJourney ? featureDirPattern(reproJourney) : null;
+  const isRepro = file => reproPattern?.test(file.split('/')[0]) ?? false;
   if (fs.existsSync(evidenceDir)) {
-    for (const file of listFiles(evidenceDir)) {
-      if (/(^|\/)(result|doctor)\.json$/.test(file)) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
-    }
+    const files = listFiles(evidenceDir).filter(file => /(^|\/)(result|doctor)\.json$/.test(file) || (isRepro(file) && /(^|\/)(reproduction\.json|check-evidence(?:-repro)?\.(?:stdout\.log|stderr\.log|exit-code\.txt))$/.test(file)))
+      .sort((left, right) => Number(isRepro(right)) - Number(isRepro(left)));
+    for (const file of files) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
   }
   return parts.join('\n\n').slice(0, 60000);
 }
@@ -699,7 +703,7 @@ async function main(argv, env) {
     const summary = summarize(evidenceDir, selection.features, baseSha);
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
-    fs.writeFileSync(path.join(outDir, 'evidence.md'), evidenceMarkdown(summary, selection.compareBase));
+    fs.writeFileSync(path.join(outDir, 'evidence.md'), evidenceMarkdown(summary, selection.compareBase, selection.reproJourney));
     return undefined;
   }
   if (command === 'finalize') {
