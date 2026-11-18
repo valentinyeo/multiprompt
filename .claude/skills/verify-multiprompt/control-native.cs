@@ -1107,7 +1107,7 @@ public static class GroupRailProof {
             bool mutedInk = mutedPixels >= 8;
             int groupTop = sectionTop - 2 * (sectionHeight + 2 * rowHeight);
             int groupLetterHeight = FirstLetterHeight(image, headlineX, groupTop, right - S(8, dpi, scale), sectionHeight);
-            int sectionLetterHeight = FirstLetterHeight(image, firstInk, sectionTop, right - S(8, dpi, scale), sectionHeight);
+            int sectionLetterHeight = present ? FirstLetterHeight(image, firstInk, sectionTop, right - S(8, dpi, scale), sectionHeight) : 0;
             bool sameLetterHeight = present && groupLetterHeight > 0 && sectionLetterHeight > 0 && Math.Abs(sectionLetterHeight - groupLetterHeight) <= Math.Max(1, S(2, dpi, scale));
             int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);

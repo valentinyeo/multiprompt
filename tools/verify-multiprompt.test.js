@@ -2405,6 +2405,8 @@ foreach ($collapsed in @($false, $true)) {
     $second = if ($collapsed) { 167 } else { 283 }
     if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 158)) { throw 'Member rectangles do not track group collapse' }
     if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
+    $blankLabels = [GroupRailProof]::Labels((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $proof.sidebarRect[3], 20, $proof.rowHeight, 300)
+    if ($blankLabels.labelPresent -or $blankLabels.sameStyle) { throw 'Missing label must fail the style check without invalid pixel coordinates' }
 }
 $frame.Left = 0; $frame.Top = 0
 $origin.X = 0; $origin.Y = 0
