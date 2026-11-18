@@ -1521,8 +1521,6 @@ fn browserFocusHotkey() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-    if (msg == 0x000B) altqLog("frame_redraw enable={d}", .{wp});
-    if (msg == WM_PAINT and app_state.g_search_active) altqLog("palette_paint entry", .{});
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
     if (msg == WM_TIMER and wp == @import("win32.zig").TIMER_CHAT_FILE_READY) {
         @import("win32.zig").chatFileReadyTimer(hwnd);
@@ -1839,7 +1837,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const pw = paint_rc.right - paint_rc.left;
             const ph = paint_rc.bottom - paint_rc.top;
             if (pw <= 0 or ph <= 0) {
-                if (verboseLoggingEnabled() and app_state.g_search_active) debugLog("[frame] search paint has an empty update rectangle");
                 _ = EndPaint(hwnd, &ps);
                 return 0;
             }
@@ -1879,11 +1876,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("window_frame.zig").paint(hwnd, mem_dc);
             canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
-            const presented = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
-            if (verboseLoggingEnabled() and (app_state.g_search_active or app_state.g_edit_hwnd != null)) {
-                var frame_log: [192]u8 = undefined;
-                debugLog(std.fmt.bufPrint(&frame_log, "[frame] search={} edit={X} rect={d},{d},{d},{d} presented={} error={d}", .{ app_state.g_search_active, if (app_state.g_edit_hwnd) |edit| @intFromPtr(edit) else 0, paint_rc.left, paint_rc.top, pw, ph, presented, GetLastError() }) catch "[frame] log overflow");
-            }
+            _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
             _ = EndPaint(hwnd, &ps);
             launch_cache.painted(false);
             return 0;
@@ -2415,12 +2408,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             }
             var leave_pt: POINT = undefined;
-            _ = GetCursorPos(&leave_pt);
-            _ = ScreenToClient(hwnd, &leave_pt);
-            if (!app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
-                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
-                _ = TrackMouseEvent(&tracking);
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            var leave_rc: RECT = undefined;
+            const in_sidebar = !app_state.g_hide_sidebar and GetCursorPos(&leave_pt) != 0 and
+                ScreenToClient(hwnd, &leave_pt) != 0 and GetClientRect(hwnd, &leave_rc) != 0 and
+                leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0 and leave_pt.y < leave_rc.bottom;
+            if (!in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {
@@ -4410,8 +4402,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             _ = SetFocus(app_state.g_main_hwnd);
             altqLog("palette_focus wp={} foreground={X} frame={X} focus={X} rem={} wait_alt={}", .{ wp, altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
-            const invalidated = InvalidateRect(hwnd, null, 0);
-            altqLog("palette_redraw visible={} style={X} redraw={X} invalidated={}", .{ IsWindowVisible(hwnd), GetWindowLongPtrW(hwnd, GWL_STYLE), altqPtr(@import("win32.zig").GetPropW(hwnd, L("SysSetRedraw"))), invalidated });
+            _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
         WM_APP_SEARCH_CLOSE => {
@@ -9595,15 +9586,7 @@ pub fn main(init: std.process.Init) void {
     _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
     update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
-    var paint_probe_tick: u64 = 0;
-    var paint_probe_messages: u64 = 0;
     while (GetMessageW(&msg, null, 0, 0) > 0) {
-        paint_probe_messages += 1;
-        if (app_state.g_search_active and GetTickCount64() -| paint_probe_tick >= 1000) {
-            altqLog("palette_pump msg={X} hwnd={X} wp={X} count={d}", .{ msg.message, altqPtr(msg.hwnd), msg.wParam, paint_probe_messages });
-            paint_probe_tick = GetTickCount64();
-            paint_probe_messages = 0;
-        }
         if (@import("settings_panel.zig").dialogMessage(&msg)) continue;
         @import("idle_budget.zig").pumped(msg.message, msg.wParam);
         _ = TranslateMessage(&msg);
