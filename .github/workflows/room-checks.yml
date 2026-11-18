@@ -50,9 +50,11 @@ jobs:
         run: |
           for log in room-check-results/*.log; do
             [ -f "$log" ] || continue
-            printf '\n### %s\n\n```\n' "$(basename "$log")" >> "$GITHUB_STEP_SUMMARY"
-            cat "$log" >> "$GITHUB_STEP_SUMMARY"
-            printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+            {
+              printf '\n### %s\n\n```\n' "$(basename "$log")"
+              cat "$log"
+              printf '\n```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
           done
       - name: Upload results
         if: always()
