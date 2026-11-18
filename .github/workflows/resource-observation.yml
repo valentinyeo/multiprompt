@@ -1,6 +1,7 @@
 name: Resource guard
 on:
-  pull_request:
+  schedule:
+    - cron: '12 5 * * *'
   workflow_dispatch:
 permissions:
   contents: read
