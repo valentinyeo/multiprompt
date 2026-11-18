@@ -120,7 +120,8 @@ try {
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
-        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
+        $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
+        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
         [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }

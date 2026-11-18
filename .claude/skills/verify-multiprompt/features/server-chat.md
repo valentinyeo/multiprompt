@@ -8,7 +8,7 @@ Verify on: push, pull_request
 
 - Open a saved Linux tmux chat and copy its persisted seed reply from the Windows Chat View.
 - Send a message with the real composer and Enter. Require exactly one server-side provider receipt and the reply copied from the visible transcript.
-- Type `/clear`, dismiss autocomplete, and send it. Require exactly one provider receipt and a rendered reply, then send another message successfully.
+- Type `/clear`, dismiss autocomplete, and send it. The production composer terminates bare trigger tokens with one space, so require exactly one provider receipt of `/clear ` and its rendered reply, then send another message successfully.
 - Authenticate with a new ed25519 key for this job. The private directory and file allow only the Windows runner SID, with inheritance removed.
 - Retain an actual desktop recording and evidence even when the journey fails.
 

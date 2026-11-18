@@ -14,7 +14,8 @@ assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
 for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear']]) {
-  assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === message).length, 1);
+  const wireText = name === 'clear' ? '/clear ' : message;
+  assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
   assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));
   assert.ok(fs.statSync(path.join(root, `${name}.png`)).size > 1000);
 }
