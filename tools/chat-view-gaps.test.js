@@ -1002,7 +1002,8 @@ fn chatQuestionCaptureRows(_: u32, _: []const []const u16) void {}
 fn chatWorkingIndicatorInvalidate() void {}
 fn debugLog(_: []const u8) void {}
 fn chatPermissionAnswer(_: u32, _: @import("chat_permission.zig").Action) bool { return false; }
-fn chatLiveAttached(_: u32) bool { return false; }
+var live_attached = false;
+fn chatLiveAttached(_: u32) bool { return live_attached; }
 fn PostMessageW(hwnd: usize, message: u32, _: usize, _: isize) i32 {
     std.debug.assert(hwnd == 123 and message == 456);
     repaints += 1;
@@ -1018,9 +1019,12 @@ test "question progress repaint is active-session and answer specific" {
     app_state.shells[0].chat_question_other_sent = true;
     chatPermissionCaptureRows(0, 2, 4, 2);
     try std.testing.expectEqual(@as(usize, 1), repaints);
+    live_attached = true;
+    chatPermissionCaptureRows(0, 2, 4, 2);
+    try std.testing.expectEqual(@as(usize, 2), repaints);
     app_state.g_chat_active = false;
     chatPermissionCaptureRows(0, 2, 4, 2);
-    try std.testing.expectEqual(@as(usize, 1), repaints);
+    try std.testing.expectEqual(@as(usize, 2), repaints);
 }
 `, ['chat_permission.zig', 'chat_live.zig'], 'question progress repaint', ['-fno-llvm', '-fno-lld']);
   assert.equal(result.status, 0, JSON.stringify(result));
