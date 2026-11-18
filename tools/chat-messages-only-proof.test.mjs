@@ -124,6 +124,8 @@ test('fresh history distinguishes the opening hold from an explicit user scroll'
   const prepare = session.lastIndexOf('layoutChatControls();', ready);
   const refresh = session.indexOf('refreshChatTranscript(false);', prepare);
   assert.ok(prepare >= 0 && ready > prepare && refresh > ready, 'publish source readiness between old layout preparation and the new-history refresh');
+  const refreshBody = session.slice(session.indexOf('pub fn refreshChatTranscript('), session.indexOf('pub fn chatRelayoutPreservingScroll('));
+  assert.match(refreshBody, /chatScrollStateChanged\(viewport_h\);\s+if \(verboseLoggingEnabled\(\)\) chatNewMessagesChanged\(app_state.g_chat_new_messages.count\(\) != 0\);/);
   assert.match(session, /chat_history.followBottom\(force or \(app_state.g_chat_read_hold and app_state.g_chat_read_open_ready\)/);
   assert.match(session, /g_chat_scroll_y = app_state.g_chat_content_h - viewport_h - 100;\s+app_state.g_chat_scrolled_up = true;/);
   assert.match(session, /expectEqual\(app_state.g_chat_content_h - viewport_h, app_state.g_chat_scroll_y\)/);
