@@ -39,6 +39,7 @@ Preconditions:
 ## Gotchas
 
 - The filtered `dark` and `light` lists also include `System`, but exact-name matches rank first. Enter selects explicit Dark or Light; confirm that selection in the action screenshot. Never accept `system` as the expected saved result.
+- Palette `target` values identify actions, not filtered row positions. Dark and Light should have different action IDs. A saved `dark` preference after choosing Light proves a failed outcome; it does not prove wrong-row routing. That diagnosis requires an intended label-to-ID mapping for the same build and a trace of the dispatched action. If those are unavailable, leave the cause unproven.
 - A theme selection keeps the Themes overlay open; Esc is necessary for comparable workspace screenshots.
 - System follows Windows appearance and is not equivalent to a fixed Light preference.
 - This journey proves live application and saved preference, not persistence across an app restart, every available theme, or a browser pane's theme.

@@ -1,4 +1,3 @@
-"""Native transcript facts only; never authorizes a desktop delivery or resend."""
 from collections import Counter, defaultdict
 from copy import deepcopy
 
@@ -8,7 +7,6 @@ def empty_snapshot():
 
 
 def append(snapshot, source, events):
-    """Append physical source positions; identical rereads are idempotent."""
     rows = snapshot["sources"].setdefault(source, [])
     for event in events:
         position = event["position"]
@@ -23,7 +21,6 @@ def append(snapshot, source, events):
 
 
 def classify(snapshot):
-    """Classify every observed occurrence without matching text or timestamps."""
     results = {}
     for source, rows in snapshot["sources"].items():
         removes, attachments = defaultdict(list), defaultdict(list)
@@ -61,8 +58,6 @@ def classify(snapshot):
                     elif matches:
                         result["alias_ambiguous"] = True
             elif kind in ("user", "attachment"):
-                # Extracted metadata does not universally distinguish user input
-                # from tool results, notifications, or other non-deliveries.
                 eligibility = event.get("eligible")
                 result["class"] = "native_acceptance" if eligibility is True else "excluded" if eligibility is False else "ambiguous"
                 if kind == "attachment":

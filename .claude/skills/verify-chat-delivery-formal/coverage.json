@@ -3,7 +3,7 @@
   "files": {
     "src/chat_echo.zig": "7b71f4c41e28350cadb56a7a75765c60217fc7f69df7895fcd0f1f13a23bbf1a",
     "src/chat_send.zig": "33d4fc603a662000d71547ea08701221f7f100ba0ce5d1356d129ca8086240a2",
-    "src/chat_render.zig": "7d4f811374d678a7b8f66c3dc420bf180dd84faa0c0cf1e63a16dde0e5a301bb",
+    "src/chat_render.zig": "4a84d3d626456da81b9337cf2fe0450c1fd30e727161b9325dc336b521eb3fb5",
     "src/chat_history_reader.py": "e7f130e6d709884868f3b57f7293a8cc9e2990fcd1230e71596c07915c7fe92f",
     "src/app_state.zig": "aa64f38d2aad8503a23f63791aac8fdb18d5609a8b34ed037e1d5320cb3ec952",
     "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",

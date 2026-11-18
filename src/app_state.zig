@@ -1311,6 +1311,7 @@ pub var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
 pub var g_chat_read_open_pending = false;
 pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;
+pub var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
 pub var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 pub var g_chat_read_divider_y: i32 = 0;
 pub var g_chat_batch_boundary: chat_history.BatchBoundary = .{};

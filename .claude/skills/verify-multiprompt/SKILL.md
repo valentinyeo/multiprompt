@@ -157,6 +157,10 @@ The on-demand-only `browser-switch-speed` journey (`workflow_dispatch`, not the 
 
 The `browser-pane-stuck` journey reads the app-published `browser_state`, `browser_connection_id` and `browser_window_id` fields in `inbox-default.json`; it never writes them or publishes pane URLs. A docked pane does not need an extension window ID. Run `node tools/check-browser-pane-stuck.mjs` for its static map/workflow/driver contract check (no app execution).
 
+### Read palette logs without inventing a cause
+
+A palette `target` is an action ID, not a row position. The `ids` list contains the actions matching the current query. Different queries can select different action IDs without any routing error. Claim a wrong action only with an intended label-to-ID mapping for the same build and a trace proving which action ran. Without that mapping, report the observed failed outcome and leave the cause unproven. Input records prove which keys were sent, not which state changed. An absent log line proves nothing unless that operation is guaranteed to emit it.
+
 Bounded condition waits inspect actual saved state and window titles. A missing precondition fails the journey with an error and retained evidence. Never change the expected outcome, write settings yourself, add a test-only setter, or skip the failing action to make a run green. Fix a broken driver only when the real user path is unchanged.
 
 ### Messages only

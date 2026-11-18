@@ -233,6 +233,24 @@ public static class VerifyNative {
         return result;
     }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+    [DllImport("user32.dll")] static extern bool GetUpdateRect(IntPtr hwnd, out Rect rect, bool erase);
+    public static Dictionary<string, object> ObservePaint(IntPtr owner) {
+        Rect update;
+        var children = new List<Dictionary<string, object>>();
+        EnumChildWindows(owner, delegate(IntPtr hwnd, IntPtr data) {
+            var identity = WindowIdentity(hwnd);
+            Rect rectangle;
+            identity["parent"] = GetParent(hwnd).ToInt64();
+            identity["rect"] = GetWindowRect(hwnd, out rectangle) ? new int[] { rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom } : null;
+            children.Add(identity);
+            return true;
+        }, IntPtr.Zero);
+        bool pending = GetUpdateRect(owner, out update, false);
+        return new Dictionary<string, object> {
+            { "pending", pending }, { "update", new int[] { update.Left, update.Top, update.Right, update.Bottom } },
+            { "children", children }
+        };
+    }
     public static List<Dictionary<string, object>> DesktopWindows() {
         var windows = new List<Dictionary<string, object>>();
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {

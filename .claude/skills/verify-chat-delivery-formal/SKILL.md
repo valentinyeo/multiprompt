@@ -50,6 +50,8 @@ Last confirmed source/model sync commit is `6baea66c637034b9d6285a5894de3ed7ffb2
 | `src/chat_history_reader.py`: `message_store_transaction`, `message_poll`; `src/chat_connectors/claude.py`: `poll` | Real temporary SQLite store, repeat-submit identity, connector acceptance and replacement rejection. No SSH, tmux process or paid provider is run. |
 | `tools/chat-history-reader-test.py`: `IGSH_1266_SharedMessageHostTest`; `tools/multibot-feedback-test.py` | Existing isolated host fixture and its import dependency. They supply a synthetic transcript, temporary home and terminal-send stand-in. |
 
+SOFT-2713 maintenance at `feeecd83` reviewed a padding expression and a reading-anchor field outside the covered declarations. The two whole-file hashes now describe that reviewed source; hosted native/mutation confirmation is pending. The confirmed sync above is intentionally unchanged. [The maintenance report](maintenance-SOFT-2713.md) explains why the three existing findings still cannot inherit across these changed files. This coverage update is not a passing delivery verdict.
+
 Whole-file drift stops before checking, even for an unrelated function change. This favors an explicit source review over silently trusting a stale model. Re-read the covered functions and callers; change the mapping, native probes or bounds when needed. Update `decisions.json` only from native output after understanding the semantic change. Update hashes and move the sync commit forward **only after confirming the verification still describes the code**. A hash refresh alone is not verification.
 
 ## Prove the checker can fail

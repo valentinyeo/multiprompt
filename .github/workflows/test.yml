@@ -483,7 +483,7 @@ jobs:
         env:
           CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
         run: |
-          if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
+          if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/fixtures/SOFT-2713/chat-still-regressions\.json$|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
             bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output "$RUNNER_TEMP/chat-still-formal.json"
           fi
       - name: Test remote browser command list

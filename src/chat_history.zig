@@ -878,6 +878,31 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
+pub const ReadAnchor = struct { message_id: u64, source_offset: u64, block_offset: usize, offset: i32 };
+
+pub fn readAnchor(blocks: []const md.Block, rects: anytype, scroll_y: i32, viewport_h: i32) ?ReadAnchor {
+    var result: ?ReadAnchor = null;
+    var message_start: usize = 0;
+    var bubble_start: usize = 0;
+    for (blocks, rects, 0..) |block, rc, i| {
+        if (i == 0 or block.message_id != blocks[i - 1].message_id or block.source_offset != blocks[i - 1].source_offset) message_start = block.start;
+        if (i == 0 or block.role != .prose or blocks[i - 1].role != .prose or block.first) bubble_start = i;
+        if (block.role == .tool or rc.bottom <= scroll_y or rc.top >= scroll_y + viewport_h) continue;
+        result = .{ .message_id = block.message_id, .source_offset = block.source_offset, .block_offset = blocks[bubble_start].start - message_start, .offset = scroll_y - rects[bubble_start].top };
+    }
+    return result;
+}
+
+pub fn readAnchorTop(blocks: []const md.Block, rects: anytype, anchor: ReadAnchor) ?i32 {
+    var message_start: ?usize = null;
+    for (blocks, rects) |block, rc| {
+        if (block.role == .tool or !(if (anchor.message_id != 0) block.message_id == anchor.message_id else block.source_offset == anchor.source_offset)) continue;
+        if (message_start == null) message_start = block.start;
+        if (block.start - message_start.? == anchor.block_offset) return rc.top;
+    }
+    return null;
+}
+
 pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
     return force or pending or !scrolled_up;
 }
@@ -902,6 +927,40 @@ pub const NOT_AVAILABLE_NOTE = "Chat not available for this session, use the she
 
 pub fn noTranscriptYet(wire: []const u8) bool {
     return std.mem.indexOf(u8, wire, "\"no_transcript\":true") != null;
+}
+
+test "SOFT-2713 opening hold keeps the newest visible bubble identity across reconciliation" {
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = 10, .role = .prose, .message_id = 1 },
+        .{ .start = 10, .len = 10, .role = .prose, .message_id = 2, .first = true },
+        .{ .start = 20, .len = 10, .role = .prose, .message_id = 2 },
+        .{ .start = 30, .len = 10, .role = .code, .message_id = 2 },
+        .{ .start = 40, .len = 10, .role = .tool, .message_id = 3 },
+        .{ .start = 50, .len = 10, .role = .prose, .message_id = 4 },
+    };
+    const rects = [_]Rect{
+        .{ .left = 0, .top = 0, .right = 100, .bottom = 20 },
+        .{ .left = 0, .top = 20, .right = 100, .bottom = 30 },
+        .{ .left = 0, .top = 30, .right = 100, .bottom = 50 },
+        .{ .left = 0, .top = 50, .right = 100, .bottom = 70 },
+        .{ .left = 0, .top = 70, .right = 100, .bottom = 120 },
+        .{ .left = 0, .top = 120, .right = 100, .bottom = 200 },
+    };
+    const anchor = readAnchor(&blocks, &rects, 0, 100).?;
+    try std.testing.expectEqual(@as(u64, 2), anchor.message_id);
+    try std.testing.expectEqual(@as(usize, 20), anchor.block_offset);
+    try std.testing.expectEqual(@as(i32, -50), anchor.offset);
+    const continuation = readAnchor(&blocks, &rects, 35, 10).?;
+    try std.testing.expectEqual(@as(i32, 15), continuation.offset);
+    var reconciled = blocks;
+    var measured = rects;
+    for (&reconciled, &measured) |*block, *rc| {
+        block.start += 100;
+        rc.top += 10;
+        rc.bottom += 10;
+    }
+    const top = readAnchorTop(reconciled[1..], measured[1..], anchor).?;
+    try std.testing.expectEqual(@as(i32, 10), top + anchor.offset);
 }
 
 test "IGSH-1266 a missing transcript is a new chat, not a load failure" {
