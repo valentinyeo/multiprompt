@@ -3,6 +3,7 @@
 Find actions and recent sessions, navigate submenus, and dismiss without accidentally changing the workspace.
 
 Journeys: command-palette
+Release paths: src/command_palette.zig, src/snippets.zig, src/main.zig, build.zig
 
 ## Sub-features
 - `search` opens actions and recent sessions, then narrows by typed query.

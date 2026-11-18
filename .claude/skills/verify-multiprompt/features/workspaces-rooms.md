@@ -3,6 +3,7 @@
 Organize sessions by workspace and coordinate several agents in a Room.
 
 Journeys: workspaces, workspace-focus
+Release paths: src/workspace*.zig, src/room*, src/groups*.zig, src/main.zig, build.zig
 
 ## Sub-features
 - `workspace` creates, switches, aggregates favorite sessions in Starred, snoozes, and archives session collections.
