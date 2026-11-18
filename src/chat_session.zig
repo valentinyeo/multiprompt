@@ -1686,6 +1686,7 @@ fn refreshChatBlockCache(force: bool) bool {
     };
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     const live_revision = @import("chat_live.zig").revision(shell_id);
+    const previous_live_revision = g_chat_live_drawn_revision;
     if (!from_file and (screen_len == null or screen_len.? == 0) and app_state.g_chat_cache_shell_id == shell_id and live_revision == g_chat_live_drawn_revision) return false;
     const len = if (from_file) entry.?.history.text.items.len else screen_len orelse 0;
     const count = if (from_file) entry.?.history.blocks.items.len else CHAT_MAX_BLOCKS;
@@ -1712,7 +1713,13 @@ fn refreshChatBlockCache(force: bool) bool {
     }
     const total = len + live_tail.text_len;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
-    app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
+    const previous_history_revision = app_state.g_chat_last_hash ^ (previous_live_revision *% 0x9E3779B97F4A7C15);
+    const history_revision = if (from_file) entry.?.history.revision else 0;
+    app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == shell_id and generation == app_state.g_chat_cache_generation and
+        (history_revision == previous_history_revision or history_revision == previous_history_revision +% 1))
+        @min(app_state.g_chat_layout_reuse, if (history_revision == previous_history_revision) count else entry.?.history.changed_from, if (live_revision != previous_live_revision) count -| 1 else count)
+    else
+        0;
     if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
         chatTableRefresh(entry.?.history.blocks.items, source);
     } else if (app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id or from_file != app_state.g_chat_blocks_from_file or generation != app_state.g_chat_cache_generation) {
@@ -1889,6 +1896,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_block_count = 0;
     app_state.g_chat_last_len = 0;
     app_state.g_chat_last_hash = 0;
+    g_chat_live_drawn_revision = 0;
     app_state.g_chat_cache_generation = 0;
     app_state.g_chat_file_valid = false;
     app_state.g_chat_blocks_from_file = false;
