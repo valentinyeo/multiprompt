@@ -64,6 +64,19 @@ test('tab-order commands resolve to a row the live palette actually produces', (
   }
 });
 
+test('group selection follows saved session identity rather than grouped display order', () => {
+  const driver = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-group-rail.ps1'), 'utf8');
+  assert.match(driver, /Invoke-JourneyCommand 'Rail A' -Session/);
+  assert.match(driver, /Invoke-JourneyCommand \('Rail ' \+ \[char\]\(65 \+ \$selected\)\) -Session/);
+  assert.doesNotMatch(driver, /Press @\(0x11, (?:0x3[1-4]|\(0x31 \+ \$selected\))/);
+});
+
+test('status-card relies on the named row selection instead of a retired routing number', () => {
+  const driver = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-status-card.ps1'), 'utf8');
+  assert.match(driver, /Invoke-JourneyCommand 'Tab order: auto'/);
+  assert.doesNotMatch(driver, /target=6218/);
+});
+
 test('catalog entries keep the row name separate from its search query', () => {
   assert.equal(catalog['archive chat'].query, 'archive chat');
   assert.equal(catalog['ui size: reset'].query, 'ui');
