@@ -86,7 +86,7 @@ function stepEvidence(step, before, after, inbox, groupId) {
     assert.equal(current.group_id || 0, 0);
     assert.equal(after.workspace_count, before.workspace_count + 1);
   } else if (name === 'workspace-existing') {
-    assert.equal(current.workspace, 0);
+    assert.equal(current.workspace || 0, 0);
     assert.equal(after.active_workspace, 0);
   } else assert.fail(`Unknown evidence step ${name}`);
 }
@@ -174,6 +174,94 @@ else if (process.argv[2] === '--evidence') {
       if (((Get-ActionPoint 202) -join ',') -ne '150,96') { throw 'Pinned target reused its old expanded rectangle' }
     `], { encoding: 'utf8' });
     if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the driver geometry helper');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('a refreshed unchanged palette row can confirm once more without replaying accepted or changed actions', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const helper = text.slice(text.indexOf('function Select-ActionRow('), text.indexOf('function Select-ActionTab('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $Evidence = ''
+      function Read-SharedText { return $script:log }
+      function Save-Json { }
+      function Type-Text { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
+      function Wait-Until($Condition, $Label) { for ($n = 0; $n -lt 5; $n++) { if (& $Condition) { return } }; throw $Label }
+      function Press($Keys, $Label) {
+        if ($Keys[0] -ne 13) { return }
+        $script:enters++
+        if ($script:scenario -eq 'accepted' -or ($script:scenario -eq 'refreshed' -and $script:enters -eq 2)) { $script:log += "[palette] confirm target=6301\n" }
+        elseif ($script:scenario -eq 'refreshed' -or $script:scenario -eq 'keeps-refreshing') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
+        elseif ($script:scenario -eq 'changed') { $script:log += "[palette] rows chars=13 count=1 ids=6302\n[palette] ready chars=13 count=1 target=6302\n" }
+        elseif ($script:scenario -eq 'selection-changed') { $script:log += "[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6302\n" }
+        elseif ($script:scenario -eq 'query-changed') { $script:log += "[palette] rows chars=0 count=1 ids=6301\n[palette] ready chars=0 count=1 target=6301\n" }
+        elseif ($script:scenario -eq 'reordered') { $script:log += "[palette] rows chars=13 count=2 ids=6302 6301\n[palette] ready chars=13 count=2 target=6301\n" }
+        elseif ($script:scenario -eq 'other-confirmed') { $script:log += "[palette] confirm target=6302\n[palette] rows chars=13 count=1 ids=6301\n[palette] ready chars=13 count=1 target=6301\n" }
+      }
+      ${helper}
+      foreach ($scenario in @('refreshed', 'accepted', 'silent', 'changed', 'selection-changed', 'query-changed', 'reordered', 'other-confirmed', 'keeps-refreshing')) {
+        $script:scenario = $scenario; $script:log = ''; $script:enters = 0
+        $script:tabLog = ''; $script:tabPaletteOffset = 0; $script:tabInputs = @()
+        $script:tabTargets = [pscustomobject]@{ SEARCH_GROUPMOVE_MENU_OFFSET = 6301 }
+        $passed = $false
+        try { Select-ActionRow 'SEARCH_GROUPMOVE_MENU_OFFSET' 'move to group'; $passed = $true } catch { }
+        $expected = $scenario -in @('refreshed', 'accepted')
+        if ($passed -ne $expected) { throw "$scenario receiving-confirm result was $passed" }
+        $count = if ($scenario -in @('refreshed', 'keeps-refreshing')) { 2 } else { 1 }
+        if ($script:enters -ne $count) { throw "$scenario sent $script:enters keypresses, expected $count" }
+      }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute native confirmation handling');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('returning to home accepts the app-written omitted workspace field', t => {
+    const before = { active_tab: 1, active_workspace: 2, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Target', workspace: 2 }] };
+    const after = structuredClone(before); after.active_workspace = 0; delete after.tabs[1].workspace;
+    stepEvidence({ name: 'workspace-existing', route: 'context', id: 202 }, before, after, {}, undefined);
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const helpers = text.slice(text.indexOf('function Get-ActionTab('), text.indexOf('function Get-ActionPoint('));
+    const wait = text.split('\n').find(line => line.includes("'active target returned to the existing home workspace'"));
+    assert.ok(wait);
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:targetId = 202
+      $script:state = '${JSON.stringify(after)}' | ConvertFrom-Json
+      function Read-Session { return $script:state }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      ${helpers}
+      ${wait}
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the driver workspace check');
+    assert.equal(run.status, 0, run.stderr);
+  });
+  test('the new workspace peer receives a stable native name before tab moves', t => {
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
+    const creation = text.slice(text.indexOf("Press @(0x11, 0x4E)"), text.indexOf("Press @(0x12, 0x32)"));
+    assert.ok(creation);
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'; Set-StrictMode -Version Latest
+      $script:state = '{"workspace_count":2,"active_tab":0,"tabs":[{"chat_id":303,"name":"CMD 4"}]}' | ConvertFrom-Json
+      $script:renameOpen = $false
+      function Read-Session { return $script:state }
+      function Get-ActionTab($Id) { if ($Id -ne 303) { throw 'Wrong peer identity' }; return $script:state.tabs[0] }
+      function Press($Keys, $Label) { if ($Keys[0] -eq 0x71) { $script:renameOpen = $true } }
+      function Open-ActionPalette { }
+      function Select-ActionRow { }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      function Rename-ActionTab($Name) {
+        if (-not $script:renameOpen) { throw 'Native rename was not opened' }
+        $script:state.tabs[0].name = $Name
+        $script:state.tabs[0] | Add-Member manual $true
+      }
+      ${creation}
+      if (-not $script:state.tabs[0].PSObject.Properties['manual'] -or $script:state.tabs[0].name -ne 'Batch workspace peer') { throw 'Workspace peer retains a changing automatic title' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute workspace peer creation');
     assert.equal(run.status, 0, run.stderr);
   });
   test('window evidence binds the app root while allowing its embedded native console', () => {

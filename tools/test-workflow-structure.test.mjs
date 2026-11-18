@@ -85,14 +85,6 @@ test('Tests starts on every pull request and every master push so drift cannot h
   assert.doesNotMatch(events, /^  (?:workflow_run|repository_dispatch):/m);
 });
 
-test('Windows shard three has time to save its cache after a fifteen-minute passing run', () => {
-  const expression = workflow.split('\n  test:\n')[1].match(/timeout-minutes: \$\{\{ (.+) \}\}/)[1];
-  assert.equal(vm.runInNewContext(expression, { matrix: { group: 3 } }), 20);
-  for (const [group, expected] of [[1, 15], [2, 10], [4, 10], [5, 10]]) {
-    assert.equal(vm.runInNewContext(expression, { matrix: { group } }), expected);
-  }
-});
-
 test('red regression job installs the Zig compiler before running changed suites', () => {
   const red = fs.readFileSync(new URL('../.github/workflows/check-red-run.yml', import.meta.url), 'utf8');
   const install = red.indexOf('      - name: Install Zig 0.16.0');

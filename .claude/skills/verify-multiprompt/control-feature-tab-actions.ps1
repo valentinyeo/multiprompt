@@ -58,7 +58,23 @@ function Select-ActionRow([string]$Symbol, [string]$Query = '', [int]$Choice = 0
     for ($i = 0; $i -lt [Array]::IndexOf($ids, [string]$target); $i++) { Press @(0x28) 'Down: requested action row' }
     $nextOffset = (Read-SharedText $script:tabLog).Length
     Press @(0x0D) "Enter: $Symbol choice $Choice"
-    Wait-Until { (Read-SharedText $script:tabLog).Substring($offset) -match ('\[palette\] confirm target=' + $target + '(?:\s|$)') } 'production palette confirms the selected routing ID'
+    $confirmation = @{ retried = $false }
+    Wait-Until {
+        $log = Read-SharedText $script:tabLog
+        $trace = $log.Substring($offset)
+        if ($trace -match ('\[palette\] confirm target=' + $target + '(?:\s|$)')) { return $true }
+        $refresh = $log.Substring($nextOffset)
+        $newRows = [regex]::Matches($refresh, '\[palette\] rows chars=(\d+) count=\d+ ids=([^\r\n]+)')
+        $ready = [regex]::Matches($refresh, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
+        # A refresh can invalidate queued Enter. Reconfirm only an unchanged row, never an accepted action.
+        if (-not $confirmation.retried -and $trace -notmatch '\[palette\] confirm target=' -and $newRows.Count -gt 0 -and $ready.Count -gt 0 -and
+            [int]$newRows[-1].Groups[1].Value -eq $Query.Length -and $newRows[-1].Groups[2].Value.Trim() -ceq ($ids -join ' ') -and
+            [int]$ready[-1].Groups[1].Value -eq $Query.Length -and [int]$ready[-1].Groups[2].Value -eq $target) {
+            $confirmation.retried = $true
+            Press @(0x0D) "Enter: reconfirm refreshed $Symbol choice $Choice"
+        }
+        return $false
+    } 'production palette confirms the selected routing ID'
     $script:tabPaletteOffset = $nextOffset
     $script:tabInputs += @{ symbol=$Symbol; choice=$Choice; target=$target; query=$Query; trace=(Read-SharedText $script:tabLog).Substring($offset) }
     Save-Json @($script:tabInputs) 'tab-inputs.json'
@@ -252,6 +268,10 @@ Wait-Until { (Read-Session).workspace_count -ge 2 } 'two workspaces saved'
 Open-ActionPalette 'global' 0
 Select-ActionRow 'SEARCH_TABCTX_COPY_ID' 'copy chat id'
 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].chat_id -gt 0 } 'new workspace CMD has its own persistent identity'
+$workspacePeerId = [long](Read-Session).tabs[(Read-Session).active_tab].chat_id
+Press @(0x71) 'F2: stabilize the destination-workspace peer name'
+Rename-ActionTab 'Batch workspace peer'
+Wait-Until { (Get-ActionTab $workspacePeerId).name -ceq 'Batch workspace peer' } 'workspace peer has a saved manual name'
 Press @(0x12, 0x32) 'Alt+2: return to home workspace'
 Select-ActionTab $script:controlId
 Start-ActionStep 'workspace-back' $script:targetId 'context'
@@ -273,7 +293,7 @@ Start-ActionStep 'workspace-existing' $script:targetId 'context'
 Open-ActionPalette 'context' $script:targetId
 Select-ActionRow 'SEARCH_TABCTX_WSMOVE' 'move to workspace'
 Select-ActionRow 'SEARCH_WSMOVE_OFFSET' '' 0
-Wait-Until { (Get-ActionTab $script:targetId).workspace -eq 0 -and (Read-Session).active_workspace -eq 0 } 'active target returned to the existing home workspace'
+Wait-Until { (Get-ActionValue (Get-ActionTab $script:targetId) 'workspace') -eq 0 -and (Read-Session).active_workspace -eq 0 } 'active target returned to the existing home workspace'
 Complete-ActionStep $false
 Select-ActionTab $script:controlId
 Invoke-ActionMarker 'control-after-moves'
