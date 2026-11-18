@@ -22,6 +22,16 @@ test('red-run admission checks every PR without a hand-picked test or source rev
   assert.match(tests, /require_jobs "\$WINDOWS"[^\n]*"\$RED_RUN"/);
 });
 
+test('red-run reserves a bounded hosted budget for video dependencies and mandatory admission', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/check-red-run.yml'), 'utf8');
+  const job = workflow.split('\n  check-red-run:\n')[1];
+  assert.match(job, /timeout-minutes: 30\n/);
+  assert.match(job, /sudo apt-get update -qq && sudo apt-get install -y ffmpeg/);
+  assert.match(job, /run: node --test tools\/check-red-run\.test\.mjs/);
+  assert.match(job, /run: node tools\/check-red-run\.mjs "\$BASE" "\$HEAD"/);
+  assert.doesNotMatch(job, /continue-on-error:/);
+});
+
 test('red-run uses the preceding revision for manual master runs without changing PR or branch baselines', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const caller = workflow.match(/^  check-red-run:\n((?:(?!^  [\w-]+:)[\s\S])*)/m)?.[1];
