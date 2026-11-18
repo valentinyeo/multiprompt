@@ -41,27 +41,20 @@ mp-send --to "@Multi Bot Opus Lead{live-308b1fc}" "mention form from the @ pill"
 
 The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
 
-## Helper chats
+## Start a chat or helper
 
-A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The desktop also publishes its own zsb wrapper there as `mp-zsb`, and `mp-helper` uses that copy first, then `zsb` on the PATH, then `~/.local/bin/zsb`. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group. A `reply_timeout` from `session-open` is checked against `workspace-list` for the helper's tab and counts as success when the tab is there. `mp-zsb` is kept identical to `tools/vps-multiprompt-browser.sh`.
+Start independent chats with the [shared session command](spawn-multibot-session.md). No account key is needed in your session.
 
 ```sh
-mp-helper start --name "Research A" --model sonnet --effort high --task "Find why the build fails"
-mp-helper start --name "Research B" --model haiku --folder ~/projects/other --task - < brief.md
-mp-helper list
-mp-helper read "Research A" --wait
-mp-helper send "Research A" "Also check the release log"
-mp-helper close "Research A"
+mp session new --name "Research A" --folder "$PROJECT_FOLDER" --task - < brief.md
+mp session new --name "Research B" --folder "$PROJECT_FOLDER" --helper
+mp session star "Research A"
+mp session list
 ```
 
-- `start` runs from inside a chat. That chat is the parent. The helper tab opens right below the parent's tab, in the same workspace and group.
-- `--model` is opus, sonnet, haiku or fable. `--effort` is low, medium or high. Both default to the server's Claude defaults. `--folder` defaults to the current folder.
-- The same name under the same parent is the same helper. A repeat start reuses it and the same first task is not sent twice.
-- The helper runs with bypassPermissions, like other server-started chats. Use trusted folders only.
-- `read` prints the helper's reply to its latest prompt. `--wait` waits until its turn ends (default 600 seconds). `--json` prints name, state and reply.
-- `send` puts a message into the helper, starting with `From <parent name>:`.
-- `list` and `close` see only the calling chat's helpers. `close` stops the helper and closes its tab. The desktop refuses to close the tab you are looking at; the helper still stops.
-- When the parent tab is not open on a desktop, the helper still runs and `start` reports `"visible":false`.
+`--helper` places the new chat below the calling tab. Without it, the chat is top-level and does not depend on a parent tab. Successful creation requires account-layout readback.
+
+Use `mp-send read` and `mp-send --to` to read and message chats. `mp-helper list`, `read`, `send`, and `close` still manage older parent-scoped helpers. `mp-helper start` is not the default start path.
 
 ## Where names come from
 

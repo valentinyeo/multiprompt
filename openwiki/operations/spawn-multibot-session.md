@@ -1,79 +1,48 @@
-# Start a named session from a server
+# Start a Multibot session
 
-Use one command for visible live chats and background runners. Run it on the server that owns the project, not through terminal typing in another session.
-
-## Prerequisites
-
-- Node.js 22, Python 3, tmux, and `flock` on the Unix server.
-- The Multibot reader already installed for the server user.
-- An approved account service key in `MULTIPROMPT_KEY`. A workspace key is limited to its own workspace. Keep keys out of arguments, logs, transcripts, and agent instructions.
-- `MULTIPROMPT_HOST` identifies this server's account slot, 0 through 2. `--host` overrides it. Never publish a local session under another server's slot.
-- Visible chats need signed-in, online desktop and phone clients. Headless chats need account authorization, but no running client.
-- Group placement needs the service's `groups` capability. Older services are refused before setup when a group is requested.
-
-## Visible chat
-
-Inspect workspaces from the Multiprompt checkout:
+Use the shared server command. It reads the approved account key once through `yeo-key`, in its own process. Callers do not need a key.
 
 ```sh
-node tools/mp-layout.mjs list --json
+mp session new --name "Research follow-up" --folder "$PROJECT_FOLDER"
+mp session new --name "Release runner" --folder "$PROJECT_FOLDER" --workspace "Work" --group "Runners" --task - < brief.md
+mp session star "Release runner"
+mp session unstar "Release runner"
+mp session move "Release runner" --workspace "Research" --group "Follow-ups"
+mp session list
 ```
 
-Create a blank chat:
+New chats are visible top-level chats in the first account workspace. Omit `--task` to leave the chat idle. Use `--helper` only to place a helper immediately after the calling `MULTIPROMPT_TAB`. A helper inherits that tab's workspace and group.
+
+Names match exactly after NFC normalization, outer-space trimming, and case folding. Repeating a name reuses its live host and starts it if stopped. Existing placement wins; use `move` to change it. A different folder or an explicit conflicting provider is refused. Each task text has a durable ID per session. Repeating that text cannot send it twice. Different text gets a different ID.
+
+`star`, `unstar`, and `move` accept a display name or a session ID. An ambiguous display name requires `--host N` or the session ID. `move` without `--group` places the session at the top level of its destination. The destination workspace must exist.
+
+`new` also accepts `--host N` and `--provider claude|hax`. `MULTIPROMPT_HOST` selects the current server's account slot, defaulting to 0. Do not name another machine's slot when starting a local host. The installed reader must exist at `~/.multiprompt-runtime/reader.py`; `MULTIPROMPT_READER` can select another installed copy. Claude hosts use `bypassPermissions`. Use only trusted project folders.
+
+Every mutation reads the account layout back before reporting `visible:true`. Missing publication, refused authorization, unsupported Starred, or an unreachable service exits nonzero. Account visibility proves publication, not pixels on an offline or signed-out device. Confirm the sidebar and Inbox on signed-in desktop and phone before claiming both devices passed.
+
+## Install after merge
+
+Multi Bot installs the merged command for the server user. From the canonical checkout, after it contains this change:
 
 ```sh
-node tools/mp-layout.mjs spawn \
-  --name "Research follow-up" \
-  --folder "$PROJECT_FOLDER" \
-  --workspace "Research" \
-  --group "Follow-ups" \
-  --mode visible
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$PWD/tools/mp-layout.mjs" "$HOME/.local/bin/mp"
+mp session --help
+mp session list
 ```
 
-`visible` is the default. Omit `--group` when none was requested. The desktop creates a missing group or reuses its matching name. Device-local numeric group IDs never cross the account protocol.
+Keep `~/.local/bin` on every session's PATH. The linked target must stay in the canonical checkout, not a disposable worktree. `yeo-key` and the installed reader must already be available to the server user. No key is copied into an environment file, command argument, instruction, or log. The key is not inherited by the reader or host process.
 
-Add `--task "$FIRST_TASK"` only for an assigned first task. Otherwise omit it; the command sends no greeting or test message. It enables the existing Claude live host's `bypassPermissions` mode, like desktop creation. Use trusted project folders only.
+The approved 1Password item remains unchanged. Suggested name for a later owner-approved rename: **Multibot Session Admin Key**. Updating that name requires updating the command's lookup too.
 
-The folder must exist and satisfy the reader's folder grammar. Workspace names match exactly. Group names use NFC normalization and outer-space trimming, remain case-sensitive, and allow at most 64 UTF-16 units. Display names are not truncated. `MULTIPROMPT_READER` can select the installed reader.
+The canonical [spawn skill](../../.claude/skills/spawn-multibot-session/SKILL.md) contains one instruction. Link its directory into each owner's Claude, Codex, and hax skill directories. Refresh discovery in running sessions.
 
-## Headless chat
+## Older automation
 
-Use the same inputs with `--mode headless`. This starts the native live host without creating a tmux parking pane or publishing an account tab. It cannot appear through ordinary tmux discovery. The existing private host configuration retains its name, workspace, folder, and group; no separate session registry is introduced.
+`mp-helper` remains available to inspect, message, and close existing parent-scoped helpers. Start new sessions with `mp session new`; use its explicit `--helper` flag for caller-relative placement. The new command does not use the helper bridge's `visible:false` success path.
 
-A lead starts an independent runner through this command too:
-
-```sh
-node tools/mp-layout.mjs spawn \
-  --name "$RUNNER_NAME" \
-  --folder "$PROJECT_FOLDER" \
-  --workspace "$WORKSPACE" \
-  --group "$RUNNER_GROUP" \
-  --mode headless \
-  --task "$RUNNER_TASK"
-```
-
-This uses the Claude live host, not an arbitrary executable or provider. Subagents inside an existing session are out of scope. This command does not replace their harness-native controls.
-
-To make a headless session visible, repeat its inputs with `--mode visible`. Omit the task or repeat its exact original text. Promotion creates the parking pane, binds its existing SID, and publishes one grouped account tab. The existing host and message history remain intact. Visible-to-headless requests are refused rather than silently hiding an existing chat.
-
-## Shell tab
-
-One command opens either kind of runner. `--kind chat` runs the live-host command above. `--kind shell` publishes a tmux tab in a named workspace and group:
-
-```sh
-node tools/mp-layout.mjs open \
-  --kind shell \
-  --tmux "$TMUX_SESSION" \
-  --name "$RUNNER_NAME" \
-  --workspace "$WORKSPACE" \
-  --group "$RUNNER_GROUP" \
-  --host "$MULTIPROMPT_HOST" \
-  --star
-```
-
-`--star` marks the tab as a favorite. The same session, host, workspace, and group opens one tab; a second run leaves the layout revision unchanged. An existing tab in that workspace moves into `--group` when the group differs. A tab that already belongs to another workspace is refused unless `--move` is passed. Group names use the same NFC trim, 1 to 64 units, and no control characters as a live chat. The command sends `X-Layout-Features: groups` and refuses, before starting tmux, when the service does not advertise groups. `node tools/multibot.mjs open` accepts the same shell and chat arguments.
-
-Run the command once per shell runner. Three runners can share one workspace and one group. Signed-in desktop clients show the group within about ten seconds.
+Existing `mp-layout` and `mb` integrations keep their lower-level forms. Their key handling is unchanged. They are not the default session-start instructions.
 
 ## One roster command
 
@@ -85,26 +54,10 @@ These actions stay on this PC and have no command: this window's look and size; 
 
 `mb roster apply <file>` makes the account match the file. The file names workspaces (with an optional color), groups, and runners. Runner fields are name, kind, title, group, workspace, command, model, face, color, and photo. `--dry-run` prints the plan and changes nothing. A second apply of the same file does not publish again. Close, delete, and stopping a host apply only to workspaces, groups, and sessions this command created. There is no separate session registry. An empty group is remembered on this machine and shows up in Multibot once a session carries that group name.
 
-## Retry without duplicates
+## Compatibility and verification
 
-Keep the same name, folder, workspace, group, and host. Names use NFC normalization, outer-space trimming, and case-insensitive identity on one host. A deterministic UUIDv8 identifies the chat; its hex digits form the eventual parking-session name. Conflicting placement and terminal ownership are refused.
+The command uses the existing account layout, `favorite`, and `group` fields. No new route, schema, desktop command, or phone protocol is needed. Older clients preserve metadata they cannot display. Phone group presentation still depends on the installed Android version.
 
-The first task has one durable message ID across retries and promotion. Repeating its text cannot create another submission. Changing that text is refused; send later tasks through the existing chat instead.
+`service/test/mp-session.test.js` exercises every verb against the production account Worker and D1 in Miniflare, in a disposable account and workspaces. The installed-command case uses the production reader's config and message store, a synthetic key helper, and a host-start stand-in. HTTP goes to the disposable Worker. Cleanup disposes the database and temporary host files. Tests also check retries, stopped-host restart requests, layout readback failure, and secret-safe failures. They do not prove paid-agent operation or device rendering.
 
-Setup uses an operating-system file lock and a private pending host configuration. A crash releases the lock; partial setup can be retried. Visible publication uses the existing account revision comparison and preserves unrelated tabs and unsupported metadata.
-
-The JSON result includes `mode`, `group`, and the stable `sid`. Headless success means host setup, not task completion. Visible success means account publication, not screen rendering.
-
-## Device compatibility and proof
-
-Check a visible chat on both devices within ten seconds. A healthy desktop normally polls every five seconds; busy, signed-out, or offline clients cannot satisfy this check. Headless sessions intentionally have no screen-visibility gate until promoted.
-
-Desktop restores live-chat identity, Chat View, and the named group during import. Current phone clients already recognize visible live-host sessions and their host marker. They lack group presentation. The additive `group` tab field is capability-gated: older clients do not receive it, and their uploads preserve stored group metadata. An absent field means unknown; an empty string explicitly clears grouping. Older desktop clients need an update for identity import and grouping. Older services remain usable without grouping; desktop omits group writes when unsupported.
-
-Phone group presentation requires an Android update. Metadata preservation alone does not prove cross-client grouping or real phone visibility.
-
-The manual route remains **Ctrl+T**, **Ctrl+K → New Claude session**, and the existing shortcut-help rows. No new Windows key binding is added for server automation.
-
-## Install the agent skill
-
-The canonical skill is [spawn-multibot-session](../../.claude/skills/spawn-multibot-session/SKILL.md). The lead links that directory for each workspace owner into Claude, Codex, and hax skill directories, then refreshes discovery in running sessions. Repository presence alone does not prove fleet installation.
+The manual route remains **Ctrl+T**, **Ctrl+K → New Claude session**, and the existing shortcut-help rows. No Windows binding is added for server automation.

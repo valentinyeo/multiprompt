@@ -2,8 +2,9 @@
 import { spawnSync, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as wait } from 'node:timers/promises';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const USAGE = `usage: mp-layout <command> [options]
@@ -25,7 +26,56 @@ environment:
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
+const SESSION_USAGE = `usage: mp session <command> [options]
+
+  new --name X --folder Y [--workspace W] [--group G] [--task -] [--helper]
+  star X [--host N]
+  unstar X [--host N]
+  move X --workspace W [--group G] [--host N]
+  list [--json]
+
+New chats are visible, top-level sessions in the first account workspace.
+An existing name is reused, including after moving it. --helper places a
+chat below the calling MULTIPROMPT_TAB, inheriting its workspace and group.
+--task - reads stdin. Identical task retries are sent only once.
+New also accepts --host N and --provider claude|hax (default claude).
+The server reads its approved account key with yeo-key; no key is passed in.
+`;
+
 class Failure extends Error {}
+
+function loadSessionKey(env) {
+  const result = spawnSync('yeo-key', ['Multiprompt Layout Admin Key Mini Boss CEO', 'MULTIPROMPT_KEY'], {
+    env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90000, maxBuffer: 4096
+  });
+  if (result.status !== 0 || !/^mpk_a_[A-Za-z0-9_-]{43}$/.test(result.stdout.trim())) throw new Failure('cannot read the approved account key with yeo-key');
+  return result.stdout.trim();
+}
+
+function sessionFlags(argv, verb) {
+  const allowed = {
+    new: ['name', 'folder', 'workspace', 'group', 'task', 'helper', 'host', 'provider'],
+    star: ['host'], unstar: ['host'], move: ['workspace', 'group', 'host'], list: ['json']
+  }[verb];
+  if (!allowed) throw new Failure('unknown session command; use mp session --help');
+  const seen = new Set();
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith('--')) continue;
+    const flag = argv[i].slice(2);
+    if (!allowed.includes(flag) || seen.has(flag)) throw new Failure('invalid or repeated session option');
+    seen.add(flag);
+    if (!['helper', 'json'].includes(flag)) {
+      if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Failure(`--${flag} needs a value`);
+      i++;
+    }
+  }
+  const flags = parse(argv, verb);
+  if (verb === 'new' && (flags._.length || !flags.name || !flags.folder)) throw new Failure('new needs --name and --folder');
+  if (verb === 'list' && flags._.length) throw new Failure('list takes no session name');
+  if (['star', 'unstar', 'move'].includes(verb) && flags._.length !== 1) throw new Failure('give one session name');
+  if (verb === 'move' && !flags.workspace) throw new Failure('move needs --workspace');
+  return flags;
+}
 
 const REFUSALS = {
   scope_denied: 'refused: this key may change only its own workspace',
@@ -48,7 +98,7 @@ function parse(argv, command) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || (command === 'spawn' && argv[i + 1].startsWith('--'))) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['json', 'create', 'no-tmux', 'star', 'move'].includes(name)) flags[name] = true;
+    } else if (['json', 'create', 'no-tmux', 'star', 'move', 'helper'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -70,33 +120,34 @@ function normalizedGroup(value) {
 }
 
 async function call(ctx, method, body) {
-  const features = ctx.command === 'spawn' ? 'groups' : ctx.command === 'open' ? (ctx.features || 'groups') : '';
+  const features = ctx.session ? 'groups,favorite,muted' : ctx.command === 'spawn' ? 'groups' : ctx.command === 'open' ? (ctx.features || 'groups') : '';
   let response;
   try {
     response = await ctx.fetch(ctx.url + '/v1/layout', {
       method,
       headers: { Authorization: 'Bearer ' + ctx.key, 'Content-Type': 'application/json', ...(features ? { 'X-Layout-Features': features } : {}) },
       body: body ? JSON.stringify(body) : undefined,
-      ...(ctx.command === 'spawn' ? { signal: AbortSignal.timeout(8000) } : {})
+      ...(ctx.command === 'spawn' || ctx.session ? { signal: AbortSignal.timeout(8000) } : {})
     });
   } catch (e) {
     throw new Failure('cannot reach the account service: ' + (e.cause?.code || e.message));
   }
   let data = null;
   try { data = await response.json(); } catch { data = null; }
-  return { status: response.status, data, groupsSupported: (response.headers?.get('X-Layout-Features') || '').split(',').some(feature => feature.trim() === 'groups') };
+  const featuresSupported = new Set((response.headers?.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()));
+  return { status: response.status, data, groupsSupported: featuresSupported.has('groups'), featuresSupported };
 }
 
 function refusal(result) {
   const code = result.data?.error;
-  return new Failure(REFUSALS[code] || `service answered ${result.status}${code ? ' ' + code : ''}`);
+  return new Failure(REFUSALS[code] || `service answered ${result.status}`);
 }
 
 async function edit(ctx, mutate) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const read = await call(ctx, 'GET');
     if (read.status !== 200) throw refusal(read);
-    const next = mutate(structuredClone(read.data.layout));
+    const next = mutate(structuredClone(read.data.layout), read);
     if (!next) return { changed: false, revision: read.data.revision };
     const write = await call(ctx, 'PUT', { base_revision: read.data.revision, layout: next });
     if (write.status === 200) return { changed: true, revision: write.data.revision };
@@ -109,13 +160,60 @@ async function list(ctx, flags) {
   const read = await call(ctx, 'GET');
   if (read.status !== 200) throw refusal(read);
   const { revision, layout } = read.data;
-  if (flags.json) { ctx.out(JSON.stringify({ revision, workspaces: layout.workspaces.map(w => ({ name: w.name, sessions: layout.tabs.filter(t => t.workspace === w.name).map(t => ({ session: t.tmux_session, name: t.name, host: t.tmux_host })) })) })); return; }
+  if (flags.json) { ctx.out(JSON.stringify({ revision, workspaces: layout.workspaces.map(w => ({ name: w.name, sessions: layout.tabs.filter(t => t.workspace === w.name).map(t => ({ session: t.tmux_session, name: t.name, host: t.tmux_host, ...(ctx.session ? { group: t.group || null, starred: t.favorite === true } : {}) })) })) })); return; }
   ctx.out(`revision ${revision}`);
   for (const w of layout.workspaces) {
     const tabs = layout.tabs.filter(t => t.workspace === w.name);
     ctx.out(`${w.name} (${tabs.length})`);
-    for (const t of tabs) ctx.out(`  ${t.tmux_session}  host ${t.tmux_host}  ${t.name}`);
+    for (const t of tabs) ctx.out(`  ${t.tmux_session}  host ${t.tmux_host}  ${t.name}${ctx.session && t.group ? '  group ' + t.group : ''}${ctx.session && t.favorite ? '  starred' : ''}`);
   }
+}
+
+function namedSession(layout, name, host) {
+  const wanted = name.normalize('NFC').trim().toLowerCase();
+  const matches = layout.tabs.filter(tab => (host === undefined || tab.tmux_host === host) && (tab.tmux_session.toLowerCase() === wanted || tab.name.normalize('NFC').trim().toLowerCase() === wanted));
+  if (matches.length > 1) throw new Failure('session name is ambiguous; use --host or the session id');
+  return matches[0];
+}
+
+async function visibleSession(ctx, host, session, matches = () => true) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (attempt) await ctx.wait(250);
+    const read = await call(ctx, 'GET');
+    if (read.status !== 200) throw refusal(read);
+    const tab = read.data.layout.tabs.find(tab => tab.tmux_host === host && tab.tmux_session === session);
+    if (tab && read.data.layout.workspaces.some(workspace => workspace.name === tab.workspace) && matches(tab)) return { tab, revision: read.data.revision };
+  }
+  throw new Failure('session is not visible in the requested account layout; retry the same command');
+}
+
+async function changeSession(ctx, flags) {
+  const host = flags.host === undefined ? undefined : hostSlot(flags.host);
+  const group = normalizedGroup(flags.group);
+  let target;
+  const result = await edit(ctx, (layout, read) => {
+    if (ctx.command !== 'move' && !read.featuresSupported.has('favorite')) throw new Failure('account service does not support Starred');
+    if (group !== null && !read.groupsSupported) throw new Failure('account service does not support groups');
+    const tab = namedSession(layout, flags._[0], host);
+    if (!tab) throw new Failure('session not found; use mp session list');
+    target = { host: tab.tmux_host, session: tab.tmux_session };
+    if (ctx.command !== 'move') {
+      const wanted = ctx.command === 'star';
+      if (tab.favorite === wanted) return null;
+      tab.favorite = wanted;
+    } else {
+      if (!layout.workspaces.some(workspace => workspace.name === flags.workspace)) throw new Failure('workspace not found; use mp session list');
+      if (tab.workspace === flags.workspace && (tab.group || null) === group) return null;
+      tab.workspace = flags.workspace;
+      if (group === null) delete tab.group;
+      else tab.group = group;
+    }
+    return layout;
+  });
+  const verified = await visibleSession(ctx, target.host, target.session, tab => ctx.command === 'move'
+    ? tab.workspace === flags.workspace && (tab.group || null) === group
+    : (tab.favorite === true) === (ctx.command === 'star'));
+  ctx.out(JSON.stringify({ ok: true, visible: true, session: target.session, workspace: verified.tab.workspace, group: verified.tab.group || null, starred: verified.tab.favorite === true, changed: result.changed, revision: verified.revision }));
 }
 
 async function createSection(ctx, flags) {
@@ -223,15 +321,15 @@ function spawnLock(path, env) {
 }
 
 async function spawnSession(ctx, flags) {
-  if (flags._.length || !flags.name || !flags.folder || !flags.workspace) throw new Failure('spawn needs name, folder and workspace');
+  if (flags._.length || !flags.name || !flags.folder || (!ctx.session && !flags.workspace)) throw new Failure('spawn needs name, folder and workspace');
   const name = flags.name.normalize('NFC').trim();
-  const group = normalizedGroup(flags.group);
+  let group = normalizedGroup(flags.group);
   const mode = flags.mode ?? 'visible';
   if (!['visible', 'headless'].includes(mode)) throw new Failure('mode must be visible or headless');
-  const provider = flags.provider ?? 'claude';
+  let provider = flags.provider ?? 'claude';
   if (!['claude', 'hax'].includes(provider)) throw new Failure('provider must be claude or hax');
   if (!name || name.length > 64 || /[\p{Cc}\p{Cs}]/u.test(name)) throw new Failure('invalid session name');
-  if (!flags.workspace.trim() || Buffer.byteLength(flags.workspace, 'utf8') > 31 || /[\p{Cc}\p{Cs}]/u.test(flags.workspace)) throw new Failure('invalid workspace');
+  if (flags.workspace !== undefined && (!flags.workspace.trim() || Buffer.byteLength(flags.workspace, 'utf8') > 31 || /[\p{Cc}\p{Cs}]/u.test(flags.workspace))) throw new Failure('invalid workspace');
   if (flags.task !== undefined && (!flags.task.trim() || flags.task.includes('\0') || Buffer.byteLength(flags.task, 'utf8') > 65536)) throw new Failure('invalid task');
   const hostText = flags.host ?? ctx.env.MULTIPROMPT_HOST ?? '0';
   if (!/^[0-2]$/.test(hostText)) throw new Failure('host must be 0, 1 or 2');
@@ -240,26 +338,63 @@ async function spawnSession(ctx, flags) {
   try { folder = ctx.resolveFolder(flags.folder); }
   catch { throw new Failure('invalid folder'); }
   if (!/^[A-Za-z0-9_./~+-]{1,220}$/.test(folder)) throw new Failure('invalid folder');
-  const digest = hash(JSON.stringify([host, name.toLowerCase()]));
+  const runtime = (args, input) => {
+    let result;
+    try { result = ctx.runtime(args, input); } catch { throw new Failure('host operation failed'); }
+    if (result.status !== 0) throw new Failure('host operation failed');
+    try { return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch { throw new Failure('invalid host response'); }
+  };
+  const initial = await call(ctx, 'GET');
+  if (initial.status !== 200) throw new Failure(initial.status === 401 || initial.status === 403 ? 'key not authorized' : 'account read failed');
+  let parent;
+  if (flags.helper) {
+    if (!ctx.env.MULTIPROMPT_TAB) throw new Failure('--helper needs a calling MULTIPROMPT_TAB');
+    parent = initial.data.layout.tabs.find(tab => tab.tmux_host === host && tab.tmux_session === ctx.env.MULTIPROMPT_TAB);
+    if (!parent) throw new Failure('calling session is not visible in the account layout');
+    if (flags.workspace && flags.workspace !== parent.workspace) throw new Failure('a helper must use the calling workspace');
+    if (group !== null && group !== (parent.group || null)) throw new Failure('a helper must use the calling group');
+    flags.workspace = parent.workspace;
+    group = parent.group || null;
+  }
+  const existingName = ctx.session ? namedSession(initial.data.layout, name, host) : null;
+  if (ctx.session) {
+    flags.workspace ||= existingName?.workspace || initial.data.layout.workspaces[0]?.name;
+    if (!flags.workspace) throw new Failure('no account workspace exists');
+    if (existingName && flags.group === undefined && !flags.helper) group = existingName.group || null;
+  }
+  if (group !== null && !initial.groupsSupported) throw new Failure('account service does not support groups');
+  const digest = hash(JSON.stringify(parent ? [host, parent.tmux_session, name.toLowerCase()] : [host, name.toLowerCase()]));
   const bytes = Buffer.from(digest.slice(0, 32), 'hex');
   bytes[6] = (bytes[6] & 15) | 128;
   bytes[8] = (bytes[8] & 63) | 128;
   const hex = bytes.toString('hex');
-  const sid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  const session = 'live-' + hex;
-  const token = 'mp-spawn-' + hex;
+  let sid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  let session = 'live-' + hex;
+  if (existingName) {
+    const [listing] = runtime(['host', 'list']);
+    const chats = listing?.chats?.filter(chat => chat.name === existingName.tmux_session) || [];
+    if (chats.length > 1) throw new Failure('existing session has ambiguous host ownership');
+    if (chats.length === 1) {
+      const chat = chats[0];
+      if (flags.provider && flags.provider !== chat.provider) throw new Failure('existing session uses another provider');
+      sid = chat.sid; provider = chat.provider; session = chat.name;
+    } else if (existingName.tmux_session !== session) {
+      if (flags.task !== undefined || ctx.tmux(['has-session', '-t', '=' + existingName.tmux_session]).status !== 0) throw new Failure('existing session has no restartable live host');
+      const verified = await visibleSession(ctx, host, existingName.tmux_session);
+      ctx.out(JSON.stringify({ ok: true, visible: true, session: existingName.tmux_session, host, name: existingName.name, workspace: verified.tab.workspace, group: verified.tab.group || null, changed: false, revision: verified.revision }));
+      return;
+    }
+  }
+  const token = 'mp-spawn-' + (ctx.session && flags.task !== undefined ? hash(sid + ':' + flags.task) : hex);
   const check = layout => {
     if (!layout.workspaces.some(w => w.name === flags.workspace)) throw new Failure('workspace not found or not visible to this key');
     const existing = layout.tabs.find(t => t.tmux_host === host && t.tmux_session?.toLowerCase() === session);
     const sameName = layout.tabs.find(t => t.tmux_host === host && typeof t.name === 'string' && t.name.normalize('NFC').trim().toLowerCase() === name.toLowerCase() && t !== existing);
-    if (sameName || (existing && (existing.kind !== 'tmux' || existing.workspace !== flags.workspace || typeof existing.name !== 'string' || existing.name.normalize('NFC').trim().toLowerCase() !== name.toLowerCase()))) throw new Failure('session collision');
+    if (sameName || (existing && (existing.kind !== 'tmux' || (!ctx.session && existing.workspace !== flags.workspace) || typeof existing.name !== 'string' || existing.name.normalize('NFC').trim().toLowerCase() !== name.toLowerCase()))) throw new Failure('session collision');
     if (existing && mode === 'headless') throw new Failure('session is already visible');
-    if (existing && (existing.group || null) !== group) throw new Failure('group collision');
+    if (!ctx.session && existing && (existing.group || null) !== group) throw new Failure('group collision');
     return existing;
   };
-  const initial = await call(ctx, 'GET');
-  if (initial.status !== 200) throw new Failure(initial.status === 401 || initial.status === 403 ? 'key not authorized' : 'account read failed');
-  if (group !== null && !initial.groupsSupported) throw new Failure('account service does not support groups');
   check(initial.data.layout);
   const home = ctx.env.HOME;
   if (!home) throw new Failure('HOME is required');
@@ -286,7 +421,7 @@ async function spawnSession(ctx, flags) {
     const config = readState('.config.json');
     const owner = readState('.owner.json');
     if (owner?.owner === 'terminal') throw new Failure('session is owned by terminal');
-    if (config && (config.cwd !== folder || config.tmux !== session || config.spawn_workspace !== flags.workspace || config.spawn_name !== name.toLowerCase() || (config.spawn_group ?? null) !== group)) throw new Failure('host configuration collision');
+    if (config && (config.cwd !== folder || config.tmux !== session || (!ctx.session && config.spawn_workspace !== flags.workspace) || (!ctx.session && config.spawn_name !== name.toLowerCase()) || (!ctx.session && (config.spawn_group ?? null) !== group))) throw new Failure('host configuration collision');
     if (mode === 'headless' && config && config.spawn_mode !== 'headless') throw new Failure('session is already visible');
     const current = await call(ctx, 'GET');
     if (current.status !== 200) throw new Failure(current.status === 401 || current.status === 403 ? 'key not authorized' : 'account read failed');
@@ -302,19 +437,18 @@ async function spawnSession(ctx, flags) {
         renameSync(temporary, target);
       } catch { try { unlinkSync(temporary); } catch {} throw new Failure('cannot write host state'); }
     }
-    const runtime = (args, input) => {
-      let result;
-      try { result = ctx.runtime(args, input); } catch { throw new Failure('host operation failed'); }
-      if (result.status !== 0) throw new Failure('host operation failed');
-      try { return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch { throw new Failure('invalid host response'); }
-    };
     if (!config || config.enabled !== true) {
       const [enabled] = runtime(['host', 'enable', provider, sid, '--tmux', session, '--cwd', folder, ...(provider === 'claude' ? ['--permission-mode', 'bypassPermissions'] : [])]);
       if (enabled?.status !== 'enabled') throw new Failure('host enable failed');
     }
     const result = mode === 'headless' ? { changed: false, revision: current.data.revision } : await edit(ctx, layout => {
       if (check(layout)) return null;
-      layout.tabs.push({ kind: 'tmux', name, tmux_session: session, tmux_host: host, workspace: flags.workspace, manual: true, ...(group === null ? {} : { group }) });
+      const tab = { kind: 'tmux', name, tmux_session: session, tmux_host: host, workspace: flags.workspace, manual: true, ...(group === null ? {} : { group }) };
+      if (parent) {
+        const index = layout.tabs.findIndex(tab => tab.tmux_host === host && tab.tmux_session === parent.tmux_session);
+        if (index < 0) throw new Failure('calling session is no longer visible');
+        layout.tabs.splice(index + 1, 0, tab);
+      } else layout.tabs.push(tab);
       return layout;
     });
     const [started] = runtime(['host', 'start', provider, sid]);
@@ -327,7 +461,8 @@ async function spawnSession(ctx, flags) {
       const dispatched = replies.find(r => r.id === 2)?.result;
       if (submitted?.id !== token || submitted.text !== flags.task || !dispatched || submitted.state === 'failed' || dispatched.message?.state === 'failed') throw new Failure('task submission failed');
     }
-    ctx.out(JSON.stringify({ ok: true, sid, session, host, name, workspace: flags.workspace, group, mode, provider, first_task_id: flags.task === undefined ? null : token, revision: result.revision, changed: result.changed }));
+    const verified = ctx.session ? await visibleSession(ctx, host, session) : null;
+    ctx.out(JSON.stringify({ ok: true, sid, session, host, name, workspace: verified?.tab.workspace || flags.workspace, group: verified ? verified.tab.group || null : group, mode, provider, first_task_id: flags.task === undefined ? null : token, revision: verified?.revision ?? result.revision, changed: result.changed, ...(ctx.session ? { visible: true } : {}) }));
   } finally { release(); }
 }
 
@@ -337,35 +472,52 @@ export async function run(argv, overrides = {}) {
   const err = overrides.err || (line => process.stderr.write(line + '\n'));
   let [command, ...rest] = argv;
   if (!command || command === '--help' || command === 'help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
+  const session = command === 'session';
+  if (session) {
+    [command, ...rest] = rest;
+    if (!command || command === '--help' || command === 'help') { out(SESSION_USAGE.trimEnd()); return 0; }
+  }
   try {
-    const key = env.MULTIPROMPT_KEY;
+    const flags = session ? sessionFlags(rest, command) : parse(rest, command);
+    if (session && flags.task === '-') flags.task = (overrides.readTask || (() => readFileSync(0, 'utf8')))();
+    const childEnv = { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' };
+    let key;
+    if (session) {
+      try { key = await (overrides.loadKey || loadSessionKey)(childEnv); }
+      catch { throw new Failure('cannot read the approved account key with yeo-key'); }
+      if (!key) throw new Failure('cannot read the approved account key with yeo-key');
+      if (command === 'new') command = 'spawn';
+    } else key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
-    const flags = parse(rest, command);
     if (command === 'open' && flags.kind === 'chat') {
       command = 'spawn';
       if (flags._.length || flags.tmux || flags.title || flags.star || flags.move || flags['no-tmux']) throw new Failure('invalid spawn option');
     } else if (command === 'open' && flags.kind !== undefined && flags.kind !== 'shell') throw new Failure('kind must be shell or chat');
     const ctx = {
-      key, env, out, command,
-      url: (env.MULTIPROMPT_URL || DEFAULT_URL).replace(/\/+$/, ''),
+      key, env, out, command, session,
+      url: session ? DEFAULT_URL : (env.MULTIPROMPT_URL || DEFAULT_URL).replace(/\/+$/, ''),
       fetch: overrides.fetch || globalThis.fetch,
-      childEnv: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' },
+      childEnv,
+      wait: overrides.wait || wait,
       lock: overrides.lock || spawnLock,
       mockFolder: Boolean(overrides.resolveFolder),
       resolveFolder: overrides.resolveFolder || (value => { const folder = realpathSync(value); if (!statSync(folder).isDirectory()) throw new Error(); return folder; }),
       runtime: overrides.runtime || ((args, input) => spawnSync('python3', [env.MULTIPROMPT_READER || join(env.HOME, '.multiprompt-runtime/reader.py'), ...args], { input, encoding: 'utf8', timeout: 30000, env: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }, maxBuffer: 1048576 })),
       tmux: overrides.tmux || (args => spawnSync('tmux', args, { ...(command === 'spawn' ? { timeout: 5000 } : {}), stdio: command === 'spawn' && args[0] === 'display-message' ? ['ignore', 'pipe', 'ignore'] : 'ignore', encoding: 'utf8', ...(command === 'spawn' ? { env: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' } } : {}) }))
     };
-    const commands = { list, 'create-section': createSection, move, open, spawn: spawnSession };
+    const commands = session ? { list, star: changeSession, unstar: changeSession, move: changeSession, spawn: spawnSession } : { list, 'create-section': createSection, move, open, spawn: spawnSession };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     await commands[command](ctx, flags);
     return 0;
   } catch (e) {
-    if (command === 'spawn') { err(JSON.stringify({ ok: false, error: e instanceof Failure && !e.message.startsWith('cannot reach') && !e.message.startsWith('service answered') ? e.message : 'spawn failed' })); return 1; }
+    if (command === 'spawn' || session) { err(JSON.stringify({ ok: false, error: e instanceof Failure && !e.message.startsWith('cannot reach') && !e.message.startsWith('service answered') ? e.message : session ? 'session command failed' : 'spawn failed' })); return 1; }
     if (!(e instanceof Failure)) throw e;
     err('mp-layout: ' + e.message);
     return 1;
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) process.exitCode = await run(process.argv.slice(2));
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  const argv = process.argv.slice(2);
+  process.exitCode = await run(basename(process.argv[1]) === 'mp' && (!argv.length || ['--help', 'help'].includes(argv[0])) ? ['session', '--help'] : argv);
+}
