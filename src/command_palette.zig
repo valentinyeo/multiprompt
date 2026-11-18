@@ -206,6 +206,9 @@ const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OF
 const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
 const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
 const SEARCH_CHAT_FRESH_START_OFFSET = @import("app_state.zig").SEARCH_CHAT_FRESH_START_OFFSET;
+const SEARCH_CHAT_SWITCH_CLAUDE_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CLAUDE_OFFSET;
+const SEARCH_CHAT_SWITCH_CODEX_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CODEX_OFFSET;
+const SEARCH_CHAT_SWITCH_PI_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_PI_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -520,6 +523,7 @@ const RESTART_HOSTS = 3;
 const RestartChatJob = struct {
     all: bool = false,
     fresh: bool = false,
+    switch_to: u8 = 0,
     count: u8 = 0,
     hosts: [RESTART_HOSTS]u8 = @splat(0),
     ids: [RESTART_HOSTS]u32 = @splat(0),
@@ -738,6 +742,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_RESTART_AI) return "chat view restart the ai agent stopped claude resume";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
     if (target == app_state.SEARCH_TABCTX_FRESH_START) return "Fresh start handover clear context same chat picture address";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) return "Switch AI to Claude keep chat name picture address history";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) return "Switch AI to Codex keep chat name picture address history";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_PI) return "Switch AI to Pi keep chat name picture address history";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -989,6 +996,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
         SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
         SEARCH_CHAT_FRESH_START_OFFSET => "Chat View: Fresh start handover clear context same chat picture address",
+        SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
+        SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
+        SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1432,7 +1442,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2418,6 +2428,15 @@ test "IGSH-1921 a live chat with a session and a chat name can restart" {
     try std.testing.expect(!canRestartChat(1, 36, 0));
 }
 
+fn switchAiVisible(agent: u8, target: u8) bool {
+    return agent >= 1 and agent <= 3 and agent != target;
+}
+
+fn switchAiTab(tab: u32, target: u8) bool {
+    if (!liveChatTab(tab)) return false;
+    return switchAiVisible(app_state.shells[tab].ai_agent, target);
+}
+
 fn finishRestartChatJob(job: *RestartChatJob) void {
     job.finished.store(true, .release);
     std.heap.page_allocator.destroy(job);
@@ -2429,7 +2448,168 @@ fn restartChatNotice(text: []const u8) void {
     if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
 }
 
+fn switchAiName(target: u8) []const u8 {
+    return switch (target) {
+        1 => "claude",
+        2 => "codex",
+        3 => "pi",
+        else => "",
+    };
+}
+
+fn switchAgentId(name: []const u8) ?u8 {
+    if (std.mem.eql(u8, name, "claude")) return 1;
+    if (std.mem.eql(u8, name, "codex")) return 2;
+    if (std.mem.eql(u8, name, "pi")) return 3;
+    return null;
+}
+
+fn switchSidOk(sid: []const u8) bool {
+    if (sid.len == 0 or sid.len > 40) return false;
+    for (sid) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '-' or c == '_')) return false;
+    }
+    return true;
+}
+
+const SwitchEnvelope = struct {
+    status: []const u8 = "",
+    provider: []const u8 = "",
+    sid: []const u8 = "",
+    reason: []const u8 = "",
+    result: struct {
+        status: []const u8 = "",
+        provider: []const u8 = "",
+        sid: []const u8 = "",
+        reason: []const u8 = "",
+    } = .{},
+};
+
+fn switchEnvelopeFields(value: SwitchEnvelope) struct { status: []const u8, provider: []const u8, sid: []const u8, reason: []const u8 } {
+    const nested = value.result.status.len != 0 or value.result.provider.len != 0 or value.result.sid.len != 0 or value.result.reason.len != 0;
+    if (nested) return .{ .status = value.result.status, .provider = value.result.provider, .sid = value.result.sid, .reason = value.result.reason };
+    return .{ .status = value.status, .provider = value.provider, .sid = value.sid, .reason = value.reason };
+}
+
+pub fn adoptShellAgent(agent: *u8, sid: []u8, sid_len: *u32, next_agent: u8, next_sid: []const u8) bool {
+    if (next_agent < 1 or next_agent > 3 or !switchSidOk(next_sid) or next_sid.len > sid.len) return false;
+    agent.* = next_agent;
+    @memset(sid, 0);
+    @memcpy(sid[0..next_sid.len], next_sid);
+    sid_len.* = @intCast(next_sid.len);
+    return true;
+}
+
+pub fn adoptedSwitch(allocator: std.mem.Allocator, body: []const u8, sid_out: []u8) ?struct { agent: u8, sid_len: usize } {
+    const parsed = std.json.parseFromSlice(SwitchEnvelope, allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const fields = switchEnvelopeFields(parsed.value);
+    if (!std.mem.eql(u8, fields.status, "switched")) return null;
+    const agent = switchAgentId(fields.provider) orelse return null;
+    if (!switchSidOk(fields.sid) or fields.sid.len > sid_out.len) return null;
+    @memcpy(sid_out[0..fields.sid.len], fields.sid);
+    return .{ .agent = agent, .sid_len = fields.sid.len };
+}
+
+fn switchAiRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, to: []const u8) ?[]const u8 {
+    if (provider.len == 0 or sid.len == 0 or to.len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ id, host, provider, sid, to }) catch null;
+}
+
+test "IGSH-2280 a switch reply replaces the shell provider and sid" {
+    const old = "11111111-2222-4333-8444-555555555555";
+    const bare = "{\"status\":\"switched\",\"provider\":\"pi\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tmux\":\"same-chat\",\"start\":\"started\"}";
+    var sid_buf: [40]u8 = undefined;
+    const adopted = adoptedSwitch(std.testing.allocator, bare, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 3), adopted.agent);
+    var agent: u8 = 1;
+    var shell_sid: [40]u8 = std.mem.zeroes([40]u8);
+    @memcpy(shell_sid[0..old.len], old);
+    var shell_sid_len: u32 = @intCast(old.len);
+    try std.testing.expect(adoptShellAgent(&agent, &shell_sid, &shell_sid_len, adopted.agent, sid_buf[0..adopted.sid_len]));
+    try std.testing.expect(switchAiVisible(agent, 1));
+    try std.testing.expect(!switchAiVisible(agent, 3));
+    try std.testing.expect(!switchAiVisible(1, 1));
+    var buf: [256]u8 = undefined;
+    const request = switchAiRequest(&buf, 4, 0, switchAiName(agent), shell_sid[0..shell_sid_len], "claude") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"pi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, old) == null);
+    const wrapped = "{\"id\":4,\"message_protocol\":1,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff\"}}";
+    const again = adoptedSwitch(std.testing.allocator, wrapped, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), again.agent);
+    try std.testing.expectEqualStrings("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff", sid_buf[0..again.sid_len]);
+    try std.testing.expect(adoptedSwitch(std.testing.allocator, "{\"status\":\"busy\",\"reason\":\"chat_busy\"}", &sid_buf) == null);
+}
+
+fn switchAiDone(target: u8) []const u8 {
+    return switch (target) {
+        1 => "Chat switched to Claude",
+        2 => "Chat switched to Codex",
+        3 => "Chat switched to Pi",
+        else => "Chat switched",
+    };
+}
+
+const SwitchAiAdopt = struct {
+    shell_id: u32,
+    agent: u8,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    notice: [64]u8 = std.mem.zeroes([64]u8),
+    notice_len: u8 = 0,
+};
+
+fn postSwitchAdopt(shell_id: u32, agent: u8, sid: []const u8) bool {
+    const notice = switchAiDone(agent);
+    if (notice.len > 64 or !switchSidOk(sid)) return false;
+    const result = std.heap.page_allocator.create(SwitchAiAdopt) catch return false;
+    result.* = .{ .shell_id = shell_id, .agent = agent, .sid_len = @intCast(sid.len), .notice_len = @intCast(notice.len) };
+    @memcpy(result.sid[0..sid.len], sid);
+    @memcpy(result.notice[0..notice.len], notice);
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_SWITCH_AI, 0, @bitCast(@intFromPtr(result))) == 0) {
+        std.heap.page_allocator.destroy(result);
+        return false;
+    }
+    return true;
+}
+
+pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
+    if (lp == 0) return;
+    const result: *SwitchAiAdopt = @ptrFromInt(@as(usize, @bitCast(lp)));
+    defer std.heap.page_allocator.destroy(result);
+    const index = findShellById(result.shell_id) orelse {
+        if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+        return;
+    };
+    const shell = &app_state.shells[index];
+    if (adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, result.agent, result.sid[0..result.sid_len])) {
+        shell.hook_capable = true;
+        saveSession();
+        if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
+    }
+    if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+}
+
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
+    if (job.switch_to != 0) {
+        const parsed = std.json.parseFromSlice(SwitchEnvelope, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+            restartChatNotice("Switch AI failed: the server did not answer");
+            return;
+        };
+        defer parsed.deinit();
+        const fields = switchEnvelopeFields(parsed.value);
+        if (std.mem.eql(u8, fields.status, "switched")) {
+            const agent = switchAgentId(fields.provider) orelse {
+                restartChatNotice(switchAiDone(job.switch_to));
+                return;
+            };
+            if (!postSwitchAdopt(job.ids[0], agent, fields.sid)) restartChatNotice(switchAiDone(agent));
+            return;
+        }
+        restartChatNotice(if (std.mem.eql(u8, fields.status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
+        return;
+    }
     if (job.fresh) {
         const Reply = struct { result: struct { status: []const u8 = "", reason: []const u8 = "" } = .{} };
         const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
@@ -2476,33 +2656,40 @@ fn restartChatThread(job: *RestartChatJob) void {
             restartChatReply(job, response.items);
         }
     } else {
-        const request = if (job.fresh)
+        const request = if (job.switch_to != 0)
+            switchAiRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to)) orelse return
+        else if (job.fresh)
             std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
         else
             agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
         if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
-            restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+            restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
             return;
         }
         answered = true;
         restartChatReply(job, response.items);
     }
-    if (!answered) restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+    if (!answered) restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
 }
 
 pub fn startRestartChat(all: bool) bool {
-    return startChatJob(all, false, app_state.active_shell);
+    return startChatJob(all, false, 0, app_state.active_shell);
+}
+
+pub fn startSwitchAi(tab: u32, target: u8) bool {
+    if (target < 1 or target > 3) return false;
+    return startChatJob(false, false, target, tab);
 }
 
 pub fn startFreshChat(tab: u32) bool {
-    return startChatJob(false, true, tab);
+    return startChatJob(false, true, 0, tab);
 }
 
-fn startChatJob(all: bool, fresh: bool, tab: u32) bool {
+fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
     const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
-    job.* = .{ .all = all, .fresh = fresh };
+    job.* = .{ .all = all, .fresh = fresh, .switch_to = switch_to };
     if (all) {
         for (0..app_state.shell_count) |i| {
             if (job.count >= RESTART_HOSTS) break;
@@ -4029,6 +4216,21 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
+    const switch_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
+        .{ .id = SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, .target = 1, .name = "Chat View: Switch AI to Claude" },
+        .{ .id = SEARCH_CHAT_SWITCH_CODEX_OFFSET, .target = 2, .name = "Chat View: Switch AI to Codex" },
+        .{ .id = SEARCH_CHAT_SWITCH_PI_OFFSET, .target = 3, .name = "Chat View: Switch AI to Pi" },
+    };
+    for (switch_rows) |sw| {
+        if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+            switchAiTab(app_state.active_shell, sw.target) and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -5249,6 +5451,19 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
     {
         app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
         app_state.g_search_result_count += 1;
+    }
+    const switch_tab_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_CLAUDE, .target = 1, .name = "Switch AI to Claude" },
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_CODEX, .target = 2, .name = "Switch AI to Codex" },
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_PI, .target = 3, .name = "Switch AI to Pi" },
+    };
+    for (switch_tab_rows) |sw| {
+        if (tc_idx != null and switchAiTab(tc_idx.?, sw.target) and app_state.g_search_result_count < app_state.g_search_results.len and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
+            app_state.g_search_result_count += 1;
+        }
     }
     if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
