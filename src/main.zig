@@ -9595,7 +9595,15 @@ pub fn main(init: std.process.Init) void {
     _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
     update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
+    var paint_probe_tick: u64 = 0;
+    var paint_probe_messages: u64 = 0;
     while (GetMessageW(&msg, null, 0, 0) > 0) {
+        paint_probe_messages += 1;
+        if (app_state.g_search_active and GetTickCount64() -| paint_probe_tick >= 1000) {
+            altqLog("palette_pump msg={X} hwnd={X} wp={X} count={d}", .{ msg.message, altqPtr(msg.hwnd), msg.wParam, paint_probe_messages });
+            paint_probe_tick = GetTickCount64();
+            paint_probe_messages = 0;
+        }
         if (@import("settings_panel.zig").dialogMessage(&msg)) continue;
         @import("idle_budget.zig").pumped(msg.message, msg.wParam);
         _ = TranslateMessage(&msg);
