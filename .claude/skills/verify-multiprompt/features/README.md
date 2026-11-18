@@ -10,6 +10,8 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Stop a running reply](chat-stop.md).
 - [Send and queue messages](chat-message-sending.md).
 - [Formal chat delivery](chat-delivery-formal.md).
+- [PR verifier tools](pr-verifier-tools.md).
+- [Chat echo budget](chat-echo-budget.md).
 
 Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
 
