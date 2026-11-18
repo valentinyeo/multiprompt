@@ -1632,13 +1632,63 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
     if (!writeFileAtomicW(path, cache)) return error.Storage;
     return normalized;
 }
-fn syncedGroupId(current_id: u32, name: []const u8, starred: bool) !u32 {
+fn groupNamed(desc: []const u16) bool {
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (std.mem.eql(u16, group.name[0..group.name_len], desc)) return true;
+    }
+    return false;
+}
+
+fn groupNameSurvivesIn(tabs: []const session_layout.Tab, gidx: u32) bool {
+    var buf: [64]u8 = undefined;
+    const group = app_state.groups[gidx];
+    const old_len = std.unicode.utf16LeToUtf8(&buf, group.name[0..group.name_len]) catch return true;
+    if (old_len == 0) return true;
+    const old = buf[0..old_len];
+    for (tabs) |tab| {
+        if (std.mem.eql(u8, tab.group orelse "", old) or std.mem.eql(u8, tab.starred_group orelse "", old)) return true;
+    }
+    return false;
+}
+
+fn groupHasMember(gid: u32) bool {
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.group_id == gid or shell.starred_group_id == gid) return true;
+    }
+    return false;
+}
+
+fn dropEmptiedGroups(had: []const u32) void {
+    for (had) |gid| {
+        if (@import("sidebar.zig").findGroupIdx(gid) == null) continue;
+        if (groupHasMember(gid)) continue;
+        @import("sidebar.zig").deleteGroup(gid);
+    }
+}
+
+fn groupsWithMembers(out: *[app_state.MAX_GROUPS]u32) []const u32 {
+    var count: usize = 0;
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (groupHasMember(group.id)) {
+            out[count] = group.id;
+            count += 1;
+        }
+    }
+    return out[0..count];
+}
+
+fn syncedGroupId(current_id: u32, name: []const u8, starred: bool, tabs: []const session_layout.Tab) !u32 {
     var wide: [64]u16 = undefined;
     const len = try std.unicode.utf8ToUtf16Le(&wide, name);
     if (len == 0) return 0;
     if (@import("sidebar.zig").findGroupIdx(current_id)) |gi| {
         const current = app_state.groups[gi];
         if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) return current.id;
+        if (!groupNamed(wide[0..len]) and !groupNameSurvivesIn(tabs, gi)) {
+            @memcpy(app_state.groups[gi].name[0..len], wide[0..len]);
+            app_state.groups[gi].name_len = @intCast(len);
+            return current.id;
+        }
     }
     for (app_state.groups[0..app_state.group_count]) |group| {
         if (!std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) continue;
@@ -1659,6 +1709,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     const a = arena.allocator();
     const server = try session_layout.parse(a, json);
     defer server.deinit();
+    var filled_before: [app_state.MAX_GROUPS]u32 = undefined;
+    const had_members = groupsWithMembers(&filled_before);
     const local = try captureSessionLayout(a, true);
     var owned: [MAX_SHELLS]bool = undefined;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
@@ -1779,8 +1831,8 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
-            if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false);
-            if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true);
+            if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false, desired.tabs);
+            if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true, desired.tabs);
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
@@ -1816,6 +1868,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         switchToWorkspace(app_state.g_active_workspace);
     }
     app_state.g_layout_settings = desired.settings;
+    dropEmptiedGroups(had_members);
     if (desired.group_order) |names| _ = @import("sidebar.zig").orderGroupsByName(names);
     @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
