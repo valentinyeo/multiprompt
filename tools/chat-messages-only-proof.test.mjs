@@ -120,6 +120,10 @@ function assertScrollJourney(driver, desktop, boundary) {
 
 test('fresh history distinguishes the opening hold from an explicit user scroll', () => {
   const session = fs.readFileSync(new URL('../src/chat_session.zig', import.meta.url), 'utf8');
+  const ready = session.indexOf('if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;');
+  const prepare = session.lastIndexOf('layoutChatControls();', ready);
+  const refresh = session.indexOf('refreshChatTranscript(false);', prepare);
+  assert.ok(prepare >= 0 && ready > prepare && refresh > ready, 'publish source readiness between old layout preparation and the new-history refresh');
   assert.match(session, /chat_history.followBottom\(force or \(app_state.g_chat_read_hold and app_state.g_chat_read_open_ready\)/);
   assert.match(session, /g_chat_scroll_y = app_state.g_chat_content_h - viewport_h - 100;\s+app_state.g_chat_scrolled_up = true;/);
   assert.match(session, /expectEqual\(app_state.g_chat_content_h - viewport_h, app_state.g_chat_scroll_y\)/);

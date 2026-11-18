@@ -1570,13 +1570,13 @@ pub fn chatFileOnReady() void {
         @import("window_layout.zig").invalidateSidebar();
         @import("inbox.zig").publishInboxState();
     }
+    if (active_changed and app_state.g_chat_active) layoutChatControls();
+    if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (active_changed and app_state.g_chat_active) {
-        layoutChatControls();
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
     if (chatFetchWanted(app_state.g_chat_active)) chatFileRequest(chatFileIdentity());
-    if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }
 
