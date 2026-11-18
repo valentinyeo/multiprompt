@@ -1,6 +1,6 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, symlinkSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, symlinkSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -112,7 +112,9 @@ test('unstar clears favorite and repeats without a write', async () => {
 });
 
 test('move changes workspace and group; new still returns the existing chat', async () => {
-  const first = JSON.parse((await cli(args)).out);
+  const opened = await cli(args);
+  assert.equal(opened.code, 0, opened.err);
+  const first = JSON.parse(opened.out);
   const result = await cli(['move', 'Daily chat', '--workspace', 'Other', '--group', 'Follow-ups']);
   assert.equal(result.code, 0, result.err);
   const moved = await stored();
@@ -154,7 +156,9 @@ test('publication readback is required, including on a repeated new', async () =
 });
 
 test('helper is explicit and placed immediately after the calling tab', async () => {
-  const parent = JSON.parse((await cli(args)).out);
+  const opened = await cli(args);
+  assert.equal(opened.code, 0, opened.err);
+  const parent = JSON.parse(opened.out);
   const result = await cli(['new', '--name', 'Helper', '--folder', 'work', '--helper'], { env: { ...opts.env, MULTIPROMPT_TAB: parent.session } });
   assert.equal(result.code, 0, result.err);
   const tabs = (await stored()).tabs;
@@ -249,6 +253,7 @@ test('installed symlink loads the key once per verb without forwarding it to the
   chmodSync(yeoKey, 0o700);
   const mp = join(home, 'mp');
   symlinkSync(new URL('../../tools/mp-layout.mjs', import.meta.url).pathname, mp);
+  assert.notEqual(statSync(mp).mode & 0o111, 0, 'the installed mp command must be executable');
   const reader = join(home, 'reader.py');
   writeFileSync(reader, [
     'import os,json,runpy,sys',
