@@ -19,4 +19,4 @@ The PR selector owns these files through `CI workflow:`, not a nearest desktop n
 
 ## Gotchas
 
-The three current source findings are SOFT-2724, SOFT-2725 and SOFT-2726. They remain findings even when the verification-only CI job classifies them as inherited. Source equality, native replay, both mutations and restoration are required for that classification. No UI journey or binary hash certifies this model.
+The original source findings are SOFT-2724, SOFT-2725 and SOFT-2726. Their historical traces stay in the formal skill. The repair must pass with no findings and no inherited result. Source equality, native replay, both mutations and restoration remain required before an unrelated verification-only change can classify a finding as inherited. No UI journey or binary hash certifies this model.
