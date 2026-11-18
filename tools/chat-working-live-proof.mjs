@@ -24,6 +24,46 @@ export function checkFrames(frames, pushedMs, sendMs, replyPushedMs, queuedMs) {
     JSON.stringify(shape(frame)) !== JSON.stringify(shape(other)))), 'Queued dots did not animate in place');
 }
 
+export function recoveryFrames(trace, expected, window) {
+  assert.equal(expected.length, 2, 'Recovery needs two distinct sends');
+  const keys = expected.map(row => row.key);
+  assert.ok(keys.every(key => /^\d+$/.test(key) && key !== '0') && new Set(keys).size === 2, 'Missing or repeated recovery identity');
+  assert.ok(window.startTick < window.historyTick && window.historyTick <= window.endTick, 'Incomplete recovery observation');
+  const frames = [];
+  let frame;
+  for (const line of trace.split('\n')) {
+    const begin = line.match(/\[chat-identity\] begin tick=(\d+) frame=(\d+)/);
+    if (begin) {
+      assert.ok(!frame, 'Incomplete identity paint before next frame');
+      frame = { tick:Number(begin[1]), rows:[] };
+      continue;
+    }
+    const row = line.match(/\[chat-identity\] row source=(\w+) role=(\w+) key=(\d+)(?: wire=([\w-]*) not_sent=([01]))?/);
+    if (row && frame && row[2] === 'user' && keys.includes(row[3])) {
+      frame.rows.push({ source:row[1], key:row[3], wire:row[4], notSent:row[5] });
+    }
+    if (!line.includes('[chat-identity] end')) continue;
+    assert.ok(frame, 'Identity paint ended without a start');
+    if (frame.tick >= window.startTick && frame.tick <= window.endTick && frame.rows.length) {
+      for (const key of keys) {
+        const copies = frame.rows.filter(row => row.key === key);
+        assert.equal(copies.length, 1, `Message ${key} has ${copies.length} painted copies`);
+        const row = copies[0];
+        if (row.source === 'pending') {
+          assert.equal(row.notSent, '0', 'Uncertain message painted a false Not sent');
+          assert.equal(row.wire, expected.find(item => item.key === key).wire, 'Pending identity changed on restart');
+        } else assert.equal(row.source, 'saved', 'Unknown recovery row source');
+      }
+      frames.push(frame);
+    }
+    frame = undefined;
+  }
+  assert.ok(!frame, 'Truncated final identity paint');
+  assert.ok(frames.some(frame => frame.tick < window.historyTick && frame.rows.every(row => row.source === 'pending')), 'No pending-only recovery paint before history');
+  assert.ok(frames.some(frame => frame.tick >= window.historyTick && frame.rows.every(row => row.source === 'saved')), 'No saved-only recovery paint after history');
+  return frames;
+}
+
 function verifyCase(root, name) {
   const steady = name === 'steady-live';
   const dir = path.join(root, name);
@@ -70,7 +110,20 @@ function verifyCase(root, name) {
     }
     frame.replyPixels = count;
   }
-  if (!steady) checkFrames(frames, push.ms, observation.sendMs, replyPush.ms, observation.queuedMs);
+  if (!steady) {
+    checkFrames(frames, push.ms, observation.sendMs, replyPush.ms, observation.queuedMs);
+    const expected = json('recovery-expected.json');
+    const before = json('recovery-outbox-before.json').queues.flatMap(queue => queue.messages);
+    for (const row of expected) {
+      const saved = before.find(message => message.wire_id === row.wire);
+      assert.ok(saved && saved.x === 1 && saved.phase === 'queued' && saved.t === row.text, 'Missing persisted host receipt before restart');
+    }
+    assert.ok(rows.some(row => row.stage === 'recovery-receipt-withheld'), 'Restart did not delay receipts');
+    assert.ok(rows.some(row => row.stage === 'recovery-history-ready'), 'Saved user messages never arrived');
+    const recovery = recoveryFrames(fs.readFileSync(path.join(dir, 'debug.log'), 'utf8'), expected, observation.recovery);
+    fs.writeFileSync(path.join(dir, 'recovery-frames.json'), JSON.stringify(recovery, null, 2) + '\n');
+    for (const name of ['working-recovery-before-history.png', 'working-recovery-after-history.png']) assert.ok(fs.statSync(path.join(root, name)).size > 1000, 'Missing recovery screenshot');
+  }
   if (steady) {
     const trace = fs.readFileSync(path.join(dir, 'debug.log'), 'utf8');
     const windows = observation.paintWindows;

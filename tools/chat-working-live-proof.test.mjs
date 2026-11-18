@@ -27,3 +27,21 @@ test('hosted working evidence keeps animated dots through reply and two queued m
   assert.throws(() => checkFrames(good.filter(frame => frame.phase !== 'queued'), 2000, 1000, 3000, 4000), /two messages queued/);
   assert.throws(() => checkFrames(good.map(frame => frame.phase === 'queued' ? {...frame, dots:dot(0)} : frame), 2000, 1000, 3000, 4000), /Queued dots did not animate/);
 });
+
+test('SOFT-2725 recovery rejects a false failure or duplicate in any painted frame', async () => {
+  const { recoveryFrames } = await import(modulePath.href);
+  const expected = [{key:'101', wire:'desktop-first'}, {key:'102', wire:'desktop-second'}];
+  const window = {startTick:1000, historyTick:2000, endTick:3000};
+  const pending = expected.map(row => `[chat-identity] row source=pending role=user key=${row.key} wire=${row.wire} not_sent=0`).join('\n');
+  const saved = expected.map(row => `[chat-identity] row source=saved role=user key=${row.key}`).join('\n');
+  const paint = (tick, rows) => `[chat-identity] begin tick=${tick} frame=1\n${rows}\n[chat-identity] end\n`;
+  const good = paint(1500, pending) + paint(2500, saved);
+  assert.equal(recoveryFrames(good, expected, window).length, 2);
+  assert.throws(() => recoveryFrames(good.replace('not_sent=0', 'not_sent=1'), expected, window), /false Not sent/);
+  assert.throws(() => recoveryFrames(paint(1500, pending) + paint(2100, pending + '\n' + saved) + paint(2500, saved), expected, window), /2 painted copies/);
+  assert.throws(() => recoveryFrames(paint(2500, saved), expected, window), /pending-only/);
+  assert.throws(() => recoveryFrames(paint(1500, pending), expected, window), /saved-only/);
+  assert.throws(() => recoveryFrames(good.replace(' wire=desktop-first not_sent=0', ''), expected, window), /false Not sent/);
+  assert.throws(() => recoveryFrames(good + '[chat-identity] begin tick=2600 frame=2\n', expected, window), /Truncated/);
+  assert.throws(() => recoveryFrames(good.replace('key=102', 'key=103'), expected, window), /0 painted copies/);
+});

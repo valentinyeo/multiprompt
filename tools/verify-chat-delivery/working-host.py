@@ -18,8 +18,30 @@ def install(namespace, root, record, steady=False):
     started = threading.Event()
 
     def request(line, source, subscriptions, lock):
-        previous_request(line, source, subscriptions, lock)
         query = json.loads(line)
+        recovery = root / 'recovery-history.json'
+        if recovery.exists():
+            try:
+                fd = os.open(root / 'recovery-history-claimed', os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                pass
+            else:
+                os.close(fd)
+                session = {'state': {'display_history': True}}
+                try:
+                    for row in json.loads(recovery.read_text(encoding='utf-8-sig')):
+                        namespace['host_history_append']('claude', SID, session, dict(role='user', id=row['wire'], text=row['text']))
+                    namespace['host_state_write']('claude', SID, session['state'])
+                    namespace['host_write'](namespace['host_paths']('claude', SID)['config'], dict(enabled=True, tmux='verify-agent'))
+                    record('working-host.jsonl', stage='recovery-history-ready', sid=SID)
+                finally:
+                    if session.get('db') is not None:
+                        session['db'].close()
+        if (root / 'recovery-hold-receipts').exists() and query.get('op') in ('message_snapshot', 'message_events', 'events_subscribe'):
+            namespace['serve_print'](dict(id=query.get('id', 0), error='simulated receipt connection unavailable'))
+            record('working-host.jsonl', stage='recovery-receipt-withheld', op=query['op'])
+            return
+        previous_request(line, source, subscriptions, lock)
         if query.get('op') != 'events_subscribe' or query.get('provider') != 'claude' or query.get('sid') != SID:
             return
         try:
