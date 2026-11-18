@@ -16,7 +16,7 @@ function run(control) {
     assert.ok(start >= 0 && end > start, 'production pending-row visibility exists');
     let landed = source.slice(start, end);
     if (control === 'duplicate-row') {
-      const changed = landed.replace('return true;', 'return false;');
+      const changed = landed.replaceAll('return true;', 'return false;');
       assert.notEqual(changed, landed);
       landed = changed;
     }
@@ -40,6 +40,7 @@ pub var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 101 }};
 pub var shell_count: usize = 1;
 pub var g_chat_blocks: []const md.Block = &.{};
 pub var g_chat_block_count: usize = 0;
+pub var g_chat_cache_shell_id: u32 = 101;
 fn chatOutboxShellForKey(key: []const u8) ?usize { return if (std.mem.eql(u8, key, "desktop")) 0 else null; }
 ` + landed + String.raw`
 test "IGSH-1642 desktop recognizes Windows line breaks without changing message text" {
@@ -73,6 +74,13 @@ test "IGSH-1642 live CRLF transcript hides its local copy but keeps deliberate r
     try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
     try std.testing.expectEqual(md.Role.user, h.blocks.items[0].role);
     try std.testing.expect(chatEchoRowLanded(pending));
+    var canonical = pending;
+    canonical.message_wire_id = @splat(0);
+    @memcpy(canonical.message_wire_id[0..6], "user-1");
+    try std.testing.expect(chatEchoRowLanded(canonical));
+    g_chat_cache_shell_id = 999;
+    try std.testing.expect(!chatEchoRowLanded(canonical));
+    g_chat_cache_shell_id = 101;
     const shown_rows = h.blocks.items.len + @as(usize, if (chatEchoRowLanded(pending)) 0 else 1);
     try std.testing.expectEqual(@as(usize, 1), shown_rows);
     try std.testing.expect(echo.sameText(std.unicode.utf8ToUtf16LeStringLiteral("First line\nSecond line 😀"), h.text.items));

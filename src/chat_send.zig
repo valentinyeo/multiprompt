@@ -1775,7 +1775,9 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     var pending: [CHAT_OUTBOX_MAX_PER_KEY]chat_echo.Pending = undefined;
     for (app_state.g_chat_outbox.items) |e| {
         if (result.count >= pending.len) break;
-        if (e.state == .cancelled or (e.host_held and !e.host_confirmed) or !chatEchoWaitsOnTranscript(e) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.state == .cancelled or (e.host_held and !e.host_confirmed) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        const row_key = if (e.message_v1 and e.message_wire_id[0] != 0) @import("chat_markdown.zig").rowKey(std.mem.sliceTo(&e.message_wire_id, 0)) else 0;
+        if (!chatEchoWaitsOnTranscript(e) and @import("chat_markdown.zig").drawnOnce(row_key, blocks)) continue;
         if (chatOutboxShellForKey(e.key[0..e.key_len])) |idx| {
             if (app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent >= 2) continue;
         }
@@ -1783,6 +1785,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
+            .row_key = row_key,
             .confirmed = e.message_v1 and chat_echo.phaseTaken(std.mem.sliceTo(&e.message_phase, 0)),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
@@ -1800,7 +1803,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     for (blocks, 0..) |b, bi| {
         if (b.role != .user or user_count >= users.len) continue;
         const disp = chatBlockDisplayRange(buf, b);
-        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id };
+        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id, .row_key = b.row_key };
         user_at[user_count] = bi;
         user_count += 1;
     }
@@ -1916,7 +1919,9 @@ pub fn chatEchoRowLanded(e: ChatOutboxEntry) bool {
     const wire = std.mem.sliceTo(&e.message_wire_id, 0);
     if (wire.len == 0) return false;
     const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
-    if (shell >= app_state.shell_count) return false;
+    if (shell >= app_state.shell_count or app_state.g_chat_cache_shell_id != app_state.shells[shell].shell_id) return false;
+    const wire_key = @import("chat_markdown.zig").rowKey(wire);
+    if (!@import("chat_markdown.zig").drawnOnce(wire_key, app_state.g_chat_blocks[0..app_state.g_chat_block_count])) return true;
     var keys: [@import("chat_live.zig").SENT_KEYS]u64 = @splat(0);
     const n = @import("chat_live.zig").sentRowKeys(app_state.shells[shell].shell_id, wire, &keys);
     if (n == 0) return false;

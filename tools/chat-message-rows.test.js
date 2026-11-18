@@ -92,7 +92,7 @@ test('IGSH-1415 the local copy of a sent message drops the same way', () => {
   assert.match(read('chat_render.zig'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });
 
-function landed(source, blocks, aliases = [], shell = 41) {
+function landed(source, blocks, aliases = [], shell = 41, state = 'queued') {
   const start = source.indexOf('pub fn chatEchoRowLanded(');
   let code = source.slice(source.indexOf('{', start) + 1, source.indexOf('\n}', start));
   code = code
@@ -107,9 +107,10 @@ function landed(source, blocks, aliases = [], shell = 41) {
     .replaceAll('app_state.g_chat_blocks[0..app_state.g_chat_block_count]', 'blocks')
     .replaceAll('app_state.shells[shell].shell_id', 'shell_id')
     .replaceAll('app_state.g_chat_cache_shell_id', '41')
-    .replaceAll('app_state.shell_count', '1');
+    .replaceAll('app_state.shell_count', '1')
+    .replaceAll(' or ', ' || ');
   return new Function('e', 'blocks', 'aliases', 'shell_id', 'drawnOnce', code)(
-    {message_wire_id: 'desktop-one'}, blocks, aliases, shell,
+    {message_wire_id: 'desktop-one', state}, blocks, aliases, shell,
     (key, seen) => !seen.some(block => block.row_key === key));
 }
 
@@ -117,7 +118,7 @@ test('SOFT-2688 a saved user message never retains a grey pending copy without a
   const send = read('chat_send.zig');
   const saved = [{role: 'user', row_key: 'desktop-one'}];
   for (const state of ['queued', 'sending', 'not_sent', 'delivered']) {
-    assert.equal(1 + Number(!landed(send, saved)), 1, `${state}: one saved message, not a second pending bubble`);
+    assert.equal(1 + Number(!landed(send, saved, [], 41, state)), 1, `${state}: one saved message, not a second pending bubble`);
   }
   assert.equal(landed(send, [], []), false, 'a message absent from history must stay visible');
   assert.equal(landed(send, [{row_key: 'desktop-two'}]), false, 'a separate identical message must stay visible');

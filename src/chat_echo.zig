@@ -170,6 +170,7 @@ pub const UserBlock = struct {
     text: []const u16,
     stamp_ms: i64 = 0,
     message_id: u64 = 0,
+    row_key: u64 = 0,
 };
 
 pub const Claim = struct { message_id: u64 = 0, stamp_ms: i64 = 0, text_hash: u64 = 0 };
@@ -180,6 +181,7 @@ pub const Pending = struct {
     anchor: Anchor,
     unanchored_delivery: bool = false,
     confirmed: bool = false,
+    row_key: u64 = 0,
 };
 
 const Normalized = struct {
@@ -630,6 +632,15 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
 }
 
 fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const Claim, taken: []const ?usize, earlier: []const Pending) ?usize {
+    if (p.row_key != 0) {
+        for (blocks, 0..) |block, bi| {
+            if (block.row_key != p.row_key) continue;
+            for (taken) |at| {
+                if (at == bi) return null;
+            }
+            return bi;
+        }
+    }
     if (p.prefix.len == 0) return null;
     var full: [16384]u16 = undefined;
     const norm = normalize(p.text, &full);
@@ -701,6 +712,29 @@ fn prefixOf(comptime s: []const u8, out: []u16) []const u16 {
     const wide = w(s);
     const full = normalize(&wide, out);
     return full[0..@min(full.len, 40)];
+}
+
+test "SOFT-2688 saved identities replace pending messages before receipts or text matching" {
+    const raw = w("@Fixture{live-fixture} repeat this");
+    const shown = w("@Fixture repeat this");
+    const blocks = [_]UserBlock{
+        .{ .text = &shown, .row_key = 101, .stamp_ms = 1000 },
+        .{ .text = &shown, .row_key = 102, .stamp_ms = 1000 },
+    };
+    var pending = [_]Pending{
+        .{ .prefix = &raw, .text = &raw, .row_key = 102, .anchor = .{ .after_ms = 9000 } },
+        .{ .prefix = &raw, .text = &raw, .row_key = 101, .anchor = .{ .after_ms = 9000 } },
+        .{ .prefix = &shown, .text = &shown, .row_key = 103, .anchor = .{}, .unanchored_delivery = true },
+    };
+    var out: [3]?usize = undefined;
+    assign(&pending, &blocks, true, &.{}, &out);
+    try std.testing.expectEqual(@as(?usize, 1), out[0]);
+    try std.testing.expectEqual(@as(?usize, 0), out[1]);
+    try std.testing.expectEqual(@as(?usize, null), out[2]);
+    pending[1].row_key = 102;
+    assign(pending[0..2], &blocks, false, &.{}, out[0..2]);
+    try std.testing.expectEqual(@as(?usize, 1), out[0]);
+    try std.testing.expectEqual(@as(?usize, null), out[1]);
 }
 
 test "normalize collapses whitespace and strips pasted_content tags" {

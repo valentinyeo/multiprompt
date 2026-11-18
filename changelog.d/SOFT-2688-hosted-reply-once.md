@@ -1,1 +1,1 @@
-Hosted chat replies appear once, without a second raw copy.
+Hosted chat messages and replies appear once, without grey copies or brief duplicates.
