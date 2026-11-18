@@ -463,6 +463,37 @@ try { Fresh-Chat } catch { $freshError = $_.ToString() }
                         self.assertEqual((proof['oldAgentPid'], proof['newAgentPid'], proof['paneCommand']), (0, 1, 'sleep'))
                         self.assertEqual([call.args[2] for call in reader['host_send'].call_args_list], ['fresh replacement seed', 'busy server turn'])
 
+    def test_recorder_install_checks_archive_and_both_tools_before_publishing_path(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r'''
+$ErrorActionPreference = 'Stop'
+$global:tools = 0
+$global:expanded = $false
+function Join-Path($Path, $ChildPath) {
+    if ($ChildPath -like '*.exe') { return 'Invoke-FixtureRecorder' }
+    [IO.Path]::Combine($Path, $ChildPath)
+}
+function Invoke-WebRequest($Uri, $OutFile) { [IO.File]::WriteAllText($OutFile, 'fixture archive') }
+function Get-FileHash($Path, $Algorithm) {
+    @{ Hash = $(if ($env:VERIFY_RECORDER_FAULT -eq 'checksum') { 'bad' } else { '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4' }) }
+}
+function Expand-Archive($LiteralPath, $DestinationPath, [switch]$Force) { $global:expanded = $true }
+function Invoke-FixtureRecorder { $global:tools++; $global:LASTEXITCODE = if ($env:VERIFY_RECORDER_FAULT -eq 'tool') { 7 } else { 0 } }
+$passed = $false
+try { & (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/install-verify-recorder.ps1') -Destination $env:VERIFY_TEST_EVIDENCE; $passed = $true } catch {}
+@{ passed=$passed; tools=$global:tools; expanded=$global:expanded; published=(Test-Path $env:GITHUB_PATH) } | ConvertTo-Json -Compress
+'''
+        for fault in ('none', 'checksum', 'tool'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as evidence:
+                result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_EVIDENCE=evidence, VERIFY_RECORDER_FAULT=fault, GITHUB_PATH=str(Path(evidence) / 'github-path')), text=True, capture_output=True, check=True)
+                proof = json.loads(result.stdout)
+                self.assertEqual(proof['passed'], fault == 'none')
+                self.assertEqual(proof['published'], fault == 'none')
+                self.assertEqual(proof['expanded'], fault != 'checksum')
+                self.assertEqual(proof['tools'], 2 if fault == 'none' else 1 if fault == 'tool' else 0)
+
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         if shell is None:
