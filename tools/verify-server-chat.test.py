@@ -91,7 +91,10 @@ ConvertTo-Json -InputObject $values -Compress
                     self.assertIn('ready', observed, 'The seed was sent before provider readiness')
                     return dict(status='sent')
                 reader = dict(host_cli=Mock(return_value=dict(status='enabled')), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send))
-                with patch('runpy.run_path', return_value=reader), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT)]):
+                source_root = Path(home) / 'app-source'
+                (source_root / 'src').mkdir(parents=True)
+                shutil.copytree(ROOT / 'src/chat_connectors', source_root / 'src/chat_connectors')
+                with patch('runpy.run_path', return_value=reader) as load, patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT), str(source_root)]):
                     if will_be_ready:
                         execute(str(seed))
                         reader['host_send'].assert_called_once()
@@ -99,6 +102,7 @@ ConvertTo-Json -InputObject $values -Compress
                         with self.assertRaisesRegex(RuntimeError, 'provider.*ready'):
                             execute(str(seed))
                         reader['host_send'].assert_not_called()
+                    self.assertEqual(load.call_args.args[0], str(source_root / 'src/chat_history_reader.py'))
 
     def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
