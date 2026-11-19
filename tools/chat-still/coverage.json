@@ -3,7 +3,7 @@
   "functions": {
     "refreshChatTranscript": {
       "file": "src/chat_session.zig",
-      "sha256": "dc8330f2ce16fe57721d1897383fbedb19d48239e4a86a3f53a67c420178d82e"
+      "sha256": "b8e2168e0bbd98caf12db18bf56b1b561777b73415c51325ae18574d05e2e421"
     },
     "chatRelayoutPreservingScroll": {
       "file": "src/chat_session.zig",

@@ -44,6 +44,7 @@ const app_state = struct {
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = false;
   var g_chat_read_hold = false;
+  var g_chat_new_messages = struct { fn count(_: @This()) usize { return 0; } }{};
   var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
   var g_chat_blocks: [128]md.Block = undefined;
   var g_chat_scroll_bottom_pending = false;
@@ -57,6 +58,8 @@ const app_state = struct {
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
 fn chatEchoMatchActive() void {}
+fn verboseLoggingEnabled() bool { return false; }
+fn chatNewMessagesChanged(_: bool) void {}
 fn chatScrollStateChanged(viewport_h: i32) void {
   app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - 4;
 }
