@@ -1448,6 +1448,47 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
 var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
 
+pub fn chatMessagesArrived(added: usize) void {
+    const had_messages = app_state.g_chat_new_messages.count() != 0;
+    if (!app_state.g_chat_scrolled_up and app_state.g_chat_read_boundary.index == null) app_state.g_chat_read_hold = false;
+    app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
+    chatNewMessagesChanged(had_messages);
+}
+
+test "SOFT-2724 messages that arrive while the newest message is on screen keep following it" {
+    const saved = .{
+        .hold = app_state.g_chat_read_hold,
+        .scrolled_up = app_state.g_chat_scrolled_up,
+        .messages = app_state.g_chat_new_messages,
+        .boundary = app_state.g_chat_read_boundary,
+    };
+    defer {
+        app_state.g_chat_read_hold = saved.hold;
+        app_state.g_chat_scrolled_up = saved.scrolled_up;
+        app_state.g_chat_new_messages = saved.messages;
+        app_state.g_chat_read_boundary = saved.boundary;
+    }
+    app_state.g_chat_read_hold = true;
+    app_state.g_chat_scrolled_up = false;
+    app_state.g_chat_new_messages = .{};
+    app_state.g_chat_read_boundary = .{};
+    chatMessagesArrived(12);
+    try std.testing.expect(!app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+
+    app_state.g_chat_read_hold = true;
+    app_state.g_chat_read_boundary = .{ .index = 3 };
+    chatMessagesArrived(2);
+    try std.testing.expect(app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+
+    app_state.g_chat_read_boundary = .{};
+    app_state.g_chat_scrolled_up = true;
+    chatMessagesArrived(3);
+    try std.testing.expect(app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_new_messages.count());
+}
+
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
@@ -1540,11 +1581,7 @@ pub fn chatFileOnReady() void {
             }
             if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
             if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) read_ready = foregroundIsOurs();
-            if (belongs_to_active and app_state.g_chat_active and added > 0) {
-                const had_messages = app_state.g_chat_new_messages.count() != 0;
-                app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
-                chatNewMessagesChanged(had_messages);
-            }
+            if (belongs_to_active and app_state.g_chat_active and added > 0) chatMessagesArrived(added);
             const has_messages = for (entry.history.blocks.items) |block| {
                 if (block.role != .tool) break true;
             } else false;
