@@ -149,6 +149,16 @@ test('a feature with no executable journey cannot publish', () => {
   assert.throws(() => releasePlan(base, sha, [change(['src/chat.zig'])], [{ ...maps[0], journeys: [] }]), /chat has no journey/);
 });
 
+test('editing a CI-only or formal feature map needs no release journey', () => {
+  const ciOnly = { feature: 'ci-repair-receipt', map: 'features/ci-repair-receipt.md', journeys: [], paths: [] };
+  let plan;
+  let refusal;
+  try { plan = releasePlan(base, sha, [change(['features/ci-repair-receipt.md'])], [...maps, ciOnly]); } catch (error) { refusal = error.message; }
+  assert.equal(refusal, undefined);
+  assert.deepEqual(plan.features, []);
+  assert.throws(() => releasePlan(base, sha, [change(['src/chat.zig'])], [{ ...maps[0], journeys: [] }]), /chat has no journey/);
+});
+
 test('feature maps name actual executable recipes and own release paths', () => {
   const discovered = releaseMaps();
   assert.ok(discovered.some(map => map.paths.length > 0));
@@ -180,7 +190,7 @@ for (const [file, patch, reason] of [
   ['build.json', { candidate: false }, 'PR or published build'],
   ['build.json', { run: `${run}4` }, 'stale run'],
   ['journey.json', { status: 'failed' }, 'failed recorder'],
-  ['journey.json', { journey: 'command-palette' }, 'different journey'],
+  ['result.json', { feature: 'command-palette' }, 'different journey'],
 ]) test(`blocks ${reason}`, t => {
   const f = fixture(t);
   const old = JSON.parse(fs.readFileSync(path.join(f.dir, 'verify-chat-focus', file)));
@@ -202,13 +212,13 @@ test('corrupt video, empty video, expired artifact and duplicate artifact cannot
   const f = fixture(t);
   assert.throws(() => f.check(() => { throw new Error('decode failed'); }), /decode failed/);
   f.artifacts[0].expired = true;
-  assert.throws(() => f.check(), /artifact missing or ambiguous/);
+  assert.throws(() => f.check(), /artifact is missing or ambiguous/);
   f.artifacts[0].expired = false;
   f.artifacts.push({ ...f.artifacts[0], id: 999 });
-  assert.throws(() => f.check(), /artifact missing or ambiguous/);
+  assert.throws(() => f.check(), /artifact is missing or ambiguous/);
   f.artifacts.pop();
   f.write('chat-focus', 'journey.mp4', '');
-  assert.throws(() => f.check(), /video missing/);
+  assert.throws(() => f.check(), /journey\.mp4 is missing or empty/);
 });
 
 test('actual encoded video passes and replacing it with garbage fails', t => {
@@ -251,4 +261,134 @@ test('published v0.28.1761 lacks videos for its changed features', t => {
     return true;
   });
 });
+
+const attempt = run => { try { return { receipt: run() }; } catch (error) { return { error }; } };
+const recordedDir = (f, name, files) => {
+  const root = path.join(f.dir, name);
+  fs.mkdirSync(root, { recursive: true });
+  for (const [file, value] of Object.entries(files)) fs.writeFileSync(path.join(root, file), typeof value === 'string' ? value : JSON.stringify(value));
+  return root;
+};
+
+function failedHead(f, error) {
+  f.write('chat-focus', 'result.json', { feature: 'chat-focus', status: 'failed', sha256: f.sha256, cleanup: 'owned process tree stopped', error });
+  f.write('chat-focus', 'failure.png', 'png bytes');
+}
+
+test('a journey that failed the same way on master publishes as inherited', t => {
+  const f = fixture(t, ['chat', 'palette']);
+  const failure = 'Waited 20 s for palette contains named command Mute Tab.';
+  failedHead(f, failure);
+  recordedDir(f, `verify-chat-focus-${base}`, {
+    'result.json': { feature: 'chat-focus', status: 'failed', cleanup: 'owned process tree stopped', error: failure },
+    'failure.png': 'png bytes',
+    'recorded.json': { journey: 'chat-focus', evidence: 'verify-chat-focus', revision: base, run: `${run}4`, artifact: 900 },
+  });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.equal(outcome.error, undefined, `an inherited failure must publish, got: ${outcome.error?.message}`);
+  assert.deepEqual(outcome.receipt.inherited.map(item => item.journey), ['chat-focus']);
+  assert.equal(outcome.receipt.inherited[0].revision, base);
+  assert.equal(outcome.receipt.inherited[0].run, `${run}4`);
+  assert.deepEqual(outcome.receipt.features.map(feature => feature.feature), ['palette']);
+  assert.match(evidenceNotes(outcome.receipt), /Already failing before this release/);
+  assert.match(evidenceNotes(outcome.receipt), /\[command-palette video\]/);
+});
+
+test('a journey that passed before and fails now still blocks', t => {
+  const f = fixture(t);
+  failedHead(f, 'Waited 20 s for palette contains named command Mute Tab.');
+  recordedDir(f, `verify-chat-focus-${base}`, {
+    'result.json': { feature: 'chat-focus', status: 'passed', cleanup: 'owned process tree stopped' },
+    'passed.png': 'png bytes',
+  });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.ok(outcome.error, 'a journey that passed at the base and fails now must block');
+  assert.match(outcome.error.message, /Missing passing release journeys with video:[\s\S]*- chat \(chat-focus: fails here \(.*\) and passed at `bbbbbbbbb`\)/);
+  assert.equal(outcome.receipt, undefined);
+});
+
+test('missing head evidence and unreadable recorded evidence still block', t => {
+  const f = fixture(t);
+  fs.rmSync(path.join(f.dir, 'verify-chat-focus'), { recursive: true, force: true });
+  recordedDir(f, `verify-chat-focus-${base}`, { 'result.json': '{ not json', 'failure.png': 'png bytes' });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.ok(outcome.error, 'missing head evidence must block even with recorded failures');
+  assert.match(outcome.error.message, /- chat \(chat-focus: evidence unreadable \(the journey produced no evidence in this run\)\)/);
+});
+
+test('caption variants of one journey publish when every variant failed the same way', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-inherited-variants-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const candidate = path.join(dir, 'candidate.exe');
+  fs.writeFileSync(candidate, `MPREVISION=${sha};`);
+  const candidateSha256 = hash(fs.readFileSync(candidate));
+  const plan = releasePlan(base, sha, [change(['features/bot-photo.md'])], [{ feature: 'bot-photo', map: 'features/bot-photo.md', journeys: ['bot-photo'], paths: [] }]);
+  const failure = 'The avatar kept the previous photo after the account finished loading.';
+  const write = (name, file, value) => {
+    const root = path.join(dir, name);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, file), typeof value === 'string' ? value : JSON.stringify(value));
+  };
+  for (const name of ['verify-bot-photo-96-light', 'verify-bot-photo-144-light']) {
+    const recorded = name.replace('verify-bot-photo', `verify-bot-photo-${base}`);
+    write(name, 'build.json', { revision: sha, harnessRevision: sha, embeddedRevision: sha, sha256: candidateSha256, candidate: true, run });
+    write(name, 'result.json', { feature: 'bot-photo', status: 'failed', cleanup: 'owned process tree stopped', error: failure });
+    write(name, 'failure.png', 'png bytes');
+    write(recorded, 'result.json', { feature: 'bot-photo', status: 'failed', cleanup: 'owned process tree stopped', error: failure });
+    write(recorded, 'failure.png', 'png bytes');
+    write(recorded, 'recorded.json', { journey: 'bot-photo', evidence: name, revision: base, run: `${run}4` });
+  }
+  const outcome = attempt(() => checkEvidence(plan, dir, candidate, [], run, () => {}));
+  assert.equal(outcome.error, undefined, `every caption variant belongs in the receipt, got: ${outcome.error?.message}`);
+  assert.deepEqual(outcome.receipt.inherited.map(item => item.journey), ['bot-photo']);
+  assert.equal(outcome.receipt.inherited[0].revision, base);
+  assert.deepEqual(outcome.receipt.features, []);
+  assert.match(evidenceNotes(outcome.receipt), /Already failing before this release[\s\S]*\[bot-photo was already failing\]/);
+});
+
+test('a journey already failing at the base publishes when this run records a different error', t => {
+  const f = fixture(t, ['chat', 'palette']);
+  failedHead(f, 'Waited 20 s for initial native chat geometry.');
+  recordedDir(f, `verify-chat-focus-${base}`, {
+    'result.json': { feature: 'chat-focus', status: 'failed', cleanup: 'owned process tree stopped', error: 'Newest message pixels changed after the first frame' },
+    'failure.png': 'png bytes',
+    'recorded.json': { journey: 'chat-focus', evidence: 'verify-chat-focus', revision: base, run: `${run}4` },
+  });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.equal(outcome.error, undefined, `different wording must not hide a base failure, got: ${outcome.error?.message}`);
+  assert.deepEqual(outcome.receipt.inherited.map(item => item.journey), ['chat-focus']);
+  assert.deepEqual(outcome.receipt.features.map(feature => feature.feature), ['palette']);
+});
+
+test('a journey whose own driver proved cleanup without a process tree publishes', t => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.dir, 'verify-chat-focus', 'process-tree.json'));
+  f.write('chat-focus', 'result.json', { feature: 'chat-focus', status: 'passed', sha256: f.sha256, cleanup: 'remaining_owned_processes=0; scratch_removed=True', cases: [{ passed: true }] });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.equal(outcome.error, undefined, `a journey may prove cleanup without process-tree.json, got: ${outcome.error?.message}`);
+  assert.deepEqual(outcome.receipt.features.map(feature => feature.feature), ['chat']);
+});
+
+test('a failed recorder without a result inherits a base failure', t => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.dir, 'verify-chat-focus', 'result.json'));
+  f.write('chat-focus', 'journey.json', { status: 'failed', journey: 'chat-focus', revision: sha, error: 'Journey exited 1; inspect result.json' });
+  recordedDir(f, `verify-chat-focus-${base}`, {
+    'result.json': { feature: 'chat-focus', status: 'failed', cleanup: 'owned process tree stopped', error: 'arrival at bottom stays clear' },
+    'failure.png': 'png bytes',
+    'recorded.json': { journey: 'chat-focus', evidence: 'verify-chat-focus', revision: base, run: `${run}4` },
+  });
+  const outcome = attempt(() => f.check(() => {}));
+  assert.equal(outcome.error, undefined, `a journey that already failed at the base must publish, got: ${outcome.error?.message}`);
+  assert.deepEqual(outcome.receipt.inherited.map(item => item.journey), ['chat-focus']);
+});
+
+test('missing candidate evidence names the missing file instead of blaming a video', t => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.dir, 'verify-chat-focus', 'build.json'));
+  const outcome = attempt(() => f.check(() => {}));
+  assert.ok(outcome.error, 'missing candidate evidence must block');
+  assert.match(outcome.error.message, /- chat \(chat-focus: evidence unreadable \(build\.json is missing or unreadable\)\)/);
+});
+
 }

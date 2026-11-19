@@ -4,7 +4,21 @@ Agent sessions on the server, Claude, Codex, Pi, hax or Cursor, can list the liv
 
 ## Install
 
-Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py` and `mp_helper.py` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions` and `mp-helper` wrappers into `~/.local/bin`. Run it again after a release to update.
+Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py`, `mp_helper.py`, `multibot_feedback.py` and `mp-layout.mjs` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions`, `mp-helper`, `multibot-feedback` and `mp-layout` wrappers into `~/.local/bin`. Run it again after a release to update.
+
+Every server account that runs chats needs its own copy, because `~/.local/bin` and `~/.multiprompt-runtime` belong to one account. `--user` repeats the install for another account on the same server and needs password-free sudo:
+
+```sh
+sudo tools/install-mp-talk.sh --user inne --user valentin
+```
+
+`--check` prints each tool as `ok`, `missing` or `broken` for the accounts you name and exits 1 when one is not usable:
+
+```sh
+sudo tools/install-mp-talk.sh --check --user inne --user valentin
+```
+
+The desktop publishes `mp-send`, `mp-helper`, `multibot-feedback` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime. `mp-sessions` and `mp-layout` come only from this install step, tracked as [SOFT-2838](https://app.hypertask.ai/detail/project-2060/2838).
 
 ## List chats
 
