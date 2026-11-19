@@ -184,3 +184,23 @@ if (process.env.PARTIAL_API_ERROR) process.exit(7);
   assert.notEqual(run({ PAGES: '[{"check_runs":[]}]' }).status, 0);
   assert.equal(run({ PARTIAL_API_ERROR: '1' }).status, 7);
 });
+
+test('the CI receipt summary merges parts, records the base proof and fails on a red head', t => {
+  const dir = scratch(t);
+  const run = (...args) => spawnSync(process.execPath, [path.join(__dirname, 'ci-receipt-summary.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, HEAD_SHA: head } });
+  fs.writeFileSync(path.join(dir, 'head.log'), 'ok 1 - the cancellation observer\n# pass 1\n# fail 0\n');
+  fs.writeFileSync(path.join(dir, 'base.log'), 'not ok 1 - the cancellation observer\n  spawnSync gh ENOBUFS\n# pass 0\n# fail 1\n');
+  fs.writeFileSync(path.join(dir, 'win.log'), 'CPU961 trial\nCPU991 matching slowest_median_ms=31\n');
+  const pattern = 'ENOBUFS|^(ok|not ok) [0-9]+ - the cancellation observer|^# (pass|fail) ';
+  assert.equal(run(path.join(dir, 'out'), 'tools', path.join(dir, 'head.log'), '0', pattern, path.join(dir, 'base.log'), '1').status, 0);
+  assert.equal(run(path.join(dir, 'out'), 'echo-budget', path.join(dir, 'win.log'), '0', '^CPU(961|991) ').status, 0);
+  const summary = JSON.parse(fs.readFileSync(path.join(dir, 'out/summary.json'), 'utf8'));
+  assert.deepEqual(summary.repro, { part: 'tools', base_exit_code: 1, head_exit_code: 0 });
+  assert.deepEqual(Object.keys(summary.parts), ['tools', 'echo-budget']);
+  assert.ok(summary.parts.tools.base_lines.some(line => line.includes('ENOBUFS')));
+  assert.equal(summary.head_sha, head);
+  assert.equal(summary.exit_code, 0);
+  assert.equal(run(path.join(dir, 'out2'), 'tools', path.join(dir, 'head.log'), '1', pattern).status, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'out2/summary.json'), 'utf8')).exit_code, 1);
+  assert.equal(run(path.join(dir, 'out3'), 'tools', path.join(dir, 'head.log'), '0', pattern, path.join(dir, 'base.log')).status, 2);
+});

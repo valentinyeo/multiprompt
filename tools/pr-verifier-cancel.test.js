@@ -74,7 +74,7 @@ else if (args.includes('name=pstack-verifier recovery')) {
   fs.writeFileSync(process.env.MARKER, 'reserved');
 } else if (route.endsWith('/dispatches') && process.env.FAILURE === 'dispatch') process.exit(1);
 else if (route.endsWith('/check-runs?filter=all&per_page=100') && fs.existsSync(process.env.MARKER)) console.log(JSON.stringify({ name: 'pstack-verifier recovery', head_sha: '${head}' }));
-else if (route.endsWith('/runs?per_page=100')) console.log('[]');
+else if (route.endsWith('/runs?per_page=100')) console.log(JSON.stringify([{ id: 1, display_title: 'unrelated', status: 'completed', pad: 'x'.repeat(2 * 1024 * 1024) }]));
 `, { mode: 0o755 });
     const env = { ...process.env, PATH: `${directory}${path.delimiter}${process.env.PATH}`, REQUESTS: requests, MARKER: marker,
       GITHUB_EVENT_PATH: event, REPO: 'owner/repo', FAILURE: failure, PULL: JSON.stringify({ ...pr, head: { sha: head, repo: { full_name: 'owner/repo' } } }) };
