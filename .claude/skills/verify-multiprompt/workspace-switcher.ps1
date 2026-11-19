@@ -246,12 +246,16 @@ $result.checks += @{ name = 'workspace-delete-main-protected'; persistentSeconds
 Snapshot 'workspace-delete-complete'
 Snapshot 'after'
 
-Select-WorkspaceCard $created 'archive-before'
+$archiveStart = (Read-Session).workspace_count
+Press @(0x11, 0x4E) 'Ctrl+N: create the archive fixture workspace'
+Wait-Until { (Read-Session).workspace_count -eq $archiveStart + 1 } 'archive fixture workspace and CMD tab persisted'
+$archiveSlot = (Read-Session).active_workspace
+Select-WorkspaceCard $archiveSlot 'archive-before'
 $archiveBefore = Read-Session
-$archiveId = [string]$archiveBefore.workspaces[$created].wid
+$archiveId = [string]$archiveBefore.workspaces[$archiveSlot].wid
 $archiveRegistry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
 $archiveName = [string](@($archiveRegistry.windows | Where-Object { $_.id -ceq $archiveId })[0].name)
-$archiveTabs = @($archiveBefore.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $created })
+$archiveTabs = @($archiveBefore.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $archiveSlot })
 if ($archiveId.Length -eq 0 -or $archiveName.Length -eq 0 -or $archiveTabs.Count -eq 0) { throw 'Archive fixture needs a named workspace and a real session' }
 $archiveCount = $archiveBefore.workspace_count
 Invoke-JourneyCommand 'Archive workspace' -Confirm {
