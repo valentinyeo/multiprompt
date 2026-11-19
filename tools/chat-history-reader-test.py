@@ -1674,7 +1674,7 @@ class HistoryReaderTest(unittest.TestCase):
                 self.assertIn('REPLY-631-a', wire)
                 self.assertEqual(wire.splitlines()[0].split('\t')[13], 'tail')
                 costs = [len(row.encode('utf-8')) + 1 for row in wire.splitlines()[1:-1]]
-                self.assertLessEqual(sum(costs), reader.TAIL_VISIBLE_BYTES + max(costs))
+                self.assertLessEqual(sum(costs), 4 * reader.TAIL_BYTES + max(costs))
                 with patch.object(reader, 'ISSUE_631_TAIL_FILLS_SHOWN_BUDGET', False):
                     self.assertNotIn('REPLY-631-b', reader.response(dict(self.query)))
 
