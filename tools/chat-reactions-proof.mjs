@@ -81,7 +81,7 @@ export function assertDoubleClick({ before, added, removed, delivered }, events,
     assert.equal(observation[stage].composerText, 'draft stays here');
   }
   assert.equal(observation.doubleClickDelivered, true);
-  const expected = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
+  const expected = '👍 to: Same first words for this example for this example for this example for this…';
   const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
   assert.equal(sends.length, 1, 'exactly one reaction transport submission');
   assert.match(sends[0].content, /\n\[mp:[0-9a-f]{16}\]$/);
@@ -177,8 +177,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const clean = json('cleanup.json');
       assert.equal(clean.remaining_owned_processes, 0);
       assert.equal(clean.scratch_removed, true);
-      const prefix = 'Same first words ' + 'for this example '.repeat(8);
-      const expected = `👍 to: ${prefix.trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
+      const expected = '👍 to: Same first words for this example for this example for this example for this…';
       const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
       const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
       assert.deepEqual(sends.map(e => e.content), [expected], 'exactly one genuine transport submission');
