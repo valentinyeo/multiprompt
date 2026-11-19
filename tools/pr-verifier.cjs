@@ -153,14 +153,15 @@ function journeyRows(summary, compareBase, features = Object.keys(summary.head))
     const baseRuns = summary.base[feature] || [];
     const base = baseRuns.length ? worst(baseRuns) : (head === 'passed' || !compareBase ? 'not run' : 'missing');
     const failures = headRuns.filter(run => runOutcome(run) === 'failed');
-    const inherited = head === 'failed' && base === 'failed' && failures.every(run => baseRuns.some(other =>
+    const witnesses = failures.map(run => baseRuns.find(other =>
       runOutcome(other) === 'failed' &&
       (run.error ? other.error === run.error : !other.error && run.caseFailures?.length > 0 &&
         JSON.stringify(other.caseFailures) === JSON.stringify(run.caseFailures)) &&
       other.artifact.replace(/-[0-9a-f]{40}(?=-|$)/, '') === run.artifact));
+    const inherited = head === 'failed' && base === 'failed' && witnesses.every(Boolean);
     const requiredRuns = [...headRuns, ...(head === 'failed' && compareBase ? baseRuns : [])];
     const blocked = requiredRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
-    return { feature, head, base, inherited, blocked };
+    return { feature, head, base, inherited, blocked, witness: witnesses.find(Boolean) || null };
   });
 }
 
@@ -839,7 +840,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { describeRun, runOutcome, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
