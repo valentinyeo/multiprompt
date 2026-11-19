@@ -398,6 +398,7 @@ test('IGSH-1103 retained results preserve failure details and actual executable 
     ['appearance', { ...existing, status: 'passed' }, null],
     ['safe-updates', null, { success: false, checks: [{ name: 'rollback', passed: false }], cleanup: 'fixture cleanup' }],
     ['safe-updates', null, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
+    ['safe-updates', { feature: 'safe-updates', status: 'passed', version, sha256, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
     ['appearance', null, null, false],
   ]) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-retained-identity-'));
@@ -420,8 +421,9 @@ test('IGSH-1103 retained results preserve failure details and actual executable 
         assert.equal(retained.feature, feature);
         assert.equal(retained.version || '', resolved ? version : '');
         assert.equal(retained.sha256 || '', resolved ? sha256 : '');
-        assert.equal(retained.status, update?.success ? 'passed' : 'failed');
+        assert.equal(retained.status, 'failed');
         if (update) {
+          assert.match(retained.error, /stopped before its final check/);
           assert.deepEqual(retained.checks, update.checks);
           assert.equal(retained.cleanup, update.cleanup);
         } else {
