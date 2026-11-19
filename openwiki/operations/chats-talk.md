@@ -18,7 +18,7 @@ sudo tools/install-mp-talk.sh --user inne --user valentin
 sudo tools/install-mp-talk.sh --check --user inne --user valentin
 ```
 
-The desktop publishes `mp-send`, `mp-helper`, `multibot-feedback` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime. `mp-sessions` and `mp-layout` come only from this install step, tracked as [SOFT-2838](https://app.hypertask.ai/detail/project-2060/2838).
+The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `multibot-feedback`, `mp-layout` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime, so an account whose chats use the runtime copy needs no install step. An account on the same server that has no `~/.multiprompt-runtime` gets the tools from the install step above and nothing else.
 
 ## List chats
 

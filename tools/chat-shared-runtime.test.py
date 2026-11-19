@@ -155,9 +155,46 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(reader.is_symlink())
         self.assertEqual(reader.read_text(), (runtime / (info['sha256'] + '.py')).read_text())
 
+    def bundle(self):
+        sources = (
+            ('MP_SEND_SOURCE', 'src/mp_send.py'),
+            ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
+            ('MP_SESSIONS_SOURCE', 'src/mp_sessions.py'),
+            ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
+            ('ZSB_SOURCE', 'src/mp_zsb.sh'),
+        )
+        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources)
+        return prelude + SOURCE
+
+    def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
+        self.info(self.bundle())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        for name, file in (('mp-sessions', 'src/mp_sessions.py'), ('mp-layout', 'src/mp_layout.mjs')):
+            published = runtime / name
+            self.assertTrue(published.is_symlink(), name)
+            self.assertEqual(published.read_text(), (ROOT / file).read_text(), name)
+            self.assertTrue(os.access(published, os.X_OK), name)
+        self.assertTrue(os.readlink(runtime / 'mp-layout').endswith('.mjs'), 'node must see the module extension')
+
+    def test_published_mp_sessions_lists_chats_from_the_runtime_copy(self):
+        self.info(self.bundle())
+        sessions = Path(self.home.name) / '.multiprompt-runtime' / 'mp-sessions'
+        listed = subprocess.run([str(sessions)], text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertIn('STATE', listed.stdout)
+
+    def test_published_mp_layout_answers_help_from_the_runtime_copy(self):
+        self.info(self.bundle())
+        layout = Path(self.home.name) / '.multiprompt-runtime' / 'mp-layout'
+        usage = subprocess.run([str(layout)], text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertIn('usage: mp-layout', usage.stdout)
+
     def test_mp_send_is_not_published_without_a_bundle(self):
         self.info()
-        self.assertFalse((Path(self.home.name) / '.multiprompt-runtime' / 'mp-send').exists())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        self.assertFalse((runtime / 'mp-send').exists())
+        self.assertFalse((runtime / 'mp-sessions').exists())
+        self.assertFalse((runtime / 'mp-layout').exists())
 
     def test_import_does_not_install(self):
         code = "import importlib.util,sys; s=importlib.util.spec_from_file_location('reader',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); assert m.READER_SOURCE"

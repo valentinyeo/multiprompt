@@ -368,4 +368,4 @@ export async function run(argv, overrides = {}) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) process.exitCode = await run(process.argv.slice(2));
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) process.exitCode = await run(process.argv.slice(2));
