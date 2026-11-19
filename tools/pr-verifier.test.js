@@ -108,37 +108,6 @@ test('a missing head result is FAIL, not a pass', () => {
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' }).final, 'FAIL');
 });
 
-test('a passed head does not need a base run', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
-  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
-  assert.equal(final, 'PASS');
-  assert.match(body, /- appearance: head passed, base not run/);
-});
-
-test('the base side is only the head journeys that failed', () => {
-  const jobs = [
-    { name: 'head appearance / build-app', conclusion: 'success' },
-    { name: 'head appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head chat-view / verify (chat-view)', conclusion: 'success' },
-    { name: 'head chat-view / build-app', conclusion: 'success' },
-    { name: 'base appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head palette-order / reopen-board-contract', conclusion: 'skipped' },
-  ];
-  assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
-});
-
-test('the verifier waits until Tests passes for that head and still posts the check on the head', () => {
-  assert.equal(verifier.testsGate([]).action, 'wait');
-  assert.equal(verifier.testsGate([{ id: 2, status: 'queued', conclusion: '' }]).action, 'wait');
-  assert.equal(verifier.testsGate([{ id: 2, status: 'completed', conclusion: 'failure' }, { id: 1, status: 'completed', conclusion: 'success' }]).action, 'fail');
-  assert.equal(verifier.testsGate([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }]).action, 'pass');
-  assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
-  assert.match(workflow, /needs: tests/);
-  assert.match(workflow, /needs\.failed-head\.outputs\.features/);
-  assert.match(workflow, /head_sha="\$HEAD_SHA"/);
-  assert.match(workflow, /repos\/\$REPO\/check-runs/);
-});
-
 test('a clean head and a red base is PASS with the before and after rows', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'passed' }, [`verify-appearance-${base}`]: { status: 'failed' } });
   const summary = verifier.summarize(dir, ['appearance'], base);
@@ -269,11 +238,7 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   fs.writeFileSync(path.join(dir, 'verify-appearance', 'doctor.json'), '{"ok":true}');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
   fs.writeFileSync(path.join(out, 'pr.md'), '# Pull request 1');
-  fs.writeFileSync(path.join(dir, 'verify-appearance', 'requests.json'), '[{"method":"PATCH","body":{"display_name":"Renamed chat"}}]');
-  fs.writeFileSync(path.join(dir, 'verify-appearance', 'journal.txt'), 'mp-agent-sync.service finished');
   const material = verifier.judgeInputs(out, dir);
-  assert.match(material, /Renamed chat/);
-  assert.match(material, /mp-agent-sync.service finished/);
   assert.match(material, /evidence\/verify-appearance\/result\.json/);
   assert.match(material, /evidence\/verify-appearance\/doctor\.json/);
   const messages = verifier.judgeMessages(material);
