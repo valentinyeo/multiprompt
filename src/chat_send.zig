@@ -682,7 +682,10 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
         const session = target.session[0..target.session_len];
         if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
         var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
-        const note = mention.mentionNote(source_name, visible, &note_buf) orelse continue;
+        const provider = mention.providerName(shell.ai_agent);
+        const sid_len = @min(@as(usize, shell.claude_sid_len), shell.claude_sid.len);
+        const sid: []const u8 = if (sid_len > 0) shell.claude_sid[0..sid_len] else "";
+        const note = mention.mentionNote(source_name, provider, sid, visible, &note_buf) orelse continue;
         if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
         mention.mentionMarkDelivered(message_id, session);
     }
