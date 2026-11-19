@@ -26,6 +26,9 @@ BoardFeedbackTest = FEEDBACK_TESTS.BoardFeedbackTest
 SPEC = importlib.util.spec_from_file_location('reader', ROOT / 'src/chat_history_reader.py')
 reader = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reader)
+FIXTURE_SPEC = importlib.util.spec_from_file_location('soft2779_fixture', ROOT / 'tools/fixtures/SOFT-2779/fixture.py')
+fixture = importlib.util.module_from_spec(FIXTURE_SPEC)
+FIXTURE_SPEC.loader.exec_module(fixture)
 
 
 class HistoryReaderTest(unittest.TestCase):
@@ -1671,7 +1674,7 @@ class HistoryReaderTest(unittest.TestCase):
                 self.assertIn('REPLY-631-a', wire)
                 self.assertEqual(wire.splitlines()[0].split('\t')[13], 'tail')
                 costs = [len(row.encode('utf-8')) + 1 for row in wire.splitlines()[1:-1]]
-                self.assertLessEqual(sum(costs), reader.TAIL_BYTES + max(costs))
+                self.assertLessEqual(sum(costs), reader.TAIL_VISIBLE_BYTES + max(costs))
                 with patch.object(reader, 'ISSUE_631_TAIL_FILLS_SHOWN_BUDGET', False):
                     self.assertNotIn('REPLY-631-b', reader.response(dict(self.query)))
 
@@ -3008,6 +3011,59 @@ class HistoryReaderTest(unittest.TestCase):
         fields, rows = self.read()
         self.assertIn('QUESTION-690', [text[:12] for text in texts(rows)])
         self.assertIn('answer-4', [text[:8] for text in texts(rows)])
+
+
+class SOFT_2779_TailWindowTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.path = fixture.extract(self.home)
+        self.query = dict(id=9, provider='claude', codex=False, sid=fixture.SID, tmux='', cwd=str(self.home),
+                          follow=False, offset=0, before=0, cached_sid='', inode=0, mtime=0, probe='', start=0)
+
+    def read(self, query=None):
+        asked = dict(self.query if query is None else query)
+        wire = reader.response(asked, None, False, ('claude', asked['sid'], self.path, None))
+        lines = wire.splitlines()
+        fields = lines[0].split('\t')
+        return fields, [json.loads(line) for line in lines[1:-1]], wire
+
+    def older_page(self, fields):
+        return dict(self.query, cached_sid=fields[4], inode=int(fields[7]), offset=int(fields[6]),
+                    start=int(fields[14]), before=int(fields[5]), mtime=int(fields[11]), probe=fields[12])
+
+    def visible(self, rows):
+        return [row['text'] for row in rows if row['role'] in ('user', 'assistant')]
+
+    def test_tail_frame_holds_the_newest_question_and_reply(self):
+        measured = fixture.check(self.path)
+        fields, rows, wire = self.read()
+        self.assertEqual(fields[13], 'tail')
+        texts = self.visible(rows)
+        self.assertTrue(texts, sorted({row['role'] for row in rows}))
+        self.assertEqual(texts[-1], fixture.NEWEST_REPLY)
+        self.assertIn(fixture.NEWEST_QUESTION, texts)
+        self.assertNotIn(fixture.OLDEST_QUESTION, texts)
+        self.assertGreater(int(fields[6]) - int(fields[5]), reader.TAIL_BYTES)
+        self.assertLessEqual(int(fields[6]) - int(fields[5]), reader.TAIL_VISIBLE_BYTES)
+        self.assertGreater(measured['tool_rows'] / measured['rows'], fixture.MIN_TOOL_SHARE)
+        fields, rows, wire = self.read(self.older_page(fields))
+        self.assertEqual(fields[13], 'older')
+        self.assertTrue(self.visible(rows), [row['role'] for row in rows])
+
+    def test_tail_frame_keeps_its_messages_when_a_tool_row_arrives(self):
+        fields, rows, _wire = self.read()
+        self.assertIn(fixture.NEWEST_QUESTION, self.visible(rows), sorted({row['role'] for row in rows}))
+        with self.path.open('ab') as output:
+            output.write((json.dumps(fixture.tail_result(10_000)) + '\n').encode())
+        fields, rows, _wire = self.read()
+        texts = self.visible(rows)
+        self.assertTrue(texts, sorted({row['role'] for row in rows}))
+        self.assertEqual(texts[-1], fixture.NEWEST_REPLY)
+        self.assertIn(fixture.NEWEST_QUESTION, texts)
 
 
 class IGSH412ResumedSessionTest(unittest.TestCase):
