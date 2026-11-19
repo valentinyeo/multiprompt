@@ -189,3 +189,43 @@ test('CLI --check rejects new YAML/TOML comments and strip mode removes them', (
     assert.equal(fs.readFileSync(path.join(root, 'workflow.yml'), 'utf8'), 'run: |\n  # shell text\n');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('CLI --check --added-since ignores comments master already carries and fails on comments a change adds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strip-comments-added-'));
+  const script = path.join(__dirname, 'strip-comments.mjs');
+  const git = args => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { stdio: 'pipe' });
+  const check = (...extra) => spawnSync(process.execPath, [script, '--check', ...extra, root], { encoding: 'utf8' });
+  try {
+    git(['init', '-q', '-b', 'master']);
+    fs.writeFileSync(path.join(root, 'old.js'), 'const a = 1; // old note\nconst b = 2;\n');
+    fs.writeFileSync(path.join(root, 'old.py'), '# old note\nvalue = 1\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'base']);
+    git(['checkout', '-q', '-b', 'change']);
+    fs.appendFileSync(path.join(root, 'old.js'), 'const c = 3;\n');
+    fs.writeFileSync(path.join(root, 'fresh.js'), 'const d = 4;\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'clean change']);
+    assert.equal(check().status, 1);
+    const clean = check('--added-since', 'master');
+    assert.equal(clean.status, 0, clean.stderr);
+
+    fs.appendFileSync(path.join(root, 'old.js'), 'const e = 5; // new note\n');
+    fs.appendFileSync(path.join(root, 'old.py'), '# new python note\n');
+    fs.writeFileSync(path.join(root, 'fresh.js'), '// whole file is new\nconst d = 4;\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'adds comments']);
+    const failed = check('--added-since', 'master');
+    assert.equal(failed.status, 1);
+    assert.ok(failed.stderr.includes('old.js:4: // new note'), failed.stderr);
+    assert.ok(failed.stderr.includes('old.py:3: # new python note'), failed.stderr);
+    assert.ok(failed.stderr.includes('fresh.js:1: // whole file is new'), failed.stderr);
+    assert.ok(!failed.stderr.includes('old note'), failed.stderr);
+    assert.match(failed.stderr, /3 code comment\(s\) found/);
+
+    fs.writeFileSync(path.join(root, 'old.js'), 'const a = 1; // old note changed\nconst b = 2;\nconst c = 3;\nconst e = 5;\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'edits the commented line']);
+    assert.ok(check('--added-since', 'master').stderr.includes('old.js:1: // old note changed'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

@@ -42,7 +42,7 @@ test('the CI repair receipt is path-filtered, runs the base proof and owns its f
   assert.match(source, /name: ci-repair-receipt\n/);
   assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
-  for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+  for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
