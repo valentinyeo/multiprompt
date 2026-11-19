@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int main(int argc, char **argv) {
@@ -16,6 +17,14 @@ int main(int argc, char **argv) {
     fputs(cmd, log);
     fclose(log);
     if (strstr(cmd, "@@MP_REPOS_OK@@")) {
+        const char *only = getenv("MP_VERIFY_REPOS");
+        if (only && only[0]) {
+            int only_host = strstr(cmd, "remote-3") ? 2 : strstr(cmd, "remote-2") ? 1 : 0;
+            if (only_host == 0) puts(only);
+            puts("\n@@MP_REPOS_OK@@");
+            fflush(stdout);
+            return 0;
+        }
         int host = strstr(cmd, "remote-3") ? 2 : strstr(cmd, "remote-2") ? 1 : 0;
         snprintf(path, sizeof(path), "%s\\offline-%d", root, host);
         if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
