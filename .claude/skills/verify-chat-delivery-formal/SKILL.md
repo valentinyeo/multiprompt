@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `9dd167dad7dde81749519038b0bcc5866c6deebb`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+Last confirmed source/model sync commit is `d1fea7c43d6740eb269d0a30424bd9fa2786d4a5`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |
@@ -67,6 +67,6 @@ The current source violates `NoFalseNotSent` through timeout and restart, and `S
 
 The [formal feature map](../verify-multiprompt/features/chat-delivery-formal.md) owns this skill and its workflow. The independent PR verifier requires the exact-head formal CI run and reads its raw summary, rather than substituting a nearest-name Windows journey.
 
-The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if **every guarded source file is byte-identical to that base**. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. Changed covered code, drift and replay errors never inherit. This classifies a verification-only PR's pre-existing bugs without calling them passes.
+The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish. When every guarded source file is byte-identical to that base, the run records the base SHA. When guarded source changed, the checker extracts `chat_echo.zig` and `chat_send.zig` from that base commit and requires their production decision table to equal the head's, so a reviewed change that leaves every modeled decision intact inherits the base findings while a changed decision cannot. `summary.json` still lists all failures and the base SHA, plus `changed_covered_files` and `base_decisions_match`. Default runs still return exit 1. Drift, replay errors and a differing decision table never inherit.
 
 After a source change that did not recheck this model, use pstack /maintain-formal-verification-skill.
