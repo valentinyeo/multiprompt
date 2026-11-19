@@ -80,6 +80,7 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
     const cap = @min(out.len, QUOTE_MAX);
     const room = if (cap > 0) cap - 1 else 0;
     var n: usize = 0;
+    var boundary: usize = 0;
     var space = false;
     var i: usize = 0;
     while (i < text.len) {
@@ -99,6 +100,7 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
         n += units;
         i += units;
         space = false;
+        boundary = n;
     }
     var more = false;
     var rest = i;
@@ -108,7 +110,7 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
         break;
     }
     if (!more) return out[0..n];
-    if (n == 0) {
+    if (boundary == 0) {
         var cut: usize = 0;
         rest = 0;
         while (rest < text.len and cut < room) {
@@ -123,8 +125,8 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
         out[cut] = ELLIPSIS;
         return out[0 .. cut + 1];
     }
-    out[n] = ELLIPSIS;
-    return out[0 .. n + 1];
+    out[boundary] = ELLIPSIS;
+    return out[0 .. boundary + 1];
 }
 
 fn writeQuote(emoji: Emoji, text: []const u16, out: []u16) ?usize {
