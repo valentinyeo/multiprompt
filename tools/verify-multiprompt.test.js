@@ -2641,6 +2641,9 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   assert.ok([...driver.matchAll(/\$stage = '([^']+)'/g)].length >= 8, 'every phase names its step');
   const ready = driver.slice(driver.indexOf('function Test-ServerGroupReady('), driver.indexOf('function Wait-ServerGroup('));
   assert.match(ready, /Get-ServerGroupProperty \$_ 'tmux_session'/);
-  assert.match(ready, /Get-ServerGroupProperty \$_ 'group_id'/);
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'group_id'/)
   assert.doesNotMatch(ready, /\$_\.[a-z_]+/, 'strict mode must not read a saved tab field that may be absent');
+  const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
+  const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
+  assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*return/, 'this journey owns launch and must not fall through to the generic launch');
 });
