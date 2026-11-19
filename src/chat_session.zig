@@ -805,7 +805,7 @@ fn chatLiveWanted(key: chat_transcript.Identity) bool {
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
-    return @import("chat_send.zig").chatMessageGoesToHost(shell.kind, shell.ai_agent, @import("chat_send.zig").chatHostedShell(&shell));
+    return @import("chat_send.zig").chatMessageGoesToHost(shell.kind, shell.ai_agent);
 }
 
 fn chatLiveStreamRelease(stream: *ChatLiveStream) void {

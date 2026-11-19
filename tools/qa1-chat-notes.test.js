@@ -27,7 +27,7 @@ test('IGSH-1266 a submit that never landed is queued again instead of staying st
 test('IGSH-1266 the send path is decided at send time, not at enqueue time', () => {
   const send = read('src/chat_send.zig');
   assert.match(send, /pub fn chatSendRoute\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8, sid_present: bool, hosted: bool\) ChatSendRoute/, 'one routing rule');
-  assert.match(send, /if \(chatMessageGoesToHost\(kind, ai_agent, hosted\)\) return if \(sid_present\) \.host_message else \.wait_for_start;/, 'a hosted tab without a sid waits');
+  assert.match(send, /if \(chatHostedMessageGoesToHost\(kind, ai_agent, hosted\)\) return if \(sid_present\) \.host_message else \.wait_for_start;/, 'a hosted tab without a sid waits');
   assert.match(send, /if \(kind == \.tmux and ai_agent == 0\) return \.wait_for_start;/, 'a tmux tab that has not started its agent waits');
   assert.match(send, /if \(route == \.host_message and \(!entry\.message_v1 or entry\.message_sid\[0\] == 0\)\) \{\s*if \(!chatUpgradeToHostMessage\(shell_index, entry\)\) \{\s*entry\.state = \.queued;\s*entry\.write_started = false;\s*return \.write_failed;/, 'the entry is upgraded at send time or stays queued');
   assert.match(send, /fn chatUpgradeToHostMessage\(shell_index: u32, entry: \*app_state\.ChatOutboxEntry\) bool/, 'the upgrade helper exists');

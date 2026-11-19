@@ -6,11 +6,11 @@ const read = (file) => fs.readFileSync(file, 'utf8');
 
 test('IGSH-1266 a hosted tab message is submitted to the host and never typed into the pane', () => {
   const send = read('src/chat_send.zig');
-  assert.match(send, /pub fn chatMessageGoesToHost\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8, hosted: bool\) bool \{\s*return kind == \.tmux and \(hosted or ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7\);/,
+  assert.match(send, /pub fn chatHostedMessageGoesToHost\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8, hosted: bool\) bool \{\s*return chatMessageGoesToHost\(kind, ai_agent\) or \(kind == \.tmux and hosted\);/, 
     'the host routing rule must be one named function');
   assert.match(send, /app_state\.g_chat_outbox\.items\[added\]\.message_v1 = true;/);
   const enqueue = send.slice(send.indexOf('fn chatEchoEnqueueForShell('), send.indexOf('fn chatEchoMarkNotSent('));
-  assert.match(enqueue, /chatMessageGoesToHost\(app_state\.shells\[idx\]\.kind, app_state\.shells\[idx\]\.ai_agent, chatHostedShell\(&app_state\.shells\[idx\]\)\)/,
+  assert.match(enqueue, /chatHostedMessageGoesToHost\(app_state\.shells\[idx\]\.kind, app_state\.shells\[idx\]\.ai_agent, chatHostedShell\(&app_state\.shells\[idx\]\)\)/,
     'a hosted Claude tab must be enqueued as a host message, not a terminal one');
   assert.match(send, /if \(app_state\.g_chat_outbox\.items\[ei\]\.message_v1\) return \.write_failed;/,
     'a host message must never fall through to the console writer');

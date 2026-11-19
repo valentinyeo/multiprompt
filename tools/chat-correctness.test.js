@@ -42,7 +42,8 @@ const CONSOLE_SCREEN_BUFFER_INFO = struct {
 const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, activity: enum { idle, active } = .idle };
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatFileIdentityForShell(_: u32) chat_transcript.Identity { return .{}; }
-fn chatMessageGoesToHost(_: ShellKind, _: u8, _: bool) bool { return false; }
+fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
+fn chatHostedMessageGoesToHost(_: ShellKind, _: u8, _: bool) bool { return false; }
 fn chatSendRoute(_: ShellKind, _: u8, _: bool, _: bool) ChatSendRoute { return .terminal_send; }
 fn chatSessionHosted(_: []const u8) bool { return false; }
 fn chatHostedShell(_: *const Shell) bool { return false; }

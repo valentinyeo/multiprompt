@@ -359,6 +359,7 @@ fn chatOutboxTrySendEntry(_: u32, _: usize) bool { return false; }
 fn chatHoldLegacyCodex() bool { return false; }
 fn chatMessageSyncFinish() void {}
 fn chatMessageSyncStart(_: u32) void {}
+fn chatHostedShell(_: anytype) bool { return false; }
 fn chatOutboxCountForShell(_: u32) usize { return 0; }
 fn chatOutboxSyncCountForShell(_: u32) usize { return 0; }
 fn chatPendingResetDropIfStale() ?usize { return null; }

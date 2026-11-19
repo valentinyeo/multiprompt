@@ -1950,7 +1950,7 @@ pub fn chatHostedShell(shell: *const @import("app_state.zig").Shell) bool {
 }
 
 pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool, hosted: bool) ChatSendRoute {
-    if (chatMessageGoesToHost(kind, ai_agent, hosted)) return if (sid_present) .host_message else .wait_for_start;
+    if (chatHostedMessageGoesToHost(kind, ai_agent, hosted)) return if (sid_present) .host_message else .wait_for_start;
     if (kind == .tmux and ai_agent == 0) return .wait_for_start;
     return .terminal_send;
 }
@@ -1973,24 +1973,30 @@ test "SOFT-2824 a chat started on the server sends to the host before the app kn
     try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, true, true));
 }
 
-pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8, hosted: bool) bool {
-    return kind == .tmux and (hosted or ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
+pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
+    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
+}
+
+pub fn chatHostedMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8, hosted: bool) bool {
+    return chatMessageGoesToHost(kind, ai_agent) or (kind == .tmux and hosted);
 }
 
 test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 1, false));
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 2, false));
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 7, false));
-    try std.testing.expect(!chatMessageGoesToHost(.tmux, 0, false));
-    try std.testing.expect(!chatMessageGoesToHost(.cmd, 1, false));
-    try std.testing.expect(!chatMessageGoesToHost(.vps, 1, false));
-    try std.testing.expect(!chatMessageGoesToHost(.vps2, 2, false));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 7));
+    try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
+    try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
+    try std.testing.expect(!chatMessageGoesToHost(.vps, 1));
+    try std.testing.expect(!chatMessageGoesToHost(.vps2, 2));
 }
 
 test "SOFT-2824 a live tmux session is hosted even when no pane agent was detected" {
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 0, true));
-    try std.testing.expect(!chatMessageGoesToHost(.cmd, 0, true));
-    try std.testing.expect(!chatMessageGoesToHost(.vps, 0, true));
+    try std.testing.expect(chatHostedMessageGoesToHost(.tmux, 0, true));
+    try std.testing.expect(!chatHostedMessageGoesToHost(.cmd, 0, true));
+    try std.testing.expect(!chatHostedMessageGoesToHost(.vps, 0, true));
+    try std.testing.expect(!chatHostedMessageGoesToHost(.tmux, 0, false));
+    try std.testing.expect(chatHostedMessageGoesToHost(.tmux, 1, false));
     try std.testing.expect(chatSessionHosted("live-multiprompt-android-mwnl43gt"));
     try std.testing.expect(!chatSessionHosted("multiprompt-android"));
     try std.testing.expect(!chatSessionHosted(""));
@@ -2016,7 +2022,7 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?u
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
     const added = app_state.g_chat_outbox.items.len - 1;
     app_state.g_chat_outbox.items[added].anchor = anchor;
-    if (idx < app_state.shell_count and chatMessageGoesToHost(app_state.shells[idx].kind, app_state.shells[idx].ai_agent, chatHostedShell(&app_state.shells[idx]))) {
+    if (idx < app_state.shell_count and chatHostedMessageGoesToHost(app_state.shells[idx].kind, app_state.shells[idx].ai_agent, chatHostedShell(&app_state.shells[idx]))) {
         app_state.g_chat_outbox.items[added].message_v1 = true;
         app_state.g_chat_outbox.items[added].message_sid = chatFileIdentityForShell(idx).sid;
     }

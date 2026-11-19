@@ -275,7 +275,7 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute', 'chatSessionHosted', 'chatHostedShell'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("app_state.zig").Shell', 'Shell').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatHostedMessageGoesToHost', 'chatSendRoute', 'chatSessionHosted', 'chatHostedShell'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("app_state.zig").Shell', 'Shell').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();
