@@ -4276,8 +4276,9 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
 
 pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
     if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
+    _ = reference;
     var out: [256]u16 = undefined;
-    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return false;
+    const line = chat_reaction.spoken(emoji, quote, &out) orelse return false;
     if (!@import("chat_send.zig").sendChatMessage(line)) {
         showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
         return false;
