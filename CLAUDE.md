@@ -8,13 +8,13 @@ This public repo is where Multiprompt is developed, checked and released. GitHub
 
 Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](openwiki/operations/build-and-install.md).
 
-- Hard blockers interrupt PRs and tickets. If Valentin cannot work, publish a replacement. Then resume the queue.
+- An outage interrupts the queue. Revert the bad change first, then send the real fix through reproduction, failing repro, PR verification and normal release.
 - Follow the solo-dev skill's work order.
 - Drain existing PRs first. Do not open new PRs.
 - Commit small units directly to `master`. Include a one-line undo. Add it to each commit.
 - Never build or test on shared servers. This includes lightweight tests. Use GitHub-hosted public CI only.
 - Each master push publishes a release automatically. CI builds x64 and arm64. The built x64 app must launch. Its main window must appear within five minutes. Gitleaks blocks publication on failure. CI signs and publishes the assets.
-- Other checks run nightly or manually. They report only. Automatic revert is disabled. The built release must launch. If it fails, revert the change immediately. Revert it manually.
+- Heavy desktop checks run nightly or manually. The built release must launch. Use `auto-revert-master.yml` for rollback evidence; while automatic revert is disabled, revert manually before attempting a fix.
 - Add `changelog.d/<TICKET>-<slug>.md` fragments (see `changelog.d/README.md`). Commit as `<TICKET>: Brief description`. CI stamps versions. Never hand-edit app versions.
 - Release updates reach users via the in-app updater. Never compile on the laptop.
 - Every extension change (`bridge.js`, manifest) bumps `"version"` in `extension/manifest.json`, independent of the app version. The extension-version check fails a PR that changes shipped files in `extension/` without a bump.
@@ -49,9 +49,11 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
+| Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs name a journey that fails on master and passes on head. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
+| Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every PR commit in `test.yml` |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |

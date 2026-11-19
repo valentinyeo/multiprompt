@@ -13,6 +13,8 @@ const MARKER = '<!-- pstack-verifier -->';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-flash';
 const MAX_FILE_CHARS = 6000;
+const ARTIFACT_ATTEMPTS = 5;
+const ARTIFACT_RETRY_MS = 3000;
 
 function selectable(available) {
   return available.filter(name => !SLOW_FEATURES.has(name));
@@ -29,6 +31,15 @@ function reproRequirement(pr) {
   return { bugFix, reproJourney: names.length === 1 ? names[0] : '' };
 }
 
+function ciRepro(selection, summary) {
+  const workflows = selection.ciWorkflows || [];
+  const receipts = summary?.ciRepro || [];
+  if (selection.reproJourney || selection.features?.length || !workflows.length || selection.unmapped?.length || selection.nearest?.length) return null;
+  const proofs = workflows.map(workflow => receipts.find(item => item.workflow === workflow));
+  const proven = proofs.every(item => item && Number.isInteger(item.base_exit_code) && item.base_exit_code !== 0 && item.head_exit_code === 0);
+  return proven ? proofs : null;
+}
+
 function validateSelection(raw, available, pr = {}) {
   let parsed;
   try {
@@ -40,13 +51,6 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
-  const requiredFeatures = [];
-  const changedPaths = (pr.files || []).map(file => file.path);
-  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
-    if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
-    requested.unshift('chat-still');
-    requiredFeatures.push('chat-still');
-  }
   if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
@@ -59,7 +63,6 @@ function validateSelection(raw, available, pr = {}) {
     features,
     dropped,
     ...requirement,
-    requiredFeatures,
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -109,6 +112,63 @@ function describeRun(directory, name) {
   };
 }
 
+function transientArtifactError(value) {
+  return /HTTP (?:429|5\d\d)\b|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|TLS handshake|unexpected EOF/i.test(value || '');
+}
+
+function pause(ms) {
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function fetchArtifactArchive(env, repo, artifact, archive) {
+  const attempts = Math.max(1, Number(env.ARTIFACT_ATTEMPTS || ARTIFACT_ATTEMPTS));
+  const retryMs = Math.max(0, Number(env.ARTIFACT_RETRY_MS ?? ARTIFACT_RETRY_MS));
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const fd = fs.openSync(archive, 'w');
+    try {
+      execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'pipe'] });
+      return;
+    } catch (error) {
+      last = error;
+    } finally {
+      fs.closeSync(fd);
+    }
+    const message = `${last.stderr ?? ''} ${last.message ?? ''}`;
+    if (!transientArtifactError(message) || attempt === attempts) break;
+    pause(retryMs * attempt);
+  }
+  throw new Error(oneLine(`${last?.stderr || ''} ${last?.message || ''}`, 300) || 'artifact download failed');
+}
+
+function placeArtifact(env, repo, artifact, evidenceDir) {
+  const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
+  try {
+    const archive = path.join(scratch, 'artifact.zip');
+    fetchArtifactArchive(env, repo, artifact, archive);
+    const content = path.join(scratch, 'content');
+    execFileSync('unzip', ['-q', archive, '-d', content], { stdio: 'inherit' });
+    const target = path.join(evidenceDir, artifact.name);
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.renameSync(content, target);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function downloadFailures(evidenceDir) {
+  const file = path.join(evidenceDir, 'download-failures.json');
+  if (!fs.existsSync(file)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(parsed)
+      ? parsed.filter(item => item && item.artifact).map(item => ({ artifact: String(item.artifact), error: oneLine(item.error, 300) }))
+      : [];
+  } catch {
+    return [{ artifact: 'download-failures.json', error: 'the recorded download failures could not be read' }];
+  }
+}
+
 function summarize(evidenceDir, features, baseSha) {
   const names = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
   const summary = { head: {}, base: {} };
@@ -124,6 +184,7 @@ function summarize(evidenceDir, features, baseSha) {
       else if (match[1] === baseSha) summary.base[feature].push(run);
     }
   }
+  summary.downloadFailures = downloadFailures(evidenceDir);
   return summary;
 }
 
@@ -152,14 +213,15 @@ function journeyRows(summary, compareBase, features = Object.keys(summary.head))
     const baseRuns = summary.base[feature] || [];
     const base = baseRuns.length ? worst(baseRuns) : (head === 'passed' || !compareBase ? 'not run' : 'missing');
     const failures = headRuns.filter(run => runOutcome(run) === 'failed');
-    const inherited = head === 'failed' && base === 'failed' && failures.every(run => baseRuns.some(other =>
+    const witnesses = failures.map(run => baseRuns.find(other =>
       runOutcome(other) === 'failed' &&
       (run.error ? other.error === run.error : !other.error && run.caseFailures?.length > 0 &&
         JSON.stringify(other.caseFailures) === JSON.stringify(run.caseFailures)) &&
       other.artifact.replace(/-[0-9a-f]{40}(?=-|$)/, '') === run.artifact));
+    const inherited = head === 'failed' && base === 'failed' && witnesses.every(Boolean);
     const requiredRuns = [...headRuns, ...(head === 'failed' && compareBase ? baseRuns : [])];
     const blocked = requiredRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
-    return { feature, head, base, inherited, blocked };
+    return { feature, head, base, inherited, blocked, witness: witnesses.find(Boolean) || null };
   });
 }
 
@@ -194,6 +256,11 @@ function failedHeadFeatures(jobs, features) {
 
 function evidenceMarkdown(summary, selection) {
   const lines = ['# Journey evidence', ''];
+  if (summary.downloadFailures?.length) {
+    lines.push('## Evidence artifacts that could not be downloaded', '');
+    for (const item of summary.downloadFailures) lines.push(`- ${item.artifact}: ${item.error}`);
+    lines.push('');
+  }
   if (!selection.features.length) lines.push('No desktop journeys were selected by source mapping or mandatory gates. This is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch; required Tests and independent review still apply.', '');
   for (const row of journeyRows(summary, selection.compareBase, selection.features)) {
     lines.push(`## ${row.feature}: head ${row.head}, base ${row.base}`, '');
@@ -221,8 +288,9 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const compareBase = selection.compareBase;
   const rows = journeyRows(summary, compareBase, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
-  const notes = [];
+  const notes = (selection.nearest || []).map(entry => `Nearest mapped feature ${entry.feature} selected for ${entry.file}; no file ownership matched.`);
   let final = VERDICTS.includes(verdict?.verdict) ? verdict.verdict : 'BLOCKED';
+  if (notes.length && final === 'PASS') final = 'PASS+NOTES';
   if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid assessment.');
   const failedHead = rows.filter(row => row.head !== 'passed');
   const brokenOnBase = failedHead.filter(row => row.inherited);
@@ -231,9 +299,11 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const prerequisites = Object.entries(jobs).filter(([name, job]) =>
     (['tests', 'resolve', 'select', 'failed-head'].includes(name) && job.result !== 'success') || job.result === 'cancelled' ||
     (['head', 'base'].includes(name) && job.result === 'failure' && !rows.some(row => row[name] === 'failed')));
-  if (blocked.length || prerequisites.length || infrastructure.length) {
+  const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
+  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
+    for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
     if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head}, base ${row.base})`).join(', ')}.`);
     for (const [name, job] of prerequisites) notes.push(`${name} job ${job.result}; full verification could not complete.`);
   }
@@ -254,7 +324,10 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     final = 'PASS+NOTES';
     notes.push(`Not covered by any journey: ${selection.uncovered}`);
   }
-  if (selection.bugFix) {
+  const ciProof = selection.bugFix ? ciRepro(selection, summary) : null;
+  if (ciProof) {
+    notes.unshift(`Repro by CI workflow: ${ciProof.map(item => `${item.workflow} (${item.part}: base exit ${item.base_exit_code}, head exit ${item.head_exit_code})`).join(', ')}.`);
+  } else if (selection.bugFix) {
     const repro = rows.find(row => row.feature === selection.reproJourney);
     const baseRuns = summary.base[selection.reproJourney] || [];
     if (!repro || repro.head !== 'passed' || repro.base !== 'failed' || repro.blocked ||
@@ -361,7 +434,7 @@ function recover(env) {
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
   const headSha = pr.head.sha;
   if (run.conclusion === 'cancelled') {
-    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '.workflow_runs']));
+    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '[.workflow_runs[] | {id, display_title, head_sha, event, status}]']));
     if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
       gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
@@ -390,7 +463,7 @@ function recover(env) {
 }
 
 function gh(args) {
-  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
 function setOutputs(values) {
@@ -467,28 +540,52 @@ function download(env, selectionFile, evidenceDir, baseSha) {
   const listed = gh(['api', `repos/${repo}/actions/runs/${env.RUN_ID}/artifacts`, '--paginate', '--jq', '.artifacts[] | {id,name,created_at,expired}'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
   const wanted = latestArtifacts(listed, selection, baseSha);
-  fs.mkdirSync(evidenceDir, { recursive: true });
-  for (const artifact of wanted) {
-    const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
+  const ciReceipts = [];
+  const failures = [];
+  for (const workflow of selection.ciWorkflows || []) {
+    const name = workflow.replace(/\.yml$/, '');
     try {
-      const archive = path.join(scratch, 'artifact.zip');
-      const fd = fs.openSync(archive, 'w');
-      try {
-        execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'inherit'] });
-      } finally { fs.closeSync(fd); }
-      const content = path.join(scratch, 'content');
-      execFileSync('unzip', ['-q', archive, '-d', content], { stdio: 'inherit' });
-      const target = path.join(evidenceDir, artifact.name);
-      fs.rmSync(target, { recursive: true, force: true });
-      fs.renameSync(content, target);
-    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+      const pr = JSON.parse(fs.readFileSync(path.join(path.dirname(selectionFile), 'pr.json'), 'utf8'));
+      const run = ciWorkflowRun(env, workflow, pr.headRefOid);
+      if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`the ${workflow} run is ${run?.conclusion || run?.status || 'missing'} on this head`);
+      const artifacts = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${run.id}/artifacts`, '--jq', '.artifacts']));
+      const artifact = artifacts.filter(item => item.name === name && !item.expired).sort((a, b) => Number(b.id) - Number(a.id))[0];
+      if (!artifact) throw new Error(`the ${name} artifact is missing`);
+      wanted.push(artifact);
+      ciReceipts.push({ workflow, ...run, artifact: name, artifact_id: artifact.id });
+    } catch (error) {
+      failures.push({ artifact: name, error: oneLine(error.message || error, 300) });
+    }
   }
-  process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  let placed = 0;
+  for (const artifact of wanted) {
+    try {
+      placeArtifact(env, repo, artifact, evidenceDir);
+      placed += 1;
+    } catch (error) {
+      failures.push({ artifact: artifact.name, error: oneLine(error.message || error, 300) });
+    }
+  }
+  if (ciReceipts.length) fs.writeFileSync(path.join(evidenceDir, 'ci-workflows.json'), JSON.stringify(ciReceipts, null, 2));
+  const failuresFile = path.join(evidenceDir, 'download-failures.json');
+  if (failures.length) fs.writeFileSync(failuresFile, JSON.stringify(failures, null, 2));
+  else fs.rmSync(failuresFile, { force: true });
+  process.stdout.write(`downloaded ${placed} of ${wanted.length} evidence artifacts\n`);
+  for (const failure of failures) process.stdout.write(`evidence artifact ${failure.artifact} was not collected: ${failure.error}\n`);
 }
 
 function readCapped(file, limit = MAX_FILE_CHARS) {
   const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
   return text.length > limit ? `${text.slice(0, limit)}\n[truncated]` : text;
+}
+
+function ciReproReceipts(evidenceDir, workflows) {
+  return workflows.flatMap(workflow => {
+    const file = path.join(evidenceDir, workflow.replace(/\.yml$/, ''), 'summary.json');
+    const repro = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).repro : null;
+    return repro && typeof repro === 'object' ? [{ workflow, part: String(repro.part), base_exit_code: repro.base_exit_code, head_exit_code: repro.head_exit_code }] : [];
+  });
 }
 
 function judgeInputs(outDir, evidenceDir) {
@@ -500,7 +597,23 @@ function judgeInputs(outDir, evidenceDir) {
   const selection = path.join(outDir, 'selection.json');
   if (fs.existsSync(selection)) {
     parts.push(`### selection.json\n${readCapped(selection)}`);
-    if (JSON.parse(fs.readFileSync(selection, 'utf8')).features?.length === 0) {
+    const plan = JSON.parse(fs.readFileSync(selection, 'utf8'));
+    if (plan.ciWorkflows?.length) {
+      const receiptFile = path.join(evidenceDir, 'ci-workflows.json');
+      if (!fs.existsSync(receiptFile)) throw new Error('CI workflow evidence receipts missing');
+      const receipts = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+      const pr = JSON.parse(fs.readFileSync(path.join(outDir, 'pr.json'), 'utf8'));
+      parts.push(`### evidence/ci-workflows.json\n${readCapped(receiptFile)}`);
+      for (const workflow of plan.ciWorkflows) {
+        const artifact = workflow.replace(/\.yml$/, '');
+        const receipt = receipts.find(item => item.workflow === workflow && item.artifact === artifact && item.head_sha === pr.headRefOid && item.conclusion === 'success');
+        const summary = path.join(evidenceDir, artifact, 'summary.json');
+        if (!receipt || !fs.existsSync(summary) || !fs.statSync(summary).size) throw new Error(`CI workflow evidence missing or stale: ${workflow}`);
+        JSON.parse(fs.readFileSync(summary, 'utf8'));
+        parts.push(`### evidence/${artifact}/summary.json\n${readCapped(summary)}`);
+      }
+    }
+    if (plan.features?.length === 0) {
       for (const [name, limit] of [['ci.json', 12000], ['diff.patch', 30000]]) {
         const file = path.join(outDir, name);
         if (!fs.existsSync(file) || !fs.statSync(file).size) throw new Error(`CI-only review is missing required evidence: ${name}`);
@@ -532,6 +645,7 @@ function judgeMessages(material) {
     'BLOCKED: infrastructure prevented verification, including timeout, cancellation, missing evidence, harness error or runner queue. Missing cleanup evidence is BLOCKED, not a product FAIL.',
     'selection.features is the authoritative execution plan; picker suggestions in reason or doneWhen do not add planned journeys.',
     'An empty selection.features is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch instead of requiring desktop result.json, doctor.json or base comparisons.',
+    'Selected ciWorkflows provide exact-head run receipts and raw summary.json evidence. A successful verification workflow may report inherited source findings; those remain findings, not property passes. Judge them against the patch and inheritance proof.',
     'Use PASS+NOTES for behavior not covered by the CI-only evidence. Still use FAIL for a regression shown by the patch or checks, and BLOCKED for missing required CI evidence or an API failure.',
     'CI snapshots include supplementary pending checks and expected negative controls. Interpret them using the patch and aggregate gates; do not mistake them for missing selected journeys or automatically treat a negative control as a regression.',
     'Reply with one JSON object only: {"verdict":"PASS"|"PASS+NOTES"|"FAIL"|"BLOCKED","evidence":[at most 8 plain sentences, each naming the file or journey it comes from]}.',
@@ -645,6 +759,12 @@ function testsRuns(env, headSha, suites) {
   return runs;
 }
 
+function ciWorkflowRun(env, workflow, head) {
+  if (!/^[a-z0-9-]+\.yml$/.test(workflow) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('Invalid CI workflow or head');
+  const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/${workflow}/runs?head_sha=${head}&event=pull_request&per_page=20`, '--jq', '[.workflow_runs[] | {id, head_sha, status, conclusion}]']));
+  return runs.filter(run => run.head_sha === head).sort((a, b) => Number(b.id) - Number(a.id))[0];
+}
+
 async function waitForTests(env) {
   let head = String(env.HEAD_SHA || '').trim();
   if (!/^[0-9a-f]{40}$/.test(head)) {
@@ -658,14 +778,19 @@ async function waitForTests(env) {
   const maxPoll = Number(env.MAX_POLL_MS || 300000);
   if (!Number.isFinite(poll) || poll <= 0 || !Number.isFinite(maxPoll) || maxPoll < poll) throw new Error('POLL_MS must be positive and MAX_POLL_MS must be at least POLL_MS');
   for (;;) {
-    const decision = testsGate(testsRuns(env, head));
-    process.stdout.write(`${decision.reason}\n`);
-    if (decision.action === 'pass') return setOutputs({ result: 'PASS', head_sha: head });
-    if (decision.action === 'fail' || decision.action === 'blocked') {
-      const error = new Error(decision.reason);
-      error.verdict = decision.action === 'fail' ? 'FAIL' : 'BLOCKED';
+    const decisions = [testsGate(testsRuns(env, head)), ...JSON.parse(env.CI_WORKFLOWS || '[]').map(workflow => {
+      const run = ciWorkflowRun(env, workflow, head);
+      const decision = testsGate(run ? [run] : []);
+      return { ...decision, reason: `${workflow}: ${decision.reason}` };
+    })];
+    for (const decision of decisions) process.stdout.write(`${decision.reason}\n`);
+    const failure = decisions.find(decision => decision.action === 'fail' || decision.action === 'blocked');
+    if (failure) {
+      const error = new Error(failure.reason);
+      error.verdict = failure.action === 'fail' ? 'FAIL' : 'BLOCKED';
       throw error;
     }
+    if (decisions.every(decision => decision.action === 'pass')) return setOutputs({ result: 'PASS', head_sha: head });
     if (Date.now() + poll > deadline) throw new Error('Tests did not pass before the wait ended');
     await new Promise(resolveWait => setTimeout(resolveWait, poll));
     poll = Math.min(poll * 2, maxPoll);
@@ -694,15 +819,24 @@ async function main(argv, env) {
     const selection = validateSelection(env.SELECTION, available, pr);
     const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
     const repro = selection.bugFix && available.includes(selection.reproJourney) ? [selection.reproJourney] : [];
-    selection.features = [...new Set([...mapped.features, ...repro, ...selection.requiredFeatures])].sort();
+    selection.features = [...new Set([...mapped.features, ...repro])].sort();
     selection.dropped = [];
-    selection.compareBase = selection.features.length > 0 && (selection.bugFix || JSON.parse(env.SELECTION).compare_base !== false);
+    selection.compareBase = selection.features.length > 0;
     selection.unmapped = mapped.unmapped;
+    selection.nearest = mapped.nearest || [];
+    selection.ciWorkflows = mapped.ciWorkflows || [];
+    if (selection.nearest.length) {
+      const note = `No file ownership matched; nearest feature by map: ${selection.nearest.map(entry => `${entry.feature} for ${entry.file}`).join(', ')}.`;
+      selection.reason = note;
+      selection.uncovered = note;
+    } else if (mapped.unmapped.length) {
+      selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
+    }
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
     const base = selection.compareBase ? selection.features : [];
-    setOutputs({ features: JSON.stringify(selection.features), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
+    setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
     return undefined;
   }
   if (command === 'pick-deepseek') return pickDeepseek(env, rest[0]);
@@ -716,6 +850,7 @@ async function main(argv, env) {
     const [evidenceDir, selectionFile, baseSha, outDir] = rest;
     const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
     const summary = summarize(evidenceDir, selection.features, baseSha);
+    summary.ciRepro = ciReproReceipts(evidenceDir, selection.ciWorkflows || []);
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
     fs.writeFileSync(path.join(outDir, 'evidence.md'), evidenceMarkdown(summary, selection));
@@ -775,7 +910,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { describeRun, runOutcome, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

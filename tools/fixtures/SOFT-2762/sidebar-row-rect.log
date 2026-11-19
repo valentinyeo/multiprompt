@@ -1,0 +1,16 @@
+2026-11-19 07:45:52.011 [photo-proof] expanded target=2 rect=20,113,56,149
+2026-11-19 07:45:52.011 [sidebar-avatar] target=2 face=12 color=0
+2026-11-19 07:45:52.011 [bots] face=12 color=0 rect=20,113,56,149
+2026-11-19 07:45:52.013 [photo-proof] expanded target=0 rect=20,171,56,207
+2026-11-19 07:45:52.013 [sidebar-avatar] target=0 face=5 color=0
+2026-11-19 07:45:52.013 [bots] face=5 color=0 rect=20,171,56,207
+2026-11-19 07:45:52.015 [photo-proof] expanded target=1 rect=20,229,56,265
+2026-11-19 07:45:52.015 [sidebar-avatar] target=1 face=15 color=0
+2026-11-19 07:45:52.015 [bots] face=15 color=0 rect=20,229,56,265
+2026-11-19 07:45:55.650 [palette] confirm target=7110
+2026-11-19 07:45:55.673 [reposition] client=1024x720 sidebar=300
+2026-11-19 07:45:55.694 [photo-proof] expanded target=0 rect=20,113,56,149
+2026-11-19 07:45:55.694 [bots] face=8 color=0 rect=20,113,56,149
+2026-11-19 07:45:55.694 [photo-proof] expanded target=1 rect=20,171,56,207
+2026-11-19 07:45:55.694 [bots] face=19 color=0 rect=20,171,56,207
+2026-11-19 07:46:01.246 [reposition] client=1024x720 sidebar=300

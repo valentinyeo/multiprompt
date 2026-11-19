@@ -1,12 +1,9 @@
 name: SSH helpers without consoles
 
 on:
+  schedule:
+    - cron: '28 5 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/ssh-detached.yml'
-      - 'tools/ssh-detached/**'
-
 permissions:
   contents: read
 

@@ -110,6 +110,41 @@ test('workflow restores before the base matrix and publishes reusable bundles on
     assert.notEqual(cache.harnessVersion('HEAD', dir, actualWorkflow), cache.harnessVersion('HEAD', dir));
   });
 
+  await t.test('the baseline matrix carries only the journeys that failed on head plus the declared repro', { skip: process.platform !== 'linux' }, t => {
+    const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
+    assert.match(workflow, /REPRO_FEATURES: \$\{\{ needs\.select\.outputs\.repro_features \}\}/);
+    assert.doesNotMatch(workflow, /REPRO_FEATURES: \$\{\{ needs\.select\.outputs\.base_features \}\}/);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'base-scope-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const head = [
+      { name: 'head / verify (appearance)', conclusion: 'success' },
+      { name: 'head / verify (sessions)', conclusion: 'success' },
+      { name: 'head / verify (chat-view)', conclusion: 'failure' },
+    ];
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/usr/bin/env node
+const endpoint = process.argv.slice(2).find(arg => arg.includes('/jobs') || arg.includes('/artifacts?')) || '';
+if (endpoint.includes('/jobs')) ${'for (const job of ' + JSON.stringify(head) + ') console.log(JSON.stringify(job));'}
+else console.log(JSON.stringify({ artifacts: [] }));
+`, { mode: 0o755 });
+    const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, REPO: repo, RUN_ID: '200', BASE_SHA: base, HARNESS_VERSION: harness };
+    const pick = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'failed-head'], {
+      env: { ...env, FEATURES: '["appearance","chat-view","sessions"]', REPRO_FEATURES: '["appearance"]', GITHUB_OUTPUT: path.join(dir, 'pick.output') }, encoding: 'utf8',
+    });
+    assert.equal(pick.status, 0, pick.stderr);
+    assert.equal(fs.readFileSync(path.join(dir, 'pick.output'), 'utf8').trim(), 'features=["appearance","chat-view"]');
+    const out = path.join(dir, 'base');
+    const restored = spawnSync(process.execPath, [path.join(__dirname, 'base-journey-cache.cjs'), 'restore', out], {
+      env: { ...env, FEATURES: '["appearance","chat-view"]', GITHUB_OUTPUT: path.join(dir, 'restore.output') }, encoding: 'utf8',
+    });
+    assert.equal(restored.status, 0, restored.stderr);
+    const reuse = JSON.parse(fs.readFileSync(path.join(out, 'reuse.json'), 'utf8'));
+    assert.deepEqual(reuse.features, ['appearance', 'chat-view']);
+    assert.equal(reuse.beforeJobs, 2);
+    assert.equal(reuse.afterJobs, 2);
+  });
+
   await t.test('two PR runs on one base reuse complete evidence before scheduling; missing variants rerun the whole journey', { skip: process.platform !== 'linux' }, t => {
     const f = fixture(t);
     cache.stamp(f.evidence, f.options);

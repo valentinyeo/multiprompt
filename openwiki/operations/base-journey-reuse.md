@@ -1,6 +1,6 @@
 # Reusable baseline evidence
 
-The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR. Cache tooling comes from the workflow revision, so older PRs need not contain the tool. The journey scripts and their content hash still come from the PR head.
+The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR. The baseline matrix carries only journeys that failed on head plus the declared repro journey, because a head pass needs no parent comparison. Cache tooling comes from the workflow revision, so older PRs need not contain the tool. The journey scripts and their content hash still come from the PR head.
 
 ## Identity
 

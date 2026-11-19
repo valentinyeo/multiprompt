@@ -1,0 +1,134 @@
+name: CI repair receipt
+
+on:
+  pull_request:
+    paths:
+      - 'tools/pr-verifier.cjs'
+      - 'tools/pr-verifier-cancel.test.js'
+      - 'tools/pr-verifier-download-retry.test.js'
+      - 'tools/base-journey-cache.test.js'
+      - 'tools/reusable-workflow-permissions.test.js'
+      - '.github/workflows/auto-release.yml'
+      - 'tools/strip-comments.mjs'
+      - 'tools/strip-comments.test.js'
+      - '.github/workflows/no-comments.yml'
+      - 'tools/ci-receipt-summary.mjs'
+      - 'src/chat_perf_test.zig'
+      - 'src/chat_echo.zig'
+      - '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'
+      - '.github/workflows/ci-repair-receipt.yml'
+      - '.github/workflows/pr-verifier.yml'
+      - 'openwiki/operations/base-journey-reuse.md'
+      - 'tools/release-journeys.mjs'
+      - 'tools/release-journeys.test.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-repair-receipt-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install the video decoder
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Run the verifier recovery tests on head and on the base source
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/input"
+          set +e
+          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs > "$RUNNER_TEMP/input/head.log" 2>&1
+          echo "head=$?" >> "$GITHUB_ENV"
+          if [ -n "$BASE_SHA" ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+            cp tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs "$RUNNER_TEMP/base/tools/"
+            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs) > "$RUNNER_TEMP/input/base.log" 2>&1
+            echo "base=$?" >> "$GITHUB_ENV"
+          fi
+      - name: Write the receipt
+        shell: bash
+        run: |
+          set +e
+          if [ -n "$BASE_SHA" ]; then
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
+          else
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) '
+          fi
+          echo "receipt=$?" >> "$GITHUB_ENV"
+          true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-repair-receipt-tools
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error
+      - name: Fail when the head tests or the receipt failed
+        run: test "$head" = 0 && test "$receipt" = 0
+  budget:
+    needs: tools
+    if: always() && needs.tools.result != 'skipped'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ci-repair-receipt-tools
+          path: ${{ runner.temp }}/receipt
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Run the echo-assign CPU budget
+        id: run
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\input" | Out-Null
+          $log = "$env:RUNNER_TEMP\input\echo-budget.log"
+          zig test src/chat_perf_test.zig -O ReleaseSmall -mcpu=baseline --test-filter IGSH-991 2>&1 | Out-File -Encoding utf8 $log
+          "code=$LASTEXITCODE" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+      - name: Write the receipt
+        if: always()
+        shell: pwsh
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $code = '${{ steps.run.outputs.code }}'
+          if (-not $code) { $code = '1' }
+          node tools/ci-receipt-summary.mjs "$env:RUNNER_TEMP\receipt" echo-budget "$env:RUNNER_TEMP\input\echo-budget.log" $code '^CPU(961|991) '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-repair-receipt
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error

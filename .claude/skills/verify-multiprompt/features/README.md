@@ -9,6 +9,8 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Clear a server chat](chat-clear.md).
 - [Stop a running reply](chat-stop.md).
 - [Send and queue messages](chat-message-sending.md).
+- [Formal chat delivery](chat-delivery-formal.md).
+- [CI repair receipt](ci-repair-receipt.md).
 
 Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
 
@@ -58,7 +60,7 @@ Without `--base`, the tool requires 100%. CI checks out the base revision separa
 
 For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
-Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without the picker's three-journey cap. Unknown application paths select every runnable journey. Documentation and CI-only edits do not launch unrelated desktop journeys. Shared files such as `src/main.zig` deliberately select every journey.
+Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys and the declared bug-fix repro, without a model picker. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. If nothing maps, one nearest feature is selected by map names and source paths, and the verdict reports that choice. Shared production files such as `src/main.zig` can still match every journey explicitly.
 
 The nightly master run and each release run every runnable recipe, including the formerly manual recipes. `Verify on:` retains the legacy smoke-set metadata. Reconnect and diagnostic recipes without a `Driving it with control.ps1` heading keep their separate workflows. The shared control driver remains a separate concern.
 

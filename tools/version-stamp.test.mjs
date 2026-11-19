@@ -184,7 +184,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
       assert.match(compile, /restore-keys:/);
       assert.match(toolchain, /zig-toolchain-0.16.0/);
-      if (name === 'idle-budget') assert.match(job, /if: github\.event_name == 'pull_request'\n/);
+      if (name === 'idle-budget') assert.match(job, /if: github\.event_name != 'pull_request'/);
       if (name === 'build-windows' || name === 'idle-budget') continue;
       const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
       assert.ok(trim, name);
@@ -679,3 +679,16 @@ else if (args[1] === 'download') {
     else assert.doesNotMatch(result.stdout, /RELEASE_VERIFIED/);
   });
 }
+
+test('SOFT-2803 attributes the untagged master commits since v0.28.1762', () => {
+  const reviewed = {
+    'ee394be0c178378919a6d4d3499329f5d3636691': ['docs(verify): complete the desktop feature map (SOFT-2567 Part H) (#1074)', '2567'],
+    '2452e248a2fe8ff78be0b342273b7677dd7c3f52': ['fix(chat): load inne commands as the tab owner (SOFT-2584) (#1080)', '2584'],
+  };
+  for (const [sha, [subject, number]] of Object.entries(reviewed)) {
+    const ticketTitles = { ...titles, [`IGSH-${number}`]: 'Reviewed release attribution', [`SOFT-${number}`]: 'Reviewed release attribution' };
+    let generated;
+    assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1781', [], [{ sha, subject }], ticketTitles); });
+    assert.match(generated, new RegExp(`\\.ticket = "[A-Z]+-${number}"`));
+  }
+});
