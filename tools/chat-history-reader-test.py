@@ -8217,5 +8217,39 @@ def load_tests(loader, tests, pattern):
     return unittest.TestSuite(group for i, group in enumerate(tests) if i % 2 == index)
 
 
+class SpawnedSourceGenerationTest(unittest.TestCase):
+    def test_a_host_started_from_the_inner_source_knows_its_generation(self):
+        namespace = dict(__name__='spawned_host', READER_SOURCE=reader.READER_SOURCE)
+        exec(compile(reader.READER_SOURCE, '<agent-host>', 'exec'), namespace)
+        self.assertEqual(namespace.get('RUNTIME_GENERATION'), reader.RUNTIME_GENERATION)
+        self.assertEqual(namespace['host_version']()['generation'], reader.RUNTIME_GENERATION)
+
+    def test_spawned_host_reaches_exec_during_nightly_rotation(self):
+        namespace = dict(__name__='spawned_host', READER_SOURCE=reader.READER_SOURCE)
+        exec(compile(reader.READER_SOURCE, '<agent-host>', 'exec'), namespace)
+        stopped = []
+        logs = []
+        state = {}
+        session = dict(agent=object())
+        with patch.dict(namespace, dict(host_published_runtime=lambda: '/published/reader.py',
+                                        host_restart_clear=lambda *args: None,
+                                        host_session_state=lambda *args: state,
+                                        host_state_write=lambda *args: None,
+                                        host_flush=lambda *args: None,
+                                        host_chat_name=lambda *args: 'rotation-fixture',
+                                        host_agent_stop=stopped.append,
+                                        host_log=lambda *args: logs.append(args))), \
+                patch.object(namespace['os'], 'execv', side_effect=SystemExit('rotated')) as execute:
+            with self.assertRaisesRegex(SystemExit, 'rotated'):
+                try:
+                    namespace['host_rotate']('claude', 'sid', session, session['agent'])
+                except NameError as error:
+                    self.fail(f'The spawned host crashed before rotating: {error}')
+        self.assertEqual(len(stopped), 1)
+        self.assertIsNone(session['agent'])
+        self.assertEqual(logs[-1][2:], ('rotate', dict(runtime='/published/reader.py', generation=reader.RUNTIME_GENERATION)))
+        execute.assert_called_once_with(sys.executable, [sys.executable, '-u', '/published/reader.py', '--agent-host', 'claude', 'sid'])
+
+
 if __name__ == '__main__':
     unittest.main()

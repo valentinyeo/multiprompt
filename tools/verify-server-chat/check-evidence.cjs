@@ -8,12 +8,19 @@ const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\u
 const json = name => JSON.parse(text(name));
 const result = json('result.json');
 assert.equal(result.status, 'passed');
-assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
+assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true], ['host-rotation', true], ['after-rotation', true]]);
+const rotation = json('host-rotation.json');
+assert.equal(rotation.passed, true);
+assert.ok(['restarted', 'restarting'].includes(rotation.result.status));
+assert.notEqual(rotation.before.started, rotation.after.started);
+assert.equal(rotation.rotations.length, 1);
+assert.equal(rotation.rotations[0].detail.generation, rotation.result.generation);
+assert.doesNotMatch(rotation.stderr, /NameError/);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
-for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear']]) {
+for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear'], ['after-rotation', 'windows after rotation']]) {
   const wireText = name === 'clear' ? '/clear ' : message;
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
   assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));

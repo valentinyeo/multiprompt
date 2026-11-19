@@ -118,6 +118,26 @@ function assertScrollJourney(driver, desktop, boundary) {
   assert.match(boundary, /Readable transcript paragraph[^\n]+\\n\\n" \* 32/);
 }
 
+test('fresh history distinguishes the opening hold from an explicit user scroll', () => {
+  const session = fs.readFileSync(new URL('../src/chat_session.zig', import.meta.url), 'utf8');
+  const ready = session.indexOf('if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;');
+  const prepare = session.lastIndexOf('layoutChatControls();', ready);
+  const refresh = session.indexOf('refreshChatTranscript(false);', prepare);
+  assert.ok(prepare >= 0 && ready > prepare && refresh > ready, 'publish source readiness between old layout preparation and the new-history refresh');
+  const refreshBody = session.slice(session.indexOf('pub fn refreshChatTranscript('), session.indexOf('pub fn chatRelayoutPreservingScroll('));
+  assert.match(refreshBody, /chatScrollStateChanged\(viewport_h\);\s+if \(verboseLoggingEnabled\(\)\) chatNewMessagesChanged\(app_state.g_chat_new_messages.count\(\) != 0\);/);
+  assert.match(refreshBody, /if \(app_state.g_chat_read_hold\) chat_history.visibleTailAnchor/);
+  assert.doesNotMatch(refreshBody, /app_state.g_chat_read_hold and !app_state.g_chat_read_open_ready/);
+  assert.match(session, /g_chat_scroll_y = app_state.g_chat_content_h - viewport_h - 100;\s+app_state.g_chat_scrolled_up = true;/);
+  assert.match(session, /expectEqual\(shown_y, app_state.g_chat_layout_rects\[held.index\].top - app_state.g_chat_scroll_y\)/);
+});
+
+test('handled scrolling reports a fresh exact counter state even when the counter is unchanged', () => {
+  const render = fs.readFileSync(new URL('../src/chat_render.zig', import.meta.url), 'utf8');
+  const scroll = render.slice(render.indexOf('pub fn chatScrollBy('), render.indexOf('const scroll_ui ='));
+  assert.match(scroll, /chatScrollStateChanged\(client.bottom - client.top\);\s+if \(verboseLoggingEnabled\(\)\) chatNewMessagesChanged\(app_state.g_chat_new_messages.count\(\) != 0\);/);
+});
+
 test('IGSH-813 wheel journey requires overflow and fresh strict app-log states without transcript focus', () => {
   const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
