@@ -785,9 +785,8 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
             out.text_len += 1;
         }
         if (out.text_len < text.len) {
-            const body = out.text_len;
-            const converted = std.unicode.utf8ToUtf16Le(text[body..], item.text.items) catch 0;
-            out.text_len = body + @import("chat_mention.zig").revealChatNames(text[body..], converted);
+            const converted = std.unicode.utf8ToUtf16Le(text[out.text_len..], item.text.items) catch 0;
+            out.text_len += converted;
         }
         if (out.text_len <= start) continue;
         blocks[out.blocks] = .{
