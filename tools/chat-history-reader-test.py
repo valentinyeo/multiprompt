@@ -3043,7 +3043,7 @@ class SOFT_2779_TailWindowTest(unittest.TestCase):
         fields, rows, wire = self.read()
         self.assertEqual(fields[13], 'tail')
         texts = self.visible(rows)
-        self.assertTrue(texts, [row['role'] for row in rows])
+        self.assertTrue(texts, sorted({row['role'] for row in rows}))
         self.assertEqual(texts[-1], fixture.NEWEST_REPLY)
         self.assertIn(fixture.NEWEST_QUESTION, texts)
         self.assertNotIn(fixture.OLDEST_QUESTION, texts)
@@ -3056,12 +3056,12 @@ class SOFT_2779_TailWindowTest(unittest.TestCase):
 
     def test_tail_frame_keeps_its_messages_when_a_tool_row_arrives(self):
         fields, rows, _wire = self.read()
-        self.assertIn(fixture.NEWEST_QUESTION, self.visible(rows), [row['role'] for row in rows])
+        self.assertIn(fixture.NEWEST_QUESTION, self.visible(rows), sorted({row['role'] for row in rows}))
         with self.path.open('ab') as output:
             output.write((json.dumps(fixture.tail_result(10_000)) + '\n').encode())
         fields, rows, _wire = self.read()
         texts = self.visible(rows)
-        self.assertTrue(texts, [row['role'] for row in rows])
+        self.assertTrue(texts, sorted({row['role'] for row in rows}))
         self.assertEqual(texts[-1], fixture.NEWEST_REPLY)
         self.assertIn(fixture.NEWEST_QUESTION, texts)
 
