@@ -7337,6 +7337,10 @@ def prompt_rows_close(target, opened):
         pass
 
 
+def reaction_reply(text):
+    return isinstance(text, str) and re.fullmatch(r'(?:👍|👎|❤️) to: [^\r\n]+(?: \[mp:[0-9a-f]{16}\])?', text) is not None
+
+
 def send_response_preserve_draft(q):
     import uuid
     name, sid, text = q.get('tmux'), q.get('sid'), q.get('text')
@@ -7365,7 +7369,7 @@ def send_response_preserve_draft(q):
         typed, sent = record.get('typed'), record.get('sent')
         typed = typed if isinstance(typed, str) else ''
         sent = sent if isinstance(sent, str) else ''
-        if re.fullmatch(r'(?:👍|👎|❤️) to: [^\r\n]+ \[mp:[0-9a-f]{16}\]', text):
+        if reaction_reply(text):
             typed = ''
         displaced = draft if draft and not own_draft(draft, text, typed, sent) else ''
         if displaced:
@@ -8124,7 +8128,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 130
 
 if __name__ == '__main__':
     import base64 as _base64
