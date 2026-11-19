@@ -2380,6 +2380,7 @@ pub fn chatRestartAiApplyRefusal(shell_id: u32, busy: bool) void {
         shell.ai_restart_busy_tick = @max(GetTickCount64(), 1);
         shell.ai_stopped = false;
     } else {
+        shell.ai_stopped = true;
         shell.ai_restart_busy = false;
         shell.ai_restart_busy_tick = 0;
     }
@@ -4086,12 +4087,8 @@ fn chatTmuxSendFinish() void {
         if (job.needs_restart) {
             app_state.shells[idx].ai_stopped = true;
             if (!chatRestartAi(idx)) showHeaderNoticeAscii("Could not restart the AI. Open the terminal and start it by hand", 5000, true);
-        } else {
-            app_state.shells[idx].ai_stopped = false;
-            app_state.shells[idx].ai_restart_tick = 0;
-            if (job.clear_notice_len != 0) {
-                showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
-            }
+        } else if (job.clear_notice_len != 0) {
+            showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
         }
         return;
     }
