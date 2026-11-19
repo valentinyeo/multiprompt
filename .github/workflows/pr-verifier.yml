@@ -172,7 +172,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           FEATURES: ${{ needs.select.outputs.features }}
-          REPRO_FEATURES: ${{ needs.select.outputs.base_features }}
+          REPRO_FEATURES: ${{ needs.select.outputs.repro_features }}
         run: node tools/pr-verifier.cjs failed-head
       - name: Restore base evidence before scheduling Windows jobs
         id: cache
