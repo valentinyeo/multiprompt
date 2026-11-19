@@ -332,4 +332,11 @@ test('caption variants of one journey publish when every variant failed the same
   assert.deepEqual(outcome.receipt.features, []);
   assert.match(evidenceNotes(outcome.receipt), /Already failing before this release[\s\S]*\[bot-photo fails the same way\]/);
 });
+
+test('the journey recorder checks cleanup instead of a fixed evidence list', () => {
+  const recorder = fs.readFileSync('.claude/skills/verify-multiprompt/drive.ps1', 'utf8');
+  assert.match(recorder, /if \(Test-Path "\$Evidence\/process-tree\.json"\)/, 'process-tree.json is optional because own drivers never write it');
+  assert.doesNotMatch(recorder, /before\.png|doctor\.json/, 'own drivers do not produce the generic harness screenshots');
+  assert.match(fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8'), /doctor\.json/, 'the generic harness still requires its own evidence');
+});
 }

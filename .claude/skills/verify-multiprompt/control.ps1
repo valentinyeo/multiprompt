@@ -766,7 +766,7 @@ try {
         if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }
         Write-Output $result.cleanup
         if ($result.status -eq 'passed') {
-            foreach ($name in @('before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json')) {
+            foreach ($name in @('before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json', 'data')) {
                 if (-not (Test-Path (Join-Path $Evidence $name))) { throw "Evidence lost during cleanup: $name" }
             }
         }
