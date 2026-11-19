@@ -2645,6 +2645,55 @@ test('SOFT-2762 session-actions expects the seven context ids the app appends', 
   assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
 });
 
+test('SOFT-2762 session-actions resumes deleted chats through the live All Sessions route', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const palette = read('src/command_palette.zig');
+  const search = palette.slice(palette.indexOf('pub fn updateSearchResults()'), palette.indexOf('\nfn appendExtendedChatActions(', palette.indexOf('pub fn updateSearchResults()')));
+  assert.ok(search.length > 0, 'locate the palette result builder');
+  assert.doesNotMatch(search, /SEARCH_ARCHIVED_OFFSET/, 'SOFT-2444 removed archived chats from the Ctrl+K list');
+  assert.doesNotMatch(drive, /7300\+/, 'the driver must not wait for an archived palette row the app no longer appends');
+  const resume = drive.slice(drive.indexOf('function Resume-Archived('), drive.indexOf('function Read-History('));
+  assert.ok(resume, 'the driver must reach archived chats through the live view');
+  assert.match(resume, /Palette 'archived sessions' 6291/, 'Ctrl+K archived sessions opens All Sessions on the Archived tab');
+  assert.match(resume, /\\\[overview\\\][^\r\n]* arc=/, 'require the Archived cluster to list the deleted chats');
+  assert.match(resume, /Press @\(0x11,0x46\)/, 'Ctrl+F filters the All Sessions list');
+  assert.match(resume, /\[VerifyNative\]::Text\(\$Name\)/);
+  assert.match(resume, /Press @\(0x0d\)/);
+  const history = drive.slice(drive.indexOf('function Read-History('), drive.indexOf('function Start-App('));
+  assert.match(history, /Resume-Archived \$Name/);
+});
+
+test('SOFT-2762 a journey condition failure is reported as a journey result, not infrastructure', () => {
+  const verifier = read('tools/pr-verifier.cjs');
+  const literal = verifier.match(/return (\/[^\n]*\/i)\.test\(value \|\| ''\)/);
+  assert.ok(literal, 'read the verifier infrastructure wording rule');
+  const infrastructure = new Function('return ' + literal[1])();
+  const drivers = ['tools/verify-session-actions/drive.ps1', skill + 'control-feature-server-open-group.ps1'];
+  for (const driver of drivers) {
+    const source = read(driver);
+    const message = source.match(/throw "(Journey condition not met[^"]*)"/);
+    assert.ok(message, driver + ' must name the journey condition that did not become true');
+    assert.doesNotMatch(message[1], infrastructure, driver + ' must not look like a runner fault');
+  }
+});
+
+test('SOFT-2762 a server-open-group run reports status, checks and cleanup', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  const passAt = driver.indexOf("$result = @{ verdict = 'pass'");
+  assert.ok(passAt >= 0, 'the success result block');
+  const pass = driver.slice(passAt, driver.indexOf('} catch {', passAt));
+  assert.match(pass, /status = 'passed'/);
+  assert.match(pass, /cleanup = /);
+  assert.match(pass, /checks = @\(/);
+  const failAt = driver.indexOf("$result = @{ verdict = 'fail'; status = 'failed'; step = $stage; error = $_");
+  assert.ok(failAt >= 0, 'the failure result block');
+  const fail = driver.slice(failAt, driver.indexOf('} finally {', failAt));
+  assert.match(fail, /error = \$_\.Exception\.Message/, 'the failure keeps the real message');
+  const cleanup = driver.slice(driver.indexOf('$result.cleanup = $remaining'), driver.indexOf('try { [IO.File]::WriteAllBytes($hostsFile'));
+  assert.ok(cleanup, 'cleanup is recorded before result.json is written');
+  assert.match(driver, /\$result \| ConvertTo-Json -Depth 4 \| Set-Content -LiteralPath \(Join-Path \$Evidence 'result\.json'\)/);
+});
+
 test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
   const driver = read(skill + 'control-feature-server-open-group.ps1');
   assert.doesNotMatch(driver, /error = 'server group journey failed'/, 'the driver must not replace the cause with a label');

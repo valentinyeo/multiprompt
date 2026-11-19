@@ -20,6 +20,7 @@ $cert = $null
 $rootCertAdded = $false
 $failure = $null
 $stage = 'start'
+$result = @{ verdict = 'fail'; status = 'failed'; step = $stage; error = 'Server group journey did not finish'; cleanup = 'pending' }
 $hostsFile = Join-Path $env:SystemRoot 'System32/drivers/etc/hosts'
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
 $savedEnv = @{}
@@ -56,7 +57,7 @@ function Wait-ServerGroup([string]$Description, [scriptblock]$Check, [int]$Secon
         if (& $Check) { return }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timed out: $Description"
+    throw "Journey condition not met: $Description (checked for $Seconds seconds)"
 }
 function Save-ServerGroupShot([string]$Path) {
     if ($appProcess) {
@@ -178,7 +179,12 @@ try {
     if (-not (Test-ServerGroupReady $second)) { throw 'second import lost the Runners group' }
     Save-ServerGroupShot (Join-Path $Evidence 'after.png')
     Copy-Item -LiteralPath (Join-Path $settings 'session-server-group.json') -Destination (Join-Path $Evidence 'session.json')
-    @{ verdict = 'pass'; group = 'Runners'; group_id = $runnerId; tabs = $firstTabs; groups = $firstGroups; second_import = 'unchanged'; version = $ExpectedVersion } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
+    $result = @{ verdict = 'pass'; status = 'passed'; group = 'Runners'; group_id = $runnerId; tabs = $firstTabs; groups = $firstGroups; second_import = 'unchanged'; version = $ExpectedVersion; cleanup = 'pending'; checks = @(
+        @{ name = 'one-group-named-runners'; passed = $true },
+        @{ name = 'imported-tab-group-id-matches-group'; passed = $true },
+        @{ name = 'second-import-keeps-tab-and-group'; passed = $true },
+        @{ name = 'second-import-lost-no-runners-group'; passed = $true }
+    ) }
 } catch {
     $failure = $_
     foreach ($name in @('service.log', 'service.err.log', 'state.json', 'desktop.err.log')) {
@@ -186,8 +192,9 @@ try {
         if (Test-Path -LiteralPath $saved) { try { Copy-Item -LiteralPath $saved -Destination (Join-Path $Evidence ('failure-' + $name)) -ErrorAction Stop } catch { } }
     }
     Write-Host ('[server-open-group] failed at ' + $stage + ': ' + $_.Exception.Message)
-    @{ verdict = 'fail'; step = $stage; error = $_.Exception.Message; exception = $_.Exception.GetType().FullName } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
+    $result = @{ verdict = 'fail'; status = 'failed'; step = $stage; error = $_.Exception.Message; exception = $_.Exception.GetType().FullName; cleanup = 'pending' }
 } finally {
+    $remaining = 0
     foreach ($ownedProcess in @($appProcess, $serviceProcess)) {
         if ($ownedProcess) {
             try {
@@ -196,8 +203,18 @@ try {
                     & taskkill.exe /PID $ownedProcess.Id /T /F 2>&1 | Out-Null
                     [void]$ownedProcess.WaitForExit(10000)
                 }
+                $ownedProcess.Refresh()
+                if (!$ownedProcess.HasExited) { $remaining += 1 }
             } catch {}
         }
+    }
+    $result.cleanup = $remaining
+    if ($remaining -ne 0 -and $result.status -eq 'passed') {
+        $result.status = 'failed'
+        $result.verdict = 'fail'
+        $result.step = 'cleanup'
+        $result.error = ('Owned processes survived cleanup: ' + $remaining)
+        if (!$failure) { $failure = [InvalidOperationException]::new($result.error) }
     }
     try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { if (!$failure) { $failure = $_ } }
     foreach ($envName in @($savedEnv.Keys)) { [Environment]::SetEnvironmentVariable($envName, $savedEnv[$envName], 'Process') }
@@ -208,6 +225,7 @@ try {
         } catch { if (!$failure) { $failure = $_ } }
     }
     try { if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction Stop } } catch { if (!$failure) { $failure = $_ } }
+    try { $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Evidence 'result.json') } catch { Write-Host ('[server-open-group] could not write result.json: ' + $_.Exception.Message) }
 }
 if ($failure) { throw ('Server group journey failed at ' + $stage + ': ' + $failure.Exception.Message) }
 return
