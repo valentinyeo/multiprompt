@@ -268,6 +268,14 @@ pub fn findWorkspace(id: []const u8) ?u32 {
     return null;
 }
 
+pub fn workspaceSlotArchived(slot: u8) bool {
+    if (slot >= app_state.g_lws_count or slot >= app_state.g_ws_id_len.len) return false;
+    const len = app_state.g_ws_id_len[slot];
+    if (len == 0 or len > app_state.g_ws_ids[slot].len) return false;
+    const wi = findWorkspace(app_state.g_ws_ids[slot][0..len]) orelse return false;
+    return app_state.g_workspaces[wi].archived;
+}
+
 pub fn addOrUpdateWorkspace(id: []const u8, name: []const u8, restore: bool) void {
     if (id.len == 0) return;
     const idx: u32 = findWorkspace(id) orelse blk: {
@@ -545,7 +553,10 @@ fn registryDocument(out: []u8) usize {
     return pos;
 }
 
+var registry_revision: u64 = 0;
+
 fn writeWorkspaceRegistryFile() void {
+    registry_revision +%= 1;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
     var path_buf: [512]u8 = undefined;
@@ -1107,39 +1118,55 @@ fn upsertMySlotEntries() void {
     }
 }
 
-const menu_registry_wait_ms: u32 = 0;
 var menu_registry_seen = false;
 var menu_registry_len: usize = 0;
 var menu_registry_hash: u64 = 0;
+var menu_registry_pending = false;
+var menu_registry_ready = std.atomic.Value(bool).init(false);
+var menu_registry_bytes: [8192]u8 = undefined;
+var menu_registry_read_len: usize = 0;
+var menu_registry_revision: u64 = 0;
 
 fn menuKeepsMemory(seen: bool, previous_len: usize, previous_hash: u64, disk: []const u8) bool {
     if (!seen or previous_len != disk.len) return false;
     return previous_hash == std.hash.Wyhash.hash(0, disk);
 }
 
-pub fn refreshMenuEntries() void {
-    const registry_lock = lockWorkspaceRegistryWithTimeout(menu_registry_wait_ms) orelse return;
+fn readMenuRegistry() void {
+    defer menu_registry_ready.store(true, .release);
+    menu_registry_read_len = 0;
+    const registry_lock = lockWorkspaceRegistryWithTimeout(5000) orelse return;
     defer unlockWorkspaceRegistry(registry_lock);
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return;
-    var buf: [8192]u8 = undefined;
-    const n = readWorkspaceRegistryBytes(path, &buf) orelse return;
-    if (n == 0) return;
-    const disk = buf[0..n];
-    if (menuKeepsMemory(menu_registry_seen, menu_registry_len, menu_registry_hash, disk)) return;
-    app_state.g_workspace_count = 0;
-    parseWorkspaceRegistryJson(disk);
-    syncCurrentWorkspaceToRegistry();
-    upsertMySlotEntries();
-    writeWorkspaceRegistryFile();
-    var mine: [8192]u8 = undefined;
-    const pos = registryDocument(&mine);
-    menu_registry_hash = std.hash.Wyhash.hash(0, mine[0..pos]);
-    menu_registry_len = pos;
-    menu_registry_seen = true;
+    menu_registry_read_len = readWorkspaceRegistryBytes(path, &menu_registry_bytes) orelse 0;
 }
 
-test "SOFT-2374 the workspace menu keeps memory when the registry is unchanged and never waits" {
+pub fn refreshMenuEntries() void {
+    if (menu_registry_pending and menu_registry_ready.load(.acquire)) {
+        menu_registry_pending = false;
+        const disk = menu_registry_bytes[0..menu_registry_read_len];
+        if (menu_registry_revision == registry_revision and disk.len > 0 and
+            !menuKeepsMemory(menu_registry_seen, menu_registry_len, menu_registry_hash, disk))
+        {
+            app_state.g_workspace_count = 0;
+            parseWorkspaceRegistryJson(disk);
+            menu_registry_hash = std.hash.Wyhash.hash(0, disk);
+            menu_registry_len = disk.len;
+            menu_registry_seen = true;
+        }
+    }
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+    if (menu_registry_pending) return;
+    menu_registry_revision = registry_revision;
+    menu_registry_ready.store(false, .release);
+    const thread = std.Thread.spawn(.{}, readMenuRegistry, .{}) catch return;
+    menu_registry_pending = true;
+    thread.detach();
+}
+
+test "SOFT-2374 the workspace menu keeps memory when the registry is unchanged" {
     const disk = "{\"version\":1,\"windows\":[]}";
     const hash = std.hash.Wyhash.hash(0, disk);
     try std.testing.expect(menuKeepsMemory(true, disk.len, hash, disk));
@@ -1147,7 +1174,6 @@ test "SOFT-2374 the workspace menu keeps memory when the registry is unchanged a
     try std.testing.expect(!menuKeepsMemory(true, disk.len, hash, "{\"version\":1,\"windows\":[{\"id\":\"a\"}]}"));
     try std.testing.expect(!registryWriteNeeded(disk, disk));
     try std.testing.expect(registryWriteNeeded(disk, "{\"version\":2}"));
-    try std.testing.expectEqual(@as(u32, 0), menu_registry_wait_ms);
 }
 
 pub fn syncInProcessWorkspacesToRegistry() void {

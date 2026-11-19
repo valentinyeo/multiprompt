@@ -77,6 +77,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Server runner group](server-open-group.md): import one account shell tab into a group named Runners, then import that same tab again without adding a tab or a group.
+- [Workspace menu](workspace-menu.md): first paint and responsiveness under actual registry contention, pointer and keyboard highlight pixels, and preserved local workspace identities.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Servers](servers.md): add a disposable server in the real app, paste its one setup line, test the own-key sign-in, then remove it and require the key to be refused. Manual-only release journey.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
