@@ -71,7 +71,7 @@ test('both formal CI gates compare against the event baseline after mutations an
   }
 });
 
-test('formal findings inherit only from byte-identical modeled source', { skip: process.platform === 'win32' }, t => {
+test('formal findings inherit only from an identical modeled source', { skip: process.platform === 'win32' }, t => {
   read('tools/chat-still/verify.py');
   const root = path.join(__dirname, '..');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-still-inherited-'));

@@ -73,12 +73,9 @@ def normalized(body):
     return re.sub(r"\s+", " ", re.sub(r"const held_y: \?i32 = .*?;", "HELD_Y", body)).strip()
 
 
-def check(root, replay_code=False):
-    session = (root / "src/chat_session.zig").read_text()
-    history = (root / "src/chat_history.zig").read_text()
+def fingerprint(session, history, recorded):
     bodies = {name: function(session, name) for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll")}
     covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll")}}
-    recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
     for name, body in covered.items():
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
         if digest != recorded["functions"][name]["sha256"]:
@@ -87,10 +84,18 @@ def check(root, replay_code=False):
         line = next((line for line in history.splitlines() if line.startswith("pub const " + name + " = struct")), "")
         if hashlib.sha256(normalized(line).encode()).hexdigest() != record["sha256"]:
             raise ValueError(name + " changed; review the model and replay types")
+    return bodies, {name: held(body) for name, body in bodies.items()}
+
+
+def check(root, replay_code=False):
+    session = (root / "src/chat_session.zig").read_text()
+    history = (root / "src/chat_history.zig").read_text()
+    recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
+    bodies, translated = fingerprint(session, history, recorded)
     failures = []
     witnesses = []
     for name, body in bodies.items():
-        condition, anchor_expression, fallback = held(body)
+        condition, anchor_expression, fallback = translated[name]
         for event in ("history/divider", "row measurement", "late top padding", "live append", "reconciliation"):
             old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta = z3.Ints("old_h new_h viewport old_top new_top old_scroll divider pad delta")
             before, after = z3.Ints("previous_boundary next_boundary")
@@ -185,10 +190,16 @@ if __name__ == "__main__":
             baseline = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--verify", args.inherit_from + "^{commit}"], stderr=subprocess.PIPE, timeout=10).decode().strip()
             coverage = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
             files = sorted({record["file"] for section in ("functions", "types") for record in coverage[section].values()})
-            if all((args.source_root / file).read_bytes() == subprocess.check_output(
-                    ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10) for file in files):
+            blobs = {file: subprocess.check_output(["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10) for file in files}
+            changed = [file for file in files if (args.source_root / file).read_bytes() != blobs[file]]
+            same_model = True
+            if changed:
+                same_model = fingerprint((args.source_root / "src/chat_session.zig").read_text(), (args.source_root / "src/chat_history.zig").read_text(), coverage)[1] == fingerprint(blobs["src/chat_session.zig"].decode(), blobs["src/chat_history.zig"].decode(), coverage)[1]
+            if same_model:
                 result["inherited_from"] = baseline
-                print("INHERITED:", len(result["failures"]), "findings; every modeled source file is byte-identical to", baseline)
+                result["changed_modeled_files"] = changed
+                result["base_model_matches"] = same_model
+                print("INHERITED:", len(result["failures"]), "findings; every modeled function, translated expression and type matches", baseline)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2) + "\n")
