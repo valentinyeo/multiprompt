@@ -91,6 +91,7 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
             continue;
         }
         const units: usize = if (c >= 0xd800 and c <= 0xdbff and i + 1 < text.len) 2 else 1;
+        if (space) boundary = n;
         if (n + units + @intFromBool(space) > room) break;
         if (space) {
             out[n] = ' ';
@@ -100,7 +101,6 @@ fn quoteText(text: []const u16, out: []u16) []const u16 {
         n += units;
         i += units;
         space = false;
-        boundary = n;
     }
     var more = false;
     var rest = i;
