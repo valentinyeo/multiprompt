@@ -1455,40 +1455,6 @@ pub fn chatMessagesArrived(added: usize) void {
     chatNewMessagesChanged(had_messages);
 }
 
-test "SOFT-2724 messages that arrive while the newest message is on screen keep following it" {
-    const saved = .{
-        .hold = app_state.g_chat_read_hold,
-        .scrolled_up = app_state.g_chat_scrolled_up,
-        .messages = app_state.g_chat_new_messages,
-        .boundary = app_state.g_chat_read_boundary,
-    };
-    defer {
-        app_state.g_chat_read_hold = saved.hold;
-        app_state.g_chat_scrolled_up = saved.scrolled_up;
-        app_state.g_chat_new_messages = saved.messages;
-        app_state.g_chat_read_boundary = saved.boundary;
-    }
-    app_state.g_chat_read_hold = true;
-    app_state.g_chat_scrolled_up = false;
-    app_state.g_chat_new_messages = .{};
-    app_state.g_chat_read_boundary = .{};
-    chatMessagesArrived(12);
-    try std.testing.expect(!app_state.g_chat_read_hold);
-    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
-
-    app_state.g_chat_read_hold = true;
-    app_state.g_chat_read_boundary = .{ .index = 3 };
-    chatMessagesArrived(2);
-    try std.testing.expect(app_state.g_chat_read_hold);
-    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
-
-    app_state.g_chat_read_boundary = .{};
-    app_state.g_chat_scrolled_up = true;
-    chatMessagesArrived(3);
-    try std.testing.expect(app_state.g_chat_read_hold);
-    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_new_messages.count());
-}
-
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
@@ -2723,4 +2689,38 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
         try std.testing.expectEqual(shown_y, chat_history.readAnchorTop(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], held).? - app_state.g_chat_scroll_y);
         try std.testing.expect(app_state.g_chat_scrolled_up);
     }
+}
+
+test "SOFT-2724 messages that arrive while the newest message is on screen keep following it" {
+    const saved = .{
+        .hold = app_state.g_chat_read_hold,
+        .scrolled_up = app_state.g_chat_scrolled_up,
+        .messages = app_state.g_chat_new_messages,
+        .boundary = app_state.g_chat_read_boundary,
+    };
+    defer {
+        app_state.g_chat_read_hold = saved.hold;
+        app_state.g_chat_scrolled_up = saved.scrolled_up;
+        app_state.g_chat_new_messages = saved.messages;
+        app_state.g_chat_read_boundary = saved.boundary;
+    }
+    app_state.g_chat_read_hold = true;
+    app_state.g_chat_scrolled_up = false;
+    app_state.g_chat_new_messages = .{};
+    app_state.g_chat_read_boundary = .{};
+    chatMessagesArrived(12);
+    try std.testing.expect(!app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+
+    app_state.g_chat_read_hold = true;
+    app_state.g_chat_read_boundary = .{ .index = 3 };
+    chatMessagesArrived(2);
+    try std.testing.expect(app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+
+    app_state.g_chat_read_boundary = .{};
+    app_state.g_chat_scrolled_up = true;
+    chatMessagesArrived(3);
+    try std.testing.expect(app_state.g_chat_read_hold);
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_new_messages.count());
 }
