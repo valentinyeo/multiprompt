@@ -40,7 +40,7 @@ export function releasePlan(base, sha, changes, maps) {
       const owners = maps.filter(map => map.map === file || map.paths.some(pattern => matches(file, pattern)));
       if (!owners.length && productPath(file)) unmapped.add(file);
       for (const map of owners) {
-        if (!map.journeys.length) { unmapped.add(`${file} (${map.feature} has no journey)`); continue; }
+        if (!map.journeys.length) { if (productPath(file)) unmapped.add(`${file} (${map.feature} has no journey)`); continue; }
         features.add(map.feature);
         selected.set(map.feature, { feature: map.feature, map: map.map, journeys: map.journeys });
       }

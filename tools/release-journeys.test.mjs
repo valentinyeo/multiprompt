@@ -138,6 +138,16 @@ test('a feature with no executable journey cannot publish', () => {
   assert.throws(() => releasePlan(base, sha, [change(['src/chat.zig'])], [{ ...maps[0], journeys: [] }]), /chat has no journey/);
 });
 
+test('editing a CI-only or formal feature map needs no release journey', () => {
+  const ciOnly = { feature: 'ci-repair-receipt', map: 'features/ci-repair-receipt.md', journeys: [], paths: [] };
+  let plan;
+  let refusal;
+  try { plan = releasePlan(base, sha, [change(['features/ci-repair-receipt.md'])], [...maps, ciOnly]); } catch (error) { refusal = error.message; }
+  assert.equal(refusal, undefined);
+  assert.deepEqual(plan.features, []);
+  assert.throws(() => releasePlan(base, sha, [change(['src/chat.zig'])], [{ ...maps[0], journeys: [] }]), /chat has no journey/);
+});
+
 test('feature maps name actual executable recipes and own release paths', () => {
   const discovered = releaseMaps();
   assert.ok(discovered.some(map => map.paths.length > 0));
