@@ -39,7 +39,7 @@ test('D1 a duplicate seq never moves the cursor and a delta replaces the text', 
 
 test('D1 the live channel is opened only for a hosted agent chat and feeds the model', () => {
   const session = read('src/chat_session.zig');
-  assert.match(session, /chatMessageGoesToHost\(shell\.kind, shell\.ai_agent\)/);
+  assert.match(session, /chatMessageGoesToHost\(shell\.kind, shell\.ai_agent, @import\("chat_send\.zig"\)\.chatHostedShell\(&shell\)\)/);
   assert.match(session, /chatLiveStreamEnsure\(key\)/);
   assert.match(session, /subscribeLine\(a, stream\.shell_id, key\.provider\(\), sid, after\)/);
   const wanted = session.slice(session.indexOf('fn chatLiveWanted('), session.indexOf('fn chatLiveStreamRelease('));

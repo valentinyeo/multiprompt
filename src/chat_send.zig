@@ -1940,34 +1940,60 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
 
 pub const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 
-pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool) ChatSendRoute {
-    if (chatMessageGoesToHost(kind, ai_agent)) return if (sid_present) .host_message else .wait_for_start;
+pub fn chatSessionHosted(tmux: []const u8) bool {
+    return std.mem.startsWith(u8, tmux, "live-");
+}
+
+pub fn chatHostedShell(shell: *const @import("app_state.zig").Shell) bool {
+    if (shell.kind != .tmux or shell.tmux_session_len > shell.tmux_session.len) return false;
+    return chatSessionHosted(shell.tmux_session[0..shell.tmux_session_len]);
+}
+
+pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool, hosted: bool) ChatSendRoute {
+    if (chatMessageGoesToHost(kind, ai_agent, hosted)) return if (sid_present) .host_message else .wait_for_start;
     if (kind == .tmux and ai_agent == 0) return .wait_for_start;
     return .terminal_send;
 }
 
 test "IGSH-1266 a chat typed before the tab finished starting still goes to the host" {
-    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true));
-    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 2, true));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, true));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false));
-    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, false));
-    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, false));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true, false));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 2, true, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, true, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false, false));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, false, false));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, false, false));
 }
 
-pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
-    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
+test "SOFT-2824 a chat started on the server sends to the host before the app knows its agent" {
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 0, true, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false, true));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true, true));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, true, true));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, true, true));
+}
+
+pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8, hosted: bool) bool {
+    return kind == .tmux and (hosted or ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
 }
 
 test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
-    try std.testing.expect(chatMessageGoesToHost(.tmux, 7));
-    try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
-    try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
-    try std.testing.expect(!chatMessageGoesToHost(.vps, 1));
-    try std.testing.expect(!chatMessageGoesToHost(.vps2, 2));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 1, false));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 2, false));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 7, false));
+    try std.testing.expect(!chatMessageGoesToHost(.tmux, 0, false));
+    try std.testing.expect(!chatMessageGoesToHost(.cmd, 1, false));
+    try std.testing.expect(!chatMessageGoesToHost(.vps, 1, false));
+    try std.testing.expect(!chatMessageGoesToHost(.vps2, 2, false));
+}
+
+test "SOFT-2824 a live tmux session is hosted even when no pane agent was detected" {
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 0, true));
+    try std.testing.expect(!chatMessageGoesToHost(.cmd, 0, true));
+    try std.testing.expect(!chatMessageGoesToHost(.vps, 0, true));
+    try std.testing.expect(chatSessionHosted("live-multiprompt-android-mwnl43gt"));
+    try std.testing.expect(!chatSessionHosted("multiprompt-android"));
+    try std.testing.expect(!chatSessionHosted(""));
 }
 
 fn chatMessageCaptureAdmission(idx: u32, entry: *ChatOutboxEntry) void {
@@ -1990,7 +2016,7 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?u
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
     const added = app_state.g_chat_outbox.items.len - 1;
     app_state.g_chat_outbox.items[added].anchor = anchor;
-    if (idx < app_state.shell_count and chatMessageGoesToHost(app_state.shells[idx].kind, app_state.shells[idx].ai_agent)) {
+    if (idx < app_state.shell_count and chatMessageGoesToHost(app_state.shells[idx].kind, app_state.shells[idx].ai_agent, chatHostedShell(&app_state.shells[idx]))) {
         app_state.g_chat_outbox.items[added].message_v1 = true;
         app_state.g_chat_outbox.items[added].message_sid = chatFileIdentityForShell(idx).sid;
     }
@@ -2727,8 +2753,8 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
-    const terminal = shell.kind == .tmux and shell.ai_agent == 0 and identity.tmux[0] != 0 and !std.mem.startsWith(u8, std.mem.sliceTo(&identity.tmux, 0), "live-");
-    const route = if (terminal) ChatSendRoute.terminal_send else chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
+    const terminal = shell.kind == .tmux and shell.ai_agent == 0 and identity.tmux[0] != 0 and !chatSessionHosted(std.mem.sliceTo(&identity.tmux, 0));
+    const route = if (terminal) ChatSendRoute.terminal_send else chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0, chatHostedShell(shell));
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
         chatLogSendPath(shell_index, entry, route, "enter");
@@ -2918,7 +2944,9 @@ pub fn chatOutboxTick() void {
         for (0..count) |offset| {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
-            if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
+            if (shell.kind != .tmux) continue;
+            const sync_capable = shell.ai_agent == 1 or shell.ai_agent == 2 or shell.ai_agent == 3 or (shell.ai_agent == 0 and chatHostedShell(&shell));
+            if (!sync_capable) continue;
             if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxSyncCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {
