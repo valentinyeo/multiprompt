@@ -3,11 +3,11 @@
   "files": {
     "src/chat_echo.zig": "7b71f4c41e28350cadb56a7a75765c60217fc7f69df7895fcd0f1f13a23bbf1a",
     "src/chat_send.zig": "33d4fc603a662000d71547ea08701221f7f100ba0ce5d1356d129ca8086240a2",
-    "src/chat_render.zig": "4a84d3d626456da81b9337cf2fe0450c1fd30e727161b9325dc336b521eb3fb5",
-    "src/chat_history_reader.py": "e7f130e6d709884868f3b57f7293a8cc9e2990fcd1230e71596c07915c7fe92f",
+    "src/chat_render.zig": "9e59c22d6d4b7379b05c2c574b51189560334cbd17066e6cf07b812d6934574c",
+    "src/chat_history_reader.py": "5f74035e4d9c9ed904f758fd86d64062a96472e57cb9896a79eeb3c75be2bb02",
     "src/app_state.zig": "1cb247bf8a22629c3ba63dfca1766e51354a32ecb9d8920d166d314276e1fe2e",
     "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",
-    "tools/chat-history-reader-test.py": "29831b0bc61837884688940f45c2a7b9bf20ee5f529d79bd2675443e0ea22219",
+    "tools/chat-history-reader-test.py": "9ebf92364cf1026cc87671709303e27f12719f16880bcd067a4ed967493304cb",
     "tools/multibot-feedback-test.py": "b7a26553ff1648413356bd2369e917b28bc6d283dbbdfe1c280124e11a688404"
   },
   "coverage": {
