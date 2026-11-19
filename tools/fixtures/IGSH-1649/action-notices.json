@@ -169,6 +169,8 @@
     "showPickRepoFailure: showHeaderNoticeAscii(\"Set workspace folder: could not save\",4000,true)",
     "wndProc: if(!@import(\"browser_pane.zig\").signInGoogleForShell(ti))showHeaderNoticeAscii(\"Sign in to Google needs a Chrome profile tab\",5000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
+    "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
+    "wndProc: if(!@import(\"chat_send.zig\").chatSetLiveSetting(setting))showHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatSetLiveSetting(setting))showHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(!@import(\"clipboard.zig\").setUnicodeClipboardTextWithRetry(wide_id[0..len]))showHeaderNoticeAscii(\"Could not copy chat ID\",3000,true)",
     "wndProc: if(!@import(\"command_palette.zig\").startAdoptHost(ti))showHeaderNoticeAscii(\"Move chat: this session cannot move yet\",4000,true)",
