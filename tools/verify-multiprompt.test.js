@@ -2639,4 +2639,8 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   assert.match(node, /\$reported = \(\$combined -replace 'mpk_\[A-Za-z0-9_-\]\+', '<redacted>'\)\.Trim\(\)/);
   assert.match(node, /throw "\$commandText exited \$\(\$nodeProcess\.ExitCode\): \$reported"/);
   assert.ok([...driver.matchAll(/\$stage = '([^']+)'/g)].length >= 8, 'every phase names its step');
+  const ready = driver.slice(driver.indexOf('function Test-ServerGroupReady('), driver.indexOf('function Wait-ServerGroup('));
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'tmux_session'/);
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'group_id'/);
+  assert.doesNotMatch(ready, /\$_\.[a-z_]+/, 'strict mode must not read a saved tab field that may be absent');
 });

@@ -36,11 +36,15 @@ function Get-ServerGroupSession {
     if (!$text) { return $null }
     try { return $text | ConvertFrom-Json } catch { return $null }
 }
+function Get-ServerGroupProperty($item, [string]$Name) {
+    if ($null -eq $item -or $null -eq $item.PSObject.Properties[$Name]) { return $null }
+    return $item.$Name
+}
 function Test-ServerGroupReady($state) {
     if ($null -eq $state -or $null -eq $state.PSObject.Properties['groups'] -or $null -eq $state.PSObject.Properties['tabs']) { return $false }
-    $groups = @($state.groups | Where-Object { $_.name -ceq 'Runners' -and $_.id -gt 0 })
+    $groups = @($state.groups | Where-Object { (Get-ServerGroupProperty $_ 'name') -ceq 'Runners' -and (Get-ServerGroupProperty $_ 'id') -gt 0 })
     if ($groups.Count -ne 1) { return $false }
-    return @($state.tabs | Where-Object { $_.tmux_session -ceq 'mp-runner-1' -and $_.group_id -eq $groups[0].id }).Count -eq 1
+    return @($state.tabs | Where-Object { (Get-ServerGroupProperty $_ 'tmux_session') -ceq 'mp-runner-1' -and (Get-ServerGroupProperty $_ 'group_id') -eq (Get-ServerGroupProperty $groups[0] 'id') }).Count -eq 1
 }
 function Wait-ServerGroup([string]$Description, [scriptblock]$Check, [int]$Seconds = 90) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
