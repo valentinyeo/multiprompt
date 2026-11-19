@@ -92,25 +92,6 @@ pub fn apply(text: []const u16, _: []u16) []const u16 {
     return text;
 }
 pub fn clearPicks() void {}
-pub fn isMentionNote(_: []const u16) bool {
-    return false;
-}
-pub fn mentionTargets(_: []const u16, _: []const u8, _: []const Chat, out: []Chat) []Chat {
-    return out[0..0];
-}
-pub fn providerName(_: u8) []const u8 {
-    return "";
-}
-pub fn revealChatNames(_: []u16, len: usize) usize {
-    return len;
-}
-pub fn mentionNote(_: []const u8, _: []const u8, _: []const u8, _: []const u16, _: []u16) ?[]const u16 {
-    return null;
-}
-pub fn mentionDelivered(_: u64, _: []const u8) bool {
-    return false;
-}
-pub fn mentionMarkDelivered(_: u64, _: []const u8) void {}
 `;
 
 function writeChatMention(dir) {
