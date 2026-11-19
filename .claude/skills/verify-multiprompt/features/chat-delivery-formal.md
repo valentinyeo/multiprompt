@@ -19,4 +19,4 @@ The PR selector owns these files through `CI workflow:`, not a nearest desktop n
 
 ## Gotchas
 
-The three current source findings are SOFT-2724, SOFT-2725 and SOFT-2726. They remain findings even when the verification-only CI job classifies them as inherited. Source equality, native replay, both mutations and restoration are required for that classification. No UI journey or binary hash certifies this model.
+The three current source findings are SOFT-2724, SOFT-2725 and SOFT-2726. They remain findings even when CI classifies them as inherited. Both mutations, every native replay and restoration are required for that classification, and a run with changed guarded source also needs the base commit's production decision table to equal the head's. No UI journey or binary hash certifies this model.
