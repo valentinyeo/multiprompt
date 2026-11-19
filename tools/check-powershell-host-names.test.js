@@ -99,7 +99,7 @@ test('PR job preserves existing guards and independently runs each new test and 
   assert.match(workflow, /^name: PR checks/m);
   assert.match(job, /^\n    name: no-comments/);
   assert.match(job, /actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 0/);
-  const oldSteps = ['Lint GitHub workflows', 'Test the comment checker', 'Fail on any code comment'];
+  const oldSteps = ['Lint GitHub workflows', 'Test the comment checker', 'Fail on a code comment this change adds', 'Fail on any code comment in the whole repository'];
   let previous = -1;
   for (const step of oldSteps) { const index = job.indexOf(`- name: ${step}`); assert.ok(index > previous); previous = index; }
   const steps = job.split('      - name: ').slice(1 + oldSteps.length);
