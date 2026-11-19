@@ -5,6 +5,18 @@ description: Verify Multiprompt's real Windows desktop UI on GitHub Windows runn
 
 # Verify Multiprompt
 
+## CLI
+
+`node tools/mbv.mjs --help` launches, watches and reads this verification; `list` shows every journey.
+
+```sh
+node tools/mbv.mjs run appearance --ref <branch>   dispatch, prints run id and URL
+node tools/mbv.mjs watch <run-id>                  per-job results, one poll a minute
+node tools/mbv.mjs proof <run-id>                  result.json, cleanup, evidence present
+node tools/mbv.mjs doctor <run-id> --feature f     app identity from doctor.json
+node tools/mbv.mjs failures <run-id>               failed jobs and the decisive line
+```
+
 Multiprompt is a native Windows desktop app hosting real console windows, with custom-drawn sidebar, Inbox and Ctrl+K overlays. It is not a browser page or an Electron app. The account Worker and browser extension are secondary surfaces. The `browser-emulation` map is a separate real-Chrome extension journey driven by `browser-emulation.mjs` through this workflow; it does not launch or verify the embedded app pane.
 
 Read [features/README.md](features/README.md), then the selected feature file before running anything. See [recent changes coverage](coverage.md) for gaps and this pass's run results. Never build, launch or drive locally, through Wine, on a VPS, or on a user's laptop. Desktop execution below happens on GitHub's free `windows-latest` machines in the public repository.

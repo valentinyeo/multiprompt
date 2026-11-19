@@ -1,0 +1,25 @@
+{
+  "feature": "chat-delivery",
+  "status": "passed",
+  "version": "0.28.1762",
+  "sha256": "e86a8ab32914161ceb9691d083d33c5c8797bd2105f55e66e03b222e716d25d4",
+  "checks": [
+    {
+      "name": "busy-send",
+      "passed": true,
+      "detail": "replied"
+    },
+    {
+      "name": "steer-chord",
+      "passed": false,
+      "detail": "kept the draft"
+    },
+    {
+      "name": "queue-draft-sync",
+      "passed": true,
+      "detail": "synced"
+    }
+  ],
+  "cleanup": "owned process tree stopped; scratch copied to evidence/data then removed",
+  "scratchRemoved": true
+}
