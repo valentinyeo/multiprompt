@@ -52,23 +52,29 @@ static void caret(TerminalWindow *t) {
     }
 }
 
-static void resize(TerminalWindow *t) {
+static void resize(TerminalWindow *t, int force) {
     if (!t->fonts[0]) return;
     RECT rect;
     GetClientRect(t->hwnd, &rect);
     if (rect.right <= 0 || rect.bottom <= 0) return;
     int rows = clamp(rect.bottom / t->height, 1, 512);
     int cols = clamp(rect.right / t->width, 1, 1024);
-    if (rows != t->rows || cols != t->cols) {
+    int changed = rows != t->rows || cols != t->cols;
+    if (changed) {
         t->rows = rows;
         t->cols = cols;
         t->selected = t->selecting = 0;
         mp_terminal_size(t->model, rows, cols);
-        if (t->resize) t->resize(rows, cols, t->user);
     }
+    if ((changed || force) && t->resize) t->resize(rows, cols, t->user);
     t->scroll = clamp(t->scroll, 0, mp_terminal_history(t->model));
     caret(t);
     InvalidateRect(t->hwnd, NULL, FALSE);
+}
+
+void mp_terminal_window_report(HWND hwnd) {
+    TerminalWindow *t = get(hwnd);
+    if (t) resize(t, 1);
 }
 
 void mp_terminal_window_style(HWND hwnd, const LOGFONTW *font, uint32_t fg, uint32_t bg, const uint32_t *palette) {
@@ -101,7 +107,7 @@ void mp_terminal_window_style(HWND hwnd, const LOGFONTW *font, uint32_t fg, uint
     ReleaseDC(hwnd, dc);
     t->background = bg;
     mp_terminal_palette(t->model, fg, bg, palette);
-    resize(t);
+    resize(t, 0);
 }
 
 static void paint(TerminalWindow *t, HDC target, const RECT *damage) {
@@ -288,7 +294,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
             paint(t, (HDC)wp, &rect);
             return 0;
         }
-        case WM_SIZE: resize(t); return 0;
+        case WM_SIZE: resize(t, 0); return 0;
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
         case WM_SETFOCUS: caret(t); return 0;
         case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); return 0;
