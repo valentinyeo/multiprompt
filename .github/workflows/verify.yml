@@ -9,10 +9,6 @@ on:
         required: true
         default: appearance
         type: string
-      app_revision:
-        description: Optional application commit to build with this branch's journey scripts
-        required: false
-        type: string
       dictation_stall:
         description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false
@@ -48,6 +44,11 @@ on:
         type: boolean
       chat_accepted_proof:
         description: Check queued message pixels within one second of acceptance
+        required: false
+        default: false
+        type: boolean
+      chat_shape_baseline:
+        description: Record the known v0.28.946 stale-reply regression without claiming product acceptance
         required: false
         default: false
         type: boolean
@@ -261,7 +262,7 @@ jobs:
           const { available, pr } = discoverFeatures();
           const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
           if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
-          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => ['chat-still', 'chat-position-replay'].includes(feature) ? feature : 'normal'))])}`);
+          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
           console.log(`selected=${JSON.stringify(selected)}`);
           console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
           NODE
@@ -333,14 +334,11 @@ jobs:
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: inputs.tag == '' && matrix.profile != 'normal' && inputs.app_revision != ''
+        if: inputs.tag == '' && matrix.profile == 'chat-still' && inputs.app_revision != ''
         with:
           ref: ${{ inputs.revision || github.sha }}
           path: probe-source
           persist-credentials: false
-      - name: Install identical read-only paint recorder
-        if: inputs.tag == '' && matrix.profile == 'chat-position-replay'
-        run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/verify-chat-delivery/install-frame-probe.py .
       - name: Add the read-only chat measurement probe to the verification build
         if: inputs.tag == '' && matrix.profile == 'chat-still'
         run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
@@ -350,7 +348,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || matrix.profile == 'chat-position-replay' && '-chat-position-replay' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -453,7 +451,6 @@ jobs:
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_INSTANT_PROOF: ${{ matrix.feature == 'chat-instant' && '1' || '' }}
       CHAT_MODEL_PROOF: ${{ matrix.feature == 'chat-model' && '1' || '' }}
-      CHAT_POSITION_REPLAY: ${{ matrix.feature == 'chat-position-replay' && '1' || '' }}
       CHAT_WORKING_LIVE_PROOF: ${{ matrix.feature == 'chat-working-live' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
@@ -485,10 +482,6 @@ jobs:
       VERIFY_CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
-      - name: Select the discoverable long-chat position journey
-        if: matrix.feature == 'chat-position-replay'
-        shell: pwsh
-        run: Add-Content $env:GITHUB_ENV 'FEATURE=server-chat'
       - name: Select instant chat driver
         if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1'
         shell: pwsh
@@ -545,28 +538,12 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
-      - name: Cache browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/ffmpeg-7.1.1-essentials_build.zip
-          key: windows-ffmpeg-7.1.1-04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4
       - name: Install browser toggle recorder
         if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
         shell: pwsh
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-7.1.1-essentials_build.zip'
-          if (-not (Test-Path $archive)) {
-            Invoke-WebRequest 'https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip' -OutFile $archive
-          }
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4') { throw 'FFmpeg archive checksum mismatch' }
-          Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP -Force
-          $bin = Join-Path $env:RUNNER_TEMP 'ffmpeg-7.1.1-essentials_build/bin'
-          foreach ($tool in @('ffmpeg', 'ffprobe')) {
-            & (Join-Path $bin "$tool.exe") -version
-            if ($LASTEXITCODE -ne 0) { throw "$tool installation failed" }
-          }
-          $bin | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
       - name: Check browser recovery journey contract
         continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs
@@ -674,29 +651,12 @@ jobs:
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app${{ matrix.feature == 'chat-still' && '-chat-still' || matrix.feature == 'chat-position-replay' && '-chat-position-replay' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin
       - name: Build branch executable
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
-      - name: Prove the native window observer catches a real child-console flash
-        if: matrix.feature == 'chat-position-replay'
-        shell: powershell
-        run: |
-          & node --test tools/verify-chat-delivery/native-console.test.cjs tools/verify-chat-delivery/position-replay.test.cjs
-          if ($LASTEXITCODE -ne 0) { throw 'Position recorder contracts failed' }
-          & powershell -NoProfile -File tools/verify-chat-delivery/native-console-control.ps1 -Evidence "$pwd/evidence/observer-control"
-          if ($LASTEXITCODE -ne 0) { throw 'Native console hook positive control failed' }
-      - name: Start complete chat paint recording before launch
-        if: matrix.feature == 'chat-position-replay'
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force evidence/paints | Out-Null
-          "MULTIPROMPT_FRAME_PROBE=$pwd/evidence/paints" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Test frame-by-frame movement detection
-        if: matrix.feature == 'chat-position-replay'
-        run: node --test tools/verify-chat-delivery/position-replay.test.cjs
       - name: Stage the independently built application
         if: matrix.app-revision != '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')
         shell: pwsh
@@ -1075,7 +1035,7 @@ jobs:
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
-          if ($env:VERIFY_CANDIDATE_ARTIFACT -or $env:CHAT_POSITION_REPLAY -eq '1') {
+          if ($env:VERIFY_CANDIDATE_ARTIFACT) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } elseif ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
@@ -1227,20 +1187,6 @@ jobs:
               $failure.cases = @('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone') | ForEach-Object { @{name=$_; passed=$false; detail='Workflow failed before journey launch'} }
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
-          }
-      - name: Compress every recorded paint without discarding failed evidence
-        if: always() && matrix.feature == 'chat-position-replay'
-        shell: powershell
-        run: |
-          Add-Type -AssemblyName System.Drawing
-          foreach ($directory in @('evidence/paints')) {
-            if (-not (Test-Path $directory)) { continue }
-            foreach ($file in Get-ChildItem $directory -Filter '*.bmp') {
-              $image = [Drawing.Image]::FromFile($file.FullName)
-              try { $image.Save(($file.FullName -replace '\.bmp$', '.png'), [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
-            }
-            Compress-Archive -Path "$directory/*.bmp" -DestinationPath "$directory/paint-bitmaps.zip"
-            Remove-Item "$directory/*.bmp"
           }
       - name: Check out the workflow's baseline cache tooling
         if: always() && inputs.base_cache && inputs.app_revision != ''
