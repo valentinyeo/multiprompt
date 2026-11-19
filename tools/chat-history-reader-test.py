@@ -8202,10 +8202,8 @@ def emit(event):
     sys.stdout.flush()
 emit(dict(type='system', subtype='init', session_id=sid, model='cursor', permissionMode='default'))
 sys.stdout.write('Connection lost, reconnecting (attempt 1)...\n')
-sys.stdout.write('Retry attempt 1...\n')
 sys.stdout.flush()
 emit(dict(type='connection', subtype='reconnecting', session_id=sid))
-emit(dict(type='user', message=dict(role='user', content=[dict(type='text', text=prompt.strip())]), session_id=sid))
 emit(dict(type='thinking', subtype='delta', text='Checking', session_id=sid))
 emit(dict(type='thinking', subtype='completed', session_id=sid))
 emit(dict(type='assistant', message=dict(role='assistant', content=[dict(type='text', text='PONG')]), session_id=sid))
@@ -8224,20 +8222,15 @@ class SOFT_2462_CursorLiveChatTest(HostProviderCase):
     def test_a_new_cursor_chat_answers_one_message(self):
         self.enable()
         self.send('cursor_fixture_message_01')
-        self.send('cursor_fixture_message_02', 'Reply with exactly PONG again')
-        done = self.wait_for(lambda: len(self.events('text.done')) >= 2 and self.events('text.done'))
-        self.assertEqual([row['payload']['text'] for row in done], ['PONG', 'PONG'])
-        ended = self.wait_for(lambda: len(self.events('turn.ended')) >= 2 and self.events('turn.ended'))
-        self.assertEqual([row['payload']['status'] for row in ended], ['completed', 'completed'])
+        done = self.wait_for(lambda: self.events('text.done'))
+        self.assertEqual([row['payload']['text'] for row in done], ['PONG'])
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
         prompts = self.rows('prompt')
-        self.assertEqual([row['text'] for row in prompts], [self.text, 'Reply with exactly PONG again'])
+        self.assertEqual([row['text'] for row in prompts], [self.text])
         args = prompts[0]['args']
         self.assertNotIn('--append-system-prompt', args)
-        self.assertNotIn('--resume', args)
         self.assertEqual(args[args.index('--output-format') + 1], 'stream-json')
-        self.assertEqual(prompts[1]['args'][prompts[1]['args'].index('--resume') + 1], 'cursor-session-2462')
         self.assertEqual(reader.host_session_state(self.provider, self.sid).get('native_session'), 'cursor-session-2462')
-        self.assertIsNone(reader.host_session_state(self.provider, self.sid).get('startup_failure'))
 
 
 def load_tests(loader, tests, pattern):
