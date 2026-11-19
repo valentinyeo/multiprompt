@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `9dd167dad7dde81749519038b0bcc5866c6deebb`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+Last confirmed source/model sync commit is `9d1b64784af62129c2855d0bcc940b5335190587`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |
