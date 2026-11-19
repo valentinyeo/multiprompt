@@ -5,6 +5,7 @@ on:
     paths:
       - 'tools/pr-verifier.cjs'
       - 'tools/pr-verifier-cancel.test.js'
+      - 'tools/pr-verifier-download-retry.test.js'
       - 'tools/base-journey-cache.test.js'
       - 'tools/reusable-workflow-permissions.test.js'
       - '.github/workflows/auto-release.yml'
@@ -52,12 +53,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/input"
           set +e
-          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs > "$RUNNER_TEMP/input/head.log" 2>&1
+          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs > "$RUNNER_TEMP/input/head.log" 2>&1
           echo "head=$?" >> "$GITHUB_ENV"
           if [ -n "$BASE_SHA" ]; then
             git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
-            cp tools/pr-verifier-cancel.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs "$RUNNER_TEMP/base/tools/"
-            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs) > "$RUNNER_TEMP/input/base.log" 2>&1
+            cp tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs "$RUNNER_TEMP/base/tools/"
+            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/base-journey-cache.test.js tools/reusable-workflow-permissions.test.js tools/release-journeys.test.mjs) > "$RUNNER_TEMP/input/base.log" 2>&1
             echo "base=$?" >> "$GITHUB_ENV"
           fi
       - name: Write the receipt
@@ -65,9 +66,9 @@ jobs:
         run: |
           set +e
           if [ -n "$BASE_SHA" ]; then
-            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
           else
-            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) '
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) '
           fi
           echo "receipt=$?" >> "$GITHUB_ENV"
           true
