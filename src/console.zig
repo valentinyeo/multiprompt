@@ -1893,7 +1893,10 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
 fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
     const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
     const native = @import("native_session.zig");
-    const opened = native.open(kind, tmux_session, shell_id, false) orelse return false;
+    const opened = native.open(kind, tmux_session, shell_id, false) orelse {
+        debugLog("spawnShell refused: native open");
+        return false;
+    };
     app_state.shells[idx] = .{
         .console_inflight = true,
         .native_terminal = true,
@@ -1987,15 +1990,23 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             if (!app_state.g_restoring and background_workspace == null) {
                 if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(existing) else switchToShell(existing);
             }
+            debugLog("spawnShell refused: session already open");
             return false;
         }
     }
     if (app_state.shell_count >= MAX_SHELLS) {
         if (background_workspace == null) notifyTabCapReached();
+        debugLog("spawnShell refused: tab limit");
         return false;
     }
-    const shell_id = app_state.allocateShellId() orelse return false;
-    const title_id = app_state.allocateConsoleTitleId() orelse return false;
+    const shell_id = app_state.allocateShellId() orelse {
+        debugLog("spawnShell refused: no shell id");
+        return false;
+    };
+    const title_id = app_state.allocateConsoleTitleId() orelse {
+        debugLog("spawnShell refused: no title id");
+        return false;
+    };
     const idx = app_state.shell_count;
     if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
@@ -2008,7 +2019,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     var cmd_buf: [2048]u16 = undefined;
     const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
-    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, false) orelse return false;
+    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, false) orelse {
+        debugLog("spawnShell refused: command line");
+        return false;
+    };
 
     if (!@import("launch_cache.zig").pending) {
         var cmd_u8: [2048]u8 = undefined;
@@ -2057,14 +2071,19 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying or
         (kind == .tmux and tmux_session != null and @import("chat_view.zig").isLive(tmux_session.?));
     if (asynchronous) {
-        const job = std.heap.page_allocator.create(StartupShell) catch return false;
+        const job = std.heap.page_allocator.create(StartupShell) catch {
+            debugLog("spawnShell refused: startup job");
+            return false;
+        };
         const environment = @import("win32.zig").GetEnvironmentStringsW() orelse {
+            debugLog("spawnShell refused: environment");
             std.heap.page_allocator.destroy(job);
             return false;
         };
         job.* = .{ .shell_id = shell_id, .title_id = title_id, .kind = kind, .owner = app_state.g_main_hwnd, .job = app_state.g_job, .command = cmd_buf, .cwd = cwd_wide, .has_cwd = cwd_ptr != null, .environment = environment };
         _ = startup_inflight.fetchAdd(1, .acq_rel);
         const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, startupShellWorker, .{job}) catch {
+            debugLog("spawnShell refused: startup thread");
             _ = startup_inflight.fetchSub(1, .acq_rel);
             _ = @import("win32.zig").FreeEnvironmentStringsW(environment);
             std.heap.page_allocator.destroy(job);
@@ -2105,6 +2124,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     }
 
     if (!asynchronous and cmd_hwnd == null and !isRemoteShellKind(kind)) {
+        debugLog("spawnShell refused: console window");
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         return false;
