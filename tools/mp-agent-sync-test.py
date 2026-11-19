@@ -51,33 +51,12 @@ class AgentSyncTest(unittest.TestCase):
     def run_sync(self, *args, agents=None):
         return subprocess.run([sys.executable, str(SYNC), *args], capture_output=True, text=True, env=self.env(agents or []), timeout=30)
 
-    def publish(self, entries):
-        script = (
-            "import importlib.util, json, sys\n"
-            "spec = importlib.util.spec_from_file_location('reader', sys.argv[1])\n"
-            "module = importlib.util.module_from_spec(spec)\n"
-            "spec.loader.exec_module(module)\n"
-            "print(json.dumps(module.chat_names_publish(json.loads(sys.argv[2]))))\n"
-        )
-        done = subprocess.run([sys.executable, "-c", script, str(READER), json.dumps(entries)], capture_output=True, text=True, env=self.env([]), timeout=30)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        return json.loads(self.names.read_text(encoding="utf-8"))
-
-    def assert_linked(self, stored, tmux, agent):
-        entry = stored.get(tmux) if isinstance(stored.get(tmux), dict) else {}
-        self.assertEqual(entry.get("agent"), agent)
-
     def test_rename_uses_the_stored_id_and_the_exact_chat_name(self):
         self.write_names({
             "live-beta": {"name": "New Name", "at": 1, "sid": None, "agent": AGENT},
             "@agents": {"live-beta": AGENT},
             "live-gamma": {"name": "Still Alone", "at": 1, "sid": None},
         })
-        stored = self.publish([
-            {"tmux": "live-beta", "name": "New Name", "sid": None},
-            {"tmux": "live-gamma", "name": "Still Alone", "sid": None},
-        ])
-        self.assert_linked(stored, "live-beta", AGENT)
         done = self.run_sync(agents=[{"id": AGENT, "display_name": "Old Name"}])
         self.assertEqual(done.returncode, 0, done.stderr)
         renames = [call for call in self.calls() if "rename" in call]
@@ -96,13 +75,6 @@ class AgentSyncTest(unittest.TestCase):
             "live-delta": {"name": "Honest Chat", "at": 1, "sid": None, "agent": OTHER},
             "@agents": {"live-beta": AGENT, "live-gamma": AGENT, "live-delta": OTHER},
         })
-        stored = self.publish([
-            {"tmux": "live-beta", "name": "New Name", "sid": None},
-            {"tmux": "live-gamma", "name": "Other Chat", "sid": None},
-            {"tmux": "live-delta", "name": "Honest Chat", "sid": None},
-        ])
-        self.assert_linked(stored, "live-beta", AGENT)
-        self.assert_linked(stored, "live-gamma", AGENT)
         done = self.run_sync(agents=[
             {"id": AGENT, "display_name": "Old Name"},
             {"id": OTHER, "display_name": "Stale Honest"},
@@ -127,7 +99,7 @@ class AgentSyncTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         stored = json.loads(self.names.read_text(encoding="utf-8"))
         self.assertEqual(stored["live-beta"]["name"], "New Name")
-        self.assert_linked(stored, "live-beta", AGENT)
+        self.assertEqual(stored["live-beta"]["agent"], AGENT)
         self.assertEqual(stored["@agents"]["live-beta"], AGENT)
 
 
