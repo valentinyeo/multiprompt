@@ -14,14 +14,16 @@ export function transcriptGeometry(host, status, composer, viewport) {
   const top = status.top + status.height;
   assert.ok(viewport.left === host.left && viewport.width === host.width && viewport.top === status.top,
     'reported content must match the owned status and transcript');
+  const scaled = value => Math.floor(value * status.height / 28);
+  const reserved = Math.max(scaled(14), scaled(30));
   const bottom = viewport.top + viewport.height;
-  const gap = composer.top - Math.floor(12 * status.height / 28) - bottom;
-  assert.equal(gap, Math.floor(14 * status.height / 28), 'removed working strip must not reserve space');
+  const gap = composer.top - scaled(12) - bottom;
+  assert.equal(gap, reserved, 'only the new-messages notice may reserve space; the removed working strip must not');
   assert.ok(bottom > top + 100 && bottom < host.top + host.height, 'visible transcript content must exclude composer');
   return {
     transcript: { left: host.left, top, width: host.width, height: bottom - top },
     rows: status,
-    working: { left: host.left, top: bottom, width: host.width, height: Math.floor(14 * status.height / 28) },
+    working: { left: host.left, top: bottom + reserved - scaled(14), width: host.width, height: scaled(14) },
   };
 }
 
