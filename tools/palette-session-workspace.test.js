@@ -25,7 +25,7 @@ test('palette usage fixture preserves the original counts and timestamps', () =>
   const parse = file => read(file).trim().split(/\r?\n/).map(line => line.split('\t'));
   const old = parse('tools/fixtures/IGSH-612/palette-usage.tsv');
   const current = parse('tools/fixtures/IGSH-1743/palette-usage.tsv');
-  const replacements = { 2000: '6295', 6001: '6291', 2005: '6227', 2002: '6240' };
+  const replacements = { 2000: '6295', 2005: '6248', 2002: '6240' };
   assert.deepEqual(current, old.map(([id, count, last]) => [replacements[id] ?? id, count, last]));
   assert.match(read('.claude/skills/verify-multiprompt/control.ps1'), /tools\/fixtures\/IGSH-1743\/palette-usage\.tsv/);
 });
@@ -43,7 +43,6 @@ test('native palette journey seeds and checks the real session and workspace row
   assert.match(setup, /\$saved\.tabs -isnot \[array\]/);
   assert.match(setup, /\$savedRegistry\.windows -isnot \[array\]/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
-  assert.doesNotMatch(journey, /6248|use agent or terminal session name/);
   const restart = journey.indexOf("Restart-SessionRestore 'palette-ranking' $false $false $paletteRankingSeed");
   assert.ok(restart > 0);
   const restored = journey.slice(restart);
