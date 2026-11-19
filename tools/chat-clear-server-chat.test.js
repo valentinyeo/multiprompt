@@ -69,7 +69,12 @@ test('a cleared server chat keeps only its new messages', () => {
     fs.writeFileSync(path.join(dir, 'clear-test.zig'), source);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'clear-test.zig')], { encoding: 'utf8', timeout: 180000 });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}\nsignal=${result.signal} error=${result.error || ''}`);
-    assert.match(result.stderr, /All 3 tests passed/);
+    assert.match(result.stderr, /All \d+ tests passed/);
+    for (const name of [
+      'a cleared server chat shows only the messages after the clear',
+      'a server chat keeps a replaced transcript that still carries its messages',
+      'a local chat keeps a replaced transcript',
+    ]) assert.match(result.stderr, new RegExp(`${name}\\.\\.\\.OK`), name);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

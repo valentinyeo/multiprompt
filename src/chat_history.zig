@@ -401,7 +401,7 @@ pub const History = struct {
             var incoming_history = self.cursor();
             defer incoming_history.deinit(a);
             try incoming_history.rows.appendSlice(a, added);
-            try incoming_history.retainRows(a, combined, false);
+            try incoming_history.retainRows(a, combined);
             try incoming_history.render(a);
             incoming_history.updateCursor(next.*);
             incoming_history.revision = next.revision;
@@ -435,7 +435,11 @@ pub const History = struct {
         self.updateCursor(next.*);
     }
 
-    fn retainRows(self: *History, a: std.mem.Allocator, previous: History, replaced_source: bool) !void {
+    fn retainRows(self: *History, a: std.mem.Allocator, previous: History) !void {
+        return self.retainRowsAcrossFiles(a, previous, false);
+    }
+
+    fn retainRowsAcrossFiles(self: *History, a: std.mem.Allocator, previous: History, replaced_source: bool) !void {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
@@ -743,14 +747,14 @@ pub const History = struct {
         const replaced_source = !append and !prepend and key.host != 0 and inode != 0 and inode != self.inode;
         if (!prepend and mode != null and self.rows.items.len > 0) {
             if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and end < self.offset) return error.InvalidHistory;
-            try next.retainRows(a, self.*, replaced_source);
+            try next.retainRowsAcrossFiles(a, self.*, replaced_source);
             if (!self.restore_full and inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
         }
         if (prepend) {
             var tail = self.cursor();
             defer tail.deinit(a);
             try tail.rows.appendSlice(a, self.rows.items);
-            try tail.retainRows(a, next, false);
+            try tail.retainRows(a, next);
             next.rows.deinit(a);
             next.rows = tail.rows;
             tail.rows = .empty;
@@ -807,7 +811,7 @@ pub const Backfill = struct {
         var recent = tail.cursor();
         defer recent.deinit(a);
         try recent.rows.appendSlice(a, tail.rows.items);
-        try recent.retainRows(a, result, false);
+        try recent.retainRows(a, result);
         result.rows.deinit(a);
         result.rows = recent.rows;
         recent.rows = .empty;
