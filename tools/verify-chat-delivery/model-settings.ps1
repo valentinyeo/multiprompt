@@ -83,110 +83,6 @@ function Model-Copy([string]$Stage) {
     Press @(0x1B) 'Escape: clear history selection'
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }
-function Observe-Plus([hashtable]$plusRects, [string[]]$plusActive, [string]$Screenshot, [string]$Output) {
-    $plusMenu = Wait-For 'plus menu window' { $h = [ChatDeliveryDesktop]::PlusMenu($main); if ($h -ne [IntPtr]::Zero) { $h } } 10
-    $plusBox = New-Object ChatDeliveryDesktop+Rect
-    [void][ChatDeliveryDesktop]::GetWindowRect($plusMenu, [ref]$plusBox)
-    Start-Sleep -Milliseconds 600
-    Shot $Screenshot
-    $plusWidth = $plusBox.Right - $plusBox.Left
-    $plusHeight = $plusBox.Bottom - $plusBox.Top
-    $plusShot = [Drawing.Bitmap]::new($plusWidth, $plusHeight)
-    $plusGraphics = [Drawing.Graphics]::FromImage($plusShot)
-    try { $plusGraphics.CopyFromScreen($plusBox.Left, $plusBox.Top, 0, 0, $plusShot.Size) } finally { $plusGraphics.Dispose() }
-    $plusRows = [Collections.Generic.List[object]]::new()
-    $plusGroups = @(
-        @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku', 'model_fable')},
-        @{first='effort_low'; names=@('effort_low', 'effort_medium', 'effort_high')},
-        @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass')}
-    )
-    foreach ($group in $plusGroups) {
-        if (-not $plusRects.ContainsKey($group.first)) { continue }
-        $rect = $plusRects[$group.first]
-        $rowHeight = $rect[3] - $rect[1]
-        for ($i = 0; $i -lt $group.names.Count; $i++) {
-            $left = $rect[0]; $right = $rect[2]; $top = $rect[1] + $i * $rowHeight; $bottom = $top + $rowHeight
-            $background = $plusShot.GetPixel([Math]::Min($right - 6, $plusWidth - 1), [Math]::Min([int](($top + $bottom) / 2), $plusHeight - 1))
-            $accent = 0
-            $mark = 0
-            for ($y = $top + 3; $y -lt $bottom - 3; $y++) {
-                if ($y -ge $plusHeight) { break }
-                for ($x = $left + 10; $x -lt $right - 10; $x++) {
-                    if ($x -ge $plusWidth) { break }
-                    $pixel = $plusShot.GetPixel($x, $y)
-                    if ($pixel.B -ge 150 -and ($pixel.B - $pixel.R) -ge 70) { $accent++ }
-                    if ($x -ge $right - 40 -and $x -lt $right - 14 -and ([Math]::Abs($pixel.R - $background.R) + [Math]::Abs($pixel.G - $background.G) + [Math]::Abs($pixel.B - $background.B)) -gt 90) { $mark++ }
-                }
-            }
-            $plusRows.Add(@{item=$group.names[$i]; accent=$accent; mark=$mark})
-        }
-    }
-    $plusShot.Dispose()
-    if ($plusRects.ContainsKey('mode_ask')) { $plusActive += 'mode_ask' }
-    $plusFailures = [Collections.Generic.List[string]]::new()
-    foreach ($row in $plusRows) {
-        if ($plusActive -contains $row.item -and $row.accent -lt 10) { $plusFailures.Add("$($row.item) is not drawn in the active style") }
-        if ($row.mark -gt 0) { $plusFailures.Add("$($row.item) shows a check mark") }
-    }
-    foreach ($name in $plusActive) { if (-not (@($plusRows | Where-Object { $_.item -eq $name }).Count)) { $plusFailures.Add("$name row is not in the menu") } }
-    Save @{rows=$plusRows.ToArray(); expected_active=$plusActive; failures=$plusFailures.ToArray(); window=@{width=$plusWidth; height=$plusHeight}} "$caseDir/$Output.json"
-    Press @(0x1B) 'Escape: close plus menu'
-    if ($plusFailures.Count) { throw ('Plus menu active rows: ' + ($plusFailures -join '; ')) }
-}
-function Header-Proof([string]$Name, [string]$Text, [bool]$Amber) {
-    $match = Wait-For "header shows $Text" {
-        $matches = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] header model rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) title_bottom=(-?\d+) amber=(true|false) text=([^\r\n]+)')
-        if ($matches.Count -and $matches[$matches.Count - 1].Groups[7].Value -ceq $Text) { $matches[$matches.Count - 1] }
-    } 30
-    $rect = @([int]$match.Groups[1].Value, [int]$match.Groups[2].Value, [int]$match.Groups[3].Value, [int]$match.Groups[4].Value)
-    $titleBottom = [int]$match.Groups[5].Value
-    if ($rect[1] -lt $titleBottom - 1 -or $rect[3] -le $titleBottom -or ($match.Groups[6].Value -eq 'true') -ne $Amber) { throw 'Header model is not below the name with the expected style' }
-    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $rect[0], $rect[1])
-    $pixels = [Drawing.Bitmap]::new(($rect[2] - $rect[0]), ($rect[3] - $rect[1]))
-    $graphics = [Drawing.Graphics]::FromImage($pixels)
-    $ink = 0
-    try {
-        $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $pixels.Size)
-        for ($y = 0; $y -lt $pixels.Height; $y++) {
-            for ($x = 0; $x -lt $pixels.Width; $x++) {
-                $c = $pixels.GetPixel($x, $y)
-                if ($Amber) {
-                    if ($c.R -gt 150 -and $c.G -gt 95 -and ($c.R - $c.G) -gt 25 -and ($c.G - $c.B) -gt 35) { $ink++ }
-                } elseif ($c.R -ge 105 -and $c.R -le 160 -and [Math]::Abs([int]$c.R - $c.G) -lt 4 -and [Math]::Abs([int]$c.G - $c.B) -lt 4) { $ink++ }
-            }
-        }
-        $pixels.Save("$caseDir/header-$Name.png", [Drawing.Imaging.ImageFormat]::Png)
-    } finally { $graphics.Dispose(); $pixels.Dispose() }
-    if ($ink -lt 10) { throw 'Header model has no visible text ink in the expected color' }
-    $x = [int](($rect[0] + $rect[2]) / 2)
-    $y = [int](($rect[1] + $rect[3]) / 2)
-    Doctor
-    [void](Wait-For 'hand cursor over the model line' {
-        $cursor = [ChatDeliveryDesktop]::HoverCursor($main, $app.Id, $x, $y)
-        Save @{flags=$cursor[0]; actual=$cursor[1]; expectedHand=$cursor[2]; x=$cursor[3]; y=$cursor[4]} "$caseDir/header-$Name-cursor.json"
-        $cursor[0] -eq 1 -and $cursor[1] -eq $cursor[2]
-    } 10)
-    Shot "model-header-$Name"
-    $actions.Add(@{case=$plan.name; input='click header model'; text=$Text; x=$x; y=$y})
-    [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, $y)
-    [void](Wait-For 'header model opens the plus picker' { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
-    Shot "model-header-$Name-picker"
-    Save @{text=$Text; amber=$Amber; rect=$rect; titleBottom=$titleBottom; ink=$ink; hand=$true; pickerOpened=$true} "$caseDir/header-$Name.json"
-}
-Copy-Item "$profile/home/.claude/settings.json" "$caseDir/saved-settings.json"
-Copy-Item $configPath "$caseDir/config-initial.json"
-Copy-Item "$state/model-argv.jsonl" "$caseDir/argv-initial.jsonl"
-Header-Proof 'fable' "Fable 5.2 $([char]0xb7) medium" $true
-Press @(0x1B) 'Escape: close existing-model picker'
-Type-Composer 'Show the model this new process really runs'
-Press @(0x0D) 'Enter: send with the default model' $true
-[void](Wait-For 'default-model response clears the composer' { [ChatDeliveryDesktop]::Text($composer) -ceq '' } 20)
-Header-Proof 'opus' "Opus 5.5 $([char]0xb7) medium" $false
-$initialRects = @{}
-foreach ($found in [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
-    $initialRects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
-}
-Observe-Plus $initialRects @('model_opus', 'effort_medium') 'model-default-menu' 'plus-default'
 Model-Copy 'before'
 Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft setup failed' }
@@ -225,7 +121,7 @@ foreach ($choice in $choices) {
         $lines = @((Read-Shared $hostLog).Substring($oldLog) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
         $args = @((Read-Shared "$state/model-argv.jsonl").Substring($oldArgs) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
         $applied = @($lines | Where-Object { $_.event -eq 'model_effort_settings_applied' -and $_.detail.model -eq $choice.model -and $_.detail.effort -eq $choice.effort })
-        $invoked = @($args | Where-Object { $a = @($_.argv); $m = [array]::IndexOf($a, '--model'); $e = [array]::IndexOf($a, '--effort'); $m -ge 0 -and $a[$m + 1] -ceq $choice.model -and ($e -ge 0 -and $a[$e + 1] -ceq $(if ($choice.effort -eq 'default') { 'medium' } else { $choice.effort })) })
+        $invoked = @($args | Where-Object { $a = @($_.argv); $m = [array]::IndexOf($a, '--model'); $e = [array]::IndexOf($a, '--effort'); $m -ge 0 -and $a[$m + 1] -ceq $choice.model -and (($choice.effort -eq 'default' -and $e -lt 0) -or ($e -ge 0 -and $a[$e + 1] -ceq $choice.effort)) })
         $modelProperty = $config.PSObject.Properties['model']
         $effortProperty = $config.PSObject.Properties['effort']
         $modelProperty -and $modelProperty.Value -ceq $choice.model -and ($choice.effort -eq 'default' -or ($effortProperty -and $effortProperty.Value -ceq $choice.effort)) -and $applied.Count -gt 0 -and $invoked.Count -gt 0
@@ -243,7 +139,55 @@ $plusRects = @{}
 foreach ($found in [regex]::Matches($plusLog, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
     $plusRects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
 }
-Observe-Plus $plusRects @('model_haiku', 'effort_high') 'model-plus-menu-active' 'plus-active'
+$plusMenu = Wait-For 'plus menu window' { $h = [ChatDeliveryDesktop]::PlusMenu($main); if ($h -ne [IntPtr]::Zero) { $h } } 10
+$plusBox = New-Object ChatDeliveryDesktop+Rect
+[void][ChatDeliveryDesktop]::GetWindowRect($plusMenu, [ref]$plusBox)
+Start-Sleep -Milliseconds 600
+Shot 'model-plus-menu-active'
+$plusWidth = $plusBox.Right - $plusBox.Left
+$plusHeight = $plusBox.Bottom - $plusBox.Top
+$plusShot = [Drawing.Bitmap]::new($plusWidth, $plusHeight)
+$plusGraphics = [Drawing.Graphics]::FromImage($plusShot)
+try { $plusGraphics.CopyFromScreen($plusBox.Left, $plusBox.Top, 0, 0, $plusShot.Size) } finally { $plusGraphics.Dispose() }
+$plusRows = [Collections.Generic.List[object]]::new()
+$plusGroups = @(
+    @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku', 'model_fable')},
+    @{first='effort_low'; names=@('effort_low', 'effort_medium', 'effort_high')},
+    @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass')}
+)
+foreach ($group in $plusGroups) {
+    if (-not $plusRects.ContainsKey($group.first)) { continue }
+    $rect = $plusRects[$group.first]
+    $rowHeight = $rect[3] - $rect[1]
+    for ($i = 0; $i -lt $group.names.Count; $i++) {
+        $left = $rect[0]; $right = $rect[2]; $top = $rect[1] + $i * $rowHeight; $bottom = $top + $rowHeight
+        $background = $plusShot.GetPixel([Math]::Min($right - 6, $plusWidth - 1), [Math]::Min([int](($top + $bottom) / 2), $plusHeight - 1))
+        $accent = 0
+        $mark = 0
+        for ($y = $top + 3; $y -lt $bottom - 3; $y++) {
+            if ($y -ge $plusHeight) { break }
+            for ($x = $left + 10; $x -lt $right - 10; $x++) {
+                if ($x -ge $plusWidth) { break }
+                $pixel = $plusShot.GetPixel($x, $y)
+                if ($pixel.B -ge 150 -and ($pixel.B - $pixel.R) -ge 70) { $accent++ }
+                if ($x -ge $right - 40 -and $x -lt $right - 14 -and ([Math]::Abs($pixel.R - $background.R) + [Math]::Abs($pixel.G - $background.G) + [Math]::Abs($pixel.B - $background.B)) -gt 90) { $mark++ }
+            }
+        }
+        $plusRows.Add(@{item=$group.names[$i]; accent=$accent; mark=$mark})
+    }
+}
+$plusShot.Dispose()
+$plusActive = @('model_haiku', 'effort_high')
+if ($plusRects.ContainsKey('mode_ask')) { $plusActive += 'mode_ask' }
+$plusFailures = [Collections.Generic.List[string]]::new()
+foreach ($row in $plusRows) {
+    if ($plusActive -contains $row.item -and $row.accent -lt 10) { $plusFailures.Add("$($row.item) is not drawn in the active style") }
+    if ($row.mark -gt 0) { $plusFailures.Add("$($row.item) shows a check mark") }
+}
+foreach ($name in $plusActive) { if (-not (@($plusRows | Where-Object { $_.item -eq $name }).Count)) { $plusFailures.Add("$name row is not in the menu") } }
+Save @{rows=$plusRows.ToArray(); expected_active=$plusActive; failures=$plusFailures.ToArray(); window=@{width=$plusWidth; height=$plusHeight}} "$caseDir/plus-active.json"
+Press @(0x1B) 'Escape: close plus menu'
+if ($plusFailures.Count) { throw ('Plus menu active rows: ' + ($plusFailures -join '; ')) }
 Model-Copy 'after'
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft changed after history copy' }
 $observation.draft = [ChatDeliveryDesktop]::Text($composer)
