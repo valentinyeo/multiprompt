@@ -176,7 +176,7 @@ pub fn cacheFileName(url: []const u8, out: []u8) ?[]const u8 {
 }
 
 pub const UploadConfig = struct {
-    secret: [128]u8 = undefined,
+    secret: [256]u8 = undefined,
     secret_len: usize = 0,
     base: [160]u8 = undefined,
     base_len: usize = 0,

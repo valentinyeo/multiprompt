@@ -15,12 +15,12 @@ function functionBody(text, name) {
 
 test("IGSH-1889: the worker serves the Deepgram key per account to devices only", () => {
   const worker = read("service/worker.js");
-  const found = worker.match(/if \(url\.pathname === '\/v1\/secrets\/deepgram'[^]*?\n      \}\n/);
+  const found = worker.match(/if \(secretName &&[^]*?\n      \}\n/);
   assert.ok(found, "the secrets route is missing");
   const route = found[0];
   assert.match(route, /request\.method === 'GET' \|\| request\.method === 'PUT'/);
   assert.match(route, /if \(!device\.id\) fail\(403/);
-  assert.match(route, /bind\(device\.account, 'deepgram'/);
+  assert.match(route, /bind\(device\.account, secretName/);
   assert.match(route, /FROM account_secrets WHERE account=\? AND name=\?/);
   assert.match(worker, /const validSecret = .*length <= 256.*\\x21-\\x7e/);
   const gate = worker.match(/async function authenticateKey[^]*?\n\}\n/);
@@ -55,9 +55,27 @@ test("IGSH-1889: account sync pulls the key into the registry when it is missing
   assert.match(functionBody(desktop, "accountRequest"), /accountSyncDeepgramKey\(access, job\.kind\)/);
 });
 
+test("SOFT-2683: upload settings and account sync share the same local key storage", () => {
+  const panel = read("src/settings_panel.zig");
+  const save = functionBody(panel, "saveUploadKey");
+  assert.ok(save.indexOf("accountPushScreencast2Key()") > save.indexOf("saveScreencast2ApiKey(utf8)"));
+  assert.match(functionBody(panel, "loadKey"), /readScreencast2ApiKey\(&bytes\)/);
+  assert.match(functionBody(panel, "saveScreencast2ApiKey"), /replaceUploadKey\(a, old orelse "", value\)/);
+  const desktop = read("src/account_desktop.zig");
+  const entry = functionBody(desktop, "accountPushScreencast2Key");
+  assert.ok(entry.indexOf("g_screencast2_push_pending.store(true") < entry.indexOf("g_account_has_token"));
+  const sync = functionBody(desktop, "accountSyncScreencast2Key");
+  assert.match(sync, /settings\.readScreencast2ApiKey\(/);
+  assert.match(sync, /"GET", "\/v1\/secrets\/screencast2"/);
+  assert.match(sync, /response\.status == 404/);
+  assert.match(sync, /settings\.saveScreencast2ApiKey\(remote\)/);
+  assert.match(functionBody(desktop, "putScreencast2Key"), /"PUT", "\/v1\/secrets\/screencast2"/);
+  assert.match(functionBody(desktop, "accountRequest"), /accountSyncScreencast2Key\(access, job\.kind\)/);
+});
+
 test("IGSH-1889: no log line in the account key sync carries a value", () => {
   const desktop = read("src/account_desktop.zig");
-  for (const name of ["accountSyncDeepgramKey", "putDeepgramKey", "accountPushDeepgramKey"]) {
+  for (const name of ["accountSyncDeepgramKey", "putDeepgramKey", "accountPushDeepgramKey", "accountSyncScreencast2Key", "putScreencast2Key", "accountPushScreencast2Key"]) {
     const lines = functionBody(desktop, name).split("\n").filter(line => /debugLog|syncLog/.test(line));
     for (const line of lines) assert.match(line, /^\s*(?:if \([^)]*\) )?debugLog\("[^"{}]*"\);?$|debugLog\("[^"{}]*"\)/, line);
   }

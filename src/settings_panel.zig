@@ -325,20 +325,29 @@ fn loadKey(control: Control) void {
         }
         return;
     }
-    var path_buf: [768]u8 = undefined;
-    const path = uploadPath(&path_buf) orelse return;
-    const contents = files.readFileAllocWin32(path, 8192) orelse return;
-    defer {
-        @memset(contents, 0);
-        a.free(contents);
-    }
-    if (@import("chat_image.zig").parseUploadConfig(contents)) |config_value| {
-        var config = config_value;
-        const len = std.unicode.utf8ToUtf16Le(&key, config.secretSlice()) catch 0;
+    var bytes: [256]u8 = undefined;
+    defer std.crypto.secureZero(u8, &bytes);
+    if (readScreencast2ApiKey(&bytes)) |value| {
+        const len = std.unicode.utf8ToUtf16Le(&key, value) catch return;
         key[len] = 0;
         _ = w.SetWindowTextW(key_edit, &key);
-        @memset(&config.secret, 0);
     }
+}
+
+pub fn readScreencast2ApiKey(out: []u8) ?[]const u8 {
+    var path_buf: [768]u8 = undefined;
+    const path = uploadPath(&path_buf) orelse return null;
+    const contents = files.readFileAllocWin32(path, 8192) orelse return null;
+    defer {
+        std.crypto.secureZero(u8, contents);
+        a.free(contents);
+    }
+    var config = @import("chat_image.zig").parseUploadConfig(contents) orelse return null;
+    defer std.crypto.secureZero(u8, &config.secret);
+    const value = config.secretSlice();
+    if (value.len > out.len) return null;
+    @memcpy(out[0..value.len], value);
+    return out[0..value.len];
 }
 
 fn saveUploadKey() bool {
@@ -350,41 +359,44 @@ fn saveUploadKey() bool {
         a.free(text);
     }
     _ = w.GetWindowTextW(edit, text.ptr, @intCast(text.len + 1));
-    {
-        const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return false;
-        defer {
-            @memset(utf8, 0);
-            a.free(utf8);
-        }
-        var path_buf: [768]u8 = undefined;
-        const path = uploadPath(&path_buf) orelse return false;
-        var old: ?[]u8 = null;
-        if (files.win32OpenRead(path)) |file| {
-            defer _ = w.CloseHandle(file);
-            var size: i64 = 0;
-            if (GetFileSizeEx(file, &size) == 0 or size < 0) return false;
-            const bytes = a.alloc(u8, @intCast(size)) catch return false;
-            if (files.win32ReadAll(file, bytes) != bytes.len) {
-                @memset(bytes, 0);
-                a.free(bytes);
-                return false;
-            }
-            old = bytes;
-        } else if (w.GetLastError() != 2 and w.GetLastError() != 3) return false;
-        defer if (old) |bytes| {
+    const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return false;
+    defer {
+        std.crypto.secureZero(u8, utf8);
+        a.free(utf8);
+    }
+    if (!saveScreencast2ApiKey(utf8)) return false;
+    @import("account_desktop.zig").accountPushScreencast2Key();
+    return true;
+}
+
+pub fn saveScreencast2ApiKey(value: []const u8) bool {
+    var path_buf: [768]u8 = undefined;
+    const path = uploadPath(&path_buf) orelse return false;
+    var old: ?[]u8 = null;
+    if (files.win32OpenRead(path)) |file| {
+        defer _ = w.CloseHandle(file);
+        var size: i64 = 0;
+        if (GetFileSizeEx(file, &size) == 0 or size < 0) return false;
+        const bytes = a.alloc(u8, @intCast(size)) catch return false;
+        if (files.win32ReadAll(file, bytes) != bytes.len) {
             @memset(bytes, 0);
             a.free(bytes);
-        };
-        const updated = replaceUploadKey(a, old orelse "", utf8) catch return false;
-        defer {
-            @memset(updated, 0);
-            a.free(updated);
+            return false;
         }
-        const slash = std.mem.lastIndexOfScalar(u8, path, '\\') orelse return false;
-        files.win32MakePath(path[0..slash]);
-        if (!files.writeFileAtomicW(path, updated)) return false;
+        old = bytes;
+    } else if (w.GetLastError() != 2 and w.GetLastError() != 3) return false;
+    defer if (old) |bytes| {
+        @memset(bytes, 0);
+        a.free(bytes);
+    };
+    const updated = replaceUploadKey(a, old orelse "", value) catch return false;
+    defer {
+        @memset(updated, 0);
+        a.free(updated);
     }
-    return true;
+    const slash = std.mem.lastIndexOfScalar(u8, path, '\\') orelse return false;
+    files.win32MakePath(path[0..slash]);
+    return files.writeFileAtomicW(path, updated);
 }
 
 fn closeKey() void {

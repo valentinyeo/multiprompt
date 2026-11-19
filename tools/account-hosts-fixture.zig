@@ -122,6 +122,7 @@ fn accountReadLayout(alloc: std.mem.Allocator, bytes: []const u8) ![]u8 {
 }
 fn accountSyncDeviceKeys(_: []const u8, _: AccountJob, _: *LayoutReply) !void {}
 fn accountSyncDeepgramKey(_: []const u8, _: @FieldType(AccountJob, "kind")) void {}
+fn accountSyncScreencast2Key(_: []const u8, _: @FieldType(AccountJob, "kind")) void {}
 fn accountSyncPhotos(_: []const u8, _: []const u8, _: []const session_layout.Tab) !void {}
 fn accountDeviceKeyError(_: *LayoutReply, _: []const u8) void {
     @panic("unexpected device key error");

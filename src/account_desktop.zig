@@ -1305,6 +1305,63 @@ fn accountSyncDeepgramKey(access: []const u8, kind: AccountJobKind) void {
     if (voice.saveDeepgramApiKey(wide[0..remote.len :0])) debugLog("[voice] deepgram key source=account");
 }
 
+var g_screencast2_push_pending = std.atomic.Value(bool).init(false);
+var g_screencast2_checked_at: u64 = 0;
+
+pub fn accountPushScreencast2Key() void {
+    g_screencast2_push_pending.store(true, .release);
+    if (!app_state.g_account_has_token or app_state.g_account_reauth) return;
+    pullSessionLayout();
+}
+
+fn putScreencast2Key(access: []const u8, key: []const u8) bool {
+    const a = std.heap.page_allocator;
+    const body = std.json.Stringify.valueAlloc(a, .{ .key = key }, .{}) catch return false;
+    defer freeSecret(body);
+    const response = account_client.request("PUT", "/v1/secrets/screencast2", access, body) catch return false;
+    defer response.deinit();
+    return response.status == 200;
+}
+
+fn accountSyncScreencast2Key(access: []const u8, kind: AccountJobKind) void {
+    const settings = @import("settings_panel.zig");
+    var local_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &local_buf);
+    const local = settings.readScreencast2ApiKey(&local_buf);
+    if (g_screencast2_push_pending.load(.acquire)) {
+        const key = local orelse {
+            g_screencast2_push_pending.store(false, .release);
+            return;
+        };
+        if (putScreencast2Key(access, key)) {
+            g_screencast2_push_pending.store(false, .release);
+            debugLog("[upload] screencast2 key saved to account");
+        }
+        return;
+    }
+    const now = GetTickCount64();
+    if (kind != .startup and kind != .login and g_screencast2_checked_at != 0 and now -% g_screencast2_checked_at < 60_000) return;
+    g_screencast2_checked_at = now;
+    const response = account_client.request("GET", "/v1/secrets/screencast2", access, "") catch return;
+    defer response.deinit();
+    if (response.status == 404) {
+        if (local) |key| {
+            if (putScreencast2Key(access, key)) debugLog("[upload] screencast2 key saved to account");
+        }
+        return;
+    }
+    if (response.status != 200) return;
+    const remote = account_client.field(response.bytes, "key") catch return;
+    defer freeSecret(remote);
+    if (remote.len > 256) return;
+    if (local) |key| if (std.mem.eql(u8, key, remote)) return;
+    for (remote) |c| {
+        if (c < 0x21 or c > 0x7e) return;
+    }
+    if (g_screencast2_push_pending.load(.acquire)) return;
+    if (settings.saveScreencast2ApiKey(remote)) debugLog("[upload] screencast2 key source=account");
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -1530,6 +1587,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         };
     }
     accountSyncDeepgramKey(access, job.kind);
+    accountSyncScreencast2Key(access, job.kind);
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
