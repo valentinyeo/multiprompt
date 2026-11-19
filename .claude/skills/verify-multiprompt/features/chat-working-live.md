@@ -1,5 +1,7 @@
 # Hosted live working dots
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-working-live.ps1
+
 ## Sub-features
 
 - Real composer Enter to three painted dots within 1000 ms.
@@ -24,5 +26,8 @@ Recorded hosted proof: https://github.com/valentinyeo/multiprompt/actions/runs/4
 The `Verify steady chat` workflow runs this same driver against the instrumented pre-idle-fix app at `596e3261` and the candidate. Its baseline artifact is `verify-chat-delivery-596e3261e9e77ce193ab7addbfd3001892242331`; the candidate artifact is `verify-chat-delivery`. During the idle window, the stand-in appends blank JSONL lines every half-second. The file cursor advances but no message changes. At least six such refreshes must occur inside the measured window. The baseline must fail the idle layout or paint assertion, not setup. The workflow's counter job rejects an unexpectedly quiet baseline and requires the candidate's full checker to pass. The driver creates empty isolated host directories before concurrent readers start, then uses production archive and event APIs to fill them.
 
 ## Gotchas
+
+The driver requires an already-running subscribed turn with visible dots before Enter. Its Enter-to-dots assertion proves continued visibility within the bound, not idle-to-working onset caused by that send.
+
 
 This is not proof of a real provider, real SSH, provider startup or the normal external message-worker process. Timing includes the actual hosted runner and stand-in transport, not production network or provider latency. A passing portable checker test is not a hosted desktop result. Require the Windows artifact and inspect the screenshots; no pass is claimed until that run succeeds.

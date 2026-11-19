@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: chat-bench-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bench:
     runs-on: ubuntu-24.04
@@ -104,7 +108,7 @@ jobs:
           export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
           cd tooling
           node -e 'const fs = require("fs"); for (const r of JSON.parse(fs.readFileSync("../results/manifest.json"))) console.log([r.label, r.path].join("\t"))' > ../results/plan.tsv
-          while IFS=$'\t' read -r label result; do
+          while IFS=$'\t' read -r _label result; do
             out="/opt/chat-bench/results/$(dirname "$result")"
             mkdir -p "$out"
             "$ZIG" cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows "$PWD/tools/chat-bench/browser-fixture.c" -o "$out/browser-fixture.exe" -luser32

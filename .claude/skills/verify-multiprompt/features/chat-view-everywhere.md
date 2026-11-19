@@ -1,5 +1,7 @@
 # Chat View everywhere
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-view-everywhere.ps1
+
 Verify on: push
 
 ## Sub-features
@@ -31,6 +33,9 @@ Verify on: push
 - Every view checkpoint independently reads app-written session JSON and counts visible ZigShellChatTranscript controls. Doctor runs before input. The normal finally block retains screenshots, actions, app data and zero-process cleanup evidence.
 
 ## Gotchas
+
+Live chats remain Chat View and cannot toggle to a shell. Individual tab close clears its pin first; archive and group-close protection are separate. Unpinning is a safe recipe step, not a prerequisite for every individual close.
+
 
 - Ctrl+digits follows displayed sidebar order. Pinning session 3 moves it ahead of sessions 1 and 2 even with manual ordering; unpinning restores creation order.
 - Normal close refuses while a pin exists, so the journey explicitly unpins before its restart. Native session write/load tests cover pinned persistence separately.

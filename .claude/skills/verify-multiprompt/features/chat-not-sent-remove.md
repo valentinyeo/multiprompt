@@ -1,14 +1,16 @@
 # Remove a stuck Not sent message
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-not-sent-remove.ps1, .github/workflows/click-through.yml
+
 A message that is stuck as Not sent from an old session can be removed with Remove.
 
 ## Sub-features
 
-- `remove-old-session`: Up selects the Not sent message and Delete removes it for good.
+- `remove-old-session`: Delete from an empty composer discards old-session unsent messages. Up-selected removal and context Remove are separate input paths, not exercised by this driver.
 
 ## How to get to it (user POV)
 
-- Open a chat with a Not sent message. Press Up to select it, then Delete, or right-click it and choose Remove.
+- Open a chat with a Not sent message. With an empty composer, press Escape, then Delete to discard unsent messages. Alternatively, Up selects the newest message and Enter opens its actions; right-click also offers Remove. Those alternatives require separate coverage.
 
 ## Driving it with control.ps1
 
@@ -18,9 +20,9 @@ Seeding boundary: the harness writes `session.json` and `chat-outbox.json` once 
 
 1. Launch with `--single-window` and require the message in the outbox file.
 2. Alt+C to open Chat View.
-3. Up to select the message, Delete to remove it, up to three attempts.
+3. Clear the composer, press Escape, then Delete to remove the unsent message, up to three attempts.
 4. Require the message gone from `chat-outbox.json`.
-5. Retain `outbox-before.json`, `outbox-after.json`, `action.png`, `selected.png` and `after.png`.
+5. Retain `outbox-before.json`, `outbox-after.json`, `action.png` and `after.png`.
 
 ## Gotchas
 

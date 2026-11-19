@@ -1,5 +1,7 @@
 # Chat send latency
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-send-latency.ps1
+
 Verify on: push
 
 IGSH-977: a message must be on screen in the Chat View the moment it is sent. The app used to hold the window thread for the 120 ms paste-and-Enter wait (250 ms for tmux and remote tabs) before the window could redraw, so the new message appeared late.
@@ -15,7 +17,7 @@ Press Alt+C to open Chat View, type a message and press Enter.
 
 ## Driving it with control.ps1
 
-- Branch: `gh workflow run verify.yml --ref ceo/IGSH-977 -f feature=chat-send-latency`. It also runs in the full matrix on every master push.
+- Branch: `gh workflow run verify.yml --ref <branch> -f feature=chat-send-latency`. It also runs in the full matrix on every master push.
 - The driver first starts a PowerShell console in the isolated CMD session with the title `claude agent` and a `❯` prompt, so the app treats it as a local coding agent at an idle prompt and sends through direct console input, the path that waits before pressing Enter. Then it opens Chat View, types `latency probe <n>` with real keyboard input and presses Enter, 20 times with 1.5 seconds between sends. After each send it waits for the new log line and for the message box to empty.
 - `chat-send-latency.json` holds all 20 samples in milliseconds (`enqueueMs`, `paintedMs`), the median and the maximum. `result.json` names the check `chat-send-latency` with `over`, the number of sends slower than 100 ms. Any value above 100 ms fails the run.
 

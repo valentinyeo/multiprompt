@@ -41,6 +41,13 @@ const reviewedCommits = {
   'ef5ef94e58b9c7741df9fc72e0c899fb5f42e82a': 'IGSH-1697',
   '8f52c2a6cf81d617d61bf6c439ec29719d850062': 'IGSH-1615',
   '303734dbef8add073075166d2ea8e0d4a091646c': ['IGSH-1544', 'IGSH-1545', 'IGSH-1546'],
+  'ee394be0c178378919a6d4d3499329f5d3636691': 'SOFT-2567',
+  '2452e248a2fe8ff78be0b342273b7677dd7c3f52': 'SOFT-2584',
+  'e55f7487157660752c2b22f4619bf86cbc33e9d9': 'SOFT-2567',
+  '23c96fbf3085173cbe7db56c373a70e05aee506c': 'SOFT-2686',
+  '17ff55175dfff3ceffd45d41d8517d149c6be787': 'SOFT-2718',
+  '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
+  '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
 };
 
 const mainPath = 'src/main.zig';
@@ -69,7 +76,7 @@ export function fragmentLines(file, text) {
   return lines;
 }
 
-function runtimeZigTokens(source) {
+export function runtimeZigTokens(source) {
   const tokens = tokenize(source, 'zig').tokens;
   const result = [];
   let depth = 0;
@@ -232,7 +239,7 @@ function git(args, cwd, timeout) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
 }
 
-function readTree(rev, cwd, remaining, sourcePaths = []) {
+export function readTree(rev, cwd, remaining, sourcePaths = []) {
   const read = args => git(args, cwd, remaining?.());
   const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/', ...sourcePaths]).split('\0').filter(Boolean);
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
@@ -307,93 +314,24 @@ function check(baseRev, headRev) {
 
 async function release() {
   const root = git(['rev-parse', '--show-toplevel']).trim();
-  const deadline = Date.now() + 45 * 60 * 1000;
-  const remaining = () => {
-    const left = deadline - Date.now();
-    if (left <= 0) throw new Error('Release timed out after 45 minutes');
-    return left;
-  };
-  const runGit = (args, cwd = root) => git(args, cwd, remaining());
-  const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'inherit'] }).trim();
-  const pollMs = Number(process.env.VERSION_STAMP_POLL_MS || 20000);
-  const wait = async () => {
-    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, remaining())));
-    remaining();
-  };
-  while (true) {
-    runGit(['fetch', 'origin', 'master']);
-    const open = JSON.parse(gh(['pr', 'list', '--state', 'open', '--search', 'head:release/', '--json', 'number,url']));
-    if (open.length) {
-      const pr = open[0];
-      console.log(pr.url);
-      let greenNames;
-      let mergeRequested = false;
-      while (true) {
-        const { state, statusCheckRollup } = JSON.parse(gh(['pr', 'view', String(pr.number), '--json', 'state,statusCheckRollup']));
-        if (state === 'MERGED') break;
-        if (state === 'CLOSED') throw new Error(`Release PR closed without merging: ${pr.url}`);
-        const failed = (statusCheckRollup || []).filter(c => ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR'].includes(c.conclusion || c.state));
-        if (failed.length) throw new Error(`Release PR check failed (${failed.map(c => c.name || c.context).join(', ')}): ${pr.url}`);
-        const checks = statusCheckRollup || [];
-        const names = state === 'OPEN' && checks.length && checks.every(c => c.__typename === 'CheckRun' ? c.status === 'COMPLETED' && ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(c.conclusion) : c.__typename === 'StatusContext' && c.state === 'SUCCESS') ? JSON.stringify([...new Set(checks.map(c => c.name || c.context))].sort()) : null;
-        if (names && names === greenNames && !mergeRequested) {
-          gh(['pr', 'merge', String(pr.number), '--squash', '--delete-branch']);
-          mergeRequested = true;
-        }
-        greenNames = names;
-        await wait();
-      }
-      continue;
+  git(['fetch', 'origin', 'master'], root);
+  const sha = git(['rev-parse', 'origin/master'], root).trim();
+  const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: 45 * 60 * 1000, stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  const runs = JSON.parse(gh(['run', 'list', '--workflow', 'auto-release.yml', '--event', 'push', '--commit', sha, '--json', 'databaseId,headSha,url', '--limit', '10']));
+  const run = runs.filter(run => run.headSha === sha).sort((a, b) => b.databaseId - a.databaseId)[0];
+  if (!run) throw new Error('No automatic release run for origin/master; publication starts only from the normal master push');
+  console.log(run.url);
+  gh(['run', 'watch', String(run.databaseId), '--exit-status', '--interval', '60']);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-receipt-'));
+  try {
+    gh(['run', 'download', String(run.databaseId), '--name', 'release-journey-receipt', '--dir', directory]);
+    const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'release-journeys.json'), 'utf8'));
+    if (receipt.status !== 'passed' || receipt.sha !== sha || receipt.run !== run.url || !Array.isArray(receipt.features) || receipt.features.some(feature => !feature.video?.startsWith(`${run.url}/artifacts/`))) {
+      throw new Error('Automatic release lacks passing candidate journeys with video');
     }
-    const base = readTree('origin/master', root, remaining);
-    const stamp = stampTree(base);
-    if (!stamp) {
-      console.log(`NOTHING_TO_STAMP ${base[mainPath].match(versionLine)?.slice(1).join('.')}`);
-      return;
-    }
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'version-stamp-'));
-    const tree = path.join(temp, 'tree');
-    const branch = `release/${stamp.version}`;
-    try {
-      runGit(['worktree', 'add', '--detach', tree, 'origin/master']);
-      for (const file of [mainPath, changelogPath]) fs.writeFileSync(path.join(tree, file), stamp.files[file]);
-      runGit(['rm', '--', ...stamp.removed], tree);
-      runGit(['add', '--', mainPath, changelogPath], tree);
-      const title = `v${stamp.version}: release ${stamp.tickets.join(', ')}`;
-      runGit(['commit', '-m', title], tree);
-      try {
-        runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], tree);
-      } catch (error) {
-        const left = /non-fast-forward|fetch first|already exists|stale info/.test(String(error.stderr)) ? runGit(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim().split(/\s+/)[0] : '';
-        if (!left) throw error;
-        const attempts = JSON.parse(gh(['pr', 'list', '--state', 'all', '--head', branch, '--json', 'number,state,headRefOid']));
-        if (!attempts.length || !attempts.every(attempt => attempt.state === 'CLOSED') || !attempts.some(attempt => attempt.headRefOid === left)) {
-          await wait();
-          continue;
-        }
-        try {
-          runGit(['push', `--force-with-lease=refs/heads/${branch}:${left}`, 'origin', `HEAD:refs/heads/${branch}`], tree);
-        } catch (forceError) {
-          if (!/stale info|rejected|non-fast-forward|fetch first/.test(String(forceError.stderr))) throw forceError;
-          await wait();
-          continue;
-        }
-      }
-      const url = gh(['pr', 'create', '--base', 'master', '--head', branch, '--title', title, '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
-      console.log(url);
-      try {
-        execFileSync('gh', ['pr', 'merge', url, '--squash', '--auto', '--delete-branch'], { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'pipe'] });
-      } catch (error) {
-        if (error.stderr) process.stderr.write(error.stderr);
-        if (!/auto.?merge is not allowed|not allowed for this repository|enablePullRequestAutoMerge/i.test(`${error.stderr || ''}\n${error.message}`)) throw error;
-      }
-    } finally {
-      try {
-        if (fs.existsSync(tree)) git(['worktree', 'remove', '--force', tree], root, 60000);
-      } finally {
-        fs.rmSync(temp, { recursive: true, force: true });
-      }
-    }
+    console.log(`RELEASE_VERIFIED ${sha} ${run.url}`);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 }
 

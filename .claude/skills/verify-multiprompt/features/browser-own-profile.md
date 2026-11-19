@@ -1,5 +1,7 @@
 # Own browser profile per workspace
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
+
 Verify on: push
 
 ## Sub-features
@@ -37,6 +39,9 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 12. This checks synthetic browser storage across the handoff, not Google authentication. It does not sign into Google or use credentials. Hosted execution and screenshot review remain required before claiming the regression is reproduced or fixed.
 
 ## Gotchas
+
+No new UI means no profile opt-in UI, not absence of the Google sign-in action. A rejected Google sign-in URL can automatically offer the handoff once; local synthetic cookie continuity does not prove real Google authentication.
+
 
 - The branded phase warms the own profile once through the bridge before the app restarts, because a first-run branded Chrome on a loaded runner needs longer than the pane's opening budget.
 - Branded Google Chrome refuses its DevTools pipe when `USERPROFILE` is redirected, so this journey keeps `USERPROFILE` real while `APPDATA` and `LOCALAPPDATA` stay in the scratch.

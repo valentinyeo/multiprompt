@@ -1,6 +1,7 @@
 name: PR checks
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       pr:
@@ -14,8 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pstack-no-comments:
@@ -80,7 +81,11 @@ jobs:
           pyflakes: false
       - name: Test the comment checker
         run: node --test tools/strip-comments.test.js
-      - name: Fail on any code comment
+      - name: Fail on a code comment this change adds
+        if: github.event_name == 'pull_request'
+        run: node tools/strip-comments.mjs --check --added-since origin/${{ github.base_ref }}
+      - name: Fail on any code comment in the whole repository
+        if: github.event_name != 'pull_request'
         run: node tools/strip-comments.mjs --check
       - name: Test routing ID checker
         if: success() || failure()

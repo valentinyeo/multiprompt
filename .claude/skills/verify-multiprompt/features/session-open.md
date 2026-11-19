@@ -1,5 +1,7 @@
 # Session open
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-open.ps1
+
 Open an existing remote tmux session as a named background tab through the agent's real `zsb` TCP entry point, without changing the user's selection.
 
 ## Sub-features
@@ -34,6 +36,9 @@ Preconditions:
 - **Evidence and cleanup.** Inspect all three screenshots and UIA snapshots, `actions.json`, `workspace-list`, both `session-open` `.request.bin`/`.reply.json` pairs and the `session-status-failed` pair, saved-session snapshots, `result.json` and `data/roaming/ZigShell/session.json`/`debug.log`. Connections have five-second connect/write and 90-second total reply limits plus a 16 MiB cap. Normal job-owned process cleanup and scratch removal still apply, including on failure.
 
 ## Gotchas
+
+The CLI also supports --after-tab <id> instead of --group: it inherits the anchor group and inserts directly after it, including an ungrouped anchor. This is a distinct unexercised alternative, not a claim that the documented existing-group recipe covers it.
+
 
 - This verifies the real local agent request handler and app persistence, not Bash argument validation, a reverse SSH tunnel, successful authentication, remote tmux existence or browser-extension behavior.
 - Port 19548 is the remote CLI default, not the app's local inbound port. Do not use the separate notification listener or set an internal port/state value.

@@ -1,5 +1,8 @@
 # Command palette
 
+Covers: palette:SEARCH_UI_BIGGER_OFFSET, palette:SEARCH_UI_RESET_OFFSET
+Source files: src/command_palette.zig, src/shortcuts.zig, src/search*, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-command-palette.ps1
+
 Find real actions in Ctrl+K, execute an app-size change and reset it while checking the saved setting.
 
 ## Sub-features
@@ -43,6 +46,9 @@ Preconditions:
 - **Manage Snippets.** The same command-palette dispatch seeds Remove Me and Keep Me in the existing version-one storage format, captures `manage-snippets-command.png` and `snippet-delete-confirmation.png`, checks Escape leaves the file byte-identical, confirms deletion with Delete then Enter, and verifies only Keep Me survives a restart. `snippet-deleted.png` and `snippet-kept-after-restart.png` show the existing picker.
 
 ## Gotchas
+
+The current driver resolves source action IDs instead of relying on a literal interface query and fixed Down count. It also opens a repo after the cancellation check, reads its saved cwd/selection and archives the created tabs. The plain-terminal Move chat exclusion is a separate negative assertion.
+
 
 - UI Size affects app chrome, not console font zoom. Ctrl+Plus is a different feature and is not a valid substitute.
 - Use `interface`, not a guessed full display label: these size commands accept a fixed set of search keywords and then show Increase, Decrease and Reset in that order.

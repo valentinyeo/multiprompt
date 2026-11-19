@@ -1,5 +1,7 @@
 # Inbox
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox.ps1
+
 Open the session list across workspaces, change a session's read/unread state, and return to the workspace.
 
 ## Sub-features
@@ -37,6 +39,9 @@ Preconditions:
 - **Proof.** Inspect `action.png`, `after.png`, and `returned.png` for the selected session, blue dot, and workspace return; inspect `muted.png` and `muted-returned.png` for Inbox absence and tab survival. Inspect both button states in each theme. `result.json` records pixel counts and transitions alongside attention and mute/unmute checks. Graphite 2 is not a shipped theme, so it is recorded as unavailable rather than substituted. `data/roaming/ZigShell/inbox-default.json` and `session.json` are app-published side effects, not harness-created fixtures. [Windows run 41888148376](https://github.com/valentinyeo/multiprompt/actions/runs/41888148376) passed on c092547a, with both theme states inspected, open pixels 0, closed pixels 133, restored-button clicks and zero remaining owned processes. The same driver rejected [released v0.28.1459](https://github.com/valentinyeo/multiprompt/actions/runs/41855325465), which retained 133 button pixels while Inbox was open.
 
 ## Gotchas
+
+Frequent-input settings retain a label and handler but no current palette insertion. Do not promise that row is reachable. Unread-only is saved through saveSession, not merely a global transient filter. Use the full notifications-inbox map for alternate triage inputs.
+
 
 - An empty or filtered-out list cannot exercise a read/unread toggle. Treat that as a failed precondition, not success opening an empty overlay.
 - Unread-only is a global transient filter; it is not the same thing as one session's blue dot.

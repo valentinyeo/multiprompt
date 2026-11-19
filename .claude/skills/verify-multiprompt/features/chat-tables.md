@@ -1,5 +1,7 @@
 # Chat tables
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-tables.ps1
+
 ## Sub-features
 
 Real console Unicode tables become formatted Chat View grids. Returning to an unchanged table tab retains its layout without rebuilding it.

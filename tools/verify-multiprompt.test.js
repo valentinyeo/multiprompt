@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 
@@ -119,18 +119,21 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
-test('IGSH-1113 the pull-request gate cannot be filtered out for any PR', () => {
-  const gate = read('.github/workflows/click-through.yml');
-  assert.match(gate, /^  pull_request:\r?\n  workflow_dispatch:/m);
-  assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore|types):|^      - ['"]?!/m);
-  assert.match(gate, /git diff --name-only[^\n]*-- src build\.zig/);
+test('PR verification stays unconditional while duplicate click-through drives stay nightly', () => {
+  const gate = read('.github/workflows/pr-verifier.yml');
+  assert.match(gate, /^  pull_request:/m);
+  assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore):/m);
+  const clickThrough = read('.github/workflows/click-through.yml');
+  assert.doesNotMatch(clickThrough, /^  pull_request:/m);
+  assert.match(clickThrough, /^  schedule:/m);
+  assert.match(clickThrough, /^  workflow_dispatch:/m);
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
-  assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
+  assert.match(read('.github/workflows/release.yml'), /journeys:[\s\S]*?feature: all/);
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
@@ -138,7 +141,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(concurrency, 'workflow concurrency block exists');
   const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
   assert.ok(group, 'workflow concurrency group exists');
-  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m, 'a running master verify finishes; only the pending run is replaced');
+  assert.match(concurrency[1], /^  cancel-in-progress: true\r?$/m, 'superseded work is cancelled');
   assert.doesNotMatch(concurrency[1], /refs\/heads\/master/, 'a master push never cancels the master verify already running');
   assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
   const context = (event, feature, tag = '', attempt = '1') => ({
@@ -155,7 +158,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
       current.inputs = inputs;
       const gate = event === 'push' && inputs ? `-gate-${current.github.sha}` : '';
       const feature = inputs ? `-feature-${inputs.feature}` : '';
-      assert.equal(evaluateWorkflowExpression(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}${feature}`);
+      assert.equal(evaluateWorkflowExpression(group[1], current), `verify-desktop-${current.github.workflow}-${current.github.ref}${gate}${feature}`);
     }
     const first = evaluateWorkflowExpression(group[1], context(event));
     const rerun = evaluateWorkflowExpression(group[1], context(event, undefined, '', '2'));
@@ -169,17 +172,19 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
 
 test('IGSH-1028 reusable PR journeys select their requested feature and cannot cancel each other', () => {
   const group = workflow.match(/^  group: (.+)$/m)[1];
-  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
-  const discovered = featureMatrix(workflow);
-  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature }, needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } } });
+  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature } });
   assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
-  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
-  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), discovered.pr.join(','));
-  assert.equal(evaluateWorkflowExpression(matrix, context('all')), discovered.pr.join(','));
-  const dictation = context(undefined);
-  dictation.github.event_name = 'push';
-  dictation.github.ref = 'refs/heads/ceo/IGSH-1072';
-  assert.equal(evaluateWorkflowExpression(matrix, dictation), 'chat-dictation');
+  featureMatrix(workflow);
+  const script = workflow.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
+  const run = (feature, features = '', event = 'pull_request') => {
+    const output = require('node:child_process').execFileSync(process.execPath, ['-'], { cwd: root, input: script, encoding: 'utf8', env: { ...process.env, FEATURE: feature, FEATURES: features, EVENT: event, APP_REVISION: '' } });
+    return Object.fromEntries(output.trim().split('\n').map(line => [line.slice(0, line.indexOf('=')), JSON.parse(line.slice(line.indexOf('=') + 1))]));
+  };
+  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.deepEqual(run(feature).selected, [feature]);
+  assert.deepEqual(run('').selected, featureMatrix(workflow).pr);
+  assert.deepEqual(run('all').selected, featureMatrix(workflow).available);
+  assert.deepEqual(run('', '["chat-newest","title-bar"]').selected, ['chat-newest', 'title-bar']);
+  assert.equal(run('', '["title-bar"]').matrix.length, 6);
 });
 
 function allowsSessionOpen(text) {
@@ -212,7 +217,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
-  assert.match(read('.github/workflows/click-through.yml'), /git diff --name-only[^\n]*tools/);
+  assert.match(read('.github/workflows/click-through.yml'), /touchedJourneys/);
   assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 
@@ -672,7 +677,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: [^\r\n]*&& inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -1507,11 +1512,13 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.match(chat, /foreach \(\$mode in @\('typed', 'suggestion'\)\)/);
   assert.match(chat, /Invoke-JourneyCommand 'new cmd shell' -Confirm {[\s\S]*?Type-Text \('"' \+ \$localAgent/);
   assert.match(chat, /\$inbox = Read-Inbox[\s\S]*?\$_.sid -eq \$localState.tabs\[\$localTab\].shell_id[\s\S]*?\$_.ag -eq 1/);
-  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+)\s*\n/);
+  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+|\$\w+)\s*\n/);
+  const waitArgument = detectionWait?.[1];
+  const detectionSeconds = waitArgument?.startsWith('$') ? chat.match(new RegExp(`\\${waitArgument}\\s*=\\s*(\\d+)`))?.[1] : waitArgument;
   const normalNamePoll = read('src/power.zig').match(/\.normal\s*=>\s*setCoalescableTimerInterval\(hwnd, TIMER_NAME_POLL, ([\d_]+)\)/);
-  assert.ok(detectionWait, 'local Claude detection wait must specify -Seconds');
+  assert.ok(detectionSeconds, 'local Claude detection wait must specify a numeric -Seconds budget');
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
-  assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
+  assert.ok(Number(detectionSeconds) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
   const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
@@ -2260,14 +2267,14 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.match(workflow, /  journeys:\n    if: inputs.feature != 'chat-sync-audit'/);
   assert.match(workflow, /  verify:\n    needs: \[journeys, build-app\]/);
   assert.match(workflow, /pr: \$\{\{ steps.features.outputs.pr \}\}/);
-  assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.available \}\}/);
   assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
-  assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
-  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /process.env.EVENT === 'pull_request'/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ inputs\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
+  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ (?:inputs|matrix)\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
   assert.ok(proofOnly.includes('chat-model') && proofOnly.includes('chat-working-live'));
   assert.deepEqual(features.available.filter(feature => !proofOnly.includes(feature)), registered.filter(feature => !proofOnly.includes(feature)));
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
@@ -2316,7 +2323,7 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
     const split = line.indexOf('=');
     return [line.slice(0, split), JSON.parse(line.slice(split + 1))];
   }));
-  assert.deepEqual(outputs, { full: features.full, pr: features.pr });
+  assert.deepEqual(outputs, { full: features.full, pr: features.pr, available: features.available });
   assert.deepEqual(JSON.parse(cli('browser-switch-speed').stdout), ['browser-switch-speed']);
   for (const feature of ['unknown', '../appearance', 'ssh-tab-reconnect', 'README', 'chat-sync-audit']) {
     const result = cli(feature);
@@ -2332,8 +2339,8 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \|\| inputs.app_revision != '' \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
-  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
-  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.available \}\}/);
   for (const entry of Object.values(policy.quarantined)) {
     assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
     assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
@@ -2594,4 +2601,118 @@ Write-Host 'FIRST_PHYSICAL_KEY_TARGETED_OK'
   const result = run(prefix);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /FIRST_PHYSICAL_KEY_TARGETED_OK/);
+});
+
+test('SOFT-2762 session-actions resolves the newest painted sidebar row rect', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const context = drive.slice(drive.indexOf('function Context([int]$Index) {'), drive.indexOf('function Read-History('));
+  assert.ok(context, 'extract the real context-menu step');
+  const resolver = context.slice(context.indexOf('$pair = Wait-For'), context.indexOf('$offset = (Log).Length'));
+  assert.ok(resolver, 'extract the real row-rect resolution');
+  assert.match(resolver, /\[photo-proof\\\] expanded target='\+\$Index\+' rect=/, 'row geometry must follow the paint that carries the moved rect');
+  if (process.platform !== 'win32') return;
+  const fixture = path.join(root, 'tools/fixtures/SOFT-2762/sidebar-row-rect.log');
+  const script = `
+$Index = 1
+$LogText = Get-Content -Raw -LiteralPath '${fixture.replace(/'/g, "''")}'
+function Log { $LogText }
+function Wait-For([string]$Name, [scriptblock]$Check) { $value = & $Check; if (-not $value) { throw "no match: $Name" }; $value }
+${resolver}
+Write-Host ('RECT=' + ($pair -join ','))
+`;
+  const result = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RECT=20,171,56,207/, 'the archived CMD tab moved Beta up; the older 229 rect is empty space');
+  assert.doesNotMatch(result.stdout, /RECT=20,229,56,265/);
+});
+
+test('SOFT-2762 session-actions expects the seven context ids the app appends', () => {
+  const palette = read('src/command_palette.zig');
+  const constants = new Map();
+  for (const match of read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)) constants.set(match[1], Number(match[2]));
+  const table = palette.slice(palette.indexOf('pub const chat_actions ='), palette.indexOf('pub fn chatActionLabel('));
+  const rows = [...table.matchAll(/\.target = (?:app_state\.)?([A-Z0-9_]+), \.label = "([^"]+)"/g)].map(match => {
+    assert.ok(constants.has(match[1]), `missing constant ${match[1]}`);
+    return { id: constants.get(match[1]), label: match[2] };
+  });
+  assert.deepEqual(rows.map(row => row.label), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Archive chat', 'Delete session']);
+  const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=7 ids=((?:\d+ ){6}\d+)/);
+  assert.ok(expected, 'the driver must assert the seven-row context menu');
+  assert.deepEqual(expected[1].split(' ').map(Number), rows.map(row => row.id), 'the driver ids must match the app table order');
+  const query = read('tools/verify-session-actions/drive.ps1').match(/Palette '([^']+)' 7112/);
+  assert.ok(query, 'the driver reaches Delete session through the global palette');
+  const deleteRow = rows.find(row => row.id === 7112);
+  assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
+});
+
+test('SOFT-2762 session-actions resumes deleted chats through the live All Sessions route', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const palette = read('src/command_palette.zig');
+  const search = palette.slice(palette.indexOf('pub fn updateSearchResults()'), palette.indexOf('\nfn appendExtendedChatActions(', palette.indexOf('pub fn updateSearchResults()')));
+  assert.ok(search.length > 0, 'locate the palette result builder');
+  assert.doesNotMatch(search, /SEARCH_ARCHIVED_OFFSET/, 'SOFT-2444 removed archived chats from the Ctrl+K list');
+  assert.doesNotMatch(drive, /7300\+/, 'the driver must not wait for an archived palette row the app no longer appends');
+  const resume = drive.slice(drive.indexOf('function Resume-Archived('), drive.indexOf('function Read-History('));
+  assert.ok(resume, 'the driver must reach archived chats through the live view');
+  assert.match(resume, /Palette 'archived sessions' 6291/, 'Ctrl+K archived sessions opens All Sessions on the Archived tab');
+  assert.match(resume, /\\\[overview\\\][^\r\n]* arc=/, 'require the Archived cluster to list the deleted chats');
+  assert.match(resume, /Press @\(0x11,0x46\)/, 'Ctrl+F filters the All Sessions list');
+  assert.match(resume, /\[VerifyNative\]::Text\(\$Name\)/);
+  assert.match(resume, /Press @\(0x0d\)/);
+  const history = drive.slice(drive.indexOf('function Read-History('), drive.indexOf('function Start-App('));
+  assert.match(history, /Resume-Archived \$Name/);
+});
+
+test('SOFT-2762 a journey condition failure is reported as a journey result, not infrastructure', () => {
+  const verifier = read('tools/pr-verifier.cjs');
+  const literal = verifier.match(/return (\/[^\n]*\/i)\.test\(value \|\| ''\)/);
+  assert.ok(literal, 'read the verifier infrastructure wording rule');
+  const infrastructure = new Function('return ' + literal[1])();
+  const drivers = ['tools/verify-session-actions/drive.ps1', skill + 'control-feature-server-open-group.ps1'];
+  for (const driver of drivers) {
+    const source = read(driver);
+    const message = source.match(/throw "(Journey condition not met[^"]*)"/);
+    assert.ok(message, driver + ' must name the journey condition that did not become true');
+    assert.doesNotMatch(message[1], infrastructure, driver + ' must not look like a runner fault');
+  }
+});
+
+test('SOFT-2762 a server-open-group run reports status, checks and cleanup', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  const passAt = driver.indexOf("$result = @{ verdict = 'pass'");
+  assert.ok(passAt >= 0, 'the success result block');
+  const pass = driver.slice(passAt, driver.indexOf('} catch {', passAt));
+  assert.match(pass, /status = 'passed'/);
+  assert.match(pass, /cleanup = /);
+  assert.match(pass, /checks = @\(/);
+  const failAt = driver.indexOf("$result = @{ verdict = 'fail'; status = 'failed'; step = $stage; error = $_");
+  assert.ok(failAt >= 0, 'the failure result block');
+  const fail = driver.slice(failAt, driver.indexOf('} finally {', failAt));
+  assert.match(fail, /error = \$_\.Exception\.Message/, 'the failure keeps the real message');
+  const cleanup = driver.slice(driver.indexOf('$result.cleanup = $remaining'), driver.indexOf('try { [IO.File]::WriteAllBytes($hostsFile'));
+  assert.ok(cleanup, 'cleanup is recorded before result.json is written');
+  assert.match(driver, /\$result \| ConvertTo-Json -Depth 4 \| Set-Content -LiteralPath \(Join-Path \$Evidence 'result\.json'\)/);
+});
+
+test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  assert.doesNotMatch(driver, /error = 'server group journey failed'/, 'the driver must not replace the cause with a label');
+  const catchAt = [...driver.matchAll(/\} catch \{/g)].map(match => match.index).find(index => driver.slice(index, index + 900).includes('step = $stage'));
+  assert.ok(catchAt !== undefined, 'the failure handler must record the step');
+  const failure = driver.slice(catchAt, driver.indexOf('} finally {', catchAt));
+  assert.match(failure, /step = \$stage/);
+  assert.match(failure, /error = \$_\.Exception\.Message/);
+  assert.match(driver, /failed at ' \+ \$stage \+ ': ' \+ \$failure\.Exception\.Message/);
+  const node = driver.slice(driver.indexOf('function Invoke-ServerGroupNode('), driver.indexOf('\ntry {'));
+  assert.match(node, /\$reported = \(\$combined -replace 'mpk_\[A-Za-z0-9_-\]\+', '<redacted>'\)\.Trim\(\)/);
+  assert.match(node, /throw "\$commandText exited \$\(\$nodeProcess\.ExitCode\): \$reported"/);
+  assert.ok([...driver.matchAll(/\$stage = '([^']+)'/g)].length >= 8, 'every phase names its step');
+  const ready = driver.slice(driver.indexOf('function Test-ServerGroupReady('), driver.indexOf('function Wait-ServerGroup('));
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'tmux_session'/);
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'group_id'/)
+  assert.doesNotMatch(ready, /\$_\.[a-z_]+/, 'strict mode must not read a saved tab field that may be absent');
+  const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
+  const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
+  assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
+  assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
 });

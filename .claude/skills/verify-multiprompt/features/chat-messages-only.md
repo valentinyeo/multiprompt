@@ -1,5 +1,7 @@
 # Messages only
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-messages-only.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-messages-only-proof.mjs
+
 Verify on: push
 
 ## Sub-features
@@ -24,7 +26,7 @@ IGSH-816 adds the CLEAN chat view option: the Ctrl+K entry `Chat View: Toggle CL
 
 ## Driving it with control.ps1
 
-- Dispatch exactly `gh workflow run verify.yml --ref ceo/IGSH-814 -f feature=chat-messages-only` and download `verify-chat-messages-only`.
+- Dispatch exactly `gh workflow run verify.yml --ref <branch> -f feature=chat-messages-only` and download `verify-chat-messages-only`.
 - The workflow runs `zig build test-main --summary all` on Windows, then builds the pinned pre-fix commit 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f in a separate runner checkout. It requires the same journey to fail specifically because visible activity changes the transcript, with successful owned cleanup. Launch, identity, parsing, missing data or blank screenshots are not acceptable red controls.
 - Exact workflow-side journey command:
 
@@ -61,6 +63,9 @@ The recomputed journey gate list is:
 `node --test tools/chat-messages-only-proof.test.js` on GitHub proves the correct synthetic pair passes and the old-oracle input with footer rows still painted is rejected, plus one-pixel, blank-message, displacement, restoration, reintroduced-working-strip and changed-gap negative controls. The Windows workflow retains both portable test suites. It also runs `zig build test-clean-chat`. `check-clean-chat-output.mjs` requires every named painter test. The complete live oracle rechecks `clean-chat-native.log`. Missing native coverage never counts as complete proof.
 
 ## Gotchas
+
+The current retained-anchor fixture requires a known NEW divider after source-anchor removal because cached history still contains the anchor. It does not exercise the unknown-position fallback; that remains unreachable without a fixture that actually loses the cached anchor and a corresponding native assertion.
+
 
 - This is a synthetic agent/remote-shell boundary, not signed-in Claude, real SSH or live tool execution. It exercises the production transcript reader, cache, layout, painter and native composer.
 - No Windows app, tests, copied fixtures or builds run on the VPS. All execution happens on GitHub's free Windows runner.

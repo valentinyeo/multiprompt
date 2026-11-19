@@ -1,5 +1,8 @@
 # Jump to the newest chat message
 
+Covers: palette:SEARCH_CHAT_NEWEST_OFFSET, shortcut:palette-actions/shift-g-twice-end-ctrl-k-jump-to-newest-message
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-newest.ps1, tools/chat-newest-proof.mjs
+
 ## Sub-features
 
 - Shift+G twice within 600 ms, starting in an empty composer, jumps from older messages to the newest message and leaves the box empty.
@@ -24,5 +27,8 @@ After clearing the composer, genuine Shift+G twice must produce a new bottom fra
 Inspect `chat-newest-before.png`, `chat-newest-after.png`, `chat-newest-draft.png`, `chat-newest-palette.png`, `full-history/newest.json`, `actions.json`, `result.json` and `cleanup.json`. The artifact retains the established boundary's `full-history` case directory, but does not run the separate history/performance journey.
 
 ## Gotchas
+
+The current keyboard evidence independently checks the slow G interval, not the fast pair timing. The palette draft-preservation case starts empty; a nonempty-draft palette case remains unexercised. Keep those limits separate from the successful jump assertions.
+
 
 Run only on GitHub Windows. This proves native keyboard, draft and palette behavior, not a real provider, account sync or live SSH server. No restart or latency promise belongs to this shortcut. The existing `chat-full-history`, `chat-focus` and broad `command-palette` recipes remain unchanged; their unrelated baseline failures do not replace this focused proof. Shortcut documentation remains covered by the hosted shortcut-row and documentation checks.

@@ -1,5 +1,7 @@
 # Inline working dots
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-working.ps1
+
 ## Sub-features
 
 - Three dots sit in the next assistant reply slot while the existing working signal is active.
@@ -28,6 +30,9 @@ Branch builds also run `test-live-working` before the console journey. The isola
 The native test does not send input, run a transport, contact a provider, or pump the application window's event loop. It calls the production timer tick after a 300 ms wait. The delivered state is a constructed boundary, not proof of transport acceptance. It cannot establish send-to-paint latency or clean app-process teardown. The separate console journey exercises real input and owned cleanup, but not live events. Neither replaces a real live-agent journey.
 
 ## Gotchas
+
+A reply delta or turn-ended signal does not by itself clear the dots while another working signal remains. Stop/Escape interruption needs its separate chat-stop recipe. Alt+C requires a terminal-backed tab; live chats have no shell toggle.
+
 
 No provider is contacted. Only the console boundary is replaced.
 The pre-fix release must fail with `IGSH-924 inline dots painted` after the owned working console and transcript are ready.

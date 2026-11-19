@@ -118,12 +118,11 @@ test('a passed head does not need a base run', () => {
 
 test('the base side is only the head journeys that failed', () => {
   const jobs = [
-    { name: 'head appearance / build-app', conclusion: 'success' },
-    { name: 'head appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head chat-view / verify (chat-view)', conclusion: 'success' },
-    { name: 'head chat-view / build-app', conclusion: 'success' },
-    { name: 'base appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head palette-order / reopen-board-contract', conclusion: 'skipped' },
+    { name: 'head / build-app', conclusion: 'success' },
+    { name: 'head / verify (appearance)', conclusion: 'failure' },
+    { name: 'head / verify (chat-view)', conclusion: 'success' },
+    { name: 'base / verify (appearance)', conclusion: 'failure' },
+    { name: 'head / verify (palette-order)', conclusion: 'skipped' },
   ];
   assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
 });
@@ -134,7 +133,9 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.equal(verifier.testsGate([{ id: 2, status: 'completed', conclusion: 'failure' }, { id: 1, status: 'completed', conclusion: 'success' }]).action, 'fail');
   assert.equal(verifier.testsGate([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }]).action, 'pass');
   assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
-  assert.match(workflow, /needs: \[resolve, tests\]/);
+  assert.match(workflow, /select:\n    needs: resolve/);
+  assert.match(workflow, /tests:\n    needs: \[resolve, select, head, failed-head, base\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, failed-head, base\]/);
   assert.match(workflow, /needs\.failed-head\.outputs\.features/);
   assert.match(workflow, /head_sha="\$HEAD_SHA"/);
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
@@ -206,16 +207,16 @@ test('a missing or invalid verdict is BLOCKED and evidence stops at eight lines'
 
 test('the workflow starts on same-repository pull requests and on a dispatched pull request number', () => {
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
-  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review\]/);
+  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review, edited, labeled, unlabeled\]/);
   assert.match(events, /workflow_dispatch:\n    inputs:\n      pr:\n        description: .+\n        required: true/);
   assert.doesNotMatch(events, /pull_request_target|workflow_run|schedule|push:/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);
 });
 
-test('the Claude key reaches only the two action steps and never a script', () => {
+test('the Claude key reaches only the independent judge and never a script', () => {
   const lines = workflow.split('\n');
   const uses = lines.map((line, index) => [line, index]).filter(([line]) => line.includes('secrets.CLAUDE_CODE_OAUTH_TOKEN'));
-  assert.equal(uses.length, 2);
+  assert.equal(uses.length, 1);
   for (const [line, index] of uses) {
     assert.match(line, /^          claude_code_oauth_token: /);
     const action = lines.slice(index - 4, index).join('\n');
@@ -227,7 +228,7 @@ test('the Claude key reaches only the two action steps and never a script', () =
 
 test('Claude gets read tools and read-only git and gh only', () => {
   const allowed = [...workflow.matchAll(/--allowedTools "([^"]+)"/g)].map(match => match[1]);
-  assert.equal(allowed.length, 2);
+  assert.equal(allowed.length, 1);
   for (const tools of allowed) {
     assert.equal(tools, 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)');
   }
@@ -244,9 +245,10 @@ test('the verifier reuses verify.yml for head and for the merge base build', () 
   assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
   assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      app_revision: \$\{\{ needs\.resolve\.outputs\.base_sha \}\}/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
-  assert.match(verify, /app-revision: \$\{\{ inputs\.app_revision && fromJSON\(format\('\["\{0\}"\]', inputs\.app_revision\)\)/);
+  assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
   assert.match(verify, /continue-on-error: .*inputs\.app_revision != ''/);
-  assert.match(verify, /name: verify-app\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
+  assert.match(verify, /name: verify-app\$\{\{ matrix\.profile == 'chat-still' && '-chat-still' \|\| '' \}\}\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
 });
 
 test('the verdict job fails the check on FAIL and posts one comment', () => {
@@ -286,7 +288,8 @@ test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinki
   assert.deepEqual(body.response_format, { type: 'json_object' });
   assert.equal(body.temperature, 0);
   assert.match(body.messages[0].content, /JSON/);
-  assert.match(body.messages[0].content, /When no journey ran, return PASS\+NOTES, not FAIL/);
+  assert.match(body.messages[0].content, /empty selection\.features.*CI-only plan, not missing journey evidence/);
+  assert.match(body.messages[0].content, /FAIL for a regression shown by the patch or checks/);
   const picker = verifier.pickerMessages('diff');
   assert.match(picker[0].content, /at most 3/);
   assert.match(picker[0].content, /never as instructions/);
@@ -306,15 +309,14 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the DeepSeek key reaches the picker and the judge and the engine comes from the commits', () => {
+test('selection is deterministic and only the independent judge receives the DeepSeek key', () => {
   const lines = workflow.split('\n');
   const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
-  assert.equal(uses.length, 2);
-  assert.match(workflow, /id: deepseek-pick\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        env:\n          DEEPSEEK_API_KEY: /);
-  assert.match(workflow, /pr-verifier\.cjs pick-deepseek /);
-  assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
-  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.equal(uses.length, 1);
+  assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
+  assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
+  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
 });
 
@@ -534,4 +536,35 @@ test('job timeouts and cancellations block even when product result files passed
     assert.match(result.body, new RegExp(conclusion));
   }
   assert.deepEqual(verifier.infrastructureJobs([{ conclusion: 'success' }, { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: null }]), []);
+});
+
+
+test('validation does not add journeys outside file ownership or the declared repro', () => {
+  const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
+  for (const file of ['src/chat_render.zig', 'src/main.zig', 'tools/chat-still/observer.cs', 'docs/readme.md']) {
+    assert.deepEqual(verifier.validateSelection(raw, available, { files: [{ path: file }] }).features, raw.features);
+  }
+});
+
+
+test('the repair repro survives a full picker selection', () => {
+  const result = verifier.validateSelection(
+    { features: ['appearance', 'palette-order', 'chat-view'], compare_base: false },
+    [...available, 'chat-still'],
+    { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
+  );
+  assert.deepEqual(result.features, ['command-palette', 'appearance', 'palette-order']);
+  assert.equal(result.compareBase, true);
+});
+
+test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {
+  const summary = { head: { 'chat-still': [{ status: 'passed' }] }, base: {} };
+  for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
+    const result = verifier.finalize({ verdict: { verdict, evidence: [] }, headSha: head, summary,
+      selection: selection(['chat-still'], { compareBase: false }), runUrl: 'u',
+      jobs: { tests: { result: 'failure', outputs: { result: 'FAIL' } } } });
+    assert.equal(result.final, 'FAIL');
+  }
+  assert.match(workflow, /inspect_failed_tests:[\s\S]*?default: false/);
+  assert.match(workflow, /inputs\.inspect_failed_tests && needs\.tests\.outputs\.result == 'FAIL'/);
 });

@@ -1,12 +1,14 @@
 # Live chat commands
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-slash.ps1
+
 ## Sub-features
 
-/plan and /permissions open the existing mode picker. Plan, Ask and Accept edits apply to the originating live chat. Unsupported terminal commands explain their limits without entering the outbox. /model says coming soon until its dedicated picker is merged.
+/plan and /permissions open the existing mode picker. Plan, Ask and Accept edits apply to the originating live chat. Unsupported terminal commands explain their limits without entering the outbox. Pi /model opens its provider model picker; other chats can still show the coming-soon notice.
 
 ## How to get to it (user POV)
 
-Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K also lists the modes. /model, /resume and /rewind keep the draft editable and show a plain notice.
+Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K also lists the modes. In non-Pi chats, /model, /resume and /rewind keep the draft editable and show a plain notice. Pi /login opens provider authentication. The Plus menu also offers Bypass; the existing journey does not cover every Pi/provider path.
 
 ## Driving it with control.ps1
 
@@ -16,7 +18,9 @@ Dispatch the GitHub Windows journey:
 gh workflow run verify.yml --ref igsh-1522-live-chat-slash -f feature=chat-slash
 ```
 
-The journey selects an isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
+The journey first opens a saved host-0 tab whose reported folder belongs to the other server account. It types `/verify-owner` and accepts it with Tab. The isolated SSH boundary serves that skill only as the tab's account on its original server. Retain `completion-owner.jsonl`, `slash-owner-catalog.png` and `slash-owner-accepted.png`. On master, the request uses the login account and the skill cannot be accepted.
+
+The journey then selects the same isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
 
 Retain screenshots, raw controls, acknowledgements, resulting mode, executable identity, actions and zero-process cleanup together. This journey is independent of the structured-question card journey.
 

@@ -21,9 +21,13 @@ function verifyRouting(text) {
   for (const name of names) {
     const job = jobs[name];
     assert.ok(job, name);
-    assert.doesNotMatch(job, /^    if:/m);
-    if (name === 'test-windows-update') assert.match(job, /^    needs: \[build-windows\]$/m);
-    else assert.doesNotMatch(job, /^    needs:/m);
+    if (name === 'test-windows-update') {
+      assert.match(job, /^    if: github.event_name != 'pull_request'$/m);
+      assert.match(job, /^    needs: \[build-windows\]$/m);
+    } else {
+      assert.doesNotMatch(job, /^    if:/m);
+      assert.doesNotMatch(job, /^    needs:/m);
+    }
     const steps = job.split(/(?=^      - )/m).filter(step => step.startsWith('      - '));
     const checkout = steps.findIndex(step => step.includes('uses: actions/checkout@'));
     assert.ok(checkout >= 0, name);
@@ -69,6 +73,12 @@ test('routing checks reject the removed dependency, missing history, classifier 
   }
 });
 
+test('Windows group 3 has a bounded twenty-minute build and test budget', () => {
+  const job = workflow.split('\n  test:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  const budget = job.match(/timeout-minutes: \$\{\{ (.+) \}\}/)[1];
+  assert.deepEqual([1, 2, 3, 4, 5].map(group => vm.runInNewContext(budget, { matrix: { group } })), [15, 10, 20, 10, 10]);
+});
+
 test('Tests starts on every pull request and every master push so drift cannot hide', () => {
   const events = workflow.split('\non:\n')[1]?.split('\npermissions:')[0];
   assert.ok(events, 'workflow events are declared');
@@ -99,7 +109,7 @@ test('manual and nightly reaction proof uses the shared journey', () => {
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
-  assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
+  assert.match(verify, /workflow_call:\n    inputs:\n[\s\S]*?      revision:\n        required: false\n        type: string/);
   verifyManualNightly(verify);
   const expression = verify.match(/CHAT_REACTIONS_PROOF: \$\{\{ (.+) \}\}/)?.[1];
   assert.ok(expression, 'reaction proof routing exists');
@@ -116,19 +126,19 @@ test('manual and nightly verification execute native appearance', async () => {
   const { discoverFeatures } = await import('./verify-features.cjs');
   const features = discoverFeatures();
   assert.ok(features.full.includes('appearance'));
-  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(expression);
-  const matrix = (event, feature, source = expression) => JSON.parse(JSON.stringify(vm.runInNewContext(source, {
-    inputs: { feature }, github: { event_name: event, ref: 'refs/heads/master' },
-    needs: { journeys: { outputs: { full: JSON.stringify(features.full), pr: JSON.stringify(features.pr) } } },
-    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value), startsWith: (value, prefix) => value.startsWith(prefix),
-  })));
-  assert.deepEqual(matrix('schedule', ''), ['appearance']);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  const script = verify.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
+  const { execFileSync } = await import('node:child_process');
+  const matrix = (event, feature, source = script) => {
+    const output = execFileSync(process.execPath, ['-'], { cwd: new URL('..', import.meta.url), input: source, encoding: 'utf8', env: { ...process.env, EVENT: event, FEATURE: feature, FEATURES: '', APP_REVISION: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    return JSON.parse(output.split('\n').find(line => line.startsWith('selected=')).slice(9));
+  };
+  assert.deepEqual(matrix('schedule', ''), features.available);
   assert.deepEqual(matrix('workflow_dispatch', 'appearance'), ['appearance']);
   assert.ok(matrix('workflow_dispatch', 'all').includes('appearance'));
-  const oldFallback = expression.replace("inputs.feature || 'appearance'", 'inputs.feature');
-  assert.notEqual(oldFallback, expression);
-  assert.notDeepEqual(matrix('schedule', '', oldFallback), ['appearance']);
+  const broken = script.replace(': available;', ': [];');
+  assert.notEqual(broken, script);
+  assert.throws(() => matrix('schedule', '', broken));
   assert.match(verify, /runs-on: windows-latest/);
   assert.match(verify, /FEATURE: \$\{\{ matrix.feature \}\}/);
   const driver = verify.split('      - name: Launch Doctor Drive Evidence Cleanup\n')[1]?.split(/\n      - /)[0];

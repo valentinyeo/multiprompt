@@ -1,5 +1,7 @@
 # Browser pane stuck opening
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1
+
 Verify on: push
 
 Verify browser-pane close/reopen behavior and that a docked pane works without the extension.
@@ -39,6 +41,9 @@ Preconditions:
 - **Proof.** Inspect screenshots, UIA snapshots, actions, per-step `browser-pane-*.json` records, `result.json`, and owned-job cleanup evidence. Pane URLs are not published in the inbox or copied to these records.
 
 ## Gotchas
+
+Immediate toggle pairs currently use a fixed 50 ms spacing. They do not sweep the entire documented 50–250 ms range; other intervals remain unexercised.
+
 
 - Foreground immediately after Enter can precede Edge's asynchronous activation. Do not treat that transient observation as launch completion or rely on docking to return foreground to the main window. Every input still requires the unchanged foreground safety guard.
 - No extension is not a failed launch: a successfully docked pane must work indefinitely without a bound window ID.

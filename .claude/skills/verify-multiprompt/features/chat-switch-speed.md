@@ -1,5 +1,7 @@
 # Chat session switch speed
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-switch-speed.ps1, tools/verify-chat-delivery/launcher.c
+
 ## Sub-features
 
 - Real Ctrl+1 to Ctrl+5 session switches between five remote Claude sessions in Chat View that each hold a 400-round conversation (over 1,200 transcript blocks with code blocks, tables and tool calls), with the browser pane closed and then open on every session.

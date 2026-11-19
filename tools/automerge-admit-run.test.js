@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 const workflow = fs.readFileSync(path.join(root, process.env.AUTOMERGE_RED_CONTROL === '1'
-  ? 'tools/fixtures/IGSH-1042/automerge-before.yml' : '.github/workflows/automerge.yml'), 'utf8');
+  ? 'tools/fixtures/IGSH-1042/automerge-before.yml' : 'tools/fixtures/SOFT-2713/automerge.yml'), 'utf8');
 const sha = 'a'.repeat(40);
 const master = 'b'.repeat(40);
 const page = nodes => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
@@ -81,7 +81,8 @@ test('one completed PR check reads only its PR, with one snapshot and no writes'
 });
 
 test('automerge remains disabled without automatic triggers or a shared queue', () => {
-  assert.doesNotMatch(workflow, /schedule:|cron:|concurrency:/);
+  assert.doesNotMatch(workflow, /schedule:|cron:/);
+  assert.match(workflow, /concurrency:[\s\S]*cancel-in-progress: true/);
   assert.match(workflow, /^  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request|workflow_run):/m);
   assert.match(workflow, /^  automerge:\n    if: \$\{\{ false \}\}/m);

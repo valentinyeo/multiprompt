@@ -1,5 +1,7 @@
 # App icon
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-app-icon.ps1, tools/verify-app-icon/drive.ps1
+
 ## Sub-features
 
 The Windows app icon is the approved white robot head on a dark tile. The same icon shows on the taskbar button, in the window's small and large icon slots, and as the icon of the executable file. The 16 pixel frame still reads as a robot: a bright head, a dark visor and two light eyes.
@@ -19,5 +21,8 @@ Red control: dispatch the same journey with `tag=` set to a release published be
 Evidence: `result.json`, `exe-icon.png`, `window-icon-big.png`, `window-icon-small.png`, `desktop.png`, `taskbar-strip.png`, cleanup.
 
 ## Gotchas
+
+The driver captures the bottom screen band but does not independently detect a taskbar button. Its icon-handle comparison is not a pixel assertion of the rendered taskbar. Manual screenshot inspection remains necessary, including 16 px legibility.
+
 
 Run only on GitHub Windows, never on the user's desktop. A hosted runner may show the taskbar without a button for the app until the window has been foreground for a few seconds; the driver waits five seconds after the window appears. The window icon slots can be filled by the class icon, so the executable icon is checked separately. When the screen capture shows no taskbar, report that and rely on the icon handle checks, never claim a taskbar screenshot that does not show one.

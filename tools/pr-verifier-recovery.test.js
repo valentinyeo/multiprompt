@@ -42,8 +42,8 @@ test('retry collection selects one newest artifact ID per journey and revision',
   assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
   assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection, artifacts.baseSha), selected);
-  const headOnly = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
-  assert.deepEqual(headOnly.map(item => item.name).sort(), ['verify-chat-focus', 'verify-command-palette']);
+  const automaticBase = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
+  assert.deepEqual(automaticBase, selected, 'failed-head baseline evidence must survive an initial head-only selection');
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {
@@ -67,7 +67,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
 }
 `, { mode: 0o755 });
     const selection = path.join(dir, 'selection.json');
-    fs.writeFileSync(selection, JSON.stringify(artifacts.selection));
+    fs.writeFileSync(selection, JSON.stringify({ ...artifacts.selection, compareBase: false }));
     const evidence = path.join(dir, 'evidence');
     const requests = path.join(dir, 'requests.jsonl');
     const env = {
@@ -128,7 +128,12 @@ const head = process.env.HEAD_SHA;
 const repo = 'valentinyeo/multiprompt';
 const fixture = JSON.parse(fs.readFileSync(process.env.GH_RECOVERY, 'utf8'));
 const endpoint = args.find(arg => arg.startsWith('repos/')) || '';
-if (args[0] === 'pr' || args.includes('POST')) process.stdout.write('{}');
+if (args.includes('graphql')) {
+  if (process.env.GH_GATE === 'api-error') process.exit(1);
+  const checks = process.env.GH_BLOCKED === 'true' ? fixture.checks.slice(0, process.env.GH_HISTORY === 'true' ? 2 : 1) : [];
+  const verdicts = checks.map(check => ({ databaseId: check.id, name: check.name, status: check.status.toUpperCase(), conclusion: check.conclusion.toUpperCase(), completedAt: check.completed_at, summary: check.output.summary }));
+  process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { number: 1052, state: 'OPEN', isDraft: false, title: '', body: '', headRefOid: head, baseRefName: 'master', headRepository: { nameWithOwner: repo }, comments: { nodes: [{ author: { login: 'github-actions[bot]' }, body: fixture.checks[1].output.summary }] }, commits: { nodes: [{ commit: { checkSuites: { nodes: [{ status: process.env.GH_GATE === 'queued' ? 'QUEUED' : 'COMPLETED', conclusion: process.env.GH_GATE.toUpperCase(), workflowRun: { databaseId: 1, workflow: { name: 'Tests' } }, verdicts: { nodes: verdicts } }] } } }] } } } } }));
+} else if (args[0] === 'pr' || args.includes('POST')) process.stdout.write('{}');
 else if (endpoint.endsWith('/pulls/1052')) process.stdout.write(JSON.stringify({ state: 'open', head: { sha: head, repo: { full_name: repo } } }));
 else if (endpoint.includes('/commits/')) process.stdout.write(process.env.GH_BLOCKED === 'true' ? fixture.checks.slice(0, process.env.GH_HISTORY === 'true' ? 2 : 1).map(check => JSON.stringify(check)).join('\\n') + '\\n' : '');
 else if (endpoint.includes('/comments')) process.stdout.write(JSON.stringify({ user: { login: 'github-actions[bot]' }, body: fixture.checks[1].output.summary }) + '\\n');
@@ -141,14 +146,20 @@ else if (endpoint.includes('/test.yml/runs')) {
         ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, REPO: 'valentinyeo/multiprompt', HEAD_SHA: recovery.headSha,
         GITHUB_EVENT_PATH: event, GH_REQUESTS: requests, GH_GATE: gate.startsWith('success') ? 'success' : gate, GH_BLOCKED: String(gate.startsWith('success-after-blocked')), GH_HISTORY: String(gate.endsWith('-history')), GH_RECOVERY: path.join(__dirname, 'fixtures/SOFT-2498/recovery.json'),
       } });
-      assert.equal(result.status, 0, result.stderr);
       const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      if (gate === 'api-error') {
+        assert.notEqual(result.status, 0);
+        assert.equal(calls.some(args => args.includes('conclusion=success')), false);
+        return;
+      }
+      assert.equal(result.status, 0, result.stderr);
       const check = calls.find(args => args.includes('name=pstack-verifier'));
       assert.ok(check, 'Recovery published the required head check');
       assert.ok(check.includes(`conclusion=${gate.startsWith('success') ? 'success' : 'failure'}`));
       assert.ok(check.includes(`output[title]=pstack-verifier: ${gate.startsWith('success') ? 'PASS+NOTES' : 'BLOCKED'}`));
-      assert.ok(calls.some(args => args[1]?.includes('/test.yml/runs')));
-      assert.ok(calls.some(args => args.some(arg => arg.includes('check-runs?filter=all'))));
+      assert.equal(calls.filter(args => args.includes('graphql')).length, 1);
+      assert.equal(calls.some(args => args.some(arg => /\/(?:comments|pulls\/1052|check-runs\?)/.test(arg))), false);
+      assert.equal(calls.filter(args => args.some(arg => arg.includes('/test.yml/runs'))).length, gate === 'queued' ? 0 : 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

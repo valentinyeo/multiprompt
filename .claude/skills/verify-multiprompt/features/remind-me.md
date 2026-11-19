@@ -1,5 +1,7 @@
 # Remind Me
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-remind-me.ps1, src/app_state.zig
+
 Verify on: push
 
 Open the Remind Me preset picker with Ctrl+H on a tmux session and see the hour and evening presets without choosing one.
@@ -27,6 +29,9 @@ Preconditions:
 - **Proof.** Ctrl+H publishes all applicable preset rows; `action.png` captures the picker. `result.json` records the preset row ids and that the session count and active tmux tab are unchanged. Esc is not covered.
 
 ## Gotchas
+
+The current picker oracle excludes This evening from required IDs even before 16:00. It proves picker opening, not every applicable preset. Escape can return from preset mode to the parent palette; it need not dismiss all overlays. Reminder eligibility requires tmux backing, not merely a Claude name.
+
 
 - The signal is the app's `[palette] rows` line, not a pixel check. It proves which rows exist, not how they look; inspect `action.png` for the labels and times.
 - Esc is not covered: the test tab's failing remote console can steal foreground on the GitHub runner, and closing the palette writes no new `[palette] rows` line, so waiting for rows to disappear is not a reliable dismissal proof.

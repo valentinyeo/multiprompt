@@ -1,5 +1,7 @@
 # Chat code font
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-code-font.ps1, tools/chat-code-font-proof.mjs
+
 IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiBold, 2 pt smaller than before, with the same smooth DirectWrite edges as body text, including diff rows on green and red backgrounds.
 
 ## Sub-features
@@ -25,6 +27,9 @@ IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiB
 - Inspect `before.png`, `action.png`, `after.png`, both 4x crops and the painter images yourself. The release crop is larger; the branch crop smaller; the DirectWrite diff crop is smooth on both backgrounds.
 
 ## Gotchas
+
+Tool rows are hidden by the current messages-only presentation. A synthetic painter diff scene is not a visible live file-edit preview. The live code-size driver currently compares a two-pixel difference, not a DPI-independent two-point difference; non-96-DPI proof remains a harness gap.
+
 
 - A release built before IGSH-678 draws 13 px code at default size and has no `[chatcode]` line, so it fails `IGSH-678 code cell size` after launch and Chat View opened. That is the expected red, not a launch failure.
 - The fenced block is formatted from real console text, not a seeded transcript or app setter. Tool/diff blocks are hidden in Chat View. The separate branch painter image still exercises their low-level drawing routine directly, not visible transcript rows.
