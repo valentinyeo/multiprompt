@@ -118,7 +118,7 @@ UNREACHABLE until Part B supplies multiple live, waiting, archived and unattache
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
-| `SEARCH_ARCHIVED_OFFSET` | Ctrl+K, search for **Archived**. Follow `overview` above. |
+| `SEARCH_ARCHIVED_OFFSET` | UNREACHABLE since SOFT-2444: Ctrl+K lists active sessions only and nothing appends these rows. Use `SEARCH_ARCHIVED_VIEW_OFFSET` and the All Sessions Archived tab instead. |
 | `SEARCH_ARCHIVED_VIEW_OFFSET` | Ctrl+K, search for **archived sessions**. Follow `overview` above. |
 | `SEARCH_SESSION_OVERVIEW_MENU_OFFSET` | Ctrl+K, search for **show all sessions**. Follow `overview` above. |
 | `SEARCH_SESSION_OVERVIEW_ROW_OFFSET` | Open **All Sessions**, filter if needed, then select the displayed session row. Follow `overview` above. |

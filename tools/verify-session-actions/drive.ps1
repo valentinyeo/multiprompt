@@ -43,7 +43,9 @@ function Wait-For([string]$ConditionName, [scriptblock]$Check) {
     Write-Host "[session-actions] wait: $ConditionName"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
-    throw "Timed out: $ConditionName"
+    # A journey condition that never becomes true is a journey result, not a runner fault:
+    # pr-verifier.cjs treats "timeout" wording as infrastructure and reports BLOCKED.
+    throw "Journey condition not met: $ConditionName (checked for 90 seconds)"
 }
 function Check([string]$Name, [bool]$Condition) {
     Write-Host "[session-actions] check: $Name = $Condition"
@@ -136,13 +138,23 @@ function Stop-AppJob {
 }
 function Context([int]$Index) {
     Focus
+    # Row geometry must come from the newest paint that carries this row's rect.
+    # [sidebar-avatar] is deduplicated per target, face and colour, so after a tab
+    # count change the app suppresses it and only [photo-proof] still reports the
+    # moved row. Its dedupe key includes the rect itself, so a moved row is logged.
     $pair = Wait-For 'painted sidebar target' {
         $lines = (Log) -split '\r?\n'
-        $found = $null
+        $found = $null; $foundAt = -1
+        for ($i=0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match ('\[photo-proof\] expanded target='+$Index+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) {
+                $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]); $foundAt=$i
+            }
+        }
         for ($i=0; $i -lt $lines.Count-1; $i++) {
+            if ($i -le $foundAt) { continue }
             if ($lines[$i] -match ('\[sidebar-avatar\] target='+$Index+' face=(\d+) color=(\d+)$')) {
                 $face=$Matches[1]; $color=$Matches[2]
-                if ($lines[$i+1] -match ('\[bots\] face='+$face+' color='+$color+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]) }
+                if ($lines[$i+1] -match ('\[bots\] face='+$face+' color='+$color+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]); $foundAt=$i }
             }
         }
         if ($found) { return ,$found }
@@ -150,14 +162,32 @@ function Context([int]$Index) {
     $offset = (Log).Length
     Write-Host "[session-actions] right-click: tab $Index"
     [ChatDeliveryDesktop]::RightClickClient($main, [uint32]$app.Id, [int](($pair[0]+$pair[2])/2), [int](($pair[1]+$pair[3])/2))
-    [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7197 7112(?:\s|$)' })
+    [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7110 7112(?:\s|$)' })
+}
+function Resume-Archived([string]$Name) {
+    # SOFT-2444 keeps archived chats out of the plain Ctrl+K session list; the 7300 row
+    # block kept its label handler but nothing appends those rows any more. The live
+    # user route is Ctrl+K -> archived sessions (All Sessions, Archived tab) -> Ctrl+F
+    # filter -> Enter, which reinstates the deleted chat through the same archived
+    # resume command this journey already verifies.
+    [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
+    $archived=@($saved).Count
+    $offset=(Log).Length
+    Palette 'archived sessions' 6291
+    [void](Wait-For 'archived sessions overlay lists the deleted chats' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[overview\][^\r\n]* arc='+$archived+'(?:\s|$)') })
+    Write-Host "[session-actions] archived filter: $Name"
+    Press @(0x11,0x46)
+    Start-Sleep -Milliseconds 300
+    [VerifyNative]::Text($Name)
+    Start-Sleep -Milliseconds 300
+    Press @(0x0d)
 }
 function Read-History([string]$Name, [string]$Sid, [int]$Fixture) {
     [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
     $archiveIndex=-1
     for ($i=0; $i -lt $saved.Count; $i++) { if ($saved[$i].csid -ceq $Sid) { $archiveIndex=$i } }
     Check ('archived-history-entry-'+$Name) ($archiveIndex -ge 0)
-    Palette $Name (7300+$archiveIndex)
+    Resume-Archived $Name
     [void](Wait-For ('restored saved history identity '+$Name) { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -ceq $Name -and $_.csid -ceq $Sid }).Count -eq 1 })
     $offset=(Log).Length
     $current=Session
@@ -279,7 +309,7 @@ try {
     [void](Wait-For 'context Delete removes captured Beta' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 1 })
     Shot 'context-delete-beta'
     Focus
-    Palette 'end tmux session' 7112
+    Palette 'delete session' 7112
     [void](Wait-For 'one Ctrl+K Delete stops Alpha' { $servers[0].process.HasExited })
     [void](Wait-For 'Alpha removed' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 0 })
     $requests=@(Get-Content (Join-Path $env:MP_VERIFY_STATE 'end-requests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
