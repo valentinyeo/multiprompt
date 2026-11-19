@@ -384,7 +384,10 @@ test('IGSH-1103 generated failure and update results retain verified executable 
   }
 });
 
-test('IGSH-1103 retained results preserve failure details and actual executable identity', { skip: process.platform !== 'win32' }, () => {
+const powershellHost = process.platform === 'win32' ? 'powershell' : 'pwsh';
+const powershellAvailable = require('node:child_process').spawnSync(powershellHost, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0']).status === 0;
+
+test('IGSH-1103 retained results preserve failure details and actual executable identity', { skip: !powershellAvailable }, () => {
   const os = require('node:os');
   const { spawnSync } = require('node:child_process');
   const script = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
@@ -407,7 +410,7 @@ test('IGSH-1103 retained results preserve failure details and actual executable 
       fs.mkdirSync(evidence);
       if (result) fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result));
       if (update) fs.writeFileSync(path.join(evidence, 'safe-updates.json'), JSON.stringify(update));
-      const run = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      const run = spawnSync(powershellHost, ['-NoProfile', '-NonInteractive', '-Command', script], {
         cwd: directory,
         env: { ...process.env, FEATURE: feature, VERIFY_VERSION: resolved ? version : '', VERIFY_SHA256: resolved ? sha256 : '' },
         encoding: 'utf8',
