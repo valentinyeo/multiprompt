@@ -2626,6 +2626,21 @@ Write-Host ('RECT=' + ($pair -join ','))
   assert.doesNotMatch(result.stdout, /RECT=20,229,56,265/);
 });
 
+test('SOFT-2762 session-actions expects the seven context ids the app appends', () => {
+  const palette = read('src/command_palette.zig');
+  const constants = new Map();
+  for (const match of read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)) constants.set(match[1], Number(match[2]));
+  const table = palette.slice(palette.indexOf('pub const chat_actions ='), palette.indexOf('pub fn chatActionLabel('));
+  const rows = [...table.matchAll(/\.target = (?:app_state\.)?([A-Z0-9_]+), \.label = "([^"]+)"/g)].map(match => {
+    assert.ok(constants.has(match[1]), `missing constant ${match[1]}`);
+    return { id: constants.get(match[1]), label: match[2] };
+  });
+  assert.deepEqual(rows.map(row => row.label), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Archive chat', 'Delete session']);
+  const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=7 ids=((?:\d+ ){6}\d+)/);
+  assert.ok(expected, 'the driver must assert the seven-row context menu');
+  assert.deepEqual(expected[1].split(' ').map(Number), rows.map(row => row.id), 'the driver ids must match the app table order');
+});
+
 test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
   const driver = read(skill + 'control-feature-server-open-group.ps1');
   assert.doesNotMatch(driver, /error = 'server group journey failed'/, 'the driver must not replace the cause with a label');
@@ -2645,5 +2660,6 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   assert.doesNotMatch(ready, /\$_\.[a-z_]+/, 'strict mode must not read a saved tab field that may be absent');
   const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
   const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
-  assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*return/, 'this journey owns launch and must not fall through to the generic launch');
+  assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
+  assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
 });

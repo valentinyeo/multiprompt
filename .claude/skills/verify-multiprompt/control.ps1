@@ -68,9 +68,10 @@ switch ($Feature) {
         }
         'server-open-group' {
             . (Join-Path $PSScriptRoot 'control-feature-server-open-group.ps1')
-            return
         }
 }
+
+if ($Feature -eq 'server-open-group') { return }
 
 Write-Host 'Launch: loading native verification helpers'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
