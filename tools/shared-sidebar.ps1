@@ -270,6 +270,7 @@ function Memory-Journey {
     Memory-Identity 'initial'
     if ((Flag (Session) 'unread_only') -or (Flag (Session) 'recents_section_collapsed') -or (Memory-GroupCollapsed)) { throw 'Missing flags did not default off' }
     Memory-Evidence 'before-actions'
+    # Header starts at 8 + 52 = 60; group is 28 high, expanded tab 58 high.
     Memory-Click 64 'Click group: collapse' { Memory-GroupCollapsed } 'group-closed'
     Memory-Click 92 'Click Recents: collapse' { Flag (Session) 'recents_section_collapsed' } 'recents-closed'
     Memory-Click 64 'Click group: reopen' { -not (Memory-GroupCollapsed) } 'group-open'

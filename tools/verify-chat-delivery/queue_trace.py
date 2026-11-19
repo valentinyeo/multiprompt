@@ -1,3 +1,4 @@
+"""Best-effort diagnostics for the fake delivery boundary only."""
 import builtins
 import hashlib
 import json
