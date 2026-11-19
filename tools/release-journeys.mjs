@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { discoverFeatures, journeyMatrix } from './verify-features.cjs';
-import { describeRun, journeyRows, featureDirPattern } from './pr-verifier.cjs';
+import { featureDirPattern } from './pr-verifier.cjs';
 import { readTree, runtimeZigTokens } from './version-stamp.mjs';
 
 const mapDirectory = '.claude/skills/verify-multiprompt/features';
@@ -78,28 +78,49 @@ function evidenceNames(journey) {
     `verify-${journey}-${variant['caption-dpi']}-${variant['caption-browser-theme']}`);
 }
 
-function journeyRowsFor(journeys, directory) {
+const oneLine = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+const variantKey = (journey, evidence) => evidence.slice(`verify-${journey}`.length);
+
+function readEvidenceFile(file) {
+  try { return { ok: true, value: readJson(file) }; }
+  catch (error) { return { ok: false, missing: error.code === 'ENOENT' }; }
+}
+
+function journeyVerdict(root, journey) {
+  if (!fs.existsSync(root)) return { outcome: 'unreadable', detail: 'the journey produced no evidence' };
+  const result = readEvidenceFile(path.join(root, 'result.json'));
+  const record = readEvidenceFile(path.join(root, 'journey.json'));
+  if (!result.ok && !result.missing) return { outcome: 'unreadable', detail: 'result.json is unreadable' };
+  if (!record.ok && !record.missing) return { outcome: 'unreadable', detail: 'journey.json is unreadable' };
+  const resultValue = result.ok ? result.value : null;
+  const recordValue = record.ok ? record.value : null;
+  if (resultValue?.feature && resultValue.feature !== journey) return { outcome: 'unreadable', detail: `result.json covers ${oneLine(resultValue.feature)}, not ${journey}` };
+  if (resultValue?.status === 'failed') return { outcome: 'failed', detail: oneLine(resultValue.error || resultValue.cleanup) || 'the journey recorded a failure' };
+  if (recordValue?.status === 'failed') return { outcome: 'failed', detail: oneLine(recordValue.error) || 'the recorder recorded a failure' };
+  if (!resultValue) return { outcome: 'unreadable', detail: 'result.json is missing' };
+  if (resultValue.status !== 'passed') return { outcome: 'unreadable', detail: `result.json status is ${oneLine(resultValue.status)}` };
+  if (resultValue.cases?.some(item => item.passed === false)) return { outcome: 'failed', detail: 'a named journey case failed' };
+  if (recordValue && recordValue.status !== 'passed') return { outcome: 'unreadable', detail: `journey.json status is ${oneLine(recordValue.status)}` };
+  return { outcome: 'passed' };
+}
+
+function baseEvidence(directory, journey) {
   const names = fs.existsSync(directory) ? fs.readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort() : [];
-  const summary = { head: {}, base: {} };
-  for (const journey of journeys) {
-    summary.head[journey] = [];
-    summary.base[journey] = [];
-    for (const name of names) {
-      const match = name.match(featureDirPattern(journey));
-      if (!match) continue;
-      (match[1] ? summary.base[journey] : summary.head[journey]).push(describeRun(path.join(directory, name), name));
-    }
+  const evidence = new Map();
+  for (const name of names) {
+    const match = name.match(featureDirPattern(journey));
+    if (!match?.[1]) continue;
+    const key = variantKey(journey, name.replace(`-${match[1]}`, ''));
+    if (evidence.has(key)) continue;
+    const provenance = readEvidenceFile(path.join(directory, name, 'recorded.json'));
+    if (!provenance.ok && !provenance.missing) { evidence.set(key, { outcome: 'unreadable', detail: 'recorded.json is unreadable' }); continue; }
+    evidence.set(key, {
+      revision: oneLine(provenance.value?.revision) || match[1],
+      run: oneLine(provenance.value?.run),
+      ...journeyVerdict(path.join(directory, name), journey),
+    });
   }
-  return new Map(journeyRows(summary, true, journeys).map(row => [row.feature, row]));
-}
-
-function recordedProvenance(directory, artifact) {
-  try { return readJson(path.join(directory, artifact, 'recorded.json')); } catch { return null; }
-}
-
-function inheritedFailure(feature, journey, row, directory) {
-  const provenance = recordedProvenance(directory, row.witness.artifact) || {};
-  return { feature: feature.feature, journey, evidence: provenance.evidence || '', revision: provenance.revision || '', run: provenance.run || '' };
+  return evidence;
 }
 
 export function checkEvidence(plan, directory, candidate, artifacts, runUrl, probe = file => {
@@ -109,22 +130,32 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
   execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', file, '-f', 'null', '-'], { stdio: 'pipe', timeout: 120000 });
 }) {
   const hash = digest(candidate);
-  const rows = journeyRowsFor([...new Set(plan.features.flatMap(feature => feature.journeys))], directory);
+  const journeys = [...new Set(plan.features.flatMap(feature => feature.journeys))];
+  const bases = new Map(journeys.map(journey => [journey, baseEvidence(directory, journey)]));
+  const blocked = detail => ({ ok: false, kind: 'unreadable', detail });
   const inspect = (name, journey) => {
     const root = path.join(directory, name);
-    const build = readJson(path.join(root, 'build.json'));
-    const result = readJson(path.join(root, 'result.json'));
-    const record = readJson(path.join(root, 'journey.json'));
-    const tree = readJson(path.join(root, 'process-tree.json'));
-    if (build.revision !== plan.sha || build.harnessRevision !== plan.sha || build.embeddedRevision !== plan.sha || build.sha256 !== hash || build.run !== runUrl || build.candidate !== true) throw new Error('not the exact release candidate/run');
-    if (result.feature !== journey || result.status !== 'passed' || result.sha256 !== hash || !result.scratchRemoved || tree.activeAfterStop !== 0 || result.cases?.some(item => item.passed === false)) throw new Error('journey or cleanup did not pass');
-    if (record.status !== 'passed' || record.journey !== journey || record.revision !== plan.sha) throw new Error('recorded journey did not pass');
+    if (!fs.existsSync(root)) return blocked('the journey produced no evidence in this run');
+    const build = readEvidenceFile(path.join(root, 'build.json')).value;
+    if (!build) return blocked('build.json is missing or unreadable');
+    if (build.revision !== plan.sha || build.harnessRevision !== plan.sha || build.embeddedRevision !== plan.sha || build.sha256 !== hash || build.run !== runUrl || build.candidate !== true) return blocked('build.json does not describe this release candidate');
+    const verdict = journeyVerdict(root, journey);
+    if (verdict.outcome !== 'passed') return { ok: false, kind: verdict.outcome, detail: verdict.detail };
+    const result = readEvidenceFile(path.join(root, 'result.json')).value;
+    if (result.sha256 !== hash) return blocked('result.json does not describe this release candidate');
+    if (result.scratchRemoved === false) return blocked('the journey left its scratch directory behind');
+    const tree = path.join(root, 'process-tree.json');
+    if (fs.existsSync(tree)) {
+      const stopped = readEvidenceFile(tree).value;
+      if (!stopped) return blocked('process-tree.json is unreadable');
+      if (stopped.activeAfterStop !== 0) return blocked('owned processes outlived the journey');
+    }
     const video = path.join(root, 'journey.mp4');
-    if (!fs.statSync(video).isFile() || fs.statSync(video).size === 0) throw new Error('video missing');
-    probe(video);
+    if (!fs.existsSync(video) || !fs.statSync(video).isFile() || fs.statSync(video).size === 0) return blocked('journey.mp4 is missing or empty');
+    try { probe(video); } catch (error) { return blocked(`journey.mp4 is unreadable: ${oneLine(error.message)}`); }
     const matches = artifacts.filter(artifact => artifact.name === name && !artifact.expired);
-    if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id < 1) throw new Error('current-run video artifact missing or ambiguous');
-    return { journey, sha256: hash, video: `${runUrl}/artifacts/${matches[0].id}`, file: 'journey.mp4', videoSha256: digest(video), evidence: name };
+    if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id < 1) return blocked('this run\'s evidence artifact is missing or ambiguous');
+    return { ok: true, record: { journey, sha256: hash, video: `${runUrl}/artifacts/${matches[0].id}`, file: 'journey.mp4', videoSha256: digest(video), evidence: name } };
   };
   const missing = [];
   const inherited = [];
@@ -133,15 +164,22 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
     const failures = [];
     for (const journey of feature.journeys) {
       const names = evidenceNames(journey);
-      const passed = [];
-      const blocked = [];
-      for (const name of names) {
-        try { passed.push({ ...feature, ...inspect(name, journey) }); } catch (error) { blocked.push({ name, error }); }
+      const label = name => names.length > 1 ? `${journey} (${name})` : journey;
+      const recorded = names.map(name => ({ name, ...inspect(name, journey) }));
+      if (recorded.every(item => item.ok)) { features.push(...recorded.map(item => ({ ...feature, ...item.record }))); continue; }
+      for (const item of recorded.filter(entry => !entry.ok && entry.kind === 'unreadable')) failures.push(`${label(item.name)}: evidence unreadable (${item.detail})`);
+      const inheritedHere = [];
+      for (const item of recorded.filter(entry => !entry.ok && entry.kind === 'failed')) {
+        const base = bases.get(journey)?.get(variantKey(journey, item.name));
+        if (base?.outcome === 'failed') { inheritedHere.push(item.name); continue; }
+        failures.push(base?.outcome === 'passed'
+          ? `${label(item.name)}: fails here (${item.detail}) and passed at \`${plan.base.slice(0, 9)}\``
+          : `${label(item.name)}: fails here (${item.detail}) and no readable base evidence proves it already failed`);
       }
-      if (!blocked.length) { features.push(...passed); continue; }
-      const row = rows.get(journey);
-      if (row?.inherited && !row.blocked) { inherited.push(inheritedFailure(feature, journey, row, directory)); continue; }
-      for (const item of blocked) failures.push(`${names.length > 1 ? `${journey} (${item.name})` : journey}: ${item.error.code === 'ENOENT' ? 'evidence/video missing' : item.error.message}`);
+      if (inheritedHere.length) {
+        const witness = bases.get(journey)?.get(variantKey(journey, inheritedHere[0]));
+        inherited.push({ feature: feature.feature, journey, evidence: inheritedHere.join(', '), revision: witness.revision, run: witness.run });
+      }
     }
     if (failures.length) missing.push(`${feature.feature} (${failures.join('; ')})`);
   }
@@ -152,7 +190,7 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
 export function evidenceNotes(receipt) {
   if (receipt.status !== 'passed') throw new Error('Release journey receipt did not pass');
   const already = receipt.inherited?.length
-    ? `\n## Already failing before this release\n\n${receipt.inherited.map(item => `- ${item.feature}: [${item.journey} fails the same way](${item.run || `${receipt.run}/artifacts`})${item.revision ? ` at \`${item.revision.slice(0, 9)}\`` : ''}`).join('\n')}\n`
+    ? `\n## Already failing before this release\n\n${receipt.inherited.map(item => `- ${item.feature}: [${item.journey} was already failing](${item.run || `${receipt.run}/artifacts`})${item.revision ? ` at \`${item.revision.slice(0, 9)}\`` : ''}`).join('\n')}\n`
     : '';
   return `${already}\n## Verified release journeys\n\n${receipt.features.length ? receipt.features.map(feature => `- ${feature.feature}: [${feature.evidence.replace(/^verify-/, '')} video](${feature.video}) (\`${feature.file}\`)`).join('\n') : '- none; every selected journey already failed on master before this release'}\n`;
 }
@@ -174,9 +212,7 @@ function download(repo, artifact, target) {
 export function restoreRecordedFailures(plan, directory, repo) {
   const masterRunsSearched = 5;
   const journeys = [...new Set(plan.features.flatMap(feature => feature.journeys))];
-  const unproven = journey => evidenceNames(journey).some(name => {
-    try { return readJson(path.join(directory, name, 'result.json')).status !== 'passed'; } catch { return true; }
-  });
+  const unproven = journey => evidenceNames(journey).some(name => journeyVerdict(path.join(directory, name), journey).outcome !== 'passed');
   const pending = journeys.filter(unproven);
   if (!pending.length) return [];
   const wanted = new Map(pending.flatMap(journey => evidenceNames(journey).map(name => [name, journey])));
@@ -191,7 +227,7 @@ export function restoreRecordedFailures(plan, directory, repo) {
       const target = path.join(directory, artifact.name.replace(`verify-${journey}`, `verify-${journey}-${run.head_sha}`));
       try {
         download(repo, artifact, target);
-        if (readJson(path.join(target, 'result.json')).status !== 'failed') { fs.rmSync(target, { recursive: true, force: true }); continue; }
+        if (journeyVerdict(target, journey).outcome !== 'failed') { fs.rmSync(target, { recursive: true, force: true }); continue; }
         const record = { journey, evidence: artifact.name, revision: run.head_sha, run: `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${run.id}`, artifact: artifact.id };
         fs.writeFileSync(path.join(target, 'recorded.json'), JSON.stringify(record, null, 2));
         restored.push(record);
