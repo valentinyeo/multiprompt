@@ -3098,7 +3098,7 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") == "login" and provider != "pi":
+    if query.get("op") in ("login", "login_answer") and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
@@ -3142,7 +3142,7 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -4689,6 +4689,10 @@ def host_handle_request(provider, sid, tmux, session, request):
         if provider != "pi":
             return host_refuse("unsupported_provider")
         return host_pi_login(provider, sid, tmux, session, request)
+    if operation == "login_answer":
+        if provider != "pi":
+            return host_refuse("unsupported_provider")
+        return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
         if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
@@ -5355,6 +5359,23 @@ def host_pi_login(provider, sid, tmux, session, request):
         session.pop("pi_login", None)
         return dict(status="error", reason="stdin_write_failed")
     return dict(status="ok")
+
+
+def host_pi_login_answer_op(provider, sid, tmux, session, request):
+    if "command" in request or "text" in request:
+        return host_refuse("invalid_answer")
+    data = request.get("data")
+    if not isinstance(data, str) or not data.strip() or "\x00" in data:
+        return host_refuse("invalid_answer")
+    dialog = session.get("pi_login_dialog")
+    if not isinstance(dialog, dict) or not isinstance(dialog.get("id"), str):
+        reason = "already_answered" if session.get("pi_login_answered") else "no_dialog"
+        return dict(status="final", reason=reason)
+    sent = host_pi_login_answer(provider, sid, tmux, session, dialog, data)
+    if sent.get("status") != "ok":
+        return sent
+    session["pi_login_answered"] = True
+    return dict(status="final")
 
 
 def host_pi_login_answer(provider, sid, tmux, session, dialog, text):
@@ -7974,7 +7995,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -8082,7 +8103,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 126
+RUNTIME_GENERATION = 128
 
 if __name__ == '__main__':
     import base64 as _base64
