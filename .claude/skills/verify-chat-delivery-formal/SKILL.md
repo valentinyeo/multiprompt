@@ -39,7 +39,9 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `9dd167dad7dde81749519038b0bcc5866c6deebb`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+Last confirmed source/model sync commit is `294bfa49b67c2eb2a35a8b2a986facedb672e290`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+
+SOFT-2824 changed which tabs reach the host before their pane agent is classified, plus the message-sync gate in `chatOutboxTick`. Re-reading the covered functions and callers found the replayed decisions unchanged: enqueue still holds `message_v1` and the sid, a hosted send still reserves the entry and waits for the acceptance receipt, and the empty-phase and timeout branches are untouched. The mapping and bounds still describe the code.
 
 | Source | Covered behavior |
 | --- | --- |
