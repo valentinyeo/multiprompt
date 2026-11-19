@@ -326,7 +326,8 @@ function Clear-Composer {
 }
 function Assert-FullHistory([string]$Stage) {
     $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
-    $blocks = 2 + 3 * $rounds + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
+    $toolTail = if ($plan.name -eq 'full-history') { 160 } else { 0 }
+    $blocks = 2 + 3 * $rounds + $toolTail + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
     if ($Stage -in @('open', 'restart')) {
         $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
         [Windows.Forms.Clipboard]::Clear()

@@ -364,6 +364,7 @@ def seed_event(handle, sid, kind, **fields):
 
 
 SEED_PARAGRAPH = "This paragraph stands in for a long assistant answer with enough words to wrap across several lines of the chat column, so every message needs real text layout work when the transcript is shown. "
+SOFT_2779_TAIL_CALLS = 160
 
 
 def fake_seed_many(rounds):
@@ -660,6 +661,11 @@ def shell():
                 identity = "history-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
+        if state().get("name") == "full-history":
+            for i in range(SOFT_2779_TAIL_CALLS):
+                identity = "soft-2779-tail-" + str(i)
+                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
+                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))

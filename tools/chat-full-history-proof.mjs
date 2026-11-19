@@ -11,12 +11,13 @@ try {
   const source = fs.readFileSync(path.join(root, 'full-history/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line));
   const messages = source.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text')).map(row => typeof row.message.content === 'string' ? row.message.content : row.message.content.find(part => part.type === 'text').text);
   const rounds = process.env.CHAT_LONG_PROOF === '1' ? 320 : 24;
+  const toolTail = 160;
   assert.equal(messages.length, 2 + rounds * 2);
   for (const stage of ['open', 'restart']) {
     const measured = json(`full-history/${stage}.json`);
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
     assert.equal(measured.messages, messages.length);
-    assert.equal(measured.blocks, messages.length + rounds + (process.env.CHAT_LONG_PROOF === '1' ? 300 : 0));
+    assert.equal(measured.blocks, messages.length + rounds + toolTail + (process.env.CHAT_LONG_PROOF === '1' ? 300 : 0));
     assert.equal(measured.polled, true);
     const latest = json(`full-history/${stage}-latest.json`);
     assert.equal(latest.latest, `IGSH815 assistant ${String(rounds - 1).padStart(2, '0')}`);
