@@ -268,14 +268,6 @@ pub fn findWorkspace(id: []const u8) ?u32 {
     return null;
 }
 
-pub fn workspaceSlotArchived(slot: u8) bool {
-    if (slot >= app_state.g_lws_count or slot >= app_state.g_ws_id_len.len) return false;
-    const len = app_state.g_ws_id_len[slot];
-    if (len == 0 or len > app_state.g_ws_ids[slot].len) return false;
-    const wi = findWorkspace(app_state.g_ws_ids[slot][0..len]) orelse return false;
-    return app_state.g_workspaces[wi].archived;
-}
-
 pub fn addOrUpdateWorkspace(id: []const u8, name: []const u8, restore: bool) void {
     if (id.len == 0) return;
     const idx: u32 = findWorkspace(id) orelse blk: {
