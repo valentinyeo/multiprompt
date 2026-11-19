@@ -183,16 +183,21 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   const host = { left: 30, top: 40, width: 960, height: 800 };
   const status = { left: 30, top: 80, width: 960, height: 28 };
   const composer = { left: 80, top: 750, width: 800, height: 60 };
-  const viewport = { left: 30, top: 80, width: 960, height: 644 };
+  const viewport = { left: 30, top: 80, width: 960, height: 628 };
   assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
-    transcript: { left: 30, top: 108, width: 960, height: 616 },
+    transcript: { left: 30, top: 108, width: 960, height: 600 },
     rows: status,
     working: { left: 30, top: 724, width: 960, height: 14 },
   });
   assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /working strip/);
-  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /working strip/);
+  assert.equal(transcriptGeometry(host, status, composer, viewport).transcript.height,
+    600, 'the reserved notice space keeps the newest message rectangle');
+  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height + 16 }), /notice/,
+    'a layout that reserves only the old composer gap still throws');
+  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 14 }), /working strip/,
+    'a layout that also reserves the removed working strip still throws');
   const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
   assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),
     Object.fromEntries(Object.entries(transcriptGeometry(host, status, composer, viewport)).map(([key, value]) => [key, scale(value)])));
@@ -264,20 +269,21 @@ Write-Host 'CURRENT_VIEWPORT_OK'`;
 test('IGSH-1055 two independent app revisions share the identical branch verifier', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const vm = require('node:vm');
+  const { journeyMatrix } = require('./verify-features.cjs');
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
-  const expression = workflow.match(/^        app-revision: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(expression, 'independent source matrix exists');
-  const revisions = (event, ref, appRevision = '') => JSON.parse(JSON.stringify(vm.runInNewContext(expression, { inputs: { app_revision: appRevision }, github: { event_name: event, ref, sha: 'f'.repeat(40) }, fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value) })));
-  const pinned = revisions('push', 'refs/heads/ceo/IGSH-1055-hax2');
-  assert.equal(pinned.length, 2);
-  assert.equal(new Set(pinned).size, 2);
-  assert.ok(pinned.every(sha => /^[a-f0-9]{40}$/.test(sha)));
-  assert.equal(pinned[1], 'f'.repeat(40), 'current application source is the exact tested verifier head');
-  for (const [event, ref] of [['push', 'refs/heads/master'], ['pull_request', 'refs/pull/622/merge'], ['workflow_call', 'refs/tags/v0.28.999']]) {
-    assert.deepEqual(revisions(event, ref), ['']);
-  }
-  assert.deepEqual(revisions('workflow_call', 'refs/tags/v0.28.999', 'a'.repeat(40)), ['a'.repeat(40)]);
+  assert.match(workflow, /matrix=\$\{JSON\.stringify\(journeyMatrix\(selected, process\.env\.APP_REVISION\)\)\}/, 'the journey matrix is the only source of app revisions');
+  const base = '5d2a820355969173090f0fcd0c72a7b3bd222141';
+  const head = 'f'.repeat(40);
+  const rows = revision => journeyMatrix(['chat-messages-only', 'title-bar'], revision);
+  const baseRows = rows(base);
+  const headRows = rows(head);
+  assert.ok(baseRows.length > 0 && baseRows.length === headRows.length);
+  assert.deepEqual([...new Set(baseRows.map(row => row['app-revision']))], [base]);
+  assert.deepEqual([...new Set(headRows.map(row => row['app-revision']))], [head], 'current application source is the exact tested verifier head');
+  const shape = matrix => matrix.map(({ 'app-revision': _revision, ...rest }) => rest);
+  assert.deepEqual(shape(baseRows), shape(headRows), 'both app revisions run the identical verifier matrix');
+  assert.deepEqual(journeyMatrix(['chat-messages-only'], ''), [{ feature: 'chat-messages-only', 'app-revision': '', 'caption-dpi': 96, 'caption-browser-theme': 'light' }], 'no app revision means the harness head builds the application');
+  assert.match(workflow, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
   assert.match(workflow, /path: app-source/);
   assert.match(workflow, /working-directory: \$\{\{ matrix.app-revision && 'app-source' \|\| '\.' \}\}/);
   assert.match(workflow, /git -C app-source rev-parse HEAD/);

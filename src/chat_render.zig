@@ -2661,7 +2661,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
-    const held_y = app_state.g_chat_scroll_y;
+    const held_y = app_state.g_chat_scroll_y + delta;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);
@@ -4040,7 +4040,7 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
 }
 
 fn chatEchoNotSent(e: app_state.ChatOutboxEntry) bool {
-    return chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, @as(i64, @intCast(GetTickCount64())));
+    return chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0));
 }
 
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {

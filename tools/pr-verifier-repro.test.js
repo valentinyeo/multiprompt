@@ -109,3 +109,55 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const ciFix = { title: 'SOFT-2728: Fix master red checks' };
+const ciSelection = (extra = {}) => ({ ...verifier.validateSelection({ features: [] }, ['appearance'], ciFix), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [], ...extra });
+const ciReceipt = (extra = {}) => ({ head: {}, base: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }] });
+const ciFinish = (selection, summary) => verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
+
+test('a fix whose files are all owned by a CI workflow passes when that receipt shows base red and head green', () => {
+  const result = ciFinish(ciSelection(), ciReceipt());
+  assert.notEqual(result.final, 'FAIL');
+  assert.match(result.body, /Repro by CI workflow: ci-repair-receipt\.yml \(tools: base exit 1, head exit 0\)/);
+});
+
+test('a CI receipt is not a repro when base stayed green, head is red, or the receipt is missing', () => {
+  for (const summary of [ciReceipt({ base_exit_code: 0 }), ciReceipt({ head_exit_code: 1 }), ciReceipt({ base_exit_code: null }), { head: {}, base: {} }, { head: {}, base: {}, ciRepro: [{ workflow: 'other.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0 }] }]) {
+    assert.equal(ciFinish(ciSelection(), summary).final, 'FAIL', JSON.stringify(summary));
+  }
+});
+
+test('a product fix, an unmapped file or a nearest-journey guess still needs a repro journey despite a CI receipt', () => {
+  for (const extra of [{ features: ['appearance'] }, { unmapped: ['src/main.zig'] }, { nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }, { ciWorkflows: [] }]) {
+    const result = ciFinish(ciSelection(extra), ciReceipt());
+    assert.equal(result.final, 'FAIL', JSON.stringify(extra));
+    assert.match(result.body, /Repro journey.*master.*failed.*head.*passed/i);
+  }
+});
+
+test('a PR that is not a fix never needs the CI repro', () => {
+  const selection = { ...ciSelection(), ...verifier.validateSelection({ features: [] }, ['appearance'], { title: 'Document appearance' }), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [] };
+  assert.notEqual(ciFinish(selection, { head: {}, base: {} }).final, 'FAIL');
+});
+
+test('summarize carries the repro of each selected CI workflow from its raw summary', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-ci-repro-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'evidence/ci-repair-receipt'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'evidence/ci-repair-receipt/summary.json'), JSON.stringify({ repro: { part: 'tools', base_exit_code: 1, head_exit_code: 0 } }));
+    fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features: [], ciWorkflows: ['ci-repair-receipt.yml'], compareBase: false }));
+    fs.writeFileSync(path.join(dir, 'pr.json'), JSON.stringify({ headRefOid: 'a'.repeat(40) }));
+    fs.writeFileSync(path.join(dir, 'ci-workflows.json'), '[]');
+    fs.mkdirSync(path.join(dir, 'evidence'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'evidence/ci-workflows.json'), JSON.stringify([{ workflow: 'ci-repair-receipt.yml', artifact: 'ci-repair-receipt', head_sha: 'a'.repeat(40), conclusion: 'success' }]));
+    fs.writeFileSync(path.join(dir, 'ci.json'), JSON.stringify({ checks: [{ head_sha: 'a'.repeat(40) }] }));
+    fs.writeFileSync(path.join(dir, 'diff.patch'), 'diff');
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), 'b'.repeat(40), dir], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'summary.json'), 'utf8')).ciRepro, [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0 }]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -131,6 +131,7 @@ var g_chat_read_visit_marker: u64 = 0;
 var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
 var g_chat_read_open_pending = false;
 var g_chat_read_hold = false;
+var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
 var g_chat_read_open_ready = false;
 var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -511,7 +512,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expect(@import("agent_second_line.zig").calls > 0);
 }
 `;
-function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy'), boundary = 'fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }') {
+function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy'), boundary = 'fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', refresh = fn('refreshChatBlockCache')) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh301-'));
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
@@ -522,7 +523,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'refreshChatBlockCache' ? refresh : n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -1030,6 +1031,50 @@ test "reset prefix" {
   }
 });
 
+
+test('SOFT-2713 live revisions retain unchanged history geometry', () => {
+  const cases = String.raw`
+test "cache-first switch-back live revision keeps measured history" {
+    const a = std.heap.page_allocator;
+    const live = @import("chat_live.zig");
+    const sid = "11111111-2222-3333-4444-666666666666";
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    defer g_chat_histories.deinit(a);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        ("{\"role\":\"assistant\",\"text\":\"retained message\"}\n" ** 20) ++ "@@MP_END@@\n", 1, one.key);
+    chatDeferTranscriptLoad();
+    try std.testing.expect(refreshChatBlockCache(true));
+    const count = g_chat_block_count;
+    try std.testing.expect(count > 10);
+    _ = live.begin(1, 0, sid);
+    defer live.release(1);
+    try std.testing.expect(live.applyPage(1, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"working\",\"payload\":{}}}]}}"));
+    g_chat_layout_reuse = count;
+    try std.testing.expect(refreshChatBlockCache(false));
+    try std.testing.expect(g_chat_layout_reuse >= count - 1);
+    g_chat_layout_reuse = count;
+    try one.history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"new answer\"}\n@@MP_END@@\n", 2, one.key);
+    try std.testing.expect(refreshChatBlockCache(false));
+    try std.testing.expect(g_chat_layout_reuse >= count - 1);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const current = fn('refreshChatBlockCache');
+  const broken = current.replace(
+    '@min(g_chat_layout_reuse, if (history_revision',
+    '0 * @min(g_chat_layout_reuse, if (history_revision',
+  );
+  assert.notEqual(broken, current);
+  const rejected = runHarness(fn('chatDeferTranscriptLoad'), null, cases, undefined, undefined, broken);
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /TestUnexpectedResult/);
+});
 
 test('unchanged keyed history polls live status without synchronous console acquisition', () => {
   const refresh = fn('refreshChatBlockCache');

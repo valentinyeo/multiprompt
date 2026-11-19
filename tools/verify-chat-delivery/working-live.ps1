@@ -163,3 +163,46 @@ Press @(0x11, 0x43) 'Ctrl+C: copy live conversation'
 $observation.copied = [Windows.Forms.Clipboard]::GetText()
 Press @(0x1B) 'Esc: clear live selection'
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+if (-not $steady) {
+    $pending = @(Wait-For 'both follow-ups saved with their host receipts' {
+        $saved = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
+        $messages = @($saved.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -in $observation.followups })
+        if ($messages.Count -eq 2 -and @($messages | Where-Object { $_.phase -ne 'queued' -or $_.x -ne 1 }).Count -eq 0) { $messages }
+    })
+    Copy-Item "$settings/chat-outbox.json" "$caseDir/recovery-outbox-before.json"
+    $expected = @($pending | ForEach-Object {
+        $wire = [string]$_.wire_id
+        $match = [regex]::Match((Read-Shared "$settings/debug.log"), ('\[chat-identity\] row source=pending role=user key=(\d+) wire=' + [regex]::Escape($wire) + ' not_sent=0'))
+        if (-not $match.Success) { throw 'Queued message has no painted identity before restart' }
+        @{wire=$wire; key=$match.Groups[1].Value; text=[string]$_.t}
+    })
+    Save $expected "$caseDir/recovery-expected.json"
+    [IO.File]::WriteAllText("$state/recovery-hold-receipts", '')
+    $observation.recovery = @{startTick=[ChatDeliveryDesktop]::GetTickCount64()}
+    Restart-OwnedApp
+    Press @(0x11, 0x31) 'Ctrl+1: select chat after restarting with delayed receipts'
+    Press @(0x12, 0x43) 'Alt+C: open restarted chat with delayed receipts'
+    $composer = Wait-For 'restarted native composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'restarted composer typing focus' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) })
+    Bind-Transcript
+    [void](Wait-For 'restarted pending messages painted without a new receipt' {
+        $log = Read-Shared "$settings/debug.log"
+        $frames = [regex]::Matches($log, '\[chat-identity\] begin tick=(\d+) frame=\d+([\s\S]*?)\[chat-identity\] end')
+        @($frames | Where-Object { [long]$_.Groups[1].Value -ge $observation.recovery.startTick -and ($_.Groups[2].Value -split 'source=pending').Count -ge 3 }).Count -gt 0
+    })
+    Shot 'working-recovery-before-history'
+    Copy-Item "$settings/chat-outbox.json" "$caseDir/recovery-outbox-loaded.json"
+    $observation.recovery.historyTick = [ChatDeliveryDesktop]::GetTickCount64()
+    Save $expected "$state/recovery-history.json"
+    [void](Wait-For 'simulated agent publishes both saved user messages' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "recovery-history-ready"' })
+    [void](Wait-For 'both saved messages painted after restart' {
+        $log = Read-Shared "$settings/debug.log"
+        foreach ($row in $expected) {
+            if ($log -notmatch ('\[chat-identity\] row source=saved role=user key=' + [regex]::Escape($row.key) + '(?:\s|$)')) { return $false }
+        }
+        $true
+    })
+    Shot 'working-recovery-after-history'
+    $observation.recovery.endTick = [ChatDeliveryDesktop]::GetTickCount64()
+    Copy-Item "$settings/chat-outbox.json" "$caseDir/recovery-outbox-final.json"
+}

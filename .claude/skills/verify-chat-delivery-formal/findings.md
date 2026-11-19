@@ -1,6 +1,16 @@
 # Chat delivery counterexamples
 
-The goal is one visible copy per sent message, with no false **Not sent** copy. The unchanged source at `9dd167dad7dde81749519038b0bcc5866c6deebb` violates both promises in the bounded model.
+The goal is one visible copy per sent message, with no false **Not sent** copy. The following counterexamples are historical. The source at `9dd167dad7dde81749519038b0bcc5866c6deebb` violates both promises in the bounded model.
+
+## Source fixes
+
+At `6baea66c637034b9d6285a5894de3ed7ffb24fe5`, the source decisions change as follows:
+
+- SOFT-2724 removes age-only v1 failure transitions and failure labels. Explicit failed receipts still show **Not sent**; an acceptance receipt clears a stale failure label.
+- SOFT-2725 restores queued/sending v1 entries as uncertain queued entries. Their write reservation prevents a duplicate send. Legacy restoration and explicit failure states remain unchanged.
+- SOFT-2726 includes restored v1 entries in transcript reconciliation even after empty-phase recovery cleared their write flags. The assignment still permits only one pending entry to claim a user block.
+
+The [hosted native probe](https://github.com/valentinyeo/multiprompt/actions/runs/44392581466) executed these source decisions. Its observed table passes all three unchanged properties in bounded TLC. The model, event bounds and invariants are unchanged. Full native/store replay, both planted breaks and restoration are required before a source pass is reported. Historical paths below remain regression evidence, not inherited findings to accept on the repaired source.
 
 These are production-decision counterexamples, not captured Windows screens. Native acceptance, store confirmation, client receipts and transcript arrival are separate events. Each shortest path must replay through production decisions and the real isolated message store before it is accepted as a finding.
 

@@ -418,6 +418,7 @@ function Snapshot([string]$Name) {
         $focus.uia = @{ handle = $focused.Current.NativeWindowHandle; pid = $focused.Current.ProcessId; class = $focused.Current.ClassName }
     } catch { $focus.uiaError = $_.Exception.Message }
     try { $focus.desktopWindows = @([VerifyNative]::DesktopWindows()) } catch { $focus.desktopError = $_.Exception.Message }
+    try { $focus.paint = [VerifyNative]::ObservePaint($script:window) } catch { $focus.paintError = $_.Exception.Message }
     try {
         $focus.processes = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, CreationDate | Select-Object ProcessId, ParentProcessId, Name, CreationDate)
     } catch { $focus.processError = $_.Exception.Message }

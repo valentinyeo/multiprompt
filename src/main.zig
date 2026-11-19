@@ -2408,12 +2408,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             }
             var leave_pt: POINT = undefined;
-            _ = GetCursorPos(&leave_pt);
-            _ = ScreenToClient(hwnd, &leave_pt);
-            if (!app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
-                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
-                _ = TrackMouseEvent(&tracking);
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            var leave_rc: RECT = undefined;
+            const in_sidebar = !app_state.g_hide_sidebar and GetCursorPos(&leave_pt) != 0 and
+                ScreenToClient(hwnd, &leave_pt) != 0 and GetClientRect(hwnd, &leave_rc) != 0 and
+                leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0 and leave_pt.y < leave_rc.bottom;
+            if (!in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {

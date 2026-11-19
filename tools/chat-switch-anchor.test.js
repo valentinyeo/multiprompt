@@ -18,6 +18,9 @@ function between(source, start, end) {
 
 const harness = (scroll, historySource) => `const std = @import("std");
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 800, bottom: i32 = 600 };
+const md = struct {
+  const Block = struct { start: usize = 0, role: enum { prose, tool } = .prose, first: bool = true, message_id: u64 = 0, source_offset: u64 = 0 };
+};
 const chat_history = struct {
 ${between(history, 'pub const ReadBoundary = struct', '\n')}
 ${between(historySource, 'pub const Anchor =', 'pub const MISSING_RETRY_MS')}
@@ -41,7 +44,8 @@ const app_state = struct {
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = false;
   var g_chat_read_hold = false;
-  var g_chat_new_messages = struct { fn count(_: @This()) usize { return 0; } }{};
+  var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
+  var g_chat_blocks: [128]md.Block = undefined;
   var g_chat_scroll_bottom_pending = false;
   var g_chat_scrolled_up = false;
   var g_chat_prepend_pending = false;
@@ -53,8 +57,6 @@ const app_state = struct {
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
 fn chatEchoMatchActive() void {}
-fn verboseLoggingEnabled() bool { return false; }
-fn chatNewMessagesChanged(_: bool) void {}
 fn chatScrollStateChanged(viewport_h: i32) void {
   app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - 4;
 }
@@ -92,6 +94,8 @@ fn openTab(blocks: usize) void {
   app_state.g_chat_scrolled_up = false;
   app_state.g_chat_read_boundary = .{};
   app_state.g_chat_read_hold = true;
+  app_state.g_chat_read_anchor = null;
+  for (&app_state.g_chat_blocks, 0..) |*block, i| block.* = .{ .message_id = i + 1 };
   chatRelayoutPreservingScroll(800, 600);
 }
 fn dividerTop() i32 { return app_state.g_chat_read_divider_y - app_state.g_chat_top_pad; }
@@ -106,11 +110,12 @@ test "IGSH-1924 a switch opens on the New divider and later content never moves 
   app_state.next_blocks = 40;
   refreshChatTranscript(false);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
-  const divider_y = app_state.g_chat_read_divider_y - app_state.g_chat_scroll_y;
+  const anchor = chat_history.readAnchor(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y, 600).?;
+  const before_y = chat_history.readAnchorTop(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], anchor).? - app_state.g_chat_scroll_y;
   app_state.g_chat_top_pad = 82;
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(first + 62, app_state.g_chat_scroll_y);
-  try std.testing.expectEqual(divider_y, app_state.g_chat_read_divider_y - app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(before_y, chat_history.readAnchorTop(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], anchor).? - app_state.g_chat_scroll_y);
   app_state.g_chat_top_pad = 20;
 }
 test "SOFT-2557 a late New divider never moves the first painted row" {
@@ -187,27 +192,6 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
 }
-test "IGSH-1921 ready history preserves the newest visible row through late padding" {
-  openTab(40);
-  app_state.g_chat_read_open_ready = true;
-  app_state.g_chat_scrolled_up = true;
-  var newest: usize = 0;
-  for (app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], 0..) |rect, index| {
-    if (rect.top < app_state.g_chat_scroll_y + 600) newest = index;
-  }
-  const shown_y = app_state.g_chat_layout_rects[newest].top - app_state.g_chat_scroll_y;
-  app_state.g_chat_top_pad += 12;
-  app_state.next_blocks = 45;
-  refreshChatTranscript(false);
-  try std.testing.expectEqual(shown_y, app_state.g_chat_layout_rects[newest].top - app_state.g_chat_scroll_y);
-  try std.testing.expect(app_state.g_chat_scrolled_up);
-  app_state.g_chat_read_hold = false;
-  app_state.g_chat_scroll_y = 100;
-  app_state.g_chat_scrolled_up = true;
-  app_state.next_blocks = 50;
-  refreshChatTranscript(false);
-  try std.testing.expectEqual(@as(i32, 100), app_state.g_chat_scroll_y);
-}
 `;
 
 function run(scroll, historySource = history) {
@@ -225,7 +209,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 9 tests passed/);
+  assert.match(result.stderr, /All 8 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {

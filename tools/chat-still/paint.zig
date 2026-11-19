@@ -1,5 +1,30 @@
+fn chatIdentityFrame(hwnd: HANDLE) void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    var client: RECT = undefined;
+    if (GetClientRect(hwnd, &client) == 0) return;
+    const view_h = @max(1, client.bottom - app_state.g_chat_bottom_inset);
+    var log: [256]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat-identity] begin tick={d} frame={d}", .{ GetTickCount64(), app_state.g_chat_paint_count }) catch return);
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, i| {
+        if (block.role == .tool or g_reaction_view.hides(i) or chatMessageBounds(i).first != i) continue;
+        const rc = chatMessageRect(i);
+        if (rc.bottom - app_state.g_chat_scroll_y <= app_state.g_chat_top_pad or rc.top - app_state.g_chat_scroll_y >= view_h) continue;
+        debugLog(std.fmt.bufPrint(&log, "[chat-identity] row source={s} role={s} key={d}", .{ if (block.message_id == 0) "live" else "saved", @tagName(block.role), block.row_key }) catch return);
+    }
+    for (0..app_state.g_chat_echo_layout_count) |i| {
+        const rc = app_state.g_chat_echo_layout[i];
+        if (rc.bottom - app_state.g_chat_scroll_y <= app_state.g_chat_top_pad or rc.top - app_state.g_chat_scroll_y >= view_h) continue;
+        const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
+        const entry = app_state.g_chat_outbox.items[ei];
+        const wire = std.mem.sliceTo(&entry.message_wire_id, 0);
+        debugLog(std.fmt.bufPrint(&log, "[chat-identity] row source=pending role=user key={d} wire={s} not_sent={d}", .{ @import("chat_markdown.zig").rowKey(wire), wire, @intFromBool(chatEchoNotSent(entry)) }) catch return);
+    }
+    debugLog("[chat-identity] end");
+}
+
 fn chatStillFrame(hwnd: HANDLE) void {
     var enabled: [2]u8 = undefined;
+    if (GetEnvironmentVariableA("MULTIPROMPT_CHAT_IDENTITY_PROOF", &enabled, enabled.len) != 0) chatIdentityFrame(hwnd);
     if (GetEnvironmentVariableA("MULTIPROMPT_CHAT_STILL_PROOF", &enabled, enabled.len) == 0) return;
     if (app_state.active_shell >= app_state.shell_count) return;
     var client: RECT = undefined;

@@ -12,12 +12,12 @@ const read = file => {
   return fs.readFileSync(full, 'utf8');
 };
 
-test('the dedicated stillness journey stays nightly or manual without an AI picker', () => {
+test('chat source changes always run the stillness journey without an AI picker', () => {
   const workflow = read('.github/workflows/chat-still.yml');
-  const trigger = workflow.slice(workflow.indexOf('on:'), workflow.indexOf('\npermissions:'));
-  assert.match(trigger, /\n  schedule:\n    - cron:/);
-  assert.match(trigger, /\n  workflow_dispatch:/);
-  assert.doesNotMatch(trigger, /\n  pull_request:/);
+  const trigger = workflow.slice(workflow.indexOf('  pull_request:'), workflow.indexOf('  workflow_dispatch:'));
+  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig', 'tools/fixtures/SOFT-2713/chat-still-regressions.json']) {
+    assert.ok(trigger.includes(`- '${file}'`), `${file} must trigger the fixed stillness gate`);
+  }
   const desktop = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  comment-review:'));
   assert.match(desktop, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(desktop, /feature: chat-still/);
@@ -71,40 +71,55 @@ test('both formal CI gates compare against the event baseline after mutations an
   }
 });
 
-test('proved source passes while planted findings, drift and replay errors cannot inherit', { skip: process.platform === 'win32' }, t => {
+test('formal findings inherit only from byte-identical modeled source', { skip: process.platform === 'win32' }, t => {
   read('tools/chat-still/verify.py');
   const root = path.join(__dirname, '..');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-still-inherited-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
+  const fixture = path.join(dir, 'fixture');
+  copyZig(['chat_session.zig', 'chat_history.zig', 'chat_render.zig'], path.join(fixture, 'src'));
+  for (const file of ['tools/verify-chat-still', 'tools/chat-still/verify.py', 'tools/chat-still/replay.py', 'tools/chat-still/coverage.json', 'tools/fixtures/SOFT-2713/chat-still-regressions.json']) {
+    const target = path.join(fixture, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(root, file), target);
+  }
+  const fixtureSession = path.join(fixture, 'src/chat_session.zig');
+  fs.writeFileSync(fixtureSession, fs.readFileSync(fixtureSession, 'utf8').replaceAll(
+    'if (old_content_h <= viewport_h) null else if (anchor_top)', 'if (old_content_h >= 0) null else if (anchor_top)'));
+  for (const args of [
+    ['init', '--quiet'], ['add', '.'],
+    ['-c', 'user.name=software-factory-runners[bot]', '-c', 'user.email=348741585+software-factory-runners[bot]@users.noreply.github.com', 'commit', '--quiet', '-m', 'Failing anchor fixture'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: fixture, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: os.devNull } });
+    assert.equal(result.status, 0, result.stderr);
+  }
   for (const variant of ['changed', 'drift']) {
-    copyZig(['src/chat_session.zig', 'src/chat_history.zig'], path.join(dir, variant), root);
+    fs.cpSync(path.join(fixture, 'src'), path.join(dir, variant, 'src'), { recursive: true });
   }
   const session = path.join(dir, 'changed/src/chat_session.zig');
-  fs.writeFileSync(session, fs.readFileSync(session, 'utf8').replace(
-    'if (old_content_h <= viewport_h) null else if (anchor_top)', 'if (old_content_h >= 0) null else if (anchor_top)'));
+  fs.appendFileSync(session, '\n');
   const history = path.join(dir, 'drift/src/chat_history.zig');
   fs.writeFileSync(history, fs.readFileSync(history, 'utf8').replace('pub fn scrollAnchor(', 'pub fn renamedScrollAnchor('));
   for (const [name, args, expected] of [
-    ['proved source passes without inheritance', [], 0],
-    ['proved source does not need a baseline waiver', ['--inherit-from', 'HEAD'], 0],
-    ['planted findings remain failures', ['--source-root', path.join(dir, 'changed')], 1],
+    ['raw findings remain failures', [], 1],
+    ['unchanged source is inherited', ['--inherit-from', 'HEAD'], 0],
     ['changed source is not inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'changed')], 1],
     ['model drift still fails', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'drift')], 2],
-    ['replay errors cannot inherit', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'changed'), '--replay'], 2],
-    ['missing baseline still fails', ['--inherit-from', 'refs/heads/nonexistent-chat-still-test', '--source-root', path.join(dir, 'changed')], 2],
+    ['replay errors cannot inherit', ['--inherit-from', 'HEAD', '--replay'], 2],
+    ['missing baseline still fails', ['--inherit-from', 'refs/heads/nonexistent-chat-still-test'], 2],
   ]) {
     const output = path.join(dir, 'report.json');
     fs.rmSync(output, { force: true });
     const result = spawnSync('bash', ['tools/verify-chat-still', ...args, '--output', output], {
-      cwd: root, encoding: 'utf8', timeout: 60000,
+      cwd: fixture, encoding: 'utf8', timeout: 60000,
       env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
     });
     assert.equal(result.status, expected, `${name}\n${result.stdout}\n${result.stderr}`);
     if (expected < 2) {
       const report = JSON.parse(fs.readFileSync(output, 'utf8'));
-      assert.equal(report.failures.length > 0 && report.counterexamples.length > 0, expected === 1, name);
-      assert.equal(Boolean(report.inherited_from), false, name);
+      assert.ok(report.failures.length > 0 && report.counterexamples.length > 0, name);
+      assert.equal(Boolean(report.inherited_from), expected === 0, name);
     }
   }
 });

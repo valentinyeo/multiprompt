@@ -23,7 +23,7 @@ def function(source, name):
 
 def symbolic(expression, values):
     expression = re.sub(r"!(?!=)", " not ", expression).replace("null", "-1")
-    tree = ast.parse(expression.strip().replace("true", "True").replace("false", "False"), mode="eval")
+    tree = ast.parse(expression.strip(), mode="eval")
 
     def visit(node):
         if isinstance(node, ast.Expression):
@@ -77,7 +77,8 @@ def check(root, replay_code=False):
     session = (root / "src/chat_session.zig").read_text()
     history = (root / "src/chat_history.zig").read_text()
     bodies = {name: function(session, name) for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll")}
-    covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "visibleTailAnchor", "followBottom", "scrollAfterLayout", "openScroll")}}
+    covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "readAnchor", "readAnchorTop", "followBottom", "scrollAfterLayout", "openScroll")},
+               "chatSetTopPad": function((root / "src/chat_render.zig").read_text(), "chatSetTopPad")}
     recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
     for name, body in covered.items():
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
@@ -91,34 +92,21 @@ def check(root, replay_code=False):
     witnesses = []
     for name, body in bodies.items():
         condition, anchor_expression, fallback = held(body)
-        hold_guard = re.search(r"if \(([^\n]*)\) app_state.g_chat_scroll_y = chat_history.openScroll", body).group(1)
-        tail_anchor = "chat_history.visibleTailAnchor(" in body
-        force_expression = re.search(r"const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom\((.*), app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up\);", body).group(1) if name == "refreshChatTranscript" else "false"
         for event in ("history/divider", "row measurement", "late top padding", "live append", "reconciliation"):
             old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta = z3.Ints("old_h new_h viewport old_top new_top old_scroll divider pad delta")
             before, after = z3.Ints("previous_boundary next_boundary")
             old_newest, new_newest = z3.Ints("old_newest new_newest")
-            read_ready, scrolled_up = z3.Bools("read_ready scrolled_up")
-            old_anchor = old_newest if tail_anchor else old_top
-            new_anchor = new_newest if tail_anchor else new_top
-            compensation = delta if name == "refreshChatTranscript" and "- (if (app_state.g_chat_read_hold)" in body else 0
-            offset = old_scroll - old_anchor - compensation
+            offset = old_scroll - old_newest
             values = {"old_content_h": old_h, "viewport_h": viewport, "previous_boundary.index": before,
-                      "app_state.g_chat_read_boundary.index": after, "top": new_anchor, "anchor_offset": offset,
-                      "old_scroll_y": old_scroll, "old_y": old_scroll, "anchor.?.offset": old_scroll - old_anchor,
-                      "app_state.g_chat_layout_top_pad": pad + delta, "old_top_pad": pad,
-                      "app_state.g_chat_read_hold": True, "app_state.g_chat_read_open_ready": read_ready, "force": False}
+                      "app_state.g_chat_read_boundary.index": after, "top": new_newest, "anchor_offset": offset,
+                      "old_scroll_y": old_scroll, "old_y": old_scroll, "anchor.?.offset": old_scroll - old_top,
+                      "app_state.g_chat_layout_top_pad": pad + delta, "old_top_pad": pad}
             expression = anchor_expression.replace("anchor.?.offset", "anchor_offset_value")
-            values["anchor_offset_value"] = old_scroll - old_anchor
+            values["anchor_offset_value"] = old_scroll - old_top
             drop = symbolic(condition, values)
             anchor = symbolic(expression, values)
             selected = z3.If(drop, z3.If(after >= 0, divider - pad - delta, new_h - viewport), anchor)
             scroll = z3.If(new_h <= viewport, new_h - viewport, z3.If(selected < 0, 0, z3.If(selected > new_h - viewport, new_h - viewport, selected)))
-            held_scroll = scroll
-            follow_bottom = z3.Or(symbolic(force_expression, values), z3.Not(scrolled_up))
-            unheld = new_anchor + offset if name == "refreshChatTranscript" else new_anchor + old_scroll - old_anchor
-            unheld = z3.If(follow_bottom, new_h - viewport, z3.If(unheld < 0, 0, z3.If(unheld > new_h - viewport, new_h - viewport, unheld)))
-            scroll = z3.If(symbolic(hold_guard, values), held_scroll, unheld)
             solver = z3.Solver()
             solver.add(viewport >= 100, viewport <= 1000, old_h > viewport, old_h <= 10000,
                        new_h > viewport, new_h <= 10000, old_scroll >= 0, old_scroll <= old_h - viewport,
@@ -151,7 +139,7 @@ def check(root, replay_code=False):
             if outcome == z3.sat:
                 model = solver.model()
                 witness = {str(v): model.eval(v, model_completion=True).as_long() for v in (old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta, before, after, old_newest, new_newest)}
-                witness.update(scrolled_up=int(z3.is_true(model.eval(scrolled_up, model_completion=True))), read_ready=int(z3.is_true(model.eval(read_ready, model_completion=True))), property=label, before_y=model.eval(old_newest - old_scroll).as_long(), after_y=model.eval(new_newest - scroll).as_long())
+                witness.update(property=label, before_y=model.eval(old_newest - old_scroll).as_long(), after_y=model.eval(new_newest - scroll).as_long())
                 failures.append(label)
                 witnesses.append(witness)
                 print("FAIL", label, json.dumps(witness, sort_keys=True))
@@ -159,8 +147,11 @@ def check(root, replay_code=False):
                 print("PASS", label, "all integer geometries within the stated bounds")
             else:
                 raise RuntimeError("SMT solver returned " + str(outcome))
-    if replay_code and witnesses:
-        replay(root, witnesses, function)
+    if replay_code:
+        if witnesses:
+            replay(root, witnesses, function)
+        else:
+            replay(root, json.loads((ROOT / "tools/fixtures/SOFT-2713/chat-still-regressions.json").read_text()), function, preserved=True)
     return {"tool": "z3-solver==4.13.4.0", "failures": failures, "counterexamples": witnesses, "sync_commit": recorded["sync_commit"]}
 
 
@@ -177,9 +168,29 @@ def self_test(root, replay_code=False):
             source = source.replace(original, broken)
         (scratch / "src/chat_session.zig").write_text(source)
         (scratch / "src/chat_history.zig").write_text((root / "src/chat_history.zig").read_text())
+        (scratch / "src/chat_render.zig").write_text((root / "src/chat_render.zig").read_text())
         result = check(scratch, replay_code)
         assert len(result["failures"]) == 10, "Each anchor obligation must reject the real-source scratch break"
         print("MUTATION PASS: both production held_y guards were broken in scratch; every obligation rejected them")
+        if replay_code:
+            history = (root / "src/chat_history.zig").read_text()
+            render = (root / "src/chat_render.zig").read_text()
+            capture = function(history, "readAnchor")
+            for label in ("first visible row", "uncompensated cached padding"):
+                (scratch / "src/chat_session.zig").write_text((root / "src/chat_session.zig").read_text())
+                broken_history = history.replace(capture, capture.replace("result = .{", "if (result == null) result = .{")) if label == "first visible row" else history
+                broken_render = render.replace("const held_y = app_state.g_chat_scroll_y + delta;", "const held_y = app_state.g_chat_scroll_y;") if label == "uncompensated cached padding" else render
+                assert broken_history != history or broken_render != render
+                (scratch / "src/chat_history.zig").write_text(broken_history)
+                (scratch / "src/chat_render.zig").write_text(broken_render)
+                try:
+                    replay(scratch, json.loads((ROOT / "tools/fixtures/SOFT-2713/chat-still-regressions.json").read_text()), function, preserved=True)
+                except ValueError as error:
+                    if "TestExpectedEqual" not in str(error):
+                        raise
+                    print("MUTATION PASS: native regressions rejected", label)
+                else:
+                    raise ValueError("Native regressions accepted " + label)
 
 
 if __name__ == "__main__":

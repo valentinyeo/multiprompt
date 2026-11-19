@@ -31,11 +31,43 @@ test('an unknown tool does not expand an already mapped plan', () => {
   assert.ok(result.unmapped.includes('tools/new-ci-tool.cjs'));
 });
 
-test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml']);
+test('the CI repair receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
+  const receiptPath = path.join(root, '.github/workflows/ci-repair-receipt.yml');
+  const mapPath = path.join(root, '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md');
+  assert.ok(fs.existsSync(receiptPath), 'The CI repair receipt workflow must be installed');
+  assert.ok(fs.existsSync(mapPath), 'The CI repair receipt feature map must exist');
+  const source = fs.readFileSync(receiptPath, 'utf8');
+  const map = fs.readFileSync(mapPath, 'utf8');
+  assert.match(source, /^  pull_request:\n    paths:/m);
+  assert.match(source, /name: ci-repair-receipt\n/);
+  assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
+  for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+});
+
+test('only cheap gates and fixed path-filtered checks run on pull requests', () => {
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml']);
+  assert.match(fs.readFileSync(path.join(root, '.github/workflows/chat-still.yml'), 'utf8'), /^  pull_request:/m, 'The fixed stillness gate must run on chat PRs');
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
+    if (!/^  pull_request:/m.test(source)) continue;
+    if (file !== 'chat-still.yml') {
+      assert.ok(allowed.has(file), file);
+      continue;
+    }
+    const trigger = source.slice(source.indexOf('  pull_request:'), source.indexOf('  schedule:'));
+    assert.match(trigger, /^  pull_request:\n    paths:\n/);
+    assert.deepEqual([...trigger.matchAll(/^      - '([^']+)'$/gm)].map(match => match[1]), [
+      'src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig', 'src/drawing.zig',
+      'tools/chat-still/**', 'tools/fixtures/SOFT-2713/chat-still-regressions.json', 'tools/verify-chat-delivery/**', 'tools/verify-chat-still', 'tools/pr-verifier*',
+      '.claude/skills/verify-multiprompt/**', '.github/workflows/chat-still.yml', '.github/workflows/verify.yml', '.github/workflows/pr-verifier.yml',
+    ]);
+    assert.doesNotMatch(trigger, /paths-ignore:|branches:|types:/);
+    const desktop = source.slice(source.indexOf('  desktop:'), source.indexOf('  comment-review:'));
+    assert.match(desktop, /uses: \.\/\.github\/workflows\/verify\.yml/);
+    assert.equal((desktop.match(/feature:/g) || []).length, 1);
+    assert.match(desktop, /feature: chat-still/);
+    assert.doesNotMatch(desktop, /\bif:|\bneeds:|picker|selection/);
   }
   for (const name of ['chat-still', 'click-through', 'verify-chat-steady', 'resource-observation', 'room-checks', 'rooms-preview-build', 'legacy-update-feed', 'ssh-detached', 'computer-focus-probe', 'chat-history-reader-proof']) {
     const source = fs.readFileSync(path.join(root, `.github/workflows/${name}.yml`), 'utf8');
