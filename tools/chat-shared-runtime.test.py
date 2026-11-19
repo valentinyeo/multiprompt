@@ -163,7 +163,7 @@ class RuntimeTest(unittest.TestCase):
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
-        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources)
+        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
         return prelude + SOURCE
 
     def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
@@ -179,6 +179,7 @@ class RuntimeTest(unittest.TestCase):
     def test_published_mp_sessions_lists_chats_from_the_runtime_copy(self):
         self.info(self.bundle())
         sessions = Path(self.home.name) / '.multiprompt-runtime' / 'mp-sessions'
+        self.assertTrue(sessions.is_file(), 'mp-sessions must be published')
         listed = subprocess.run([str(sessions)], text=True, capture_output=True, env=self.env, timeout=30)
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertIn('STATE', listed.stdout)
@@ -186,6 +187,7 @@ class RuntimeTest(unittest.TestCase):
     def test_published_mp_layout_answers_help_from_the_runtime_copy(self):
         self.info(self.bundle())
         layout = Path(self.home.name) / '.multiprompt-runtime' / 'mp-layout'
+        self.assertTrue(layout.is_file(), 'mp-layout must be published')
         usage = subprocess.run([str(layout)], text=True, capture_output=True, env=self.env, timeout=30)
         self.assertIn('usage: mp-layout', usage.stdout)
 
