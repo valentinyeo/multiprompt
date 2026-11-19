@@ -4884,11 +4884,20 @@ fn chatQuestionTmuxThread(key: @import("chat_transcript.zig").Identity, keys: [@
     debugLog("[chat] question sent via=tmux");
 }
 
+fn shellTmuxIdentity(shell_index: u32) ?ChatIdentity {
+    if (shell_index >= app_state.shell_count) return null;
+    const shell = &app_state.shells[shell_index];
+    if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return null;
+    const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
+    if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return null;
+    return key;
+}
+
 fn chatAgentKey(shell_index: u32, digit: u8) bool {
+    if (shell_index >= app_state.shell_count) return false;
     const shell = &app_state.shells[shell_index];
     if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) == .tmux) {
-        const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
-        if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+        const key = shellTmuxIdentity(shell_index) orelse return false;
         const thread = std.Thread.spawn(.{}, chatStopTmuxThread, .{ key, digit }) catch return false;
         thread.detach();
         return true;
@@ -4942,12 +4951,12 @@ const CANCEL_DONE: u8 = 1;
 const CANCEL_TAKEN: u8 = 2;
 const CANCEL_FAILED: u8 = 3;
 
+pub fn chatCanCancelQueued(shell_index: u32) bool {
+    return shellTmuxIdentity(shell_index) != null;
+}
+
 pub fn chatCancelQueued(shell_index: u32, outbox_id: u64, text: []const u16, queued_at: i64, queue_id: u64) bool {
-    if (shell_index >= app_state.shell_count) return false;
-    const shell = &app_state.shells[shell_index];
-    if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
-    const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
-    if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+    const key = shellTmuxIdentity(shell_index) orelse return false;
     if (app_state.g_chat_cancel_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
     const a = std.heap.page_allocator;
     const spawned = chatCancelSpawn(a, key, outbox_id, text, queued_at, queue_id);
@@ -5029,11 +5038,7 @@ pub fn chatShellEditQueued() bool {
 }
 
 pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16, in_flight: ?*std.atomic.Value(bool)) bool {
-    if (shell_index >= app_state.shell_count) return false;
-    const shell = &app_state.shells[shell_index];
-    if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
-    const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
-    if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+    const key = shellTmuxIdentity(shell_index) orelse return false;
     const a = std.heap.page_allocator;
     const store = if (text) |t| (std.unicode.utf16LeToUtf8Alloc(a, t) catch return false) else (a.alloc(u8, 0) catch return false);
     var kept: usize = 0;

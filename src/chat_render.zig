@@ -241,6 +241,7 @@ const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardU
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
+const chatCanCancelQueued = @import("chat_send.zig").chatCanCancelQueued;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const chatWorkingIndicatorText = @import("window_layout.zig").chatWorkingIndicatorText;
@@ -5755,7 +5756,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
     const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
     const request_id: ?[]u16 = if (block_at) |index| (if (chatHistoryEntry(reaction_identity)) |entry| entry.history.requestIdAlloc(std.heap.page_allocator, app_state.g_chat_blocks[index]) catch null else null) else null;
     defer if (request_id) |id| std.heap.page_allocator.free(id);
-    const waiting = if (echo_index) |ei| (if (app_state.g_chat_outbox.items[ei].message_v1) app_state.g_chat_outbox.items[ei].removable() and !unsent_actions else !app_state.g_chat_outbox.items[ei].host_confirmed and chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms)) else false;
+    const waiting = if (echo_index) |ei| chatEchoCancelWaiting(app_state.g_chat_outbox.items[ei], unsent_actions) else false;
     var items = chatContextMenuItems(keyboard_index == null and selection_text.len > 0, selection_offer, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
@@ -6650,6 +6651,37 @@ const ChatContextMenu = struct {
     len: usize = 0,
     copy_target: ChatContextCopyTarget,
 };
+
+fn chatEchoCancelWaiting(echo: app_state.ChatOutboxEntry, unsent_actions: bool) bool {
+    if (echo.message_v1) return echo.removable() and !unsent_actions;
+    if (echo.host_confirmed or !chat_echo.cancellable(echo.state, echo.delivery_watch.removed_ms)) return false;
+    return chatCanCancelQueued(app_state.active_shell);
+}
+
+test "SOFT-2728 Cancel is offered only where the app can pull the message back" {
+    const saved = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    defer {
+        app_state.shells[0] = saved;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].kind = .cmd;
+    const written: app_state.ChatOutboxEntry = .{ .state = .delivered };
+    try std.testing.expect(!chatEchoCancelWaiting(written, false));
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].tmux_host = 0;
+    @memcpy(app_state.shells[0].tmux_session[0..2], "mp");
+    app_state.shells[0].tmux_session_len = 2;
+    try std.testing.expect(chatEchoCancelWaiting(written, false));
+    const host_waiting: app_state.ChatOutboxEntry = .{ .state = .queued, .message_v1 = true };
+    try std.testing.expect(chatEchoCancelWaiting(host_waiting, false));
+    try std.testing.expect(!chatEchoCancelWaiting(host_waiting, true));
+}
 
 fn chatContextMenuItems(selected: bool, offer: bool, message: bool, reply: bool, link: bool, unsent: bool, waiting: bool) ChatContextMenu {
     var result = ChatContextMenu{ .copy_target = chatContextCopyTarget(selected, message) };
