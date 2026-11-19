@@ -1,5 +1,7 @@
 # Chat first paint
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-first-paint.ps1
+
 Verify on: push
 
 One failure class: Chat View shows one layout in the first frame after launch and a different layout once restore finishes (IGSH-925: the message card was drawn for a narrow pane while the transcript and message box kept the full width, then everything jumped).
@@ -25,6 +27,9 @@ Dispatch `gh workflow run verify.yml -f feature=chat-first-paint` (or `--ref <br
 5. `result.json` names the check `chat-first-paint`; evidence is `chat-layout-events.json`, `chat-first-paint-verdict.json`, the two screenshots and the launch 2 log.
 
 ## Gotchas
+
+The old master red-control statement is historical: current source saves and reserves browser-pane state. The driver waits six elapsed seconds before its next measurement; it does not detect six quiet seconds. verify.yml has no direct master-push trigger at this revision; do not infer one from this map.
+
 
 - Red control: current master does not save the browser pane in the launch snapshot, so the first frame uses the full width and the later frame the pane width; the run fails with `chat layout moved after first paint`. The red and green run links are on the IGSH-925 ticket.
 - The two `[chat]` log lines exist only under verbose logging, which the journey turns on; they add no behaviour.

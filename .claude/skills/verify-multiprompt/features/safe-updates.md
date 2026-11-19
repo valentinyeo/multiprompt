@@ -1,5 +1,7 @@
 # Safe release updates
 
+Source files: src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1, .github/workflows/legacy-update-feed.yml, tools/legacy-update-proof.ps1
+
 ## Sub-features
 
 Signed-manifest verification, background staging, explicit and cold apply, helper retirement, bundle rollback and launch-argument preservation.
@@ -24,4 +26,7 @@ Prove responsive signed-out launch during background checking, cold-launch stage
 
 ## Gotchas
 
-`safe-updates.json` records each successful scenario and cleanup; `sign-in-ready.png` shows the responsive signed-out app; `build.json` pins the branch executable and commit. Any missing assertion fails the job. All fixture processes are stopped before evidence is uploaded.
+User entry points are the sidebar Update ready card and Ctrl+K Restart to update; the latter is absent in dev builds. Dismissal and overflowing release notes are separate controls. The fixture restart uses posted mouse messages, not proof of a physical user click on every update surface.
+
+
+`safe-updates.json` records each successful scenario and cleanup; `sign-in-ready.png` shows the responsive signed-out app; `build.json` pins the branch executable and commit. Any missing assertion fails the job. All fixture processes are stopped before evidence is uploaded. The journey waits for the proof names the harness actually passes, and writes `result.json` only after its last check, so a late failure cannot report passed.

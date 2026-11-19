@@ -13,9 +13,19 @@ Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit
 
 ## Reusable driver
 
-Read the nine-feature index in [features/README.md](features/README.md). The Windows entry point is `./.claude/skills/verify-multiprompt/drive.ps1 settings-appearance appearance -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/settings-appearance-appearance"`. It invokes the existing Launch/Doctor/Drive/Cleanup control in a child PowerShell and records the actual desktop with FFmpeg. Use a fresh evidence folder outside the disposable profile. The mapped palette equivalent is `drive.ps1 palette command-palette` with the same arguments.
+Read the complete feature index in [features/README.md](features/README.md), starting with long sessions, server chats, /clear, Stop and sending. Area files map source actions to recipes and exact unreachable prerequisites; their `Journeys:` lines name executable supporting recipes, not a claim that every action passed. The Windows entry point is `./.claude/skills/verify-multiprompt/drive.ps1 settings-appearance appearance -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/settings-appearance-appearance"`. It invokes the existing Launch/Doctor/Drive/Cleanup control in a child PowerShell and records the actual desktop with FFmpeg. Use a fresh evidence folder outside the disposable profile. The mapped palette equivalent is `drive.ps1 palette command-palette` with the same arguments.
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
+
+Before desktop launch, the shared `control.ps1` entry runs `node --test .claude/skills/verify-multiprompt/check-feature-map.test.cjs`, including legacy workflow routes that bypass `drive.ps1`. This checks index hygiene, every shortcut row, palette target families, architecture items and recipe links. To check source coverage and the generated-module regression without driving, run that same `node --test` command. Missing source actions fail with the map to repair. These checks do not certify live behavior.
+
+Part A (`w-2567a`, SOFT-2567) owns new real-size seed data. Part B (`w-2567b`, SOFT-2567) owns real SSH/tmux on the hosted runner. Reuse their data/host when available; never replace a missing prerequisite with another undocumented stand-in. Save source-reader returns, actual journeys exercised, screenshot review and triage in scratch notes. Do not commit per-run notes or turn historical coverage into a new live-pass claim.
+
+## Part B: runner-owned server chat
+
+Use the [server-chat map](features/server-chat.md) for real Windows-to-Linux SSH/tmux journeys. `control.ps1 -Feature server-chat` opens the persisted server chat, sends a message, sends `/clear`, and sends again. The Windows job installs WSL1 Ubuntu, OpenSSH and tmux; it never reaches a shared VPS. A new per-job key is locked to the runner SID before authentication, with inheritance removed on its directory and file. The private key is deleted during cleanup and never uploaded.
+
+The app, SSH client/server, tmux, reader, connectors and host are real. Only the paid Claude process is a deterministic provider. `/clear` evidence proves transport and the subsequent usable conversation, not Claude context erasure or the separate SOFT-2420 fix. Do not claim otherwise. Require the Windows run, `verify-server-chat/journey.mp4`, matching copied replies, independent server receipts, key ACL, executable identity and owned cleanup. Failed runs retain diagnostics and video too. The PR verifier selects the map through its ordinary push-triggered run; do not dispatch duplicates.
 
 ## Feature control ownership
 
@@ -95,7 +105,31 @@ gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 timeout 3000 gh run watch <id> --interval 300
 ```
 
-DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
+The selector matches changed files to `Source files:` ownership in each runnable feature map, then adds the declared bug-fix repro journey. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector picks one nearest feature by map names and source paths and discloses the gap in the verdict.
+
+`verify.yml` runs only that set on head and parent with the same harness. Matching parent evidence is restored through the base cache before scheduling Windows jobs. DeepSeek Flash judges the patch and real evidence against the PR outcomes. Claude is the fallback when DeepSeek authored the patch. Green CI alone is never the verdict. One independent verifier posts PASS, PASS+NOTES or FAIL; missing evidence blocks passage. Only `pstack-verifier` is required.
+
+A feature map with `CI workflow: <workflow>.yml` owns a non-desktop check through the same `Source files:` rules. It does not enter the Windows matrix. The verifier requires a successful exact-head pull-request run alongside Tests, downloads the artifact named after that workflow's file stem, and gives its `summary.json` and run receipt to the judge. Missing or stale CI evidence blocks verification. [Formal chat delivery](features/chat-delivery-formal.md) uses this route; its model findings are not UI passes.
+
+The full live drive of every feature is periodic, not a per-PR step. The nightly master run executes every runnable journey and files or updates a failure ticket on board 2060. The weekly `maintain-verification.yml` pass also reconciles source, feature maps and live evidence.
+
+### Emergency rollback before repair
+
+If an update prevents users from working, revert the bad change first. Do not leave the outage live while building a fix. `auto-revert-master.yml` contains the guarded rollback path and evidence; while its automatic job is disabled, perform the revert manually. Then reproduce the original bug on its matching surface, commit the failing repro before the real fix, and send the repair through normal PR verification on that same surface. Never bypass `pstack-verifier` for the repair.
+
+### Reproduce before fixing
+
+A PR marked as a repair must name exactly one runnable journey in its description:
+
+```text
+Repro journey: `chat-delivery`
+```
+
+The gate treats titles containing `bug`, `bug fix`, `fix`, `fixes`, or `fixed`, including conventional `fix(scope):` titles, as repairs. Labels `bug`, `bug-fix`, `bugfix`, `bug fix`, `defect`, and `regression` also mark repairs.
+
+For these PRs, the named journey takes priority over the picker and runs against both head and the current master commit captured when verification starts. Both runs use the PR's journey harness. The journey must fail on master for a product assertion and pass on head. A master pass, missing result, infrastructure failure, unknown journey, or an omitted declaration makes `pstack-verifier` FAIL even if the judge says PASS. An unrelated failing journey and inherited failures on both revisions do not prove a repair. Keep the failure screenshots and result files in the uploaded artifacts.
+
+Other PRs compare the selected journeys with their parent, reusing matching cached results. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
 
 ## Doctor
 
@@ -177,6 +211,8 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 
 A proof requires the real user path, action plus resulting state, and independently read side effects. A screenshot alone, a green unit test, a log claiming an action, or hand-written app state is insufficient. For appearance, require both a persisted `light` preference and the visible sidebar becoming substantially brighter than the user-selected Dark baseline. Other journeys assert their own saved state/files/window titles. Download and look at the screenshots yourself; reject blank, occluded, login-only, wrong-build or unchanged images even if JSON says passed. A screenshot's existence or luminance is not a substitute for that review.
 
+Cite only evidence files you successfully opened. A filename returned by a journey is not a file read. If your client cannot display images, do not cite PNGs or describe their pixels. Read native measurements in `result.json` and the saved state, attribute each observation to that exact file, and state that screenshots remain unreviewed. An image-capable independent reviewer must inspect those screenshots. Never infer what `action.png` or `after.png` shows from its filename or another file's assertions.
+
 For example:
 
 ```sh
@@ -195,3 +231,25 @@ Use `/maintain-verification-skill` when menus, keyboard routing, persistence or 
 
 - [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.
 - [Chat options](features/chat-options.md): clickable answer cards for lettered or numbered options and terminal pick lists.
+
+## Part S. Verification speed
+
+PRs select journeys from each feature map's `Source files:` line. Run every match. An unknown application source selects all runnable journeys; never cap the result to save time. Documentation and CI-only edits use the required Tests and independent verifier without unrelated UI journeys.
+
+Selection and desktop journeys overlap Tests. A verdict still requires Tests to pass for the exact PR head. The independent judge, PASS, PASS+NOTES, FAIL, BLOCKED, inherited-failure handling, and cleanup requirements do not change.
+
+One application build per revision is shared within each run. Signed update fixtures, source instrumentation, and symbolized builds retain separate binaries because their build inputs differ. Zig toolchains and compilation are cached. Never accept a cached binary without the embedded version, revision, and hash checks.
+
+All workflows cancel superseded work. Keep reusable workflow groups separate from their callers. Run the full runnable set nightly on master and before release publication. Keep all Tests shards, update scenarios, speed comparisons, and five-minute idle observations.
+
+Measure real automatic runs, including queue time and cancellations. Put run links, sample counts, elapsed times, and conclusions in the PR body. Do not report a failed or cancelled run as a speedup. Push once per fix and never dispatch additional measurements.
+
+Cancelled verifier runs recover the latest open PR head automatically, at most once per head. Recovery skips drafts, existing active runs, and successful verdicts. It never retries product failures or dispatches measurement runs. Cancelling a superseded run stops its queued report jobs; the separate completion observer keeps cancellation BLOCKED until a fresh independent verdict passes.
+
+Verifier recovery reads PR metadata, head checks, comments and Tests status in one GraphQL snapshot. Tests and release-status polling start at one minute and back off to five minutes. Missing head state, API errors, and non-green Tests remain fail-closed; snapshots never substitute an older successful head or attempt.
+
+A terminal check-suite result is confirmed once against the actual Tests workflow run. Custom verifier checks can attach to another workflow's suite, so the suite's conclusion alone cannot prove that Tests passed or failed.
+
+## Chat stillness
+
+Chat changes also run [verify-chat-still](../verify-chat-still/SKILL.md) and the [chat-still journey](features/chat-still.md). The newest initially visible message must keep its exact screen rectangle from the first content frame, idle and during a streaming reply. Read the recipe for its native paint diagnostic and frame-by-frame evidence.

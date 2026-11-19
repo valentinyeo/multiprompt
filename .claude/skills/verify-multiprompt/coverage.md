@@ -1,9 +1,20 @@
 # Recent changes coverage, 2026-10-16 to 2026-10-23
 
+## Complete feature map
+
+Start with [long chats](features/long-session-chat.md), [real server chats](features/server-chats.md), [/clear](features/chat-clear.md), [Stop](features/chat-stop.md) and [sending](features/chat-message-sending.md). The [feature index](features/README.md) links the full source-action map. [Shortcuts](features/shortcuts.md) maps every SHORTCUT_ROWS entry; the owning files map palette IDs/dynamic families and the [architecture crosswalk](features/sidebar-sessions.md#architecture-feature-crosswalk) maps the design document.
+
+A source-complete map is not a live pass. Each operation names its existing focused journeys and the exact prerequisites for any unreachable full path. Existing ticket rows below retain their historical coverage; do not relabel them covered because a recipe was added. Part A (`w-2567a`, SOFT-2567) supplies real-size seed data; Part B (`w-2567b`, SOFT-2567) supplies real SSH/tmux. Neither is duplicated here. Authenticated accounts, provider CLIs, audio, Computer and missing native input/assertion paths remain separately explicit.
+
+Per-run source-reader notes, screenshots reviewed and triage stay in scratch notes or the ticket, not this historical table.
+
+## Historical ticket coverage
+
 One row per user-facing ticket, combining its changes in this period. CI, test, benchmark, documentation and release-only rows are skipped. Coverage describes existing actions and assertions, not a live pass; the second table records supplied GitHub results separately. `partial` includes supplemental native checks, never a claim of real agent delivery. All proposed journeys run on isolated GitHub runners, not locally.
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| SOFT-2559 | Opening a chat never moves its messages. | chat-still, verify-chat-still | verification added; inherited overlay reproduced on head and master | Independent DeepSeek review confirmed the same pixel failure on both builds; do not call the product fixed. |
 | SOFT-2555 | Server replies appear once when saved history arrives; identical real replies remain separate. | chat-working-live | reader red/green and hosted desktop passed; independent verdict pending | [Windows proof](https://github.com/valentinyeo/multiprompt/actions/runs/43947850518), revision 1671153c: inspected screenshots and copied conversations show one final reply after history, then two identical real replies. Zero owned processes remained. Simulated provider and SSH. Existing history is not rewritten. The workflow now retains the requested journey name on the evidence artifact so the independent verifier can collect it. |
 | SOFT-2489 | Press Shift+G twice in an empty chat box to reach the newest message. | chat-newest | focused journey added, hosted proof pending | Real keyboard jump and palette execution, exact native draft reads, ordinary lowercase/slow/draft typing and owned cleanup appear directly in result.json. Existing history/performance journeys are unchanged. |
 | IGSH-1729 | Pasted dictation keys normalize and rejected keys stay unsaved. | settings-panel | journey extended, not run | Run hosted branch and published baseline; baseline must fail wrapped-key normalization. Inspect inline errors, cancellation and screenshots. Loopback replaces only key-check HTTP. |

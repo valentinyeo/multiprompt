@@ -1,5 +1,7 @@
 # Chat composer text
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-composer-text.ps1, tools/chat-composer-text-proof.mjs
+
 IGSH-760: typing must not flash blank text or a different background between keystrokes. IGSH-731: the message box uses the transcript's grayscale DirectWrite rendering without changing native EDIT input, geometry or caret ownership.
 
 ## Sub-features
@@ -39,6 +41,9 @@ Press Alt+C to open Chat View, then type in the message box at the bottom. Selec
 - Download `verify-chat-composer-text`, inspect the before/action/after images, `composer-typing-after.png`, frame BMPs and summaries, and compare the branch and release named checks. Native red/green outcomes require actual GitHub Windows run evidence; the pure Node fixtures prove the evaluator, not the app.
 
 ## Gotchas
+
+The executable oracle requires improvement over GDI and a hard-edge fraction no greater than 0.15; it does not enforce a relative 25% reduction. Exact composer-paste handling is another existing driver case. Alt+C applies only to terminal tabs.
+
 
 - IGSH-760 (`f3a9c8d2`) introduced the strip: its offscreen bitmap starts black, and buffered painting never fills the whole client. Native EDIT/DirectWrite text painting leaves the slice below the text formatting rectangle untouched. The composer subclass also returns 1 for `WM_ERASEBKGND` while the smooth painter is enabled, swallowing native erase requests. The flag-only `PRF_CLIENT | PRF_ERASEBKGND` attempt was rejected by a real GitHub Windows live run: both v0.28.864 and that branch still showed the identical 634×4 pure-black strip at rows 610–613. Explicitly filling the entire bitmap client before native printing fixes that initialization cause; requesting another swallowed erase does not.
 - No Windows builds, native tests, Wine or copied Zig fixture tests run on the VPS. Native tests run only on GitHub Windows.

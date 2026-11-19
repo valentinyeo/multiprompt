@@ -1,5 +1,7 @@
 # Server runner group
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-server-open-group.ps1, tools/mp-layout.mjs
+
 Import one account shell tab into a named group, then import that same tab again.
 
 ## Sub-features
@@ -24,5 +26,5 @@ The driver builds the local account worker when needed, serves it on the account
 ## Gotchas
 
 - Dispatch this journey. It is not in the automatic pull-request matrix.
-- The live account service still has to advertise groups before a lead's real server command can place a group. This journey proves the desktop import against the mocked service.
+- Production group availability still needs independent confirmation. This journey proves desktop import against the mocked service; checked-in service code supports groups. The generated second-import module is exercised by check-feature-map.test.cjs before driving.
 - No remote machine, SSH credential, or existing tmux session is used. `--no-tmux` publishes the tab without starting a shell on the runner.

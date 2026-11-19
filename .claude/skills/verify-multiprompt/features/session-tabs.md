@@ -1,5 +1,7 @@
 # Session tabs
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-tabs.ps1
+
 Repair terminal tabs from an agent's real `zsb` TCP entry point: rename, rebind to another remote tmux session, move to another group or workspace, and close, all in the background.
 
 ## Sub-features
@@ -27,6 +29,9 @@ Preconditions are the same as [Session open](session-open.md): single-window off
 - **Evidence.** `session-tabs-before.session.json`, `session-tabs-layout.session.json`, `session-tabs-layout.workspace-list.json`, `session-tabs-restarted.session.json`, the request and reply pair of every command, `before.png`, `action.png`, `after.png`, `restarted.png`, `result.json`.
 
 ## Gotchas
+
+The driver submits the real listener protocol directly, not actual zsb shell command parsing. Close is remote-only and refuses pinned tabs. Workspace moves require single-window mode and ungroup when no group is specified. Rebind attaches an existing session; it does not create one.
+
 
 - A rebound tab cannot reach `connected` in CI because no server is supplied; the journey checks the saved layout and the reply state, not a live attachment.
 - Group ids are compared by group name after the restart.

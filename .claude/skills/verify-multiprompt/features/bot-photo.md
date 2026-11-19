@@ -1,5 +1,7 @@
 # Bot photos
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
+
 ## Sub-features
 
 Bot face offers an image and Reset. Images use a centered circle. Reset keeps the chosen face and color. Remote session pictures upload through background account sync, including existing local pictures. Offline changes retry when sync resumes.
@@ -28,6 +30,9 @@ IGSH-1894 adds an edge check to every photo crop. The top-left quarter, two pixe
 - Six full-window screenshots and nine avatar crops were inspected. [Matching-image contact sheet](https://screencast2.com/QTgp9.png), [Starred and header](https://screencast2.com/bjXNf.png), [Inbox](https://screencast2.com/6N5F3.png). The sheet enlarges actual native crops, not a mockup.
 
 ## Gotchas
+
+Use PNG/JPEG within 16 MiB, 8192-pixel dimensions and 32-megapixel area. Right-click tab then Bot face is an alternate entry. Workflow artifacts may append DPI/theme or revision suffixes to verify-bot-photo; inspect the actual uploaded artifact name.
+
 
 This journey uses offline local tabs. It does not verify account sync, remote services, or Android. Review `result.json` and screenshots before claiming success.
 

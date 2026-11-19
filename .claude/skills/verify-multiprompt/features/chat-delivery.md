@@ -1,5 +1,7 @@
 # Chat delivery
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
+
 ## Sub-features
 
 - `busy-send`: a message typed in the real Chat View composer reaches an agent buffer as exactly that text followed by Enter within 15 seconds while the scripted agent remains busy (`esc to interrupt`).
@@ -104,6 +106,9 @@ gh workflow run recall-handed.yml --ref <branch> -f tag=v0.28.1677
 The driver sends three messages, cancels the middle one from its menu, then presses Up and Delete on the last one. The stand-in must record those two targeted recalls and answer only the remaining message. The answered message must no longer offer Cancel. Evidence is `verify-chat-delivery`, including `recall-handed/recall-agent.jsonl` and `recall-handed-*.png`.
 
 ## Gotchas
+
+Queue reconciliation and guarded draft transfer now exist in the reader; older statements below about missing CHAT_QUEUE support or a mandatory wrapped Ctrl+U leftover describe historical behavior, not this candidate. Clearing re-reads until empty. Palette queue/retry/discard reachability is specified in chat-message-sending.md; labels/handlers alone are not offered rows.
+
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
 - `agentBoundary` honestly records: stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. This proves that real Chat View input reaches the production tmux-channel system boundary, not that Claude consumes it, generates a response, or persists a real conversation.

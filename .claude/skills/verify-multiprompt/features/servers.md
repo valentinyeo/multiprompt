@@ -1,5 +1,7 @@
 # Servers
 
+Source files: src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-servers.ps1
+
 Open the Servers screen, add a disposable server, test it, then remove it. The servers journey proves that Multibot signs in with its own key and that removal cuts access. IGSH-1928: Settings and Ctrl+K both expose Servers. Adding a name, address, user and optional port produces one setup line. Test explains failures. Removal revokes the app key.
 
 ## Sub-features
@@ -28,6 +30,9 @@ A real Windows OpenSSH positive-control login must work before removal. The nati
 `servers-proof.json` and before, action and after screenshots retain timings, authentication events, remote command results and cleanup evidence. Private app key files are deleted before the harness copies scratch evidence. The SSH endpoint's host key exists only in memory.
 
 ## Gotchas
+
+Remote key removal is attempted only for Connected slots. Local-only removal or a failed remote revoke removes the saved slot but warns that its key remains. Keep that warning and rejection proof separate; do not assert that every Remove click revoked a remote key.
+
 
 - Only the remote server is replaced: a loopback Paramiko endpoint executes the production POSIX commands using Git Bash in an isolated home. It accepts only public-key authentication, `true` and the revocation command, and never edits an existing Windows or remote connection.
 - The released app, form, setup and removal commands, crypto authentication and Windows OpenSSH are real.

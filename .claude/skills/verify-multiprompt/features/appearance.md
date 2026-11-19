@@ -1,5 +1,7 @@
 # Appearance
 
+Source files: src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-appearance.ps1, .claude/skills/verify-multiprompt/drive.ps1, src/design_tokens.zig
+
 Verify on: push, pull_request
 
 Confirm the main window starts maximized, then choose a global color theme through the command palette and confirm both the visible desktop and saved preference change.
@@ -16,7 +18,7 @@ Confirm the main window starts maximized, then choose a global color theme throu
 - Press Ctrl+K, type `themes`, press Enter on `Themes...`.
 - Ctrl+Shift+K is the palette alternative when a browser surface owns Ctrl+K; this baseline uses Ctrl+K from the main app.
 - Inside Themes, type a theme name and use Up/Down and Enter. Esc returns to the workspace.
-- There is no dedicated direct theme shortcut or native menu selector.
+- Settings also has a native theme selector through Ctrl+,; that alternative is not exercised by this palette journey. There is no dedicated direct theme shortcut.
 
 ## Driving it with control.ps1
 

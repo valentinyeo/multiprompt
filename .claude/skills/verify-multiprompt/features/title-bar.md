@@ -1,5 +1,7 @@
 # Title bar
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-title-bar.ps1
+
 ## Sub-features
 
 Multiprompt now draws its own three grey window buttons, without the Windows title bar. The native DWM-caption comparison previously used here no longer describes the app. `title-bar` retains its existing dispatch name and runs the [window controls](window-controls.md) journey.

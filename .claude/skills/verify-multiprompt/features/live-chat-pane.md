@@ -1,5 +1,7 @@
 # Live chat pane
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-live-chat-pane.ps1
+
 A live chat is a tmux tab named `live-*`. This journey binds two tabs to those names. Each chat uses its own `zsb` session token.
 
 ## Sub-features
@@ -34,6 +36,9 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 - **Evidence.** Inspect before/action/after screenshots, `chat-one-selftest.json`, selftest output, per-command request/reply pairs, both pane JSON files, session snapshots and `result.json`.
 
 ## Gotchas
+
+Chat two is selected to inspect its closed baseline; its opened pane is never viewed. The live-* fixture identity is a synthetic binding, not proof of a real hosted provider. Production pane identity does not require that name prefix.
+
 
 - The real reader host, tmux and Claude agent are absent. This proves the desktop side with explicit session tokens, not a real hosted chat creation or agent environment. The reader suite checks the supplied environment separately.
 - An agent call on a chat whose pane is closed opens that chat's own pane. The journey therefore expects a closed pane only before the first call on that chat, never as an answer to one.

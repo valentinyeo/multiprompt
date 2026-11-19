@@ -1,5 +1,7 @@
 # Browser pane locked
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-pane-locked.ps1
+
 Verify on: push
 
 ## Sub-features

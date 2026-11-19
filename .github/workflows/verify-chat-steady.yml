@@ -1,9 +1,8 @@
 name: Verify steady chat
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/verify-chat-steady.yml
+  schedule:
+    - cron: '8 5 * * *'
   workflow_dispatch:
 
 permissions:
@@ -11,7 +10,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   before:
@@ -33,11 +32,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-chat-delivery-596e3261e9e77ce193ab7addbfd3001892242331
+          name: verify-chat-working-live-596e3261e9e77ce193ab7addbfd3001892242331
           path: before
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-chat-delivery
+          name: verify-chat-working-live
           path: after
       - name: Require a reproduced idle regression and a passing candidate
         run: |

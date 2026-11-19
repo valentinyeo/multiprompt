@@ -1,18 +1,15 @@
 name: SSH helpers without consoles
 
 on:
+  schedule:
+    - cron: '28 5 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/ssh-detached.yml'
-      - 'tools/ssh-detached/**'
-
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   proof:

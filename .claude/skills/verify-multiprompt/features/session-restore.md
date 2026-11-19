@@ -1,5 +1,7 @@
 # Session restore
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-restore.ps1
+
 Verify on: push
 
 Reopen the workspace and local CMD session that was selected, after an updater restart, a normal close or a killed process, including whether it was open in Starred or its home workspace.
@@ -39,6 +41,9 @@ Dispatch `gh workflow run verify.yml -f feature=session-restore` for the exact r
 9. `result.json` must name feature `session-restore` and contain all six checks: `normal-close-selection`, `starred-view-selection`, `favorite-home-selection`, `process-kill-selection`, `favorite-cross-workspace-selection`, and `update-restart-selection` before status can be `passed`. Standard Doctor, action trace, screenshots, per-launch stdout/stderr, exit/job accounting and final cleanup evidence remain required.
 
 ## Gotchas
+
+The direct signed-helper restart in this journey does not prove the Restart Multi Bot or Restart to update palette entry. Use --ref <branch> for a standalone candidate run and verify the exact checkout SHA. Real remote continuity belongs to Part B.
+
 
 - Session shell IDs can be reassigned during restoration. Resolve the published active ID to the unique user-created name; do not assume the previous process's ID survives a relaunch.
 - Startup's painted launch snapshot is not proof of completed restoration. The driver requires the new HWND in published state and the new launch's restore/browser phase before checking selection.

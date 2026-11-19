@@ -1,5 +1,7 @@
 # Palette order
 
+Source files: src/command_palette.zig, src/shortcuts.zig, src/search*, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-palette-order.ps1
+
 Verify on: push
 
 Open an empty Ctrl+K with a known usage history and check the Most used band, the job groups, a removed command and renamed commands.
@@ -33,6 +35,9 @@ Preconditions:
 - **Proof.** `result.json` records both checks. Compare `before.png`, `action.png`, `after.png` and `typed-session-workspace.png` with the row logs.
 
 ## Gotchas
+
+The Most used band is chosen by usage, then ordered with the approved new-session/safety rules before count. Workspace rows can be appended after grouped output. Do not infer a universal highest-count-first order or a header for every possible row.
+
 
 - The seeded file is usage history, not a setting; the app reads it on every palette open. It holds only numeric ids for commands shown on an empty search, with distinct counts, and no destructive commands.
 - Releases before this change ranked by recency first, so the 2030 entry was selected first. A tag run must fail with `palette-order: selected row ...`.

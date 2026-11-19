@@ -1,5 +1,7 @@
 # Chat tab browser starts by itself
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-browser-autoload.ps1, .github/workflows/click-through.yml
+
 Switching to a Chat View tab whose browser slot is on starts the browser without any key press.
 
 ## Sub-features

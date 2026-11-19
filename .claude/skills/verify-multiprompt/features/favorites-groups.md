@@ -1,5 +1,7 @@
 # Favorites groups
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-favorites-groups.ps1
+
 Verify on: push
 
 Group the same session independently in its home workspace and Favorites (Alt+1), using the existing group palette.
@@ -35,6 +37,9 @@ Preconditions: baseline Doctor passes on a fresh single-window instance with its
 - IGSH-1534 captures `robot-dots-<theme>-<view>-<placement>-<state>.png` for Light, AMOLED and Edge Grey, Home and Starred, row and pinned, read and unread. Edge Grey uses the saved theme value `edgegray`. It uses Alt+U and the Inbox U action, verifies published attention, and restores each pin. Inspect the images for marker position, size, color, ring and exclusivity. These captures are not a passed Windows proof until the journey runs and the images are inspected.
 
 ## Gotchas
+
+Remote account sync now captures and restores both home and Starred group names. This offline journey is not cross-device proof. Its driver includes two restarts; do not exclude restart persistence from the checks it actually performs.
+
 
 - Groups use their real default saved names. This journey does not type into an inline rename editor or seed JSON.
 - Group memberships are local to this device; account layout sync is unchanged and does not sync groups across devices.

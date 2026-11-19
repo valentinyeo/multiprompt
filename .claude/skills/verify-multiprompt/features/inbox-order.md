@@ -1,5 +1,7 @@
 # Inbox order
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox-order.ps1
+
 The desktop Inbox shows recent sessions first.
 
 ## Sub-features
@@ -25,6 +27,9 @@ The driver waits for app-published activity, then a changed window frame before 
 A successful run captures evidence; it does not automatically verify displayed order. `result.json` marks `visualReviewRequired`. Review `inbox-order-before.png`: Inbox Newer must appear above Inbox Older, with both times visible. Review `inbox-order-after.png`: Inbox Older must appear above Inbox Newer, with both times visible. Compare `inbox-order-before.json` and `inbox-order-after.json` for app-published timestamps and identities. The `inbox-order-notification.json` fixture records the app PID, listener owner, loopback port and scripted payload. The harness records the executable version and hash, and cleans its owned process and profile.
 
 ## Gotchas
+
+The recency-order exception is the Frequent split, not Favorites. Active filters also restrict which session can occupy the top row.
+
 
 - The second update is a scripted local notification, not a cloud message, so reply timing and remote ordering are not covered.
 - Order is proven by eye on the two captures; `result.json` never decides it and always asks for visual review.
