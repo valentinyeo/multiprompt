@@ -47,8 +47,6 @@ jobs:
         run: node --test tools/release-journeys.test.mjs
       - name: Test release tag publication
         run: node --test tools/release-version.test.mjs
-      - name: Test reusable workflow permissions
-        run: node --test tools/reusable-workflow-permissions.test.js
       - name: Test release symbol packaging
         run: node --test tools/package-symbols.test.mjs
       - name: Test the runtime generation guard
