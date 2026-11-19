@@ -6275,19 +6275,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     const spawned_terminal = spawnWorkspaceTerminalSession();
-                    if (spawned_terminal) {
-                        _ = InvalidateRect(hwnd, null, 0);
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
-                        return 0;
-                    }
-                    if (app_state.g_search_pick_repo_mode) {
-                        debugLog("new-terminal needs workspace folder: opening picker");
-                        _ = PostMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
-                        return 0;
-                    }
-                    showActiveShellAfterOverlay();
+                    if (!spawned_terminal) showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, if (spawned_terminal) 200 else 50, null);
                     return 0;
                 }
                 if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) {
