@@ -204,7 +204,7 @@ Full native reaction journey https://github.com/valentinyeo/multiprompt/actions/
 
 ## SOFT-2384 skill echo
 
-The `chat-delivery` journey now includes skill-command reordering and an unchanged plain-message control. Each requires real composer input, source enqueue and consumed attachment, exactly one message copied from the native transcript, no pending outbox copy, screenshots, Doctor identity and cleanup. Hosted results are pending. A differing skill command remains a unit-test-only case.
+The `chat-delivery` journey now includes skill-command reordering and an unchanged plain-message control. Each requires real composer input, source enqueue and consumed attachment, exactly one message copied from the native transcript, no pending outbox copy, screenshots, Doctor identity and cleanup. Both cases passed on hosted Windows at 718bd1dca in https://github.com/valentinyeo/multiprompt/actions/runs/44047833292. A differing skill command remains a unit-test-only case.
 
 ## SOFT-2442 double-click thumbs up
 
