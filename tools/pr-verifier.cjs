@@ -13,6 +13,8 @@ const MARKER = '<!-- pstack-verifier -->';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-flash';
 const MAX_FILE_CHARS = 6000;
+const ARTIFACT_ATTEMPTS = 5;
+const ARTIFACT_RETRY_MS = 3000;
 
 function selectable(available) {
   return available.filter(name => !SLOW_FEATURES.has(name));
@@ -110,6 +112,63 @@ function describeRun(directory, name) {
   };
 }
 
+function transientArtifactError(value) {
+  return /HTTP (?:429|5\d\d)\b|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|TLS handshake|unexpected EOF/i.test(value || '');
+}
+
+function pause(ms) {
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function fetchArtifactArchive(env, repo, artifact, archive) {
+  const attempts = Math.max(1, Number(env.ARTIFACT_ATTEMPTS || ARTIFACT_ATTEMPTS));
+  const retryMs = Math.max(0, Number(env.ARTIFACT_RETRY_MS ?? ARTIFACT_RETRY_MS));
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const fd = fs.openSync(archive, 'w');
+    try {
+      execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'pipe'] });
+      return;
+    } catch (error) {
+      last = error;
+    } finally {
+      fs.closeSync(fd);
+    }
+    const message = `${last.stderr ?? ''} ${last.message ?? ''}`;
+    if (!transientArtifactError(message) || attempt === attempts) break;
+    pause(retryMs * attempt);
+  }
+  throw new Error(oneLine(`${last?.stderr || ''} ${last?.message || ''}`, 300) || 'artifact download failed');
+}
+
+function placeArtifact(env, repo, artifact, evidenceDir) {
+  const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
+  try {
+    const archive = path.join(scratch, 'artifact.zip');
+    fetchArtifactArchive(env, repo, artifact, archive);
+    const content = path.join(scratch, 'content');
+    execFileSync('unzip', ['-q', archive, '-d', content], { stdio: 'inherit' });
+    const target = path.join(evidenceDir, artifact.name);
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.renameSync(content, target);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function downloadFailures(evidenceDir) {
+  const file = path.join(evidenceDir, 'download-failures.json');
+  if (!fs.existsSync(file)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(parsed)
+      ? parsed.filter(item => item && item.artifact).map(item => ({ artifact: String(item.artifact), error: oneLine(item.error, 300) }))
+      : [];
+  } catch {
+    return [{ artifact: 'download-failures.json', error: 'the recorded download failures could not be read' }];
+  }
+}
+
 function summarize(evidenceDir, features, baseSha) {
   const names = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
   const summary = { head: {}, base: {} };
@@ -125,6 +184,7 @@ function summarize(evidenceDir, features, baseSha) {
       else if (match[1] === baseSha) summary.base[feature].push(run);
     }
   }
+  summary.downloadFailures = downloadFailures(evidenceDir);
   return summary;
 }
 
@@ -196,6 +256,11 @@ function failedHeadFeatures(jobs, features) {
 
 function evidenceMarkdown(summary, selection) {
   const lines = ['# Journey evidence', ''];
+  if (summary.downloadFailures?.length) {
+    lines.push('## Evidence artifacts that could not be downloaded', '');
+    for (const item of summary.downloadFailures) lines.push(`- ${item.artifact}: ${item.error}`);
+    lines.push('');
+  }
   if (!selection.features.length) lines.push('No desktop journeys were selected by source mapping or mandatory gates. This is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch; required Tests and independent review still apply.', '');
   for (const row of journeyRows(summary, selection.compareBase, selection.features)) {
     lines.push(`## ${row.feature}: head ${row.head}, base ${row.base}`, '');
@@ -234,9 +299,11 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const prerequisites = Object.entries(jobs).filter(([name, job]) =>
     (['tests', 'resolve', 'select', 'failed-head'].includes(name) && job.result !== 'success') || job.result === 'cancelled' ||
     (['head', 'base'].includes(name) && job.result === 'failure' && !rows.some(row => row[name] === 'failed')));
-  if (blocked.length || prerequisites.length || infrastructure.length) {
+  const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
+  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
+    for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
     if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head}, base ${row.base})`).join(', ')}.`);
     for (const [name, job] of prerequisites) notes.push(`${name} job ${job.result}; full verification could not complete.`);
   }
@@ -474,35 +541,38 @@ function download(env, selectionFile, evidenceDir, baseSha) {
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
   const wanted = latestArtifacts(listed, selection, baseSha);
   const ciReceipts = [];
+  const failures = [];
   for (const workflow of selection.ciWorkflows || []) {
-    const pr = JSON.parse(fs.readFileSync(path.join(path.dirname(selectionFile), 'pr.json'), 'utf8'));
-    const run = ciWorkflowRun(env, workflow, pr.headRefOid);
-    if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`CI workflow evidence is not successful: ${workflow}`);
     const name = workflow.replace(/\.yml$/, '');
-    const artifacts = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${run.id}/artifacts`, '--jq', '.artifacts']));
-    const artifact = artifacts.filter(item => item.name === name && !item.expired).sort((a, b) => Number(b.id) - Number(a.id))[0];
-    if (!artifact) throw new Error(`CI workflow evidence artifact missing: ${name}`);
-    wanted.push(artifact);
-    ciReceipts.push({ workflow, ...run, artifact: name, artifact_id: artifact.id });
+    try {
+      const pr = JSON.parse(fs.readFileSync(path.join(path.dirname(selectionFile), 'pr.json'), 'utf8'));
+      const run = ciWorkflowRun(env, workflow, pr.headRefOid);
+      if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`the ${workflow} run is ${run?.conclusion || run?.status || 'missing'} on this head`);
+      const artifacts = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${run.id}/artifacts`, '--jq', '.artifacts']));
+      const artifact = artifacts.filter(item => item.name === name && !item.expired).sort((a, b) => Number(b.id) - Number(a.id))[0];
+      if (!artifact) throw new Error(`the ${name} artifact is missing`);
+      wanted.push(artifact);
+      ciReceipts.push({ workflow, ...run, artifact: name, artifact_id: artifact.id });
+    } catch (error) {
+      failures.push({ artifact: name, error: oneLine(error.message || error, 300) });
+    }
   }
   fs.mkdirSync(evidenceDir, { recursive: true });
+  let placed = 0;
   for (const artifact of wanted) {
-    const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
     try {
-      const archive = path.join(scratch, 'artifact.zip');
-      const fd = fs.openSync(archive, 'w');
-      try {
-        execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'inherit'] });
-      } finally { fs.closeSync(fd); }
-      const content = path.join(scratch, 'content');
-      execFileSync('unzip', ['-q', archive, '-d', content], { stdio: 'inherit' });
-      const target = path.join(evidenceDir, artifact.name);
-      fs.rmSync(target, { recursive: true, force: true });
-      fs.renameSync(content, target);
-    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+      placeArtifact(env, repo, artifact, evidenceDir);
+      placed += 1;
+    } catch (error) {
+      failures.push({ artifact: artifact.name, error: oneLine(error.message || error, 300) });
+    }
   }
   if (ciReceipts.length) fs.writeFileSync(path.join(evidenceDir, 'ci-workflows.json'), JSON.stringify(ciReceipts, null, 2));
-  process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
+  const failuresFile = path.join(evidenceDir, 'download-failures.json');
+  if (failures.length) fs.writeFileSync(failuresFile, JSON.stringify(failures, null, 2));
+  else fs.rmSync(failuresFile, { force: true });
+  process.stdout.write(`downloaded ${placed} of ${wanted.length} evidence artifacts\n`);
+  for (const failure of failures) process.stdout.write(`evidence artifact ${failure.artifact} was not collected: ${failure.error}\n`);
 }
 
 function readCapped(file, limit = MAX_FILE_CHARS) {
