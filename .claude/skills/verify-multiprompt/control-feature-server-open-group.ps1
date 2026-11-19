@@ -165,7 +165,7 @@ try {
     $env:MP_STATE = $statePath
     $env:MP_URL = "https://$accountHost"
     $bumpPath = Join-Path $workRoot 'bump.mjs'
-    [IO.File]::WriteAllText($bumpPath, "import fs from 'node:fs';`nconst state = JSON.parse(fs.readFileSync(process.env.MP_STATE, 'utf8'));`nconst headers = { Authorization: 'Bearer ' + state.admin_key, 'X-Layout-Features': 'groups,favorite' };`nconst current = await fetch(process.env.MP_URL + '/v1/layout', { headers });`nif (!current.ok) throw new Error('read failed');`nconst body = await current.json();`nconst saved = await fetch(process.env.MP_URL + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: body.revision, layout: body.layout }) });`nif (!saved.ok) throw new Error('write failed');`n")
+    [IO.File]::WriteAllText($bumpPath, "import fs from 'node:fs';`nconst state = JSON.parse(fs.readFileSync(process.env.MP_STATE, 'utf8'));`nconst headers = { Authorization: 'Bearer ' + state.admin_key, 'X-Layout-Features': 'groups,favorite' };`nfor (let attempt = 1; ; attempt++) {`n  const current = await fetch(process.env.MP_URL + '/v1/layout', { headers });`n  if (!current.ok) throw new Error('read failed ' + current.status);`n  const body = await current.json();`n  const saved = await fetch(process.env.MP_URL + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: body.revision, layout: body.layout }) });`n  if (saved.ok) break;`n  if (saved.status !== 409 || attempt >= 5) throw new Error('write failed ' + saved.status);`n}`n")
     $stage = 'second grouped import'
     $appliedBefore = (Read-ServerGroupText $logPath).Length
     [void](Invoke-ServerGroupNode @($bumpPath))

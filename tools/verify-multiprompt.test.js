@@ -2639,6 +2639,10 @@ test('SOFT-2762 session-actions expects the seven context ids the app appends', 
   const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=7 ids=((?:\d+ ){6}\d+)/);
   assert.ok(expected, 'the driver must assert the seven-row context menu');
   assert.deepEqual(expected[1].split(' ').map(Number), rows.map(row => row.id), 'the driver ids must match the app table order');
+  const query = read('tools/verify-session-actions/drive.ps1').match(/Palette '([^']+)' 7112/);
+  assert.ok(query, 'the driver reaches Delete session through the global palette');
+  const deleteRow = rows.find(row => row.id === 7112);
+  assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
 });
 
 test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
