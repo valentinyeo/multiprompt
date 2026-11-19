@@ -2428,10 +2428,13 @@ test "IGSH-1921 a live chat with a session and a chat name can restart" {
     try std.testing.expect(!canRestartChat(1, 36, 0));
 }
 
+fn switchAiVisible(agent: u8, target: u8) bool {
+    return agent >= 1 and agent <= 3 and agent != target;
+}
+
 fn switchAiTab(tab: u32, target: u8) bool {
     if (!liveChatTab(tab)) return false;
-    const agent = app_state.shells[tab].ai_agent;
-    return agent >= 1 and agent <= 3 and agent != target;
+    return switchAiVisible(app_state.shells[tab].ai_agent, target);
 }
 
 fn finishRestartChatJob(job: *RestartChatJob) void {
@@ -2454,6 +2457,91 @@ fn switchAiName(target: u8) []const u8 {
     };
 }
 
+fn switchAgentId(name: []const u8) ?u8 {
+    if (std.mem.eql(u8, name, "claude")) return 1;
+    if (std.mem.eql(u8, name, "codex")) return 2;
+    if (std.mem.eql(u8, name, "pi")) return 3;
+    return null;
+}
+
+fn switchSidOk(sid: []const u8) bool {
+    if (sid.len == 0 or sid.len > 40) return false;
+    for (sid) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '-' or c == '_')) return false;
+    }
+    return true;
+}
+
+const SwitchEnvelope = struct {
+    status: []const u8 = "",
+    provider: []const u8 = "",
+    sid: []const u8 = "",
+    reason: []const u8 = "",
+    result: struct {
+        status: []const u8 = "",
+        provider: []const u8 = "",
+        sid: []const u8 = "",
+        reason: []const u8 = "",
+    } = .{},
+};
+
+fn switchEnvelopeFields(value: SwitchEnvelope) struct { status: []const u8, provider: []const u8, sid: []const u8, reason: []const u8 } {
+    const nested = value.result.status.len != 0 or value.result.provider.len != 0 or value.result.sid.len != 0 or value.result.reason.len != 0;
+    if (nested) return .{ .status = value.result.status, .provider = value.result.provider, .sid = value.result.sid, .reason = value.result.reason };
+    return .{ .status = value.status, .provider = value.provider, .sid = value.sid, .reason = value.reason };
+}
+
+pub fn adoptShellAgent(agent: *u8, sid: []u8, sid_len: *u32, next_agent: u8, next_sid: []const u8) bool {
+    if (next_agent < 1 or next_agent > 3 or !switchSidOk(next_sid) or next_sid.len > sid.len) return false;
+    agent.* = next_agent;
+    @memset(sid, 0);
+    @memcpy(sid[0..next_sid.len], next_sid);
+    sid_len.* = @intCast(next_sid.len);
+    return true;
+}
+
+pub fn adoptedSwitch(allocator: std.mem.Allocator, body: []const u8, sid_out: []u8) ?struct { agent: u8, sid_len: usize } {
+    const parsed = std.json.parseFromSlice(SwitchEnvelope, allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const fields = switchEnvelopeFields(parsed.value);
+    if (!std.mem.eql(u8, fields.status, "switched")) return null;
+    const agent = switchAgentId(fields.provider) orelse return null;
+    if (!switchSidOk(fields.sid) or fields.sid.len > sid_out.len) return null;
+    @memcpy(sid_out[0..fields.sid.len], fields.sid);
+    return .{ .agent = agent, .sid_len = fields.sid.len };
+}
+
+fn switchAiRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, to: []const u8) ?[]const u8 {
+    if (provider.len == 0 or sid.len == 0 or to.len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ id, host, provider, sid, to }) catch null;
+}
+
+test "IGSH-2280 a switch reply replaces the shell provider and sid" {
+    const old = "11111111-2222-4333-8444-555555555555";
+    const bare = "{\"status\":\"switched\",\"provider\":\"pi\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tmux\":\"same-chat\",\"start\":\"started\"}";
+    var sid_buf: [40]u8 = undefined;
+    const adopted = adoptedSwitch(std.testing.allocator, bare, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 3), adopted.agent);
+    var agent: u8 = 1;
+    var shell_sid: [40]u8 = std.mem.zeroes([40]u8);
+    @memcpy(shell_sid[0..old.len], old);
+    var shell_sid_len: u32 = @intCast(old.len);
+    try std.testing.expect(adoptShellAgent(&agent, &shell_sid, &shell_sid_len, adopted.agent, sid_buf[0..adopted.sid_len]));
+    try std.testing.expect(switchAiVisible(agent, 1));
+    try std.testing.expect(!switchAiVisible(agent, 3));
+    try std.testing.expect(!switchAiVisible(1, 1));
+    var buf: [256]u8 = undefined;
+    const request = switchAiRequest(&buf, 4, 0, switchAiName(agent), shell_sid[0..shell_sid_len], "claude") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"pi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, old) == null);
+    const wrapped = "{\"id\":4,\"message_protocol\":1,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff\"}}";
+    const again = adoptedSwitch(std.testing.allocator, wrapped, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), again.agent);
+    try std.testing.expectEqualStrings("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff", sid_buf[0..again.sid_len]);
+    try std.testing.expect(adoptedSwitch(std.testing.allocator, "{\"status\":\"busy\",\"reason\":\"chat_busy\"}", &sid_buf) == null);
+}
+
 fn switchAiDone(target: u8) []const u8 {
     return switch (target) {
         1 => "Chat switched to Claude",
@@ -2463,20 +2551,63 @@ fn switchAiDone(target: u8) []const u8 {
     };
 }
 
+const SwitchAiAdopt = struct {
+    shell_id: u32,
+    agent: u8,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    notice: [64]u8 = std.mem.zeroes([64]u8),
+    notice_len: u8 = 0,
+};
+
+fn postSwitchAdopt(shell_id: u32, agent: u8, sid: []const u8) bool {
+    const notice = switchAiDone(agent);
+    if (notice.len > 64 or !switchSidOk(sid)) return false;
+    const result = std.heap.page_allocator.create(SwitchAiAdopt) catch return false;
+    result.* = .{ .shell_id = shell_id, .agent = agent, .sid_len = @intCast(sid.len), .notice_len = @intCast(notice.len) };
+    @memcpy(result.sid[0..sid.len], sid);
+    @memcpy(result.notice[0..notice.len], notice);
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_SWITCH_AI, 0, @bitCast(@intFromPtr(result))) == 0) {
+        std.heap.page_allocator.destroy(result);
+        return false;
+    }
+    return true;
+}
+
+pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
+    if (lp == 0) return;
+    const result: *SwitchAiAdopt = @ptrFromInt(@as(usize, @bitCast(lp)));
+    defer std.heap.page_allocator.destroy(result);
+    const index = findShellById(result.shell_id) orelse {
+        if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+        return;
+    };
+    const shell = &app_state.shells[index];
+    if (adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, result.agent, result.sid[0..result.sid_len])) {
+        shell.hook_capable = true;
+        saveSession();
+        if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
+    }
+    if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+}
+
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
     if (job.switch_to != 0) {
-        const Reply = struct { result: struct { status: []const u8 = "", reason: []const u8 = "" } = .{} };
-        const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+        const parsed = std.json.parseFromSlice(SwitchEnvelope, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
             restartChatNotice("Switch AI failed: the server did not answer");
             return;
         };
         defer parsed.deinit();
-        const status = parsed.value.result.status;
-        if (std.mem.eql(u8, status, "switched")) {
-            restartChatNotice(switchAiDone(job.switch_to));
+        const fields = switchEnvelopeFields(parsed.value);
+        if (std.mem.eql(u8, fields.status, "switched")) {
+            const agent = switchAgentId(fields.provider) orelse {
+                restartChatNotice(switchAiDone(job.switch_to));
+                return;
+            };
+            if (!postSwitchAdopt(job.ids[0], agent, fields.sid)) restartChatNotice(switchAiDone(agent));
             return;
         }
-        restartChatNotice(if (std.mem.eql(u8, status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
+        restartChatNotice(if (std.mem.eql(u8, fields.status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
         return;
     }
     if (job.fresh) {
@@ -2526,7 +2657,7 @@ fn restartChatThread(job: *RestartChatJob) void {
         }
     } else {
         const request = if (job.switch_to != 0)
-            std.fmt.bufPrint(&buf, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to) }) catch return
+            switchAiRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to)) orelse return
         else if (job.fresh)
             std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
         else
@@ -4155,6 +4286,12 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_expand_table, "expand table full screen enlarge zoom read wide table" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EXPAND_TABLE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view select all", "select all text", "ctrl a" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
