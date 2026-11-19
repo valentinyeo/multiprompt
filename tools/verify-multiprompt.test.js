@@ -2602,3 +2602,41 @@ Write-Host 'FIRST_PHYSICAL_KEY_TARGETED_OK'
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /FIRST_PHYSICAL_KEY_TARGETED_OK/);
 });
+
+test('SOFT-2762 session-actions resolves the newest painted sidebar row rect', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const context = drive.slice(drive.indexOf('function Context([int]$Index) {'), drive.indexOf('function Read-History('));
+  assert.ok(context, 'extract the real context-menu step');
+  const resolver = context.slice(context.indexOf('$pair = Wait-For'), context.indexOf('$offset = (Log).Length'));
+  assert.ok(resolver, 'extract the real row-rect resolution');
+  assert.match(resolver, /\[photo-proof\\\] expanded target='\+\$Index\+' rect=/, 'row geometry must follow the paint that carries the moved rect');
+  if (process.platform !== 'win32') return;
+  const fixture = path.join(root, 'tools/fixtures/SOFT-2762/sidebar-row-rect.log');
+  const script = `
+$Index = 1
+$LogText = Get-Content -Raw -LiteralPath '${fixture.replace(/'/g, "''")}'
+function Log { $LogText }
+function Wait-For([string]$Name, [scriptblock]$Check) { $value = & $Check; if (-not $value) { throw "no match: $Name" }; $value }
+${resolver}
+Write-Host ('RECT=' + ($pair -join ','))
+`;
+  const result = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RECT=20,171,56,207/, 'the archived CMD tab moved Beta up; the older 229 rect is empty space');
+  assert.doesNotMatch(result.stdout, /RECT=20,229,56,265/);
+});
+
+test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  assert.doesNotMatch(driver, /error = 'server group journey failed'/, 'the driver must not replace the cause with a label');
+  const catchAt = [...driver.matchAll(/\} catch \{/g)].map(match => match.index).find(index => driver.slice(index, index + 900).includes('step = $stage'));
+  assert.ok(catchAt !== undefined, 'the failure handler must record the step');
+  const failure = driver.slice(catchAt, driver.indexOf('} finally {', catchAt));
+  assert.match(failure, /step = \$stage/);
+  assert.match(failure, /error = \$_\.Exception\.Message/);
+  assert.match(driver, /failed at ' \+ \$stage \+ ': ' \+ \$failure\.Exception\.Message/);
+  const node = driver.slice(driver.indexOf('function Invoke-ServerGroupNode('), driver.indexOf('\ntry {'));
+  assert.match(node, /\$reported = \(\$combined -replace 'mpk_\[A-Za-z0-9_-\]\+', '<redacted>'\)\.Trim\(\)/);
+  assert.match(node, /throw "\$commandText exited \$\(\$nodeProcess\.ExitCode\): \$reported"/);
+  assert.ok([...driver.matchAll(/\$stage = '([^']+)'/g)].length >= 8, 'every phase names its step');
+});

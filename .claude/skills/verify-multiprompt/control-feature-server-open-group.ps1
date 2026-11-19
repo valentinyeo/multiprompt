@@ -19,6 +19,7 @@ $serviceProcess = $null
 $cert = $null
 $rootCertAdded = $false
 $failure = $null
+$stage = 'start'
 $hostsFile = Join-Path $env:SystemRoot 'System32/drivers/etc/hosts'
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
 $savedEnv = @{}
@@ -79,11 +80,15 @@ function Invoke-ServerGroupNode([string[]]$NodeArgs) {
     $nodeProcess = Start-Process -FilePath 'node' -ArgumentList (Format-ServerGroupArgs $NodeArgs) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     $combined = (Read-ServerGroupText $outputPath) + (Read-ServerGroupText $errorPath)
     Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
-    if ($nodeProcess.ExitCode -ne 0 -or $combined -match 'mpk_') { throw 'server group command failed' }
+    $reported = ($combined -replace 'mpk_[A-Za-z0-9_-]+', '<redacted>').Trim()
+    $commandText = 'mp-layout ' + (($NodeArgs | Select-Object -Skip 1) -join ' ')
+    if ($nodeProcess.ExitCode -ne 0) { throw "$commandText exited $($nodeProcess.ExitCode): $reported" }
+    if ($reported -ne $combined.Trim()) { throw "$commandText printed a service key: $reported" }
     return $combined
 }
 try {
     New-Item -ItemType Directory -Force -Path $settings, (Join-Path $workRoot 'local') | Out-Null
+    $stage = 'account worker bundle'
     $worker = Join-Path $repoRoot 'service/.build/worker.js'
     if (!(Test-Path -LiteralPath $worker)) {
         Push-Location (Join-Path $repoRoot 'service')
@@ -95,6 +100,7 @@ try {
         } finally { Pop-Location }
     }
     if (!(Test-Path -LiteralPath $worker)) { throw 'Account worker bundle missing' }
+    $stage = 'local account certificate'
     $cert = New-SelfSignedCertificate -DnsName $accountHost -CertStoreLocation Cert:\LocalMachine\My -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddDays(1)
     $secure = New-Object Security.SecureString
     foreach ($char in ([guid]::NewGuid().ToString('N')).ToCharArray()) { $secure.AppendChar($char) }
@@ -107,14 +113,17 @@ try {
     Import-Certificate -FilePath (Join-Path $workRoot 'account.cer') -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
     $rootCertAdded = $true
     [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $accountHost`r`n")
+    $stage = 'account service launch'
     $serviceProcess = Start-Process -FilePath 'node' -ArgumentList (Format-ServerGroupArgs @((Join-Path $repoRoot 'service/journey/server.mjs'), '--port=443', "--pfx=$pfx", "--pfxpass=$plain", "--state=$statePath")) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $workRoot 'service.log') -RedirectStandardError (Join-Path $workRoot 'service.err.log')
     $plain = $null
     $secure.Dispose()
     $ready = $false
+    $healthError = 'no response'
     for ($attempt = 0; $attempt -lt 40 -and -not $ready; $attempt++) {
-        try { Invoke-RestMethod -Uri "https://$accountHost/health" | Out-Null; $ready = $true } catch { Start-Sleep -Milliseconds 250 }
+        try { Invoke-RestMethod -Uri "https://$accountHost/health" | Out-Null; $ready = $true } catch { $healthError = $_.Exception.Message; Start-Sleep -Milliseconds 250 }
     }
-    if (-not $ready) { throw 'account service did not start' }
+    if (-not $ready) { throw ('account service did not answer https://' + $accountHost + '/health: ' + $healthError) }
+    $stage = 'account enrolment'
     $secrets = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     $credential = [Text.Encoding]::UTF8.GetBytes((@{ refresh_token = $secrets.refresh_token } | ConvertTo-Json -Compress))
     [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), [Security.Cryptography.ProtectedData]::Protect($credential, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
@@ -122,6 +131,7 @@ try {
     $env:MULTIPROMPT_URL = "https://$accountHost"
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
     $env:MULTIPROMPT_HOST = '0'
+    $stage = 'first layout import'
     $layoutTool = Join-Path $repoRoot 'tools/mp-layout.mjs'
     [void](Invoke-ServerGroupNode @($layoutTool, 'create-section', 'Multiprompt'))
     $opened = Invoke-ServerGroupNode @($layoutTool, 'open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--name', 'Runner shell', '--workspace', 'Multiprompt', '--group', 'Runners', '--host', '0', '--star', '--no-tmux')
@@ -133,7 +143,9 @@ try {
     $env:HOME = $workRoot
     $env:ZIGSHELL_DEBUG = '1'
     Remove-Item Env:\MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
+    $stage = 'desktop launch'
     $appProcess = Start-Process -FilePath $Exe -ArgumentList @('--single-window', '--name', 'server-group', '--no-window-restore') -PassThru -RedirectStandardOutput (Join-Path $workRoot 'desktop.log') -RedirectStandardError (Join-Path $workRoot 'desktop.err.log')
+    $stage = 'first grouped import'
     Wait-ServerGroup 'first grouped import' { Test-ServerGroupReady (Get-ServerGroupSession) }
     Wait-ServerGroup 'desktop window' { $appProcess.Refresh(); $appProcess.MainWindowHandle -ne [IntPtr]::Zero } 30
     $first = Get-ServerGroupSession
@@ -142,6 +154,7 @@ try {
     $runnerId = @($first.groups | Where-Object { $_.name -ceq 'Runners' })[0].id
     Save-ServerGroupShot (Join-Path $Evidence 'before.png')
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
+    $stage = 'second open keeps the tab'
     $again = Invoke-ServerGroupNode @($layoutTool, 'open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--name', 'Runner shell', '--workspace', 'Multiprompt', '--group', 'Runners', '--host', '0', '--star', '--no-tmux')
     Remove-Item Env:\MULTIPROMPT_KEY -ErrorAction SilentlyContinue
     if ($again -notmatch 'already open mp-runner-1') { throw 'second open did not keep the same tab' }
@@ -149,11 +162,13 @@ try {
     $env:MP_URL = "https://$accountHost"
     $bumpPath = Join-Path $workRoot 'bump.mjs'
     [IO.File]::WriteAllText($bumpPath, "import fs from 'node:fs';`nconst state = JSON.parse(fs.readFileSync(process.env.MP_STATE, 'utf8'));`nconst headers = { Authorization: 'Bearer ' + state.admin_key, 'X-Layout-Features': 'groups,favorite' };`nconst current = await fetch(process.env.MP_URL + '/v1/layout', { headers });`nif (!current.ok) throw new Error('read failed');`nconst body = await current.json();`nconst saved = await fetch(process.env.MP_URL + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: body.revision, layout: body.layout }) });`nif (!saved.ok) throw new Error('write failed');`n")
+    $stage = 'second grouped import'
     $appliedBefore = (Read-ServerGroupText $logPath).Length
     [void](Invoke-ServerGroupNode @($bumpPath))
     Remove-Item Env:\MP_STATE, Env:\MP_URL -ErrorAction SilentlyContinue
     Wait-ServerGroup 'second grouped import' { (Read-ServerGroupText $logPath).Length -gt $appliedBefore -and (Read-ServerGroupText $logPath).Substring($appliedBefore) -match 'account-sync: applied' }
     $second = Get-ServerGroupSession
+    $stage = 'second import assertions'
     if (@($second.tabs).Count -ne $firstTabs) { throw 'second import added a tab' }
     if (@($second.groups).Count -ne $firstGroups) { throw 'second import added a group' }
     if (-not (Test-ServerGroupReady $second)) { throw 'second import lost the Runners group' }
@@ -162,7 +177,12 @@ try {
     @{ verdict = 'pass'; group = 'Runners'; group_id = $runnerId; tabs = $firstTabs; groups = $firstGroups; second_import = 'unchanged'; version = $ExpectedVersion } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
 } catch {
     $failure = $_
-    @{ verdict = 'fail'; error = 'server group journey failed' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
+    foreach ($name in @('service.log', 'service.err.log', 'state.json', 'desktop.err.log')) {
+        $saved = Join-Path $workRoot $name
+        if (Test-Path -LiteralPath $saved) { try { Copy-Item -LiteralPath $saved -Destination (Join-Path $Evidence ('failure-' + $name)) -ErrorAction Stop } catch { } }
+    }
+    Write-Host ('[server-open-group] failed at ' + $stage + ': ' + $_.Exception.Message)
+    @{ verdict = 'fail'; step = $stage; error = $_.Exception.Message; exception = $_.Exception.GetType().FullName } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Evidence 'result.json')
 } finally {
     foreach ($ownedProcess in @($appProcess, $serviceProcess)) {
         if ($ownedProcess) {
@@ -185,5 +205,5 @@ try {
     }
     try { if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction Stop } } catch { if (!$failure) { $failure = $_ } }
 }
-if ($failure) { throw 'Server group journey failed' }
+if ($failure) { throw ('Server group journey failed at ' + $stage + ': ' + $failure.Exception.Message) }
 return

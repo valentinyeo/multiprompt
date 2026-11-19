@@ -136,13 +136,23 @@ function Stop-AppJob {
 }
 function Context([int]$Index) {
     Focus
+    # Row geometry must come from the newest paint that carries this row's rect.
+    # [sidebar-avatar] is deduplicated per target, face and colour, so after a tab
+    # count change the app suppresses it and only [photo-proof] still reports the
+    # moved row. Its dedupe key includes the rect itself, so a moved row is logged.
     $pair = Wait-For 'painted sidebar target' {
         $lines = (Log) -split '\r?\n'
-        $found = $null
+        $found = $null; $foundAt = -1
+        for ($i=0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match ('\[photo-proof\] expanded target='+$Index+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) {
+                $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]); $foundAt=$i
+            }
+        }
         for ($i=0; $i -lt $lines.Count-1; $i++) {
+            if ($i -le $foundAt) { continue }
             if ($lines[$i] -match ('\[sidebar-avatar\] target='+$Index+' face=(\d+) color=(\d+)$')) {
                 $face=$Matches[1]; $color=$Matches[2]
-                if ($lines[$i+1] -match ('\[bots\] face='+$face+' color='+$color+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]) }
+                if ($lines[$i+1] -match ('\[bots\] face='+$face+' color='+$color+' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { $found=@([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4]); $foundAt=$i }
             }
         }
         if ($found) { return ,$found }
