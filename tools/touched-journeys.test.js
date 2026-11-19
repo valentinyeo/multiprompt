@@ -246,3 +246,9 @@ test('a required failing-master journey survives an empty diff selection and a p
   assert.equal(selection.compareBase, true);
   assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /repro_features=\["appearance"\]/);
 });
+
+test('SOFT-2762 session-actions owns its hosted driver and fixtures', () => {
+  const real = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  assert.deepEqual(touchedJourneys(['tools/verify-session-actions/drive.ps1'], real), { features: ['session-actions'], unmapped: [] });
+  assert.deepEqual(touchedJourneys(['tools/fixtures/SOFT-2762/sidebar-row-rect.log'], real), { features: ['session-actions'], unmapped: [] });
+});

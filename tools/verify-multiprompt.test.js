@@ -2602,3 +2602,117 @@ Write-Host 'FIRST_PHYSICAL_KEY_TARGETED_OK'
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /FIRST_PHYSICAL_KEY_TARGETED_OK/);
 });
+
+test('SOFT-2762 session-actions resolves the newest painted sidebar row rect', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const context = drive.slice(drive.indexOf('function Context([int]$Index) {'), drive.indexOf('function Read-History('));
+  assert.ok(context, 'extract the real context-menu step');
+  const resolver = context.slice(context.indexOf('$pair = Wait-For'), context.indexOf('$offset = (Log).Length'));
+  assert.ok(resolver, 'extract the real row-rect resolution');
+  assert.match(resolver, /\[photo-proof\\\] expanded target='\+\$Index\+' rect=/, 'row geometry must follow the paint that carries the moved rect');
+  if (process.platform !== 'win32') return;
+  const fixture = path.join(root, 'tools/fixtures/SOFT-2762/sidebar-row-rect.log');
+  const script = `
+$Index = 1
+$LogText = Get-Content -Raw -LiteralPath '${fixture.replace(/'/g, "''")}'
+function Log { $LogText }
+function Wait-For([string]$Name, [scriptblock]$Check) { $value = & $Check; if (-not $value) { throw "no match: $Name" }; $value }
+${resolver}
+Write-Host ('RECT=' + ($pair -join ','))
+`;
+  const result = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RECT=20,171,56,207/, 'the archived CMD tab moved Beta up; the older 229 rect is empty space');
+  assert.doesNotMatch(result.stdout, /RECT=20,229,56,265/);
+});
+
+test('SOFT-2762 session-actions expects the seven context ids the app appends', () => {
+  const palette = read('src/command_palette.zig');
+  const constants = new Map();
+  for (const match of read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)) constants.set(match[1], Number(match[2]));
+  const table = palette.slice(palette.indexOf('pub const chat_actions ='), palette.indexOf('pub fn chatActionLabel('));
+  const rows = [...table.matchAll(/\.target = (?:app_state\.)?([A-Z0-9_]+), \.label = "([^"]+)"/g)].map(match => {
+    assert.ok(constants.has(match[1]), `missing constant ${match[1]}`);
+    return { id: constants.get(match[1]), label: match[2] };
+  });
+  assert.deepEqual(rows.map(row => row.label), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Archive chat', 'Delete session']);
+  const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=7 ids=((?:\d+ ){6}\d+)/);
+  assert.ok(expected, 'the driver must assert the seven-row context menu');
+  assert.deepEqual(expected[1].split(' ').map(Number), rows.map(row => row.id), 'the driver ids must match the app table order');
+  const query = read('tools/verify-session-actions/drive.ps1').match(/Palette '([^']+)' 7112/);
+  assert.ok(query, 'the driver reaches Delete session through the global palette');
+  const deleteRow = rows.find(row => row.id === 7112);
+  assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
+});
+
+test('SOFT-2762 session-actions resumes deleted chats through the live All Sessions route', () => {
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  const palette = read('src/command_palette.zig');
+  const search = palette.slice(palette.indexOf('pub fn updateSearchResults()'), palette.indexOf('\nfn appendExtendedChatActions(', palette.indexOf('pub fn updateSearchResults()')));
+  assert.ok(search.length > 0, 'locate the palette result builder');
+  assert.doesNotMatch(search, /SEARCH_ARCHIVED_OFFSET/, 'SOFT-2444 removed archived chats from the Ctrl+K list');
+  assert.doesNotMatch(drive, /7300\+/, 'the driver must not wait for an archived palette row the app no longer appends');
+  const resume = drive.slice(drive.indexOf('function Resume-Archived('), drive.indexOf('function Read-History('));
+  assert.ok(resume, 'the driver must reach archived chats through the live view');
+  assert.match(resume, /Palette 'archived sessions' 6291/, 'Ctrl+K archived sessions opens All Sessions on the Archived tab');
+  assert.match(resume, /\\\[overview\\\][^\r\n]* arc=/, 'require the Archived cluster to list the deleted chats');
+  assert.match(resume, /Press @\(0x11,0x46\)/, 'Ctrl+F filters the All Sessions list');
+  assert.match(resume, /\[VerifyNative\]::Text\(\$Name\)/);
+  assert.match(resume, /Press @\(0x0d\)/);
+  const history = drive.slice(drive.indexOf('function Read-History('), drive.indexOf('function Start-App('));
+  assert.match(history, /Resume-Archived \$Name/);
+});
+
+test('SOFT-2762 a journey condition failure is reported as a journey result, not infrastructure', () => {
+  const verifier = read('tools/pr-verifier.cjs');
+  const literal = verifier.match(/return (\/[^\n]*\/i)\.test\(value \|\| ''\)/);
+  assert.ok(literal, 'read the verifier infrastructure wording rule');
+  const infrastructure = new Function('return ' + literal[1])();
+  const drivers = ['tools/verify-session-actions/drive.ps1', skill + 'control-feature-server-open-group.ps1'];
+  for (const driver of drivers) {
+    const source = read(driver);
+    const message = source.match(/throw "(Journey condition not met[^"]*)"/);
+    assert.ok(message, driver + ' must name the journey condition that did not become true');
+    assert.doesNotMatch(message[1], infrastructure, driver + ' must not look like a runner fault');
+  }
+});
+
+test('SOFT-2762 a server-open-group run reports status, checks and cleanup', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  const passAt = driver.indexOf("$result = @{ verdict = 'pass'");
+  assert.ok(passAt >= 0, 'the success result block');
+  const pass = driver.slice(passAt, driver.indexOf('} catch {', passAt));
+  assert.match(pass, /status = 'passed'/);
+  assert.match(pass, /cleanup = /);
+  assert.match(pass, /checks = @\(/);
+  const failAt = driver.indexOf("$result = @{ verdict = 'fail'; status = 'failed'; step = $stage; error = $_");
+  assert.ok(failAt >= 0, 'the failure result block');
+  const fail = driver.slice(failAt, driver.indexOf('} finally {', failAt));
+  assert.match(fail, /error = \$_\.Exception\.Message/, 'the failure keeps the real message');
+  const cleanup = driver.slice(driver.indexOf('$result.cleanup = $remaining'), driver.indexOf('try { [IO.File]::WriteAllBytes($hostsFile'));
+  assert.ok(cleanup, 'cleanup is recorded before result.json is written');
+  assert.match(driver, /\$result \| ConvertTo-Json -Depth 4 \| Set-Content -LiteralPath \(Join-Path \$Evidence 'result\.json'\)/);
+});
+
+test('SOFT-2762 a failed server-open-group run reports the real error and step', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  assert.doesNotMatch(driver, /error = 'server group journey failed'/, 'the driver must not replace the cause with a label');
+  const catchAt = [...driver.matchAll(/\} catch \{/g)].map(match => match.index).find(index => driver.slice(index, index + 900).includes('step = $stage'));
+  assert.ok(catchAt !== undefined, 'the failure handler must record the step');
+  const failure = driver.slice(catchAt, driver.indexOf('} finally {', catchAt));
+  assert.match(failure, /step = \$stage/);
+  assert.match(failure, /error = \$_\.Exception\.Message/);
+  assert.match(driver, /failed at ' \+ \$stage \+ ': ' \+ \$failure\.Exception\.Message/);
+  const node = driver.slice(driver.indexOf('function Invoke-ServerGroupNode('), driver.indexOf('\ntry {'));
+  assert.match(node, /\$reported = \(\$combined -replace 'mpk_\[A-Za-z0-9_-\]\+', '<redacted>'\)\.Trim\(\)/);
+  assert.match(node, /throw "\$commandText exited \$\(\$nodeProcess\.ExitCode\): \$reported"/);
+  assert.ok([...driver.matchAll(/\$stage = '([^']+)'/g)].length >= 8, 'every phase names its step');
+  const ready = driver.slice(driver.indexOf('function Test-ServerGroupReady('), driver.indexOf('function Wait-ServerGroup('));
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'tmux_session'/);
+  assert.match(ready, /Get-ServerGroupProperty \$_ 'group_id'/)
+  assert.doesNotMatch(ready, /\$_\.[a-z_]+/, 'strict mode must not read a saved tab field that may be absent');
+  const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
+  const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
+  assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
+  assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
+});

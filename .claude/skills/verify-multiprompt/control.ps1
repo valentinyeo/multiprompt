@@ -71,6 +71,8 @@ switch ($Feature) {
         }
 }
 
+if ($Feature -eq 'server-open-group') { return }
+
 Write-Host 'Launch: loading native verification helpers'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -TypeDefinition (Get-Content (Join-Path $PSScriptRoot 'control-native.cs') -Raw)
