@@ -401,7 +401,7 @@ pub const History = struct {
             var incoming_history = self.cursor();
             defer incoming_history.deinit(a);
             try incoming_history.rows.appendSlice(a, added);
-            try incoming_history.retainRows(a, combined);
+            try incoming_history.retainRows(a, combined, false);
             try incoming_history.render(a);
             incoming_history.updateCursor(next.*);
             incoming_history.revision = next.revision;
@@ -435,7 +435,7 @@ pub const History = struct {
         self.updateCursor(next.*);
     }
 
-    fn retainRows(self: *History, a: std.mem.Allocator, previous: History) !void {
+    fn retainRows(self: *History, a: std.mem.Allocator, previous: History, replaced_source: bool) !void {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
@@ -466,7 +466,7 @@ pub const History = struct {
                 shared = true;
             }
         }
-        if (!shared and !std.mem.eql(u8, &self.sid, &previous.sid)) {
+        if (!shared and (replaced_source or !std.mem.eql(u8, &self.sid, &previous.sid))) {
             self.read_sid = self.sid;
             return;
         }
@@ -740,16 +740,17 @@ pub const History = struct {
             next.deinit(a);
             return;
         }
+        const replaced_source = !append and !prepend and key.host != 0 and inode != 0 and inode != self.inode;
         if (!prepend and mode != null and self.rows.items.len > 0) {
             if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and end < self.offset) return error.InvalidHistory;
-            try next.retainRows(a, self.*);
+            try next.retainRows(a, self.*, replaced_source);
             if (!self.restore_full and inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
         }
         if (prepend) {
             var tail = self.cursor();
             defer tail.deinit(a);
             try tail.rows.appendSlice(a, self.rows.items);
-            try tail.retainRows(a, next);
+            try tail.retainRows(a, next, false);
             next.rows.deinit(a);
             next.rows = tail.rows;
             tail.rows = .empty;
@@ -806,7 +807,7 @@ pub const Backfill = struct {
         var recent = tail.cursor();
         defer recent.deinit(a);
         try recent.rows.appendSlice(a, tail.rows.items);
-        try recent.retainRows(a, result);
+        try recent.retainRows(a, result, false);
         result.rows.deinit(a);
         result.rows = recent.rows;
         recent.rows = .empty;
@@ -2142,6 +2143,60 @@ test "IGSH-950 a different live conversation replaces unrelated retained history
     try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("current conversation"), h.text.items);
     try std.testing.expectEqualStrings("new", std.mem.sliceTo(&h.read_sid, 0));
+}
+
+test "SOFT-2528 a cleared server chat shows only the messages after the clear" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(2528, 2, false, "remote-tab", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tremote-tab\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"before\",\"text\":\"old question\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"old-answer\",\"text\":\"old answer\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t200\t10\t0\tclaude\tremote-tab\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"new-question\",\"text\":\"new question\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"new-answer\",\"text\":\"new answer\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new questionnew answer"), h.text.items);
+    try std.testing.expectEqual(@as(u64, 10), h.inode);
+    try h.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t10\t0\tclaude\tremote-tab\t0\t\tdelta\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"later\",\"text\":\"later answer\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 3, key);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new questionnew answerlater answer"), h.text.items);
+    const encoded = try h.encode(a, key);
+    defer a.free(encoded);
+    var restored = try History.decode(a, encoded, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqual(@as(usize, 3), restored.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new questionnew answerlater answer"), restored.text.items);
+}
+
+test "SOFT-2528 a server chat whose transcript is replaced but still carries its messages keeps them" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(2529, 2, false, "remote-tab", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tremote-tab\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"question\",\"text\":\"kept question\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"old-answer\",\"text\":\"old answer\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t100\t300\t10\t0\tclaude\tremote-tab\t0\t\ttail\t100\n" ++
+        "{\"role\":\"assistant\",\"id\":\"old-answer\",\"text\":\"old answer\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"new-answer\",\"text\":\"new answer\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("kept questionold answernew answer"), h.text.items);
+}
+
+test "SOFT-2528 a local chat's replaced transcript keeps its retained messages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(2530, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"old-answer\",\"text\":\"old answer\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t100\t10\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"new-answer\",\"text\":\"new answer\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("old answernew answer"), h.text.items);
 }
 
 test "IGSH-934 backfill after a source rewrite deduplicates already retained messages" {
