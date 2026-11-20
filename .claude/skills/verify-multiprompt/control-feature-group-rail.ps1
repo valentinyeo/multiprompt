@@ -31,7 +31,7 @@
             Wait-Until { $state = Read-Session; $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[1].group_id -eq $state.groups[0].id } 'second session in new saved group'
             Press @(0x1B) 'Esc: finish default group name'
             $group = (Read-Session).groups[0]
-            Press @(0x11, 0x31) 'Ctrl+1: select the original session in manual order'
+            Invoke-JourneyCommand 'Rail A' -Session
             Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
             Invoke-JourneyCommand 'Move to Group' -Confirm {
                 Press @(0x0D) 'Enter: Move to Group submenu'
@@ -51,7 +51,7 @@
                 Press @(0x0D) 'Enter: save short session name'
                 Wait-Until { (Read-Session).tabs[$index].name -eq $name } 'short synthetic session name saved'
             }
-            Press @(0x11, 0x33) 'Ctrl+3: select third session for second group'
+            Invoke-JourneyCommand 'Rail C' -Session
             Wait-Until { (Read-Session).active_tab -eq 2 } 'third session selected'
             Invoke-JourneyCommand 'Move to Group' -Confirm {
                 Press @(0x0D) 'Enter: Move to Group submenu'
@@ -61,7 +61,7 @@
             Wait-Until { $state = Read-Session; @($state.groups).Count -eq 2 -and $state.tabs[2].group_id -eq $state.groups[1].id } 'third session in second saved group'
             Press @(0x1B) 'Esc: finish second default group name'
             $secondGroup = (Read-Session).groups[1]
-            Press @(0x11, 0x34) 'Ctrl+4: select fourth session'
+            Invoke-JourneyCommand 'Rail D' -Session
             Wait-Until { (Read-Session).active_tab -eq 3 } 'fourth session selected'
             Invoke-JourneyCommand 'Move to Group' -Confirm {
                 Press @(0x0D) 'Enter: Move to Group submenu'
@@ -85,7 +85,7 @@
             $noRail = $true
             $flushLeft = $true
             foreach ($selected in @(0, 1)) {
-                Press @(0x11, (0x31 + $selected)) ('Ctrl+' + ($selected + 1) + ': select grouped session')
+                Invoke-JourneyCommand ('Rail ' + [char](65 + $selected)) -Session
                 Wait-Until { (Read-Session).active_tab -eq $selected } 'grouped selection persisted'
                 $shot = 'group-rail-selected-' + $selected
                 Snapshot $shot

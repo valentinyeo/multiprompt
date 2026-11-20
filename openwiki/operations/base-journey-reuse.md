@@ -1,6 +1,6 @@
 # Reusable baseline evidence
 
-The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR. The baseline matrix carries only journeys that failed on head plus the declared repro journey, because a head pass needs no parent comparison. Cache tooling comes from the workflow revision, so older PRs need not contain the tool. The journey scripts and their content hash still come from the PR head.
+The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR. The baseline matrix carries only journeys that failed on head, because a head pass needs no parent comparison. Cache tooling comes from the workflow revision, so older PRs need not contain the tool. The journey scripts and their content hash still come from the PR head.
 
 ## Identity
 
@@ -19,7 +19,7 @@ An artifact is reusable only when it contains:
 
 Infrastructure failures, expired artifacts, unavailable downloads, and incomplete display coverage are cache misses. `tmux-binding` remains a miss because its separate Linux semantic proof is not contained in the Windows artifact. Cached artifacts expire after seven days.
 
-The existing repro gate still requires the named journey to fail on current master and pass on the PR head. Reusing a master pass cannot satisfy that gate. Stored evidence is copied under its original baseline artifact name, so the judge and deterministic gates read the same results, screenshots, and cleanup records.
+Repair PRs compare against current master, so reused baseline evidence is read under that same commit and its result files, screenshots and cleanup records reach the judge and the deterministic gates unchanged.
 
 `pr-verifier-base-reuse/reuse.json` records the baseline SHA, harness version, reused journeys, source artifact/run IDs, and the planned Windows journey counts before and after lookup. These counters exclude build and Linux jobs. They are not wall-time measurements.
 
