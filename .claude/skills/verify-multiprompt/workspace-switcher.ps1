@@ -131,7 +131,8 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $look = [VerifyNative]::MenuLook($card)
     $expected = if ($theme -eq 'light') { 'F9F9F9' } elseif ($theme -eq 'system') { $null } elseif ($theme -eq 'multiprompt') { '0F1011' } else { '262626' }
     if ($null -ne $expected -and $look.fill -cne $expected) { throw "Workspace card unreadable fill in ${theme}: $($look.fill)" }
-    $expectedHeight = 19 + (Get-VisibleWorkspaceCardRows + 2) * 28
+    $visibleCount = Get-VisibleWorkspaceCardRows
+    $expectedHeight = 19 + ($visibleCount + 2) * 28
     if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
     Dismiss-WorkspaceCard 'Miss-click the workspace card padding to dismiss without switching' -WithEscape
@@ -158,7 +159,7 @@ Select-WorkspaceCard $created 'workspace-keyboard-return'
 $result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphite 2'; reason = 'Not a shipped theme; Edge Grey is separate' }
 
 $card = Open-WorkspaceCard 'workspace-new-open'
-$newRow = Get-VisibleWorkspaceCardRows + 1
+$newRow = (Get-VisibleWorkspaceCardRows) + 1
 $count = (Read-Session).workspace_count
 Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card new row click'
 Record 'Click New workspace in workspace card'
