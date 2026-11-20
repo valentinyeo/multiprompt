@@ -2640,10 +2640,10 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor')
+HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor', 'antigravity')
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
-HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent', 'antigravity': 'agy'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
@@ -3627,6 +3627,15 @@ def host_cursor_argv(provider, sid, base, mode=None):
     native = host_session_state(provider, sid).get("native_session")
     if isinstance(native, str) and native:
         return command + ["--resume", native]
+    return command
+
+
+def host_antigravity_argv(provider, sid, base, mode=None):
+    command = base + ["--input-format", "stream-json", "--output-format", "stream-json",
+                      "--dangerously-skip-permissions", "--print="]
+    native = host_session_state(provider, sid).get("native_session")
+    if isinstance(native, str) and native:
+        return command + ["--conversation", native]
     return command
 
 
@@ -5023,6 +5032,120 @@ def host_cursor_open(provider, sid, tmux, session):
     pass
 
 
+def host_antigravity_open(provider, sid, tmux, session):
+    pass
+
+
+def host_antigravity_write(provider, sid, session, token, text):
+    return host_control_send(session, dict(event="user", message=dict(role="user", content=text)))
+
+
+def host_antigravity_interrupt(provider, sid, session):
+    import signal
+    agent = session.get("agent")
+    if agent is None:
+        return dict(status="error", reason="agent_missing")
+    try:
+        agent.send_signal(signal.SIGINT)
+    except (OSError, ValueError):
+        return dict(status="error", reason="interrupt_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
+def host_antigravity_set_mode(provider, sid, session, mode):
+    return host_refuse("antigravity_mode_fixed")
+
+
+def host_antigravity_event(provider, sid, tmux, session, event):
+    kind = event.get("event")
+    if kind == "init":
+        session["ready"] = True
+        native = event.get("conversation_id")
+        if isinstance(native, str) and native:
+            session["state"]["native_session"] = native
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "init", dict(session=native))
+        host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
+        return
+    if kind == "step_update":
+        update = event.get("step_update") if isinstance(event.get("step_update"), dict) else {}
+        step_type = update.get("step_type")
+        state = update.get("state")
+        step_index = update.get("step_index")
+        step_key = "agy-" + str(step_index if type(step_index) is int else 0)
+        native = update.get("conversation_id")
+        if isinstance(native, str) and native and not session["state"].get("native_session"):
+            session["state"]["native_session"] = native
+        if step_type == "user_input":
+            host_accept(provider, sid, tmux, session, event)
+            return
+        if step_type == "agent_response":
+            host_accept(provider, sid, tmux, session, event)
+            thinking_delta = update.get("thinking_delta")
+            if isinstance(thinking_delta, str) and thinking_delta:
+                host_delta(session, host_stream_block(session, step_key, "thinking", 0), thinking_delta)
+            text_delta = update.get("text_delta")
+            if isinstance(text_delta, str) and text_delta:
+                session["agy_emitted_text"] = True
+                host_delta(session, host_stream_block(session, step_key, "text", 1), text_delta)
+            if state in ("DONE", "ERROR", "CANCELED"):
+                entry = session["messages"].get(step_key)
+                if isinstance(entry, dict):
+                    for block in entry["blocks"]:
+                        if not block["done"]:
+                            host_complete(provider, sid, tmux, session, block)
+            return
+        if step_type == "tool":
+            host_accept(provider, sid, tmux, session, event)
+            info = update.get("tool_info") if isinstance(update.get("tool_info"), dict) else {}
+            tool = (update.get("tool_name") if isinstance(update.get("tool_name"), str)
+                    else info.get("name") if isinstance(info.get("name"), str) else "tool")
+            params = info.get("parameters") if isinstance(info.get("parameters"), dict) else {}
+            tool_id = "agy-tool-" + str(step_index if type(step_index) is int else 0)
+            started = session.setdefault("agy_tools", set())
+            if tool_id not in started:
+                started.add(tool_id)
+                host_event(provider, sid, tmux, session, "item.started",
+                           dict(type="tool_call", tool=tool, input=params, title=tool, display_name=tool), tool_id)
+            if state in ("DONE", "ERROR", "CANCELED"):
+                failed = state != "DONE" or bool(info.get("is_error"))
+                output = info.get("output") if "output" in info else info.get("error")
+                host_event(provider, sid, tmux, session, "item.done",
+                           dict(status="failed" if failed else "completed", output=host_tool_output(output),
+                                is_error=failed), tool_id)
+                started.discard(tool_id)
+            return
+        return
+    if kind == "result":
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        inflight = session.get("inflight")
+        if isinstance(inflight, dict) and not inflight.get("accepted"):
+            host_accept(provider, sid, tmux, session, event)
+        native = result.get("conversation_id")
+        if isinstance(native, str) and native:
+            session["state"]["native_session"] = native
+        response_text = result.get("response")
+        if isinstance(response_text, str) and response_text and not session.get("agy_emitted_text"):
+            block = host_stream_block(session, "agy-result", "text", 0)
+            host_complete(provider, sid, tmux, session, block, response_text)
+        if session.get("interrupted") or result.get("finished_reason") == "interrupted":
+            status = "interrupted"
+        elif result.get("status") == "SUCCESS":
+            status = "completed"
+        else:
+            status = "failed"
+        session["state"]["result"] = dict(subtype=status, at=time.time())
+        session.pop("agy_tools", None)
+        session.pop("agy_emitted_text", None)
+        host_turn_end(provider, sid, tmux, session,
+                      dict(status=status, stop_reason=result.get("finished_reason"),
+                           usage=result.get("usage") or {}),
+                      dict(subtype=status))
+
+
 HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
 
 
@@ -5764,6 +5887,10 @@ HOST_ADAPTERS = {
     "cursor": dict(argv=host_cursor_argv, open=host_cursor_open, write=host_claude_write, event=host_cursor_event,
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
+    "antigravity": dict(argv=host_antigravity_argv, open=host_antigravity_open, write=host_antigravity_write,
+                        event=host_antigravity_event, answer=host_pi_answer, interrupt=host_antigravity_interrupt,
+                        set_mode=host_antigravity_set_mode,
+                        binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
 
 
@@ -8231,7 +8358,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 132
+RUNTIME_GENERATION = 133
 
 if __name__ == '__main__':
     import base64 as _base64

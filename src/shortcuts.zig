@@ -333,6 +333,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "/login in a Pi chat", .b = "Log in to a Pi provider. Pi shows its own prompts and links in the chat, and the next reply uses that login", .header = false },
     .{ .a = "Ctrl+K -> Log in", .b = "Log in to a Pi provider from this Pi chat. Same as /login", .header = false },
     .{ .a = "Ctrl+K -> New Cursor chat", .b = "Start a Cursor CLI live chat in this workspace folder, same chat view as Claude", .header = false },
+    .{ .a = "Ctrl+K -> New Antigravity Sessions", .b = "Start an Antigravity CLI live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },

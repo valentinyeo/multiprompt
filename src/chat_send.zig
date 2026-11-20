@@ -1561,7 +1561,7 @@ fn chatOutboxDropForKey(key: []const u8) void {
 pub fn chatResetForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const key = chatFileIdentityForShell(idx);
-    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3 or app_state.shells[idx].ai_agent == 7)) {
+    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3 or app_state.shells[idx].ai_agent == 7 or app_state.shells[idx].ai_agent == 8)) {
         _ = chatPendingResetDropIfStale();
         if (app_state.g_chat_pending_reset) |pending| {
             if (key.sid[0] != 0 and chatResetSameChat(pending.key, key)) {
@@ -1974,7 +1974,7 @@ test "IGSH-1266 a chat typed before the tab finished starting still goes to the 
 }
 
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
-    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
+    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7 or ai_agent == 8);
 }
 
 pub const ChatSendNowRoute = enum { host_steer, terminal_key };
@@ -1987,6 +1987,7 @@ test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab 
     try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
     try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
     try std.testing.expect(chatMessageGoesToHost(.tmux, 7));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 8));
     try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
     try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
     try std.testing.expect(!chatMessageGoesToHost(.vps, 1));

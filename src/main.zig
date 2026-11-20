@@ -736,6 +736,7 @@ const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFS
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
+const SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -947,6 +948,7 @@ const spawnWorkspacePlainClaudeSession = @import("command_palette.zig").spawnWor
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
 const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
 const spawnCursorTmuxSession = @import("command_palette.zig").spawnCursorTmuxSession;
+const spawnAntigravityTmuxSession = @import("command_palette.zig").spawnAntigravityTmuxSession;
 const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const notifyTabCapReached = @import("console.zig").notifyTabCapReached;
@@ -6238,33 +6240,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(hwnd, WM_APP_NEW_TAB_DEFAULT, 1, 0);
                     return 0;
                 }
-                if (target == SEARCH_NEW_PI_CHAT_OFFSET) {
+                if (target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     applySearchSpawnContext(hwnd);
-                    const spawned_pi = spawnPiTmuxSession();
+                    const spawned_hosted = if (target == SEARCH_NEW_PI_CHAT_OFFSET)
+                        spawnPiTmuxSession()
+                    else if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET)
+                        spawnCursorTmuxSession()
+                    else
+                        spawnAntigravityTmuxSession();
                     applyPendingGroup();
-                    if (!spawned_pi) showActiveShellAfterOverlay();
+                    if (!spawned_hosted) showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    if (spawned_pi) {
-                        app_state.g_refocus_remaining = 4;
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
-                    } else {
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
-                    }
-                    return 0;
-                }
-                if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    applySearchSpawnContext(hwnd);
-                    const spawned_cursor = spawnCursorTmuxSession();
-                    applyPendingGroup();
-                    if (!spawned_cursor) showActiveShellAfterOverlay();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    if (spawned_cursor) {
+                    if (spawned_hosted) {
                         app_state.g_refocus_remaining = 4;
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
                     } else {

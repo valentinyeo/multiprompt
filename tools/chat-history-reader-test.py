@@ -6993,6 +6993,12 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         open_cursor('cursor', self.sid, self.tmux, self.session)
         self.assertEqual(self.writes(), [])
 
+    def test_antigravity_start_does_not_request_remote_control(self):
+        open_agy = getattr(reader, 'host_antigravity_open', None)
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['open'], open_agy)
+        open_agy('antigravity', self.sid, self.tmux, self.session)
+        self.assertEqual(self.writes(), [])
+
     def test_remote_control_rejection_does_not_stop_normal_chat(self):
         reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
         writes = self.writes()
@@ -7499,7 +7505,7 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
     def test_an_unsupported_provider_never_substitutes_an_interrupt(self):
         target = self.deliver('host_fixture_message_01')
         previous = self.writes()
-        for provider in ('codex', 'pi', 'hax', 'cursor'):
+        for provider in ('codex', 'pi', 'hax', 'cursor', 'antigravity'):
             result = reader.host_handle_request(provider, self.sid, self.tmux, self.session,
                                                 dict(op='recall', id=target['id'], attempt='attempt-1'))
             self.assertEqual(result['reason'], 'recall_unavailable')

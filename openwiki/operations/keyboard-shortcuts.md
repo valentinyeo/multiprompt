@@ -222,6 +222,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | /login in a Pi chat | Log in to a Pi provider. Pi shows its own prompts and links in the chat, and the next reply uses that login |
 | Ctrl+K -&gt; Log in | Log in to a Pi provider from this Pi chat. Same as /login |
 | Ctrl+K -&gt; New Cursor chat | Start a Cursor CLI live chat in this workspace folder, same chat view as Claude |
+| Ctrl+K -&gt; New Antigravity Sessions | Start an Antigravity CLI live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |

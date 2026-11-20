@@ -90,6 +90,7 @@ const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
+const SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -550,7 +551,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -558,7 +559,7 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
@@ -566,6 +567,7 @@ test "IGSH-1266 new session rows keep the approved order" {
     try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Cursor chat", palettePrimaryLabel(SEARCH_NEW_CURSOR_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Antigravity Sessions", palettePrimaryLabel(SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
     try std.testing.expectEqualStrings("Open session...", palettePrimaryLabel(SEARCH_OPEN_SESSION_MENU_OFFSET) orelse "");
     try std.testing.expectEqualStrings("More shells...", palettePrimaryLabel(SEARCH_SHELLS_MENU_OFFSET) orelse "");
@@ -724,6 +726,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_PI_LOGIN_OFFSET) return "Log in";
     if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) return "New Cursor chat";
+    if (target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) return "New Antigravity Sessions";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
     if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
@@ -944,6 +947,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
         SEARCH_NEW_CURSOR_CHAT_OFFSET => "new cursor chat session agent cli",
+        SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET => "new antigravity sessions chat session agy agent cli",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
         SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
@@ -1474,7 +1478,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
-    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
         target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
         target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
         (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
@@ -2262,6 +2266,8 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
     try std.testing.expect(!newTabOpensChatView("pi"));
     try std.testing.expect(newTabOpensChatView("cursor"));
     try std.testing.expect(newTabOpensChatView("agent"));
+    try std.testing.expect(newTabOpensChatView("antigravity"));
+    try std.testing.expect(newTabOpensChatView("agy"));
     try std.testing.expect(!newTabOpensChatView("bash"));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
@@ -3120,6 +3126,7 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
         .codex => "new Codex session",
         .pi => "new Pi session",
         .cursor => "new Cursor session",
+        .antigravity => "new Antigravity session",
         .claude => "new Claude session",
     };
     if (!capacityAdmitNewAgent(host, workspace, .user, reason)) return false;
@@ -3185,6 +3192,10 @@ pub fn spawnPiTmuxSession() bool {
 
 pub fn spawnCursorTmuxSession() bool {
     return spawnHostedChatSession(.cursor);
+}
+
+pub fn spawnAntigravityTmuxSession() bool {
+    return spawnHostedChatSession(.antigravity);
 }
 
 test "IGSH-1546 Codex and Pi chats are live chats that never type into a terminal" {
@@ -3989,6 +4000,12 @@ pub fn updateSearchResults() void {
             keywordsMatchAll("new cursor chat session agent cli", app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CURSOR_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new antigravity sessions chat session agy agent cli", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and

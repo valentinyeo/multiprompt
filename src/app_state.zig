@@ -1459,6 +1459,7 @@ pub const SEARCH_OPENALL_HOST_INNE_OFFSET: usize = 5006;
 pub const SEARCH_NEW_CLAUDE_CHAT_OFFSET: usize = 5100;
 pub const SEARCH_NEW_PI_CHAT_OFFSET: usize = 5101;
 pub const SEARCH_NEW_CURSOR_CHAT_OFFSET: usize = 5108;
+pub const SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET: usize = 5109;
 pub const SEARCH_NEW_TERMINAL_OFFSET: usize = 5102;
 pub const SEARCH_OPEN_SESSION_MENU_OFFSET: usize = 5103;
 pub const SEARCH_SHELLS_MENU_OFFSET: usize = 5104;
@@ -4034,7 +4035,7 @@ pub var g_inbox_split_xe: [INBOX_MAX_SPLIT_TABS]i32 = [_]i32{0} ** INBOX_MAX_SPL
 pub var g_inbox_split_ids: [INBOX_MAX_SPLIT_TABS]u32 = [_]u32{0} ** INBOX_MAX_SPLIT_TABS;
 pub var g_inbox_split_tab_count: u32 = 0;
 
-pub const AgentName = enum { none, claude, codex, pi, kimi, hax, grok, cursor };
+pub const AgentName = enum { none, claude, codex, pi, kimi, hax, grok, cursor, antigravity };
 
 pub const HIDDEN_IDLE_WATCHDOG_POLLS: u8 = 2;
 
