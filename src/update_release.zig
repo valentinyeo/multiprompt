@@ -128,12 +128,12 @@ pub fn startup(args: []const []const u8) bool {
 
 fn setCheckNotice(comptime fmt: []const u8, args: anytype) void {
     const app_state = @import("app_state.zig");
-    app_state.g_update_check_notice_len = std.fmt.bufPrint(&app_state.g_update_check_notice, fmt, args) catch 0;
+    app_state.g_update_check_notice_len = (std.fmt.bufPrint(&app_state.g_update_check_notice, fmt, args) catch "").len;
 }
 
 fn setCheckDetail(comptime fmt: []const u8, args: anytype) void {
     const app_state = @import("app_state.zig");
-    app_state.g_update_check_detail_len = std.fmt.bufPrint(&app_state.g_update_check_detail, fmt, args) catch 0;
+    app_state.g_update_check_detail_len = (std.fmt.bufPrint(&app_state.g_update_check_detail, fmt, args) catch "").len;
 }
 
 fn clearCheckDetail() void {

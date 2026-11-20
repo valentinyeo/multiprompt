@@ -1,1 +1,1 @@
-Multiprompt now tells you when an update check fails or stalls instead of staying quiet.
+Multiprompt now shows a header message when looking for an update fails or stalls instead of staying quiet.
