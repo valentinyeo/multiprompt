@@ -238,12 +238,6 @@ jobs:
           path: release-evidence
       - name: Install video validation tools
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-      - name: Restore journeys that already failed on master
-        if: needs.prepare.outputs.features != '[]'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/release-journeys.mjs recorded release-plan.json release-evidence
       - name: Require passing candidate journeys and readable videos
         env:
           GH_TOKEN: ${{ github.token }}
