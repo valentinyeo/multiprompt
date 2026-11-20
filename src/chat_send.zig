@@ -654,6 +654,43 @@ pub fn sendChatMessage(text: []const u16) bool {
     return true;
 }
 
+fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
+    const mention = @import("chat_mention.zig");
+    if (message_id == 0 or source_idx >= app_state.shell_count or mention.isMentionNote(text)) return;
+    const shell = &app_state.shells[source_idx];
+    var source_session: [64]u8 = undefined;
+    const source_len: usize = @min(@as(usize, shell.tmux_session_len), source_session.len);
+    if (source_len > 0) @memcpy(source_session[0..source_len], shell.tmux_session[0..source_len]);
+    var name_buf: [192]u8 = undefined;
+    const name_n: usize = if (shell.name_len > 0 and shell.name_len <= shell.name.len) (std.unicode.utf16LeToUtf8(&name_buf, shell.name[0..shell.name_len]) catch 0) else 0;
+    const source_name: []const u8 = if (name_n > 0) name_buf[0..name_n] else if (source_len > 0) source_session[0..source_len] else "this chat";
+    var targets_buf: [16]mention.Chat = undefined;
+    const found = mention.mentionTargets(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
+    if (found.len == 0) return;
+    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8 } = undefined;
+    const count = @min(found.len, plan.len);
+    for (found[0..count], 0..) |chat, i| {
+        const n = @min(chat.session.len, plan[i].session.len);
+        @memcpy(plan[i].session[0..n], chat.session[0..n]);
+        plan[i].session_len = @intCast(n);
+        plan[i].index = chat.index;
+    }
+    var visible_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
+    const visible = mention.copyVisible(text, &.{}, &visible_buf);
+    for (plan[0..count]) |target| {
+        if (target.index == source_idx or target.index >= app_state.shell_count) continue;
+        const session = target.session[0..target.session_len];
+        if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
+        var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
+        const provider = mention.providerName(shell.ai_agent);
+        const sid_len = @min(@as(usize, shell.claude_sid_len), shell.claude_sid.len);
+        const sid: []const u8 = if (sid_len > 0) shell.claude_sid[0..sid_len] else "";
+        const note = mention.mentionNote(source_name, provider, sid, visible, &note_buf) orelse continue;
+        if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
+        mention.mentionMarkDelivered(message_id, session);
+    }
+}
+
 pub fn sendChatPrompt() void {
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
         showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
@@ -808,6 +845,7 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
+    deliverMentions(app_state.active_shell, app_state.g_chat_outbox.items[ei].id, send_text);
     @import("chat_mention.zig").clearPicks();
     send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
     app_state.g_chat_read_open_pending = false;
@@ -2380,7 +2418,6 @@ pub fn chatRestartAiApplyRefusal(shell_id: u32, busy: bool) void {
         shell.ai_restart_busy_tick = @max(GetTickCount64(), 1);
         shell.ai_stopped = false;
     } else {
-        shell.ai_stopped = true;
         shell.ai_restart_busy = false;
         shell.ai_restart_busy_tick = 0;
     }
@@ -4087,8 +4124,12 @@ fn chatTmuxSendFinish() void {
         if (job.needs_restart) {
             app_state.shells[idx].ai_stopped = true;
             if (!chatRestartAi(idx)) showHeaderNoticeAscii("Could not restart the AI. Open the terminal and start it by hand", 5000, true);
-        } else if (job.clear_notice_len != 0) {
-            showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
+        } else {
+            app_state.shells[idx].ai_stopped = false;
+            app_state.shells[idx].ai_restart_tick = 0;
+            if (job.clear_notice_len != 0) {
+                showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
+            }
         }
         return;
     }
