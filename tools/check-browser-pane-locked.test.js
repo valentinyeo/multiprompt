@@ -211,9 +211,11 @@ function launchJourneyContract(source) {
     'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
     '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
     '$job.Dispose()', '$job = New-Object VerifyJob', '$process = $job.Start(',
-    '$script:window = $process.MainWindowHandle', "'relaunch main window ready for Shortcuts' 60 20",
+    '$overlayPostedAt = $null',
+    '$state = if ($script:window -ne [IntPtr]::Zero) { Read-Inbox } else { $null }',
     '[VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)',
     '$overlayPostedAt = [DateTime]::UtcNow',
+    "'relaunch main window ready for Shortcuts' 60 20",
     'MonitorFromWindow($script:window, 1)', 'GetMonitorInfoW($monitor, [ref]$info)',
     '$script:overlayLaunches = @(Get-CimInstance Win32_Process', '$script:overlayLaunches.Count -gt 0',
     "'positioned isolated browser launched while Shortcuts is open' 60",
@@ -236,8 +238,9 @@ function launchJourneyContract(source) {
   assert.match(source, /function Wait-Until\([^\n]+\[int\]\$PollMilliseconds = 200, \[switch\]\$Tight\)/);
   const wait = source.slice(source.indexOf('function Wait-Until('), source.indexOf('function Read-Session'));
   assert.match(wait, /Start-Sleep -Milliseconds \$PollMilliseconds/);
-  const early = journey.slice(journey.indexOf('$process = $job.Start('), journey.indexOf('$overlayPostedAt ='));
-  assert.doesNotMatch(early, /PaneVisible|Read-Inbox|Doctor|Press /);
+  const early = journey.slice(journey.indexOf('$process = $job.Start('), journey.indexOf('$monitor = [VerifyNative]::MonitorFromWindow($script:window, 1)'));
+  assert.doesNotMatch(early, /PaneVisible|Doctor|Press /);
+  assert.match(early, /Read-Inbox/);
   assert.match(early, /if \(-not \[VerifyNative\]::PostMessage\([^\n]+\)\) \{ throw /);
   const overlay = journey.slice(journey.indexOf('$monitor ='), journey.indexOf('            Press @(0x1B)'));
   const normalizeIndent = value => value.trim().split('\n').map(line => line.trim()).join('\n');

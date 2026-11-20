@@ -20,13 +20,18 @@
             $job = New-Object VerifyJob
             $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
             $script:window = [IntPtr]::Zero
+            $overlayPostedAt = $null
             Wait-Until {
                 $process.Refresh()
                 $script:window = $process.MainWindowHandle
-                $script:window -ne [IntPtr]::Zero
+                $state = if ($script:window -ne [IntPtr]::Zero) { Read-Inbox } else { $null }
+                $ready = $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
+                if ($ready -and $null -eq $overlayPostedAt) {
+                    if (-not [VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not open Shortcuts before the restored browser launch' }
+                    $overlayPostedAt = [DateTime]::UtcNow
+                }
+                $ready -and $null -ne $overlayPostedAt
             } 'relaunch main window ready for Shortcuts' 60 20
-            if (-not [VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not open Shortcuts before the restored browser launch' }
-            $overlayPostedAt = [DateTime]::UtcNow
             $monitor = [VerifyNative]::MonitorFromWindow($script:window, 1)
             $info = New-Object VerifyNative+MonitorInfo
             $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
