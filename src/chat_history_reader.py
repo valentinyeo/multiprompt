@@ -8124,7 +8124,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 130
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8227,6 +8227,20 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    sessions_source = globals().get('MP_SESSIONS_SOURCE')
+                    if isinstance(sessions_source, str) and sessions_source:
+                        try:
+                            publish_named_tool('mp-sessions', _base64.b64decode(sessions_source))
+                            _os.chmod('mp-sessions', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    layout_source = globals().get('MP_LAYOUT_SOURCE')
+                    if isinstance(layout_source, str) and layout_source:
+                        try:
+                            relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
+                            _os.chmod('mp-layout', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     zsb_source = globals().get('ZSB_SOURCE')
