@@ -12,6 +12,10 @@ const VERDICTS = ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED'];
 const MARKER = '<!-- pstack-verifier -->';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-flash';
+const VERIFIER_MODELS = [
+  { engine: 'deepseek', family: 'deepseek' },
+  { engine: 'claude', family: 'anthropic' },
+];
 const MAX_FILE_CHARS = 6000;
 const ARTIFACT_ATTEMPTS = 5;
 const ARTIFACT_RETRY_MS = 3000;
@@ -293,16 +297,32 @@ function evidenceMarkdown(summary, selection) {
   return lines.join('\n');
 }
 
-function pickEngine(commits) {
-  const deepseekAuthored = (commits || []).some(commit => /^co-authored-by:\s*deepseek\b/im.test(`${commit.messageHeadline || ''}\n${commit.messageBody || ''}`));
-  return deepseekAuthored ? 'claude' : 'deepseek';
+function modelFamily(model) {
+  const name = String(model || '');
+  if (/deepseek/i.test(name)) return 'deepseek';
+  if (/anthropic|claude/i.test(name)) return 'anthropic';
+  if (/google|gemini/i.test(name)) return 'google';
+  if (/openai|gpt/i.test(name)) return 'openai';
+  return '';
+}
+
+function pickVerifier(body) {
+  const authors = [...String(body || '').matchAll(/^Author model:\s*(\S+)\s*$/gim)].map(match => match[1]);
+  if (!authors.length) return { problem: 'missing Author model line' };
+  const families = authors.map(modelFamily);
+  const unknown = authors[families.indexOf('')];
+  if (unknown) return { problem: `unknown model family in Author model line: ${unknown}` };
+  const verifier = VERIFIER_MODELS.find(candidate => !families.includes(candidate.family));
+  if (!verifier) return { problem: 'no verifier from another model family' };
+  return { engine: verifier.engine };
 }
 
 function judgeLabel(engine) {
-  return engine === 'deepseek' ? `deepseek ${DEEPSEEK_MODEL}` : 'claude';
+  if (engine === 'deepseek') return `deepseek ${DEEPSEEK_MODEL}`;
+  return engine === 'claude' ? 'claude' : 'none';
 }
 
-function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', jobs = {}, infrastructure = [] }) {
+function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', jobs = {}, infrastructure = [], modelProblem = '' }) {
   const rows = journeyRows(summary, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
   const notes = [];
@@ -352,6 +372,10 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   } else if (selection.bugFix && !selection.features?.length && selection.ciWorkflows?.length) {
     final = 'FAIL';
     notes.unshift('A repair PR with no desktop journey needs a CI workflow receipt that shows base failed and head passed.');
+  }
+  if (modelProblem) {
+    final = 'FAIL';
+    notes.unshift(`No verifier ran: ${modelProblem}.`);
   }
   const evidence = [...notes, ...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean)].slice(0, MAX_EVIDENCE_LINES);
   const body = [
@@ -504,7 +528,8 @@ function resolve(env) {
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine: pickEngine(pr.commits) });
+  const { engine = '', problem = '' } = pickVerifier(pr.body);
+  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
 }
 
 function availableFeatures(env) {
@@ -912,7 +937,7 @@ async function main(argv, env) {
     } catch {
       verdict = null;
     }
-    const { final, body } = finalize({ verdict, headSha: env.HEAD_SHA, summary, selection, runUrl: env.RUN_URL, engine: env.ENGINE, jobs, infrastructure });
+    const { final, body } = finalize({ verdict, headSha: env.HEAD_SHA, summary, selection, runUrl: env.RUN_URL, engine: env.ENGINE, jobs, infrastructure, modelProblem: env.AUTHOR_MODEL_PROBLEM });
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'comment.md'), body);
     setOutputs({ result: final, conclusion: checkConclusion(final) });
@@ -921,7 +946,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, modelFamily, pickVerifier, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
