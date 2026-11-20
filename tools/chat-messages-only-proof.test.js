@@ -268,7 +268,7 @@ test('IGSH-1055 two independent app revisions share the identical branch verifie
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   const expression = workflow.match(/^        app-revision: \$\{\{ (.+) \}\}$/m)?.[1];
   assert.ok(expression, 'independent source matrix exists');
-  const revisions = (event, ref) => JSON.parse(JSON.stringify(vm.runInNewContext(expression, { github: { event_name: event, ref, sha: 'f'.repeat(40) }, fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value) })));
+  const revisions = (event, ref, appRevision = '') => JSON.parse(JSON.stringify(vm.runInNewContext(expression, { inputs: { app_revision: appRevision }, github: { event_name: event, ref, sha: 'f'.repeat(40) }, fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value) })));
   const pinned = revisions('push', 'refs/heads/ceo/IGSH-1055-hax2');
   assert.equal(pinned.length, 2);
   assert.equal(new Set(pinned).size, 2);
@@ -277,6 +277,7 @@ test('IGSH-1055 two independent app revisions share the identical branch verifie
   for (const [event, ref] of [['push', 'refs/heads/master'], ['pull_request', 'refs/pull/622/merge'], ['workflow_call', 'refs/tags/v0.28.999']]) {
     assert.deepEqual(revisions(event, ref), ['']);
   }
+  assert.deepEqual(revisions('workflow_call', 'refs/tags/v0.28.999', 'a'.repeat(40)), ['a'.repeat(40)]);
   assert.match(workflow, /path: app-source/);
   assert.match(workflow, /working-directory: \$\{\{ matrix.app-revision && 'app-source' \|\| '\.' \}\}/);
   assert.match(workflow, /git -C app-source rev-parse HEAD/);
