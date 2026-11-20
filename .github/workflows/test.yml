@@ -55,6 +55,8 @@ jobs:
         run: node --test tools/check-runtime-generation.test.js
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
+      - name: Test send now in a hosted chat
+        run: node --test tools/chat-send-now.test.js
       - name: Guard the reader runtime generation
         env:
           BASE: ${{ github.event.before || '' }}

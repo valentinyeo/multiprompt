@@ -426,6 +426,12 @@ fn chatEchoLoadedMs() i64 { return fake_loaded_ms; }
 fn chatEchoWindowFull() bool { return false; }
 fn chatEchoAnchorNow(_: u32) chat_echo.Anchor { return .{ .after_ms = 1000, .sent_ms = fake_now_ms, .counted = true, .user_count = 1 }; }
 fn chatShouldUseDirectInput(_: u32) bool { return true; }
+const ChatSendNowRoute = enum { host_steer, terminal_key };
+fn chatSendNowRoute(_: ShellKind, _: u8) ChatSendNowRoute { return .terminal_key; }
+fn chatQueuedSendNowTarget(_: u32) ?u64 { return null; }
+fn chatHostSendNowStart(_: u32, _: ?[]const u16, _: bool) bool { return false; }
+fn chatSendNowDispatched() void {}
+fn chatSendNowFinish() void {}
 fn chatSendForceBracketed(_: u32) bool { return true; }
 fn chatSendEnterDelayMs(_: ShellKind) u32 { return 0; }
 var g_chat_message_sync_job: ?*anyopaque = null;
@@ -2145,10 +2151,10 @@ function runHarness(control = false) {
       functions = functions.replace('    if (chatSendQuestionText(send_text)) return;', '');
     }
     if (control === 'steer-before') {
-      functions = functions.replace('    chatEchoPushQueuedForShell(idx);', '    _ = idx;');
+      functions = functions.replace('    chatEchoPushQueuedForShell(idx, g_chat_outbox.items[ei].id, true);', '    _ = idx;');
     }
     if (control === 'steer-empty-before') {
-      functions = functions.replace('fn chatEchoPushQueuedForShell(idx: u32) void {', 'fn chatEchoPushQueuedForShell(idx: u32) void {\n    if (chatEchoCountDeliveredForShell(idx) == 0) return;');
+      functions = functions.replace('fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {', 'fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {\n    _ = outbox_id;\n    _ = quiet;\n    if (chatEchoCountDeliveredForShell(idx) == 0) return;');
     }
     if (control === 'settlement') {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
