@@ -29,7 +29,7 @@ test('an unknown tool does not expand an already mapped plan', () => {
   assert.ok(result.unmapped.includes('tools/new-ci-tool.cjs'));
 });
 
-test('the CI repair receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
+test('the CI repair receipt is path-filtered, runs the base proof and does not block the verifier', () => {
   const receiptPath = path.join(root, '.github/workflows/ci-repair-receipt.yml');
   const mapPath = path.join(root, '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md');
   assert.ok(fs.existsSync(receiptPath), 'The CI repair receipt workflow must be installed');
@@ -39,8 +39,13 @@ test('the CI repair receipt is path-filtered, runs the base proof and owns its f
   assert.match(source, /^  pull_request:\n    paths:/m);
   assert.match(source, /name: ci-repair-receipt\n/);
   assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
-  assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
-  for (const file of ['tools/pr-verifier.cjs', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+  assert.doesNotMatch(map, /^CI workflow: /m);
+  for (const file of ['tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/ci-repair-receipt.yml']) {
+    assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+  }
+  for (const file of ['tools/pr-verifier.cjs', '.github/workflows/ci-repair-receipt.yml', '.github/workflows/pr-verifier.yml']) {
+    assert.equal(touchedJourneys([file]).ciWorkflows, undefined, file);
+  }
 });
 
 test('the service route receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {

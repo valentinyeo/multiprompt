@@ -10,7 +10,6 @@ on:
       - '.github/workflows/auto-release.yml'
       - 'tools/strip-comments.mjs'
       - 'tools/strip-comments.test.js'
-      - '.github/workflows/no-comments.yml'
       - 'tools/ci-receipt-summary.mjs'
       - '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'
       - '.claude/skills/verify-multiprompt/features/README.md'
