@@ -1131,6 +1131,7 @@ const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
 const chatEchoRetryAllForActive = @import("chat_send.zig").chatEchoRetryAllForActive;
 const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardUnsentForActive;
 const chatOutboxTick = @import("chat_send.zig").chatOutboxTick;
+const chatSendNowFinish = @import("chat_send.zig").chatSendNowFinish;
 const chatOutboxFlushActiveNow = @import("chat_send.zig").chatOutboxFlushActiveNow;
 const chatOutboxClearActive = @import("chat_send.zig").chatOutboxClearActive;
 const sshAutoReconnectTick = @import("chat_send.zig").sshAutoReconnectTick;
@@ -8470,6 +8471,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_OUTBOX) {
+                chatSendNowFinish();
                 chatOutboxTick();
                 return 0;
             }
