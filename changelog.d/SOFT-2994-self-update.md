@@ -1,0 +1,1 @@
+Multiprompt now tells you when an update check fails or stalls instead of staying quiet.
