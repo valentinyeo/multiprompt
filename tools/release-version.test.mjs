@@ -104,7 +104,6 @@ if (!args.includes('--verify-tag') || args.includes('--target') || existing.stat
           git('--git-dir', remote, 'update-ref', `refs/tags/${env.TAG || tag}`, env.BUILT_SHA || sha);
         }
         fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
-        fs.writeFileSync(path.join(dir, 'release-journeys.json.md'), '\n## Verified release journeys\n\n- Chat: [video](https://github.com/example/multiprompt/actions/runs/123/artifacts/100)\n');
         fs.writeFileSync(path.join(dir, 'dist/release-notes.json'), JSON.stringify({ version: (env.TAG || tag).slice(1), releases: [{ changes: ['IGSH-728 Update notes'], tickets: ['https://app.hypertask.ai/detail/project-2060/728'] }] }));
       }
       return spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
@@ -157,11 +156,11 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 5);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 4);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
-  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journey-gate\]/);
+  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: true$/m);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
@@ -186,7 +185,7 @@ test('release downloads exclude verification evidence from published update asse
   for (const [, inputs] of downloads) {
     const name = inputs.match(/^          name: (.+)$/m)?.[1];
     const destination = inputs.match(/^          path: (.+)$/m)?.[1];
-    if (['release-notes-source', 'release-journey-receipt'].includes(name)) {
+    if (name === 'release-notes-source') {
       assert.equal(destination, undefined);
       continue;
     }
@@ -198,7 +197,7 @@ test('release downloads exclude verification evidence from published update asse
       for (const file of files) fs.writeFileSync(path.join(directory, file), '');
     }
   }
-  const generated = ['multiprompt-extension.zip', 'release-notes.json', 'release-journeys.json', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig'];
+  const generated = ['multiprompt-extension.zip', 'release-notes.json', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig'];
   for (const file of generated) fs.writeFileSync(path.join(f.dir, 'dist', file), '');
   const result = f.run('Publish release');
   assert.equal(result.status, 0, result.stderr);
@@ -212,7 +211,7 @@ test('release builds both architectures independently of the report-only Tests w
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.build, /needs: prepare/);
-  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation, journey-gate\]/);
+  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.doesNotMatch(jobs.release.split('    steps:')[0], /update-test|test-result/);
   const tests = readWorkflow('test.yml');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
@@ -437,7 +436,6 @@ test('packaging includes extension contents, excludes current themes and covers 
   fs.writeFileSync(path.join(f.dir, 'extension/manifest.json'), '{}');
   fs.writeFileSync(path.join(f.dir, 'extension/.included'), 'included');
   for (const name of ['multiprompt-x64.exe', 'multiprompt-arm64.exe', 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe']) fs.writeFileSync(path.join(f.dir, 'dist', name), name);
-  fs.writeFileSync(path.join(f.dir, 'dist/release-journeys.json'), JSON.stringify({ status: 'passed', sha: f.sha, features: [] }));
   const result = f.run('Package extension and checksums');
   assert.equal(result.status, 0, result.stderr);
   const entries = execFileSync('unzip', ['-Z1', 'dist/multiprompt-extension.zip'], { cwd: f.dir, encoding: 'utf8' });
@@ -446,8 +444,7 @@ test('packaging includes extension contents, excludes current themes and covers 
   assert.match(entries, /themes\/kept.json/);
   assert.doesNotMatch(entries, /themes\/current/);
   const sums = fs.readFileSync(path.join(f.dir, 'dist/SHA256SUMS.txt'), 'utf8');
-  assert.equal(sums.trim().split('\n').length, 7);
-  assert.match(sums, /^[a-f0-9]{64}  release-journeys\.json$/m);
+  assert.equal(sums.trim().split('\n').length, 6);
   assert.match(sums, /^[a-f0-9]{64}  release-notes\.json$/m);
   execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: path.join(f.dir, 'dist') });
 });

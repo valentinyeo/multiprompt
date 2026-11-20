@@ -4,7 +4,7 @@ Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.z
 
 Verify on: push
 
-The release gate for one failure class: a bug that only shows when the app starts again on real saved sessions (IGSH-890 listed every starred session twice and kept adding more; every check had only started the app once on an empty profile).
+The relaunch check for one failure class: a bug that only shows when the app starts again on real saved sessions (IGSH-890 listed every starred session twice and kept adding more; every check had only started the app once on an empty profile).
 
 ## Sub-features
 
