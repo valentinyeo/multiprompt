@@ -2,9 +2,13 @@ name: Release diagnostics
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 5 * * *'
+    - cron: '48 4 * * *'
 permissions:
   contents: read
+concurrency:
+  group: release-diagnostics-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publication-proof:
     runs-on: ubuntu-latest
