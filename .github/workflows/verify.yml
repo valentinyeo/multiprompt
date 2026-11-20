@@ -129,14 +129,6 @@ on:
         type: string
   workflow_call:
     inputs:
-      base_cache:
-        description: Publish complete baseline evidence for reuse by another PR
-        type: boolean
-        default: false
-      harness_version:
-        description: Content hash of the baseline journey harness
-        type: string
-        default: ''
       features:
         description: JSON array of mapped journeys sharing one application build
         required: false
@@ -1188,32 +1180,6 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
-      - name: Check out the workflow's baseline cache tooling
-        if: always() && inputs.base_cache && inputs.app_revision != ''
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.sha }}
-          path: base-cache-tools
-          sparse-checkout: tools
-          persist-credentials: false
-      - name: Seal complete baseline evidence for reuse
-        id: base-cache
-        if: always() && inputs.base_cache && inputs.app_revision != ''
-        env:
-          VARIANT: ${{ toJSON(matrix) }}
-          HARNESS_VERSION: ${{ inputs.harness_version }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: node base-cache-tools/tools/base-journey-cache.cjs stamp evidence
-      - name: Store reusable baseline evidence
-        if: always() && steps.base-cache.outputs.name != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ${{ steps.base-cache.outputs.name }}
-          path: evidence/
-          overwrite: true
-          retention-days: 7
-          if-no-files-found: error
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

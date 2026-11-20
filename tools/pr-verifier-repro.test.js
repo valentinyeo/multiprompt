@@ -2,29 +2,31 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const verifier = require('./pr-verifier.cjs');
 
-function finish(pr, baseStatus, headStatus = 'passed', extra = {}) {
-  const selection = verifier.validateSelection({ features: ['appearance'], compare_base: false }, ['appearance'], pr);
+function finish(pr, masterFails = false, headStatus = 'passed', extra = {}) {
+  const selection = verifier.validateSelection({ features: ['appearance'] }, ['appearance'], pr);
   const run = status => ({ status, artifact: 'verify-appearance', error: status === 'failed' ? 'wrong visible appearance' : '', screenshots: ['after.png'], ...extra });
-  return verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40),
-    summary: { head: { appearance: [run(headStatus)] }, base: { appearance: baseStatus ? [run(baseStatus)] : [] } }, selection, runUrl: 'https://example.test/run' });
+  const summary = { head: { appearance: [run(headStatus)] } };
+  if (masterFails) summary.masterFailures = ['appearance'];
+  return verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
 }
 
 const fix = { title: 'fix(settings): preserve appearance', body: 'Repro journey: `appearance`' };
 
 test('a repair PR passes on its touched journey without a named repro', () => {
   for (const pr of [fix, { title: 'Settings repair', labels: [{ name: 'bug' }], body: fix.body }]) {
-    for (const baseStatus of [undefined, 'passed', 'failed']) {
-      assert.equal(finish(pr, baseStatus).final, 'PASS', JSON.stringify(pr));
+    for (const masterFails of [false, true]) {
+      assert.equal(finish(pr, masterFails).final, 'PASS', JSON.stringify(pr));
     }
   }
 });
 
 test('a declared repro line never changes the selection', () => {
-  const declared = verifier.validateSelection({ features: ['sessions'], compare_base: false }, ['appearance', 'sessions'], fix);
-  const undeclared = verifier.validateSelection({ features: ['sessions'], compare_base: false }, ['appearance', 'sessions'], { title: 'Bug fix: settings' });
+  const declared = verifier.validateSelection({ features: ['sessions'] }, ['appearance', 'sessions'], fix);
+  const undeclared = verifier.validateSelection({ features: ['sessions'] }, ['appearance', 'sessions'], { title: 'Bug fix: settings' });
   assert.deepEqual(declared.features, ['sessions']);
   assert.deepEqual(undeclared.features, ['sessions']);
-  assert.equal(declared.compareBase, true);
+  assert.equal(declared.bugFix, true);
+  assert.equal(undeclared.bugFix, true);
 });
 
 test('a repair label adds no journey when the diff maps to none', () => {
@@ -34,13 +36,13 @@ test('a repair label adds no journey when the diff maps to none', () => {
   ]) {
     const selection = verifier.validateSelection({ features: [] }, ['appearance'], pr);
     assert.deepEqual(selection.features, [], JSON.stringify(pr));
-    const result = verifier.finalize({ verdict: { verdict: 'PASS' }, selection, summary: { head: {}, base: {} } });
+    const result = verifier.finalize({ verdict: { verdict: 'PASS' }, selection, summary: { head: {} } });
     assert.notEqual(result.final, 'FAIL', JSON.stringify(pr));
   }
 });
 
-test('a PR that is not a repair keeps the optional baseline behaviour', () => {
-  assert.equal(finish({ title: 'Document appearance' }, undefined).final, 'PASS');
+test('a PR that is not a repair passes on its touched journey', () => {
+  assert.equal(finish({ title: 'Document appearance' }).final, 'PASS');
 });
 
 test('the CLI selects only touched sources and publishes a passing verdict without a repro', { skip: process.platform === 'win32' }, () => {
@@ -74,13 +76,12 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     run(['prepare', dir]);
     assert.equal(fs.existsSync(path.join(dir, 'mapped.json')), true, 'Preparation saves the touched-source selection');
     assert.equal(fs.existsSync(path.join(dir, 'diff.patch')), true, 'Preparation saves the actual diff for independent CI-only review');
-    const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [], compare_base: false }) });
+    const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [] }) });
     assert.match(selected, /features=\[\]/);
-    assert.doesNotMatch(selected, /repro_features/);
-    assert.match(run(['failed-head'], { FEATURES: '[]', RUN_ID: '1' }), /features=\[\]/);
+    assert.doesNotMatch(selected, /repro_features|base_features/);
     const selectionFile = path.join(dir, 'selection.json');
     const summary = path.join(dir, 'summary.json');
-    fs.writeFileSync(summary, JSON.stringify({ head: {}, base: {} }));
+    fs.writeFileSync(summary, JSON.stringify({ head: {} }));
     assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=PASS\+NOTES/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -89,9 +90,9 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
 
 const ciFix = { title: 'SOFT-2728: Fix master red checks' };
 const ciSelection = (extra = {}) => ({ ...verifier.validateSelection({ features: [] }, ['appearance'], ciFix), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [], ...extra });
-const ciReceipt = (extra = {}) => ({ head: {}, base: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }] });
+const ciReceipt = (extra = {}) => ({ head: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }] });
 const ciFinish = (selection, summary) => verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
-const passing = { head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] }, base: {} };
+const passing = { head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] } };
 
 test('a repair whose files are all owned by a CI workflow passes when that receipt shows base red and head green', () => {
   const result = ciFinish(ciSelection(), ciReceipt());
@@ -100,7 +101,7 @@ test('a repair whose files are all owned by a CI workflow passes when that recei
 });
 
 test('a CI receipt is not a repro when base stayed green, head is red, or the receipt is missing', () => {
-  for (const summary of [ciReceipt({ base_exit_code: 0 }), ciReceipt({ head_exit_code: 1 }), ciReceipt({ base_exit_code: null }), { head: {}, base: {} }, { head: {}, base: {}, ciRepro: [{ workflow: 'other.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0 }] }]) {
+  for (const summary of [ciReceipt({ base_exit_code: 0 }), ciReceipt({ head_exit_code: 1 }), ciReceipt({ base_exit_code: null }), { head: {} }, { head: {}, ciRepro: [{ workflow: 'other.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0 }] }]) {
     assert.equal(ciFinish(ciSelection(), summary).final, 'FAIL', JSON.stringify(summary));
   }
 });
@@ -125,7 +126,7 @@ test('a leftover nearest field never turns a proven CI receipt into a missing jo
 
 test('a PR that is not a repair never needs the CI receipt', () => {
   const selection = { ...ciSelection(), ...verifier.validateSelection({ features: [] }, ['appearance'], { title: 'Document appearance' }), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [] };
-  assert.notEqual(ciFinish(selection, { head: {}, base: {} }).final, 'FAIL');
+  assert.notEqual(ciFinish(selection, { head: {} }).final, 'FAIL');
 });
 
 test('summarize carries the repro of each selected CI workflow from its raw summary', () => {
@@ -137,14 +138,14 @@ test('summarize carries the repro of each selected CI workflow from its raw summ
   try {
     fs.mkdirSync(path.join(dir, 'evidence/ci-repair-receipt'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'evidence/ci-repair-receipt/summary.json'), JSON.stringify({ repro: { part: 'tools', base_exit_code: 1, head_exit_code: 0 } }));
-    fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features: [], ciWorkflows: ['ci-repair-receipt.yml'], compareBase: false }));
+    fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features: [], ciWorkflows: ['ci-repair-receipt.yml'] }));
     fs.writeFileSync(path.join(dir, 'pr.json'), JSON.stringify({ headRefOid: 'a'.repeat(40) }));
     fs.writeFileSync(path.join(dir, 'ci-workflows.json'), '[]');
     fs.mkdirSync(path.join(dir, 'evidence'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'evidence/ci-workflows.json'), JSON.stringify([{ workflow: 'ci-repair-receipt.yml', artifact: 'ci-repair-receipt', head_sha: 'a'.repeat(40), conclusion: 'success' }]));
     fs.writeFileSync(path.join(dir, 'ci.json'), JSON.stringify({ checks: [{ head_sha: 'a'.repeat(40) }] }));
     fs.writeFileSync(path.join(dir, 'diff.patch'), 'diff');
-    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), 'b'.repeat(40), dir], { encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), dir], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'summary.json'), 'utf8')).ciRepro, [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0 }]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

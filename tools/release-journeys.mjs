@@ -4,14 +4,22 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { discoverFeatures, journeyMatrix } from './verify-features.cjs';
-import { featureDirPattern } from './pr-verifier.cjs';
+import { runJobs } from './verification-jobs.cjs';
 import { readTree, runtimeZigTokens } from './version-stamp.mjs';
 
 const mapDirectory = '.claude/skills/verify-multiprompt/features';
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const git = args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
-const api = route => JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', route], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+const pause = milliseconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+
+export function retryRead(read, wait = pause) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try { return read(); } catch (error) { if (attempt === 3) throw error; wait(attempt * 2000); }
+  }
+}
+
+const api = route => retryRead(() => JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', route], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })));
 const productPath = file => /^(?:src\/|extension\/|service\/|shared\/|assets\/|build\.zig$)/.test(file);
 
 export function releaseMaps(directory = mapDirectory) {
@@ -79,7 +87,6 @@ function evidenceNames(journey) {
 }
 
 const oneLine = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-const variantKey = (journey, evidence) => evidence.slice(`verify-${journey}`.length);
 
 function readEvidenceFile(file) {
   try { return { ok: true, value: readJson(file) }; }
@@ -104,23 +111,26 @@ function journeyVerdict(root, journey) {
   return { outcome: 'passed' };
 }
 
-function baseEvidence(directory, journey) {
-  const names = fs.existsSync(directory) ? fs.readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort() : [];
-  const evidence = new Map();
-  for (const name of names) {
-    const match = name.match(featureDirPattern(journey));
-    if (!match?.[1]) continue;
-    const key = variantKey(journey, name.replace(`-${match[1]}`, ''));
-    if (evidence.has(key)) continue;
-    const provenance = readEvidenceFile(path.join(directory, name, 'recorded.json'));
-    if (!provenance.ok && !provenance.missing) { evidence.set(key, { outcome: 'unreadable', detail: 'recorded.json is unreadable' }); continue; }
-    evidence.set(key, {
-      revision: oneLine(provenance.value?.revision) || match[1],
-      run: oneLine(provenance.value?.run),
-      ...journeyVerdict(path.join(directory, name), journey),
-    });
+const journeyJob = name => name.match(/^(?:release \/ journeys \/ )?verify \(([^,)]+)(?:, [^)]*)?\)$/)?.[1];
+const ancestor = (sha, head) => {
+  try { git(['merge-base', '--is-ancestor', sha, head]); return true; } catch (error) { if (error.status === 1) return false; throw error; }
+};
+
+export function journeyWitnesses(plan, repo, jobs = runJobs, runs = api) {
+  const nightly = runs(`repos/${repo}/actions/workflows/verify.yml/runs?branch=master&status=completed&event=schedule&per_page=20`)[0]?.workflow_runs?.find(run => /^[0-9a-f]{40}$/.test(run.head_sha || '') && ancestor(run.head_sha, plan.sha));
+  const published = runs(`repos/${repo}/actions/workflows/auto-release.yml/runs?status=success&per_page=20`)[0]?.workflow_runs?.find(run => run.head_sha === plan.base);
+  const witnesses = new Map();
+  for (const run of [nightly, published].filter(Boolean)) {
+    for (const job of jobs(repo, run.id)) {
+      const journey = journeyJob(job.name);
+      if (!journey) continue;
+      const outcome = job.conclusion === 'success' ? 'passed' : 'failed';
+      if (outcome === 'passed' && witnesses.has(journey)) continue;
+      if (witnesses.get(journey)?.outcome === 'failed') continue;
+      witnesses.set(journey, { outcome, run: run.html_url, revision: run.head_sha });
+    }
   }
-  return evidence;
+  return witnesses;
 }
 
 export function checkEvidence(plan, directory, candidate, artifacts, runUrl, probe = file => {
@@ -128,21 +138,19 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
   const video = JSON.parse(json);
   if (video.streams?.length !== 1 || !(video.streams[0].width > 0) || !(video.streams[0].height > 0) || !(Number(video.format?.duration) > 0)) throw new Error('Unreadable video');
   execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', file, '-f', 'null', '-'], { stdio: 'pipe', timeout: 120000 });
-}) {
+}, witnesses = new Map()) {
   const hash = digest(candidate);
-  const journeys = [...new Set(plan.features.flatMap(feature => feature.journeys))];
-  const bases = new Map(journeys.map(journey => [journey, baseEvidence(directory, journey)]));
-  const blocked = detail => ({ ok: false, kind: 'unreadable', detail });
+  const blocked = detail => ({ ok: false, kind: 'broken', detail });
   const inspect = (name, journey) => {
     const root = path.join(directory, name);
-    if (!fs.existsSync(root)) return blocked('the journey produced no evidence in this run');
+    if (!fs.existsSync(root)) return { ok: false, kind: 'missing', detail: 'the journey produced no evidence in this run' };
     const build = readEvidenceFile(path.join(root, 'build.json')).value;
     if (!build) return blocked('build.json is missing or unreadable');
     if (build.revision !== plan.sha || build.harnessRevision !== plan.sha || build.embeddedRevision !== plan.sha || build.sha256 !== hash || build.run !== runUrl || build.candidate !== true) return blocked('build.json does not describe this release candidate');
     const verdict = journeyVerdict(root, journey);
-    if (verdict.outcome !== 'passed') return { ok: false, kind: verdict.outcome, detail: verdict.detail };
+    if (verdict.outcome !== 'passed') return { ok: false, kind: verdict.outcome === 'failed' ? 'failed' : 'broken', detail: verdict.detail };
     const result = readEvidenceFile(path.join(root, 'result.json')).value;
-    if (result.sha256 !== hash) return blocked('result.json does not describe this release candidate');
+    if (result.sha256 && result.sha256 !== hash) return blocked('result.json describes a different executable');
     if (result.scratchRemoved === false) return blocked('the journey left its scratch directory behind');
     const tree = path.join(root, 'process-tree.json');
     if (fs.existsSync(tree)) {
@@ -167,19 +175,22 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
       const label = name => names.length > 1 ? `${journey} (${name})` : journey;
       const recorded = names.map(name => ({ name, ...inspect(name, journey) }));
       if (recorded.every(item => item.ok)) { features.push(...recorded.map(item => ({ ...feature, ...item.record }))); continue; }
-      for (const item of recorded.filter(entry => !entry.ok && entry.kind === 'unreadable')) failures.push(`${label(item.name)}: evidence unreadable (${item.detail})`);
-      const inheritedHere = [];
-      for (const item of recorded.filter(entry => !entry.ok && entry.kind === 'failed')) {
-        const base = bases.get(journey)?.get(variantKey(journey, item.name));
-        if (base?.outcome === 'failed') { inheritedHere.push(item.name); continue; }
-        failures.push(base?.outcome === 'passed'
-          ? `${label(item.name)}: fails here (${item.detail}) and passed at \`${plan.base.slice(0, 9)}\``
-          : `${label(item.name)}: fails here (${item.detail}) and no readable base evidence proves it already failed`);
+      const notPassed = recorded.filter(item => !item.ok);
+      for (const item of notPassed.filter(entry => entry.kind === 'broken')) failures.push(`${label(item.name)}: evidence unreadable (${item.detail})`);
+      if (notPassed.some(entry => entry.kind === 'broken')) continue;
+      const witness = witnesses.get(journey);
+      if (witness?.outcome === 'passed') {
+        const revision = oneLine(witness.revision) || plan.base;
+        for (const item of notPassed) failures.push(`${label(item.name)}: fails here (${item.detail}) and passed at \`${revision.slice(0, 9)}\``);
+        continue;
       }
-      if (inheritedHere.length) {
-        const witness = bases.get(journey)?.get(variantKey(journey, inheritedHere[0]));
-        inherited.push({ feature: feature.feature, journey, evidence: inheritedHere.join(', '), revision: witness.revision, run: witness.run });
-      }
+      inherited.push({
+        feature: feature.feature,
+        journey,
+        evidence: notPassed.map(item => item.name).join(', '),
+        revision: oneLine(witness?.revision),
+        run: oneLine(witness?.run),
+      });
     }
     if (failures.length) missing.push(`${feature.feature} (${failures.join('; ')})`);
   }
@@ -189,53 +200,11 @@ export function checkEvidence(plan, directory, candidate, artifacts, runUrl, pro
 
 export function evidenceNotes(receipt) {
   if (receipt.status !== 'passed') throw new Error('Release journey receipt did not pass');
-  const already = receipt.inherited?.length
-    ? `\n## Already failing before this release\n\n${receipt.inherited.map(item => `- ${item.feature}: [${item.journey} was already failing](${item.run || `${receipt.run}/artifacts`})${item.revision ? ` at \`${item.revision.slice(0, 9)}\`` : ''}`).join('\n')}\n`
-    : '';
-  return `${already}\n## Verified release journeys\n\n${receipt.features.length ? receipt.features.map(feature => `- ${feature.feature}: [${feature.evidence.replace(/^verify-/, '')} video](${feature.video}) (\`${feature.file}\`)`).join('\n') : '- none; every selected journey already failed on master before this release'}\n`;
-}
-
-const ancestor = (sha, head) => {
-  try { git(['merge-base', '--is-ancestor', sha, head]); return true; } catch (error) { if (error.status === 1) return false; throw error; }
-};
-
-function download(repo, artifact, target) {
-  fs.rmSync(target, { recursive: true, force: true });
-  const archive = `${target}.zip`;
-  try {
-    const fd = fs.openSync(archive, 'w');
-    try { execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'inherit'] }); } finally { fs.closeSync(fd); }
-    execFileSync('unzip', ['-q', archive, '-d', target], { stdio: 'inherit' });
-  } finally { fs.rmSync(archive, { force: true }); }
-}
-
-export function restoreRecordedFailures(plan, directory, repo) {
-  const masterRunsSearched = 5;
-  const journeys = [...new Set(plan.features.flatMap(feature => feature.journeys))];
-  const unproven = journey => evidenceNames(journey).some(name => journeyVerdict(path.join(directory, name), journey).outcome !== 'passed');
-  const pending = journeys.filter(unproven);
-  if (!pending.length) return [];
-  const wanted = new Map(pending.flatMap(journey => evidenceNames(journey).map(name => [name, journey])));
-  const runs = api(`repos/${repo}/actions/workflows/verify.yml/runs?branch=master&status=completed&per_page=20`)[0].workflow_runs
-    .filter(run => /^[0-9a-f]{40}$/.test(run.head_sha || '') && run.head_sha !== plan.sha && ancestor(run.head_sha, plan.sha)).slice(0, masterRunsSearched);
-  const restored = [];
-  const complete = () => pending.every(journey => evidenceNames(journey).every(name => restored.some(item => item.evidence === name)));
-  for (const run of runs) {
-    for (const artifact of api(`repos/${repo}/actions/runs/${run.id}/artifacts?per_page=100`).flatMap(page => page.artifacts)) {
-      const journey = wanted.get(artifact.name);
-      if (!journey || artifact.expired || restored.some(item => item.evidence === artifact.name)) continue;
-      const target = path.join(directory, artifact.name.replace(`verify-${journey}`, `verify-${journey}-${run.head_sha}`));
-      try {
-        download(repo, artifact, target);
-        if (journeyVerdict(target, journey).outcome !== 'failed') { fs.rmSync(target, { recursive: true, force: true }); continue; }
-        const record = { journey, evidence: artifact.name, revision: run.head_sha, run: `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${run.id}`, artifact: artifact.id };
-        fs.writeFileSync(path.join(target, 'recorded.json'), JSON.stringify(record, null, 2));
-        restored.push(record);
-      } catch (error) { process.stderr.write(`Recorded ${artifact.name} not restored: ${error.message}\n`); fs.rmSync(target, { recursive: true, force: true }); }
-    }
-    if (complete()) break;
-  }
-  return restored;
+  const failing = receipt.inherited ?? [];
+  const section = (title, items, line) => items.length ? `\n## ${title}\n\n${items.map(line).join('\n')}\n` : '';
+  const before = section('Already failing before this release', failing.filter(item => item.run), item => `- ${item.feature}: [${item.journey} was already failing](${item.run})${item.revision ? ` at \`${item.revision.slice(0, 9)}\`` : ''}`);
+  const unrecorded = section('Failing on the candidate, unrecorded at the base', failing.filter(item => !item.run), item => `- ${item.feature}: ${item.journey} failed on the candidate and no base run recorded it`);
+  return `${before}${unrecorded}\n## Verified release journeys\n\n${receipt.features.length ? receipt.features.map(feature => `- ${feature.feature}: [${feature.evidence.replace(/^verify-/, '')} video](${feature.video}) (\`${feature.file}\`)`).join('\n') : '- none; every selected journey already failed on master before this release'}\n`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -252,20 +221,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const journeys = [...new Set(plan.features.flatMap(feature => feature.journeys))].sort();
       if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `features=${JSON.stringify(journeys)}\n`);
       console.log(JSON.stringify(plan, null, 2));
-    } else if (command === 'recorded' && args.length === 2) {
-      const [planFile, directory] = args;
-      const restored = restoreRecordedFailures(readJson(planFile), directory, repo);
-      for (const item of restored) console.log(`RECORDED_FAILURE ${item.journey} ${item.evidence} at ${item.revision} from ${item.run}`);
-      if (process.env.GITHUB_STEP_SUMMARY && restored.length) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Already failing on master: ${[...new Set(restored.map(item => item.journey))].join(', ')}\n`);
     } else if (command === 'check' && args.length === 4) {
       const [planFile, directory, candidate, output] = args;
       const runUrl = `${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
       const artifacts = api(`repos/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}/artifacts?per_page=100`).flatMap(page => page.artifacts);
-      const receipt = checkEvidence(readJson(planFile), directory, candidate, artifacts, runUrl);
+      const plan = readJson(planFile);
+      const witnesses = journeyWitnesses(plan, repo);
+      for (const [journey, witness] of [...witnesses].sort()) console.log(`BASE_JOURNEY ${journey} ${witness.outcome} at ${witness.run}`);
+      const receipt = checkEvidence(plan, directory, candidate, artifacts, runUrl, undefined, witnesses);
       fs.writeFileSync(output, JSON.stringify(receipt, null, 2));
       fs.writeFileSync(`${output}.md`, evidenceNotes(receipt));
       console.log('RELEASE_JOURNEYS_PASS', JSON.stringify(receipt));
-    } else throw new Error('Usage: release-journeys.mjs plan <sha> <output> [published-base] | recorded <plan> <evidence> | check <plan> <evidence> <candidate> <output>');
+    } else throw new Error('Usage: release-journeys.mjs plan <sha> <output> [published-base] | check <plan> <evidence> <candidate> <output>');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
