@@ -947,12 +947,6 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = SetTextColor(hdc, if (layout.model_amber) RGB(0xF0, 0xB4, 0x5A) else grey);
         var model_rc = layout.model_text;
         _ = @import("dwrite_text.zig").draw(hdc, layout.model_line.ptr, @intCast(layout.model_line.len), &model_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (@import("diagnostics.zig").verboseLoggingEnabled()) {
-            var text_buf: [480]u8 = undefined;
-            const text_len = std.unicode.utf16LeToUtf8(&text_buf, layout.model_line) catch 0;
-            var log_buf: [640]u8 = undefined;
-            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] header model rect={d},{d},{d},{d} title_bottom={d} amber={} text={s}", .{ layout.model_text.left, layout.model_text.top, layout.model_text.right, layout.model_text.bottom, layout.text.bottom, layout.model_amber, text_buf[0..text_len] }) catch "[chat] header model unavailable");
-        }
     }
     paintTitleInboxButton(hdc, layout.inbox, border, fill, edge);
     paintMoreButton(hdc, layout.more, border, fill, edge);
