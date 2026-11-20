@@ -4014,6 +4014,27 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
 
+    def test_soft_2989_refused_phone_message_carries_exact_reason_to_status_reply(self):
+        self.submit()
+        with patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'not_sent', 'reason': 'draft_present'}):
+            self.request('dispatch')
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('draft_present', message['receipt'])
+
+    def test_soft_2989_connector_not_sent_without_facts_keeps_reason_in_status_reply(self):
+        connector = dict(
+            capabilities=lambda ctx: dict(protocol=1, provider='claude'),
+            submit=lambda ctx, row, state, services: dict(handoff='not_sent', facts=[], state=state, reason='draft_present'),
+        )
+        self.submit()
+        with patch.object(reader, 'message_connector', return_value=connector):
+            self.request('dispatch')
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertNotEqual(message['receipt'], 'not_sent')
+        self.assertIn('draft_present', message['receipt'])
+
     def test_remove_works_for_failed_unknown_and_reset_messages(self):
         self.submit()
         with patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'not_sent', 'reason': 'draft_present'}):
