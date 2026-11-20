@@ -38,6 +38,7 @@ END = "@@MP_END@@"
 PAGE_BYTES = 350000
 SCAN_BYTES = 512 * 1024
 TAIL_BYTES = 512 * 1024
+TAIL_VISIBLE_BYTES = 4 * TAIL_BYTES
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
 STATUS_CACHE = {}
 QUEUE_CACHE = {}
@@ -1129,14 +1130,39 @@ def asks_question(raw, agent):
     return message is not None and message.get("role") == "user"
 
 
+def tail_visible_start(agent, start, older, base, end, data):
+    offset = base
+    visible_at = None
+    for raw in reversed(older.splitlines(keepends=True)):
+        offset -= len(raw)
+        if end - offset > TAIL_VISIBLE_BYTES:
+            break
+        messages = conversation_rows(load_line(raw), agent, offset)
+        if any(row["role"] == "user" for row in messages):
+            return offset, end, older[offset - start:] + data
+        if visible_at is None and any(row["role"] == "assistant" for row in messages):
+            visible_at = offset
+    if visible_at is not None:
+        return visible_at, end, older[visible_at - start:] + data
+    return base, end, data
+
+
 def read_tail(source, size, agent, captured=None, fill=True):
+    tail_page = fill
     fill = fill and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET
     base, end, data = read_window(source, size, captured=captured)
     if (not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or (not data and not fill) or
             (not fill and any(asks_question(raw, agent) for raw in data.splitlines()))):
         return base, end, data
     start, _, older = read_window(source, base, QUESTION_SCAN_BYTES - TAIL_BYTES, captured)
-    held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(load_line(raw), agent, base))
+    held = 0
+    visible = False
+    for raw in data.splitlines():
+        messages = conversation_rows(load_line(raw), agent, base)
+        held += sum(len(wire_row(row)) + 1 for row in messages)
+        visible = visible or any(row["role"] in ("user", "assistant") for row in messages)
+    if tail_page and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET and not visible:
+        return tail_visible_start(agent, start, older, base, end, data)
     fill = fill and held < TAIL_BYTES // 2
     shown = 0
     offset = base
@@ -1969,8 +1995,15 @@ def fit_tail(rows, oldest):
     budget = sum(len(wire_row(row)) + 1 for row in rows)
     if budget <= TAIL_BYTES or len(rows) < 2:
         return rows, oldest
+    newest = question = None
+    for index, row in enumerate(rows):
+        if row["role"] in ("user", "assistant"):
+            newest = index
+            if row["role"] == "user":
+                question = index
+    keep = question if question is not None else (newest or 0)
     start = 0
-    while budget > TAIL_BYTES and start + 1 < len(rows):
+    while budget > TAIL_BYTES and start + 1 < len(rows) and (start < keep or budget > TAIL_VISIBLE_BYTES):
         budget -= len(wire_row(rows[start])) + 1
         start += 1
     kept = rows[start:]
@@ -2115,8 +2148,17 @@ def response(q, source=None, as_owner=False, resolved=None):
         if tail_reuse == "append":
             rows, oldest = fit_tail(rows, oldest)
         elif tail_reuse != "exact" and mode != "delta" and budget > TAIL_BYTES and len(groups) > 1 and any(row["role"] in ("tool", "tool_result") for row in rows):
+            newest = question = None
+            for index, (_consumed, row_start, _cost) in enumerate(groups):
+                stop = groups[index + 1][1] if index + 1 < len(groups) else len(rows)
+                block = rows[row_start:stop]
+                if any(row["role"] in ("user", "assistant") for row in block):
+                    newest = index
+                    if any(row["role"] == "user" for row in block):
+                        question = index
+            keep = question if question is not None else (newest or 0)
             first = 0
-            while budget > TAIL_BYTES and first + 1 < len(groups):
+            while budget > TAIL_BYTES and first < keep and first + 1 < len(groups):
                 budget -= groups[first][2]
                 first += 1
             base, row_start, _cost = groups[first]
