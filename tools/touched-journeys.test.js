@@ -28,7 +28,7 @@ test('source-file mapping runs only the touched journeys', t => {
   const directory = maps(t);
   assert.deepEqual(touchedJourneys(['src/themes.zig'], directory), { features: ['appearance'], unmapped: [] });
   assert.deepEqual(touchedJourneys(['src/chat_input.zig', 'tools/drive-chat.ps1', 'src/panes.zig'], directory), { features: ['chat-view', 'pane-layout'], unmapped: [] });
-  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory).features, ['chat-view']);
+  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory), { features: [], unmapped: ['src/chat_inputXzig'] });
 });
 
 test('formal verification owns its files without selecting an unrelated desktop journey', t => {
@@ -58,11 +58,12 @@ test('the verifier preserves CI ownership in its execution plan', t => {
   assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /ci_workflows=\["chat-delivery-formal.yml"\]/);
 });
 
-test('unknown application files choose one nearest journey and disclose the gap', t => {
+test('unknown application files select no journey and disclose the gap', t => {
   const directory = maps(t);
-  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: ['appearance'], unmapped: ['src/new_feature.zig'], nearest: [{ file: 'src/new_feature.zig', feature: 'appearance' }] });
-  assert.equal(touchedJourneys(['extension/new.js'], directory).features.length, 1);
-  assert.equal(touchedJourneys(['.claude/skills/verify-multiprompt/new-driver.ps1'], directory).features.length, 1);
+  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: [], unmapped: ['src/new_feature.zig'] });
+  assert.deepEqual(touchedJourneys(['extension/new.js'], directory), { features: [], unmapped: ['extension/new.js'] });
+  assert.deepEqual(touchedJourneys(['.claude/skills/verify-multiprompt/new-driver.ps1'], directory), { features: [], unmapped: ['.claude/skills/verify-multiprompt/new-driver.ps1'] });
+  assert.deepEqual(touchedJourneys(['src/themes.zig', 'extension/new.js'], directory), { features: ['appearance'], unmapped: ['extension/new.js'] });
 });
 
 test('a changed feature map selects its own journey without broadening for CI edits', t => {
@@ -113,7 +114,7 @@ test('diff routing excludes only proven edits inside existing top-level Zig test
   save('themes.zig', original);
   save('new_feature.zig', 'test "new" {}\n');
   head = commit();
-  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance'], unmapped: ['src/new_feature.zig'], nearest: [{ file: 'src/new_feature.zig', feature: 'appearance' }] });
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: [], unmapped: ['src/new_feature.zig'] });
   fs.unlinkSync(path.join(root, 'src/themes.zig'));
   head = commit();
   assert.ok((await touchedJourneysForDiff(base, head, directory, root)).features.includes('appearance'));
@@ -231,7 +232,7 @@ test('mapped model and live-working journeys retain their chat-delivery driver',
   assert.doesNotMatch(shared, /CHAT_MODEL_PROOF/);
 });
 
-test('a required failing-master journey survives an empty diff selection and a picker that disables comparison', t => {
+test('an empty diff on a repair PR schedules no journey and compares no baseline', t => {
   const directory = maps(t);
   const out = path.join(directory, 'out');
   fs.mkdirSync(out);
@@ -242,13 +243,23 @@ test('a required failing-master journey survives an empty diff selection and a p
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
-  assert.deepEqual(selection.features, ['appearance']);
-  assert.equal(selection.compareBase, true);
-  assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /repro_features=\["appearance"\]/);
+  assert.deepEqual(selection.features, []);
+  assert.equal(selection.compareBase, false);
+  const outputs = fs.readFileSync(path.join(directory, 'output'), 'utf8');
+  assert.match(outputs, /features=\[\]/);
+  assert.doesNotMatch(outputs, /repro_features/);
 });
 
 test('SOFT-2762 session-actions owns its hosted driver and fixtures', () => {
   const real = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
   assert.deepEqual(touchedJourneys(['tools/verify-session-actions/drive.ps1'], real), { features: ['session-actions'], unmapped: [] });
   assert.deepEqual(touchedJourneys(['tools/fixtures/SOFT-2762/sidebar-row-rect.log'], real), { features: ['session-actions'], unmapped: [] });
+});
+
+test('SOFT-2890 the test CLI selects its own workflow, not a desktop journey', () => {
+  const real = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  for (const file of ['tools/mbv.mjs', 'tools/fixtures/SOFT-2755/result-passed.json', '.github/workflows/verify-cli.yml', '.claude/skills/verify-multiprompt/features/verify-cli.md']) {
+    assert.deepEqual(touchedJourneys([file], real), { features: [], unmapped: [], ciWorkflows: ['verify-cli.yml'] }, `${file} must run the CLI check and no desktop journey`);
+  }
+  assert.deepEqual(touchedJourneys(['tools/mbv.mjs', 'src/themes.zig'], real), { features: ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card'], unmapped: [], ciWorkflows: ['verify-cli.yml'] });
 });

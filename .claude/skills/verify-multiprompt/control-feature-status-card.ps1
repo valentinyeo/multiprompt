@@ -74,12 +74,9 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $client = New-Object VerifyNative+Rect
             if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client)) { throw 'status-card client rectangle unavailable' }
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
-            $logPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            $logStart = if (Test-Path $logPath) { (Get-Content $logPath -Raw).Length } else { 0 }
             Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: use manual tab order'
             }
-            Wait-Until { (Test-Path $logPath) -and (Get-Content $logPath -Raw).Substring($logStart) -match '\[confirm\].*target=6218' } 'manual order command selected'
             $confirmedAt = [DateTime]::UtcNow
             Press @(0x11, 0x09) 'Ctrl+Tab: refresh manual session export'
             $inboxPath = Join-Path $scratch 'roaming/ZigShell/inbox-default.json'

@@ -28,21 +28,7 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
     }
     if (!matches.length) unmapped.push(file);
   }
-  const nearest = [];
-  if (!selected.size && !ciWorkflows.size && files.length) {
-    const tokens = value => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2 && !['src', 'tools', 'github', 'workflows', 'claude', 'skill', 'skills', 'verify', 'multiprompt', 'feature', 'features', 'control', 'test', 'readme', 'zig', 'ps1', 'cjs', 'mjs', 'yml'].includes(word)));
-    const ranked = maps.filter(map => !map.ciWorkflow).flatMap(map => {
-      const names = tokens(map.feature);
-      const sources = tokens(map.sources.join(' '));
-      return (unmapped.length ? unmapped : files).map(file => {
-        const score = [...tokens(file)].reduce((sum, word) => sum + (names.has(word) ? 10 : 0) + (sources.has(word) ? 1 : 0), 0);
-        return { feature: map.feature, file, score };
-      });
-    }).sort((a, b) => b.score - a.score || Number(b.feature === 'appearance') - Number(a.feature === 'appearance') || a.feature.localeCompare(b.feature) || a.file.localeCompare(b.file));
-    selected.add(ranked[0].feature);
-    nearest.push({ file: ranked[0].file, feature: ranked[0].feature });
-  }
-  return { features: [...selected].sort(), unmapped, ...(nearest.length ? { nearest } : {}), ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
+  return { features: [...selected].sort(), unmapped, ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
 }
 
 async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {

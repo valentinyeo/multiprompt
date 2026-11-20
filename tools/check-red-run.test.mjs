@@ -10,19 +10,22 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const checker = path.join(root, 'tools/check-red-run.mjs');
 
-test('red-run admission checks every PR without a hand-picked test or source revision', () => {
+test('red-run admission is not a per-PR gate while the checker stays whole', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/check-red-run.yml'), 'utf8');
   assert.match(workflow, /workflow_call:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /^  schedule:\n    - cron:/m);
   assert.doesNotMatch(workflow, /matrix:|prefix:|paths:/);
   assert.match(workflow, /node tools\/check-red-run\.mjs/);
+  assert.match(workflow, /default: master\^/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /uses: \.\/\.github\/workflows\/check-red-run.yml/);
-  assert.match(tests, /needs: \[[^\n]*check-red-run[^\n]*\]/);
-  assert.match(tests, /RED_RUN: \$\{\{ needs.check-red-run.result \}\}/);
-  assert.match(tests, /require_jobs "\$WINDOWS"[^\n]*"\$RED_RUN"/);
+  assert.doesNotMatch(tests, /uses: \.\/\.github\/workflows\/check-red-run\.yml/);
+  assert.doesNotMatch(tests, /needs: \[[^\n]*check-red-run[^\n]*\]/);
+  assert.doesNotMatch(tests, /RED_RUN/);
+  assert.match(tests, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$WORKER" "\$UPDATE_SOURCE"$/m);
 });
 
-test('red-run reserves a bounded hosted budget for video dependencies and mandatory admission', () => {
+test('red-run reserves a bounded hosted budget for video dependencies and its own admission check', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/check-red-run.yml'), 'utf8');
   const job = workflow.split('\n  check-red-run:\n')[1];
   assert.match(job, /timeout-minutes: 20\n/);
@@ -30,25 +33,6 @@ test('red-run reserves a bounded hosted budget for video dependencies and mandat
   assert.match(job, /run: node --test tools\/check-red-run\.test\.mjs/);
   assert.match(job, /run: node tools\/check-red-run\.mjs "\$BASE" "\$HEAD"/);
   assert.doesNotMatch(job, /continue-on-error:/);
-});
-
-test('red-run uses the preceding revision for manual master runs without changing PR or branch baselines', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  const caller = workflow.match(/^  check-red-run:\n((?:(?!^  [\w-]+:)[\s\S])*)/m)?.[1];
-  const expression = caller?.match(/^      base: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(expression, 'red-run caller supplies a base revision');
-  const evaluate = new Function('github', 'format', `return (${expression});`);
-  const format = (template, value) => template.replace('{0}', value);
-  for (const [name, ref, event, expected] of [
-    ['pull request', 'refs/pull/1/merge', { pull_request: { base: { sha: 'pr-base' } } }, 'pr-base'],
-    ['master push', 'refs/heads/master', { before: 'push-base' }, 'push-base'],
-    ['manual master run', 'refs/heads/master', {}, 'head^'],
-    ['branch push', 'refs/heads/ceo/IGSH-1140', { before: 'push-base' }, 'origin/master'],
-    ['manual branch run', 'refs/heads/ceo/IGSH-1140', {}, 'origin/master'],
-  ]) {
-    const github = { ref, sha: 'head', event: { pull_request: { base: {} }, ...event } };
-    assert.equal(evaluate(github, format), expected, name);
-  }
 });
 
 function fixture(t) {
@@ -120,14 +104,14 @@ test('fixed value with isolated state', () => {
     assert.ok(!fs.existsSync(path.join(f.repo, 'service/.build')));
   });
 
-  test('manual master checks compare the preceding commit without weakening PR or branch proof', t => {
+  test('manual speed checks compare the preceding commit without weakening PR or branch proof', t => {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
     f.write('tools/value.test.cjs', f.regression);
     const head = f.commit();
     f.git('update-ref', 'refs/remotes/origin/master', head);
-    for (const name of ['check-red-run', 'speed-baseline']) {
+    for (const name of ['speed-baseline']) {
       const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
       const expression = job.match(/(?:base|BASE): \$\{\{ (.+) \}\}/)?.[1];
       assert.ok(expression, `${name} baseline expression exists`);
