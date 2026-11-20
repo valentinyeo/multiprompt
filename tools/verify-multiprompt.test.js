@@ -2582,6 +2582,14 @@ Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
 });
 
 
+test('SOFT-2897 desktop driver clears a leaked child exit code after a passed result', () => {
+  const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
+  const verdict = driver.indexOf("if (-not (Test-Path evidence/result.json)) { throw 'Desktop journey produced no result.json' }");
+  const reset = driver.indexOf('$global:LASTEXITCODE = 0', verdict);
+  assert.ok(verdict >= 0 && reset > verdict, 'driver step must validate result.json before clearing LASTEXITCODE');
+  assert.match(driver.slice(verdict, reset + 1), /\$verdict\.status -ne 'passed'/);
+});
+
 test('IGSH-1176 browser warning times out before its job cancellation boundary', () => {
   const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
   assert.match(driver, /timeout-minutes: \$\{\{ env\.FEATURE == 'browser-pane-stuck' && 8 \|\|/);

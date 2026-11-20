@@ -393,6 +393,8 @@ fn clear() void {
 var test_outbox_key: []const u8 = "test";
 fn chatOutboxKeyForShell(_: u32, buf: []u8) []const u8 { @memcpy(buf[0..test_outbox_key.len], test_outbox_key); return buf[0..test_outbox_key.len]; }
 fn chatEchoRowLanded(_: anytype) bool { return false; }
+fn chatEchoTranscriptHasRow(_: anytype) bool { return false; }
+fn chatEchoRowKnown(e: anytype, force: bool) bool { return force or chatEchoRowLanded(e) or chatEchoTranscriptHasRow(e); }
 fn chatOutboxLegacyKeyForShell(_: u32, buf: []u8) []const u8 { return buf[0..0]; }
 fn chatBlockDisplayRange(_: []const u16, b: ChatBlock) struct { start: usize, len: usize } { return .{ .start = b.start, .len = b.len }; }
 var fake_now_ms: i64 = 2000;
