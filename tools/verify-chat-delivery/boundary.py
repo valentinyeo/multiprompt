@@ -1210,6 +1210,11 @@ def reader_namespace():
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
         fixture.install(namespace, ROOT, record)
+    if state().get("name") == "fresh-start":
+        spec = importlib.util.spec_from_file_location("fresh_start_host", Path(__file__).with_name("fresh-start-host.py"))
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1553,6 +1558,21 @@ def transport_reader():
 
 def serve_reader():
     namespace = reader_namespace()
+    if state().get("name") == "fresh-start":
+        value = state()
+        tmux = "verify-fresh-start"
+        sid = value["sids"][tmux]
+        index = value["sessions"].index(tmux)
+        cwd = value.get("cwds", {}).get(tmux, f"C:/verify/work{index}")
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(
+                enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
+                command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
     if state().get("name") == "model-settings":
         import hashlib
         sid = state()["sid"]

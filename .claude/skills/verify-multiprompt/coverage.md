@@ -189,6 +189,7 @@ The view-switch branch run https://github.com/valentinyeo/multiprompt/actions/ru
 
 | IGSH-928 | Skill pills | `chat-skill-pill` | Dark/light draft and sent-history pixels, plain and unknown controls; pre-fix release control required. |
 | IGSH-984 | Clickable answer options and question prompts | `chat-options` | Real mouse click on a reply option card and on a question prompt card; the console must receive the lettered answer and the option number; pre-change master control required. |
+| SOFT-2999 | Fresh start keeps the same Multibot chat | `fresh-start` | Hosted palette fresh start; same public sid/tmux/row/csid, new native_session, one sidebar row, handover visible. |
 
 ## IGSH-1590 reaction follow-up parity
 

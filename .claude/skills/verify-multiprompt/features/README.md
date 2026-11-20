@@ -112,6 +112,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
 - [Chat options](chat-options.md): only structured provider questions become cards, with multiple selection and Other; ordinary reply lists stay text.
+- [Fresh start](fresh-start.md): palette **Chat View: Fresh start** keeps sid, tmux, row name and layout `csid` while rotating the native session and showing the handover.
 - [Permission rows](permission-rows.md): hosted console-boundary clicks, shortcuts, receipts and screenshots; visual review remains required.
 - [Live chat commands](chat-slash.md): Plan and permission modes through the composer and Ctrl+K; unsupported commands never enter the outbox.
 - [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.

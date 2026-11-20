@@ -270,6 +270,16 @@ print('FRESH_START_PASS')
 `);
 });
 
+test('fresh start journey is wired in journey-commands and the verify feature map', () => {
+  const { commandCatalog } = require('./journey-commands.mjs');
+  const commands = commandCatalog();
+  assert.ok(commands['chat view: fresh start'], 'journey command missing for Chat View: Fresh start');
+  const feature = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/fresh-start.md'), 'utf8');
+  assert.match(feature, /## Driving it with control\.ps1/);
+  assert.match(feature, /control-feature-fresh-start\.ps1/);
+  assert.match(feature, /palette-fresh-start/);
+});
+
 test('fresh start is discoverable without adding message chrome or changing the target tab', () => {
   const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
