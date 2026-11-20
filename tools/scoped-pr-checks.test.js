@@ -39,7 +39,7 @@ test('the CI repair receipt is path-filtered, runs the base proof and does not b
   assert.match(source, /^  pull_request:\n    paths:/m);
   assert.match(source, /name: ci-repair-receipt\n/);
   assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
-  assert.doesNotMatch(map, /^CI workflow: /m);
+  assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
   for (const file of ['tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/ci-repair-receipt.yml']) {
     assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
   }

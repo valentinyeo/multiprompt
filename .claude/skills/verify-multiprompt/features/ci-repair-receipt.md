@@ -1,6 +1,7 @@
 # CI repair receipt
 
 Source files: tools/ci-receipt-summary.mjs, tools/strip-comments.mjs, .claude/skills/verify-multiprompt/features/README.md, .github/workflows/ci-repair-receipt.yml, .github/workflows/auto-release.yml, tools/reusable-workflow-permissions.test.js
+CI workflow: ci-repair-receipt.yml
 
 ## Sub-features
 
