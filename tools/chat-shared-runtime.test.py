@@ -158,6 +158,7 @@ class RuntimeTest(unittest.TestCase):
     def bundle(self):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
+            ('MP_FRESH_SOURCE', 'src/mp_fresh.py'),
             ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
             ('MP_SESSIONS_SOURCE', 'src/mp_sessions.py'),
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
