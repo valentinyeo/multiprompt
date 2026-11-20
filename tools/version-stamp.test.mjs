@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint } from './version-stamp.mjs';
+import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint, reviewedCommits } from './version-stamp.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
@@ -647,4 +647,28 @@ test('SOFT-2803 attributes the untagged master commits since v0.28.1762', () => 
     assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1781', [], [{ sha, subject }], ticketTitles); });
     assert.match(generated, new RegExp(`\\.ticket = "[A-Z]+-${number}"`));
   }
+});
+
+test('SOFT-2958 builds release notes for the ticketless verifier merge on master', () => {
+  const commit = { sha: '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9', subject: 'ci(verifier): never block a PR on a journey or check already red on master (#1129)' };
+  const ticketTitles = { ...titles, 'IGSH-2902': 'Publish master without a release journey gate', 'SOFT-2902': 'Publish master without a release journey gate' };
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1800', [], [commit], ticketTitles); });
+  assert.match(generated, /\.ticket = "IGSH-2902"/);
+  assert.match(generated, /\.text = "IGSH-2902 Publish master without a release journey gate"/);
+  assert.match(generated, /\.ver = "0\.28\.1800"/);
+});
+
+test('SOFT-2958 gives every master commit since v0.28.1762 a ticket or reviewed attribution', t => {
+  const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/;
+  const history = ['origin/master', 'refs/remotes/origin/master', 'master', 'HEAD']
+    .map(ref => spawnSync('git', ['log', '--format=%H%x09%s', `v0.28.1762..${ref}`], { cwd: root, encoding: 'utf8' }))
+    .find(result => result.status === 0 && result.stdout.trim());
+  if (!history) return t.skip('this checkout has no history from v0.28.1762 to master');
+  const commits = history.stdout.split('\n').filter(Boolean).map(line => {
+    const at = line.indexOf('\t');
+    return { sha: line.slice(0, at), subject: line.slice(at + 1) };
+  });
+  const untagged = commits.filter(commit => !lead.test(commit.subject) && !reviewedCommits[commit.sha]);
+  assert.deepEqual(untagged, [], 'add every ticketless commit to reviewedCommits before the release');
 });
