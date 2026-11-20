@@ -110,6 +110,14 @@ ConvertTo-Json -InputObject $results -Compress
 });
 
 
+test('SOFT-2894 stops the hidden setup browser job before Open-BrowserPane so adoption cannot target the warmup PID', () => {
+  const open = journey.slice(journey.indexOf("Snapshot 'controls-before-browser'"), journey.indexOf("$browser = [VerifyNative]::PaneWindow"));
+  assert.match(open, /ReadAccounting\(\)\.ActiveProcesses -gt 0/);
+  assert.match(open, /\$warmupStopped = \$warmupJob\.Stop\(\)/);
+  assert.match(open, /window-controls-warmup-stopped\.json/);
+  assert.match(open, /\$warmupJob = \$null[\s\S]*\$pane = Open-BrowserPane 'controls-browser-open'/);
+});
+
 test('window pixels use the actual app-published sidebar width rather than the retired 220px layout', () => {
   assert.match(journey, /session\.json\.launch\.json/);
   assert.match(journey, /ConvertFrom-Json\)\.sidebar_width/);
