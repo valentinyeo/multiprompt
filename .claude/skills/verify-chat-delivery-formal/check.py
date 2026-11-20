@@ -41,6 +41,15 @@ def coverage(root):
     return record
 
 
+def tables_at(root, commit, output):
+    with tempfile.TemporaryDirectory(prefix="delivery-base-") as directory:
+        scratch = pathlib.Path(directory)
+        (scratch / "src").mkdir()
+        for file in ("src/chat_echo.zig", "src/chat_send.zig"):
+            (scratch / file).write_bytes(subprocess.check_output(["git", "show", commit + ":" + file], cwd=root))
+        return tables(scratch, output)
+
+
 def config(values, rule, scenario):
     lines = ["SPECIFICATION Spec", "CHECK_DEADLOCK FALSE", "CONSTANTS"]
     for key, value in values.items():
@@ -160,16 +169,23 @@ def main():
         replay(ROOT, restored_results, output / "restored-replay")
     failures = [rule for rule in RULES if results[rule]["status"] == "FAIL"]
     inherited = None
+    changed = []
+    base_decisions_match = None
     if failures and args.inherit_from:
         if not mutations:
             raise ValueError("Inherited findings require --self-test")
+        base = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
         for file in record["files"]:
-            base = subprocess.check_output(["git", "show", args.inherit_from + ":" + file], cwd=ROOT)
-            if base != (ROOT / file).read_bytes():
-                raise ValueError("Covered source differs from base: " + file)
-        inherited = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
+            if subprocess.check_output(["git", "show", base + ":" + file], cwd=ROOT) != (ROOT / file).read_bytes():
+                changed.append(file)
+        if changed:
+            base_decisions_match = tables_at(ROOT, base, output / "base-native") == values
+            if not base_decisions_match:
+                raise ValueError("Production decisions differ from base " + base + ": " + ", ".join(changed) + "; re-verify the model instead of inheriting its findings")
+        inherited = base
     summary = {"source_sync": record["sync_commit"], "model_only": args.model_only,
-               "failures": failures, "mutations_caught": mutations, "inherited_from": inherited}
+               "failures": failures, "mutations_caught": mutations, "inherited_from": inherited,
+               "changed_covered_files": changed, "base_decisions_match": base_decisions_match}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
     return 1 if failures and not inherited else 0
