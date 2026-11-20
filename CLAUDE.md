@@ -20,6 +20,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - Every extension change (`bridge.js`, manifest) bumps `"version"` in `extension/manifest.json`, independent of the app version. The extension-version check fails a PR that changes shipped files in `extension/` without a bump.
 - Everything here is public: never commit keys, private host names, internal paths, emails or private messages. The secret-scan check runs on every PR.
 - Ticket board: https://app.hypertask.ai/project?id=2060 (prefix `IGSH`).
+- Hypertask board: 2060, label: Multiprompt
 
 ## Hard rules
 
