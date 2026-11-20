@@ -66,9 +66,9 @@ jobs:
         run: |
           set +e
           if [ -n "$BASE_SHA" ]; then
-            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
           else
-            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head plus the declared repro|^# (pass|fail) '
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the baseline matrix carries only the journeys that failed on head|^# (pass|fail) '
           fi
           echo "receipt=$?" >> "$GITHUB_ENV"
           true

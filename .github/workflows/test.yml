@@ -58,7 +58,7 @@ jobs:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
-      - name: Test required before-and-after repro evidence
+      - name: Test repair PR journey selection
         run: node --test tools/pr-verifier-repro.test.js
       - name: Test stable desktop journey command names
         run: node --test tools/check-journey-commands.test.mjs

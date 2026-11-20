@@ -11,60 +11,39 @@ function finish(pr, baseStatus, headStatus = 'passed', extra = {}) {
 
 const fix = { title: 'fix(settings): preserve appearance', body: 'Repro journey: `appearance`' };
 
-test('a fix PR without a failing-on-master repro fails even when the judge says PASS', () => {
+test('a repair PR passes on its touched journey without a named repro', () => {
   for (const pr of [fix, { title: 'Settings repair', labels: [{ name: 'bug' }], body: fix.body }]) {
-    for (const baseStatus of [undefined, 'passed']) {
-      const result = finish(pr, baseStatus);
-      assert.equal(result.final, 'FAIL');
-      assert.match(result.body, /Repro journey.*master.*failed.*head.*passed/i);
+    for (const baseStatus of [undefined, 'passed', 'failed']) {
+      assert.equal(finish(pr, baseStatus).final, 'PASS', JSON.stringify(pr));
     }
   }
 });
 
-test('a fix PR must name its repro journey', () => {
-  assert.equal(finish({ title: 'Bug fix: settings' }, 'failed').final, 'FAIL');
-  assert.equal(finish({ title: 'Settings', labels: [{ name: 'bug-fix' }] }, 'failed').final, 'FAIL');
+test('a declared repro line never changes the selection', () => {
+  const declared = verifier.validateSelection({ features: ['sessions'], compare_base: false }, ['appearance', 'sessions'], fix);
+  const undeclared = verifier.validateSelection({ features: ['sessions'], compare_base: false }, ['appearance', 'sessions'], { title: 'Bug fix: settings' });
+  assert.deepEqual(declared.features, ['sessions']);
+  assert.deepEqual(undeclared.features, ['sessions']);
+  assert.equal(declared.compareBase, true);
 });
 
-test('the named repro must fail on master and pass on head', () => {
-  assert.equal(finish(fix, 'failed').final, 'PASS');
-  assert.equal(finish(fix, 'failed', 'failed').final, 'FAIL');
-  assert.equal(finish(fix, 'failed', 'passed', { failureKind: 'infrastructure' }).final, 'FAIL');
-});
-
-test('an unrelated failing journey cannot substitute for the named repro', () => {
-  assert.equal(finish({ ...fix, body: 'Repro journey: `sessions`' }, 'failed').final, 'FAIL');
-});
-
-test('unknown, duplicate and slow repro declarations cannot pass', () => {
-  for (const body of ['Repro journey: `unknown`', 'Repro journey: `pane-layout`', `${fix.body}\n${fix.body}`]) {
-    assert.equal(finish({ ...fix, body }, 'failed').final, 'FAIL');
-  }
-});
-
-test('repair labels and titles require evidence even without any picked journeys', () => {
+test('a repair label adds no journey when the diff maps to none', () => {
   for (const pr of [
     ...['bug', 'bug-fix', 'bugfix', 'bug fix', 'defect', 'regression'].map(name => ({ labels: [{ name }] })),
     ...['fix: appearance', 'Fix appearance', 'Appearance bug fix', 'bugfix: appearance'].map(title => ({ title })),
   ]) {
     const selection = verifier.validateSelection({ features: [] }, ['appearance'], pr);
+    assert.deepEqual(selection.features, [], JSON.stringify(pr));
     const result = verifier.finalize({ verdict: { verdict: 'PASS' }, selection, summary: { head: {}, base: {} } });
-    assert.equal(result.final, 'FAIL', JSON.stringify(pr));
+    assert.notEqual(result.final, 'FAIL', JSON.stringify(pr));
   }
 });
 
-test('non-fix PRs keep the existing optional baseline behaviour', () => {
+test('a PR that is not a repair keeps the optional baseline behaviour', () => {
   assert.equal(finish({ title: 'Document appearance' }, undefined).final, 'PASS');
 });
 
-test('the declared repro takes priority over the picker and forces a master comparison', () => {
-  const selected = verifier.validateSelection({ features: ['sessions', 'chat-view', 'title-bar'], compare_base: false }, ['appearance', 'sessions', 'chat-view', 'title-bar'], fix);
-  assert.deepEqual(selected.features, ['appearance', 'sessions', 'chat-view']);
-  assert.equal(selected.compareBase, true);
-  assert.equal(selected.reproJourney, 'appearance');
-});
-
-test('the CLI carries real PR metadata into selection, schedules a passing repro on master, and rechecks it at publication', { skip: process.platform === 'win32' }, () => {
+test('the CLI selects only touched sources and publishes a passing verdict without a repro', { skip: process.platform === 'win32' }, () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -93,18 +72,16 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.ok(calls.some(args => args.includes('repos/owner/repo/commits/master')), 'repair baselines must be master even for a retargeted PR');
     assert.ok(calls.some(args => args.includes(`repos/owner/repo/statuses/${'a'.repeat(40)}`) && args.includes('state=pending') && args.includes('context=pstack-verifier')), 'a metadata rerun must invalidate a previous green status on the same head');
     run(['prepare', dir]);
-    assert.equal(fs.existsSync(path.join(dir, 'mapped.json')), true, 'Preparation retains the touched-source selection alongside the required repro');
+    assert.equal(fs.existsSync(path.join(dir, 'mapped.json')), true, 'Preparation saves the touched-source selection');
     assert.equal(fs.existsSync(path.join(dir, 'diff.patch')), true, 'Preparation saves the actual diff for independent CI-only review');
     const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [], compare_base: false }) });
-    assert.match(selected, /repro_features=\["appearance"\]/);
-    assert.match(selected, /features=\["appearance"\]/);
-    assert.match(run(['failed-head'], { FEATURES: '["appearance"]', REPRO_FEATURES: '["appearance"]', RUN_ID: '1' }), /features=\["appearance"\]/);
+    assert.match(selected, /features=\[\]/);
+    assert.doesNotMatch(selected, /repro_features/);
+    assert.match(run(['failed-head'], { FEATURES: '[]', RUN_ID: '1' }), /features=\[\]/);
     const selectionFile = path.join(dir, 'selection.json');
-    const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
-    fs.writeFileSync(selectionFile, JSON.stringify({ ...selection, bugFix: false }));
     const summary = path.join(dir, 'summary.json');
-    fs.writeFileSync(summary, JSON.stringify({ head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] }, base: {} }));
-    assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=FAIL/);
+    fs.writeFileSync(summary, JSON.stringify({ head: {}, base: {} }));
+    assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=PASS\+NOTES/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -114,8 +91,9 @@ const ciFix = { title: 'SOFT-2728: Fix master red checks' };
 const ciSelection = (extra = {}) => ({ ...verifier.validateSelection({ features: [] }, ['appearance'], ciFix), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [], ...extra });
 const ciReceipt = (extra = {}) => ({ head: {}, base: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }] });
 const ciFinish = (selection, summary) => verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
+const passing = { head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] }, base: {} };
 
-test('a fix whose files are all owned by a CI workflow passes when that receipt shows base red and head green', () => {
+test('a repair whose files are all owned by a CI workflow passes when that receipt shows base red and head green', () => {
   const result = ciFinish(ciSelection(), ciReceipt());
   assert.notEqual(result.final, 'FAIL');
   assert.match(result.body, /Repro by CI workflow: ci-repair-receipt\.yml \(tools: base exit 1, head exit 0\)/);
@@ -127,15 +105,21 @@ test('a CI receipt is not a repro when base stayed green, head is red, or the re
   }
 });
 
-test('a product fix, an unmapped file or a nearest-journey guess still needs a repro journey despite a CI receipt', () => {
-  for (const extra of [{ features: ['appearance'] }, { unmapped: ['src/main.zig'] }, { nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }, { ciWorkflows: [] }]) {
-    const result = ciFinish(ciSelection(extra), ciReceipt());
+test('a repair PR with a touched journey is judged on that journey alone', () => {
+  const result = ciFinish(ciSelection({ features: ['appearance'] }), passing);
+  assert.equal(result.final, 'PASS');
+  assert.doesNotMatch(result.body, /Repro journey/i);
+});
+
+test('a repair PR whose files no journey owns still needs a CI workflow receipt', () => {
+  for (const extra of [{ unmapped: ['src/main.zig'] }, { nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }]) {
+    const result = ciFinish(ciSelection(extra), { head: {}, base: {}, ciRepro: [] });
     assert.equal(result.final, 'FAIL', JSON.stringify(extra));
-    assert.match(result.body, /Repro journey.*master.*failed.*head.*passed/i);
+    assert.match(result.body, /CI workflow receipt.*base.*failed.*head.*passed/i);
   }
 });
 
-test('a PR that is not a fix never needs the CI repro', () => {
+test('a PR that is not a repair never needs the CI receipt', () => {
   const selection = { ...ciSelection(), ...verifier.validateSelection({ features: [] }, ['appearance'], { title: 'Document appearance' }), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [] };
   assert.notEqual(ciFinish(selection, { head: {}, base: {} }).final, 'FAIL');
 });

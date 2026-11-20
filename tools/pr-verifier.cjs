@@ -24,17 +24,15 @@ function oneLine(value, limit = MAX_LINE) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
-function reproRequirement(pr) {
-  const bugFix = /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
+function isRepair(pr) {
+  return /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
     (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
-  const names = [...(pr.body || '').matchAll(/^Repro journey:\s*`?([a-z0-9-]+)`?\s*$/gmi)].map(match => match[1]);
-  return { bugFix, reproJourney: names.length === 1 ? names[0] : '' };
 }
 
 function ciRepro(selection, summary) {
   const workflows = selection.ciWorkflows || [];
   const receipts = summary?.ciRepro || [];
-  if (selection.reproJourney || selection.features?.length || !workflows.length || selection.unmapped?.length || selection.nearest?.length) return null;
+  if (selection.features?.length || !workflows.length || selection.unmapped?.length || selection.nearest?.length) return null;
   const proofs = workflows.map(workflow => receipts.find(item => item.workflow === workflow));
   const proven = proofs.every(item => item && Number.isInteger(item.base_exit_code) && item.base_exit_code !== 0 && item.head_exit_code === 0);
   return proven ? proofs : null;
@@ -49,9 +47,8 @@ function validateSelection(raw, available, pr = {}) {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
-  const requirement = reproRequirement(pr);
+  const bugFix = isRepair(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
-  if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
   for (const name of requested) {
@@ -62,8 +59,8 @@ function validateSelection(raw, available, pr = {}) {
   return {
     features,
     dropped,
-    ...requirement,
-    compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
+    bugFix,
+    compareBase: features.length > 0 && (bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
     doneWhen: (Array.isArray(parsed.done_when) ? parsed.done_when : []).slice(0, 12).map(line => oneLine(line)),
@@ -327,14 +324,9 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const ciProof = selection.bugFix ? ciRepro(selection, summary) : null;
   if (ciProof) {
     notes.unshift(`Repro by CI workflow: ${ciProof.map(item => `${item.workflow} (${item.part}: base exit ${item.base_exit_code}, head exit ${item.head_exit_code})`).join(', ')}.`);
-  } else if (selection.bugFix) {
-    const repro = rows.find(row => row.feature === selection.reproJourney);
-    const baseRuns = summary.base[selection.reproJourney] || [];
-    if (!repro || repro.head !== 'passed' || repro.base !== 'failed' || repro.blocked ||
-        baseRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0)) {
-      final = 'FAIL';
-      notes.unshift(`Repro journey ${selection.reproJourney || '(not named)'} must show master failed and head passed with complete evidence; bug-fix PRs cannot pass without it.`);
-    }
+  } else if (selection.bugFix && !selection.features?.length && selection.ciWorkflows?.length) {
+    final = 'FAIL';
+    notes.unshift('A repair PR with no desktop journey needs a CI workflow receipt that shows base failed and head passed.');
   }
   const evidence = [...notes, ...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean)].slice(0, MAX_EVIDENCE_LINES);
   const body = [
@@ -480,7 +472,7 @@ function resolve(env) {
   const dispatched = env.EVENT_NAME === 'workflow_dispatch';
   const eligible = pr.state === 'OPEN' && !pr.isCrossRepository && (dispatched || !pr.isDraft);
   if (eligible) gh(['api', `repos/${repo}/statuses/${pr.headRefOid}`, '-X', 'POST', '-f', 'context=pstack-verifier', '-f', 'state=pending', '-f', 'description=Verification is checking current PR metadata and evidence']);
-  const baseSha = reproRequirement(pr).bugFix
+  const baseSha = isRepair(pr)
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
@@ -801,8 +793,7 @@ function failedHead(env) {
   const features = JSON.parse(env.FEATURES || '[]');
   const raw = gh(['api', '--paginate', `repos/${env.REPO}/actions/runs/${env.RUN_ID}/jobs`, '--jq', '.jobs[] | {name,conclusion}']);
   const jobs = raw.split('\n').map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line));
-  const repro = JSON.parse(env.REPRO_FEATURES || '[]');
-  setOutputs({ features: JSON.stringify([...new Set([...repro, ...failedHeadFeatures(jobs, features)])]) });
+  setOutputs({ features: JSON.stringify(failedHeadFeatures(jobs, features)) });
 }
 
 async function main(argv, env) {
@@ -818,8 +809,7 @@ async function main(argv, env) {
     const available = availableFeatures(env);
     const selection = validateSelection(env.SELECTION, available, pr);
     const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
-    const repro = selection.bugFix && available.includes(selection.reproJourney) ? [selection.reproJourney] : [];
-    selection.features = [...new Set([...mapped.features, ...repro])].sort();
+    selection.features = [...new Set(mapped.features)].sort();
     selection.dropped = [];
     selection.compareBase = selection.features.length > 0;
     selection.unmapped = mapped.unmapped;
@@ -836,7 +826,7 @@ async function main(argv, env) {
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
     const base = selection.compareBase ? selection.features : [];
-    setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
+    setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows), base_features: JSON.stringify(base) });
     return undefined;
   }
   if (command === 'pick-deepseek') return pickDeepseek(env, rest[0]);
@@ -871,7 +861,7 @@ async function main(argv, env) {
     }
     if (env.PR_NUMBER) {
       try {
-        Object.assign(selection, reproRequirement(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))));
+        Object.assign(selection, { bugFix: isRepair(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
       } catch {
         infrastructure.push('Could not confirm bug-fix metadata; verification is BLOCKED.');
       }
