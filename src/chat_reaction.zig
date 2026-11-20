@@ -270,15 +270,6 @@ pub const View = struct {
         self.wish_len += 1;
     }
 
-    pub fn wishedLike(self: *const View, message: u64) ?bool {
-        if (message == 0 or self.wish_context != self.context) return null;
-        for (self.wish_refs[0..self.wish_len], 0..) |existing, i| {
-            if (existing != message) continue;
-            return self.wish_kind[i] == .show;
-        }
-        return null;
-    }
-
     fn foldLikes(self: *View, blocks: []const md.Block) void {
         var i: usize = 0;
         while (i < self.wish_len) {
@@ -727,14 +718,9 @@ test "SOFT-2442 a second thumbs up removes the badge and one pending copy does n
     _ = try view.build(a, &.{ target, first, second }, capture, &.{});
     try std.testing.expectEqual(@as(u8, 0), view.mask(0));
     view.wishLike(id, true);
-    try std.testing.expectEqual(@as(?bool, true), view.wishedLike(id));
     _ = try view.build(a, &.{ target, first, second }, capture, &.{});
     try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
     view.wishLike(id, false);
-    try std.testing.expectEqual(@as(?bool, false), view.wishedLike(id));
-    view.context = view.context +% 1;
-    try std.testing.expect(view.wishedLike(id) == null);
-    view.context = view.wish_context;
     _ = try view.build(a, &.{ target, first }, capture, &.{});
     try std.testing.expectEqual(@as(u8, 0), view.mask(0));
     _ = try view.build(a, &.{ target, first, second }, capture, &.{});
