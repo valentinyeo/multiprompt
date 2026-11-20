@@ -34,20 +34,18 @@ function evidenceDir(entries) {
 }
 
 function selection(features, extra = {}) {
-  return { features, dropped: [], compareBase: features.length > 0, reason: '', uncovered: '', doneWhen: [], newMap: '', ...extra };
+  return { features, dropped: [], reason: '', uncovered: '', doneWhen: [], newMap: '', ...extra };
 }
 
 test('only real, fast journeys are selected and at most three', () => {
-  const result = verifier.validateSelection({ features: ['appearance', 'made-up', 'pane-layout', 'appearance', 'command-palette', 'palette-order', 'chat-view'], compare_base: true }, available);
+  const result = verifier.validateSelection({ features: ['appearance', 'made-up', 'pane-layout', 'appearance', 'command-palette', 'palette-order', 'chat-view'] }, available);
   assert.deepEqual(result.features, ['appearance', 'command-palette', 'palette-order']);
   assert.deepEqual(result.dropped, ['made-up', 'pane-layout', 'chat-view']);
-  assert.equal(result.compareBase, true);
 });
 
-test('an empty selection never compares a base build', () => {
-  const result = verifier.validateSelection({ features: [], compare_base: true, uncovered: 'the new shortcut', new_map: '# map' }, available);
+test('an empty selection still carries the uncovered note and a new map', () => {
+  const result = verifier.validateSelection({ features: [], uncovered: 'the new shortcut', new_map: '# map' }, available);
   assert.deepEqual(result.features, []);
-  assert.equal(result.compareBase, false);
   assert.equal(result.newMap, '# map');
 });
 
@@ -62,69 +60,49 @@ test('every journey the picker may choose exists as a feature map', () => {
   for (const name of verifier.SLOW_FEATURES) assert.ok(!verifier.selectable(real).includes(name));
 });
 
-test('evidence folders split into head and base without mixing similar feature names', () => {
+test('evidence folders keep one head run per journey without mixing similar feature names', () => {
   const dir = evidenceDir({
     'verify-chat-view': { status: 'passed', checks: [1, 2] },
     'verify-chat-view-everywhere': { status: 'failed', error: 'other journey' },
-    [`verify-chat-view-${base}`]: { status: 'failed', error: 'old behaviour' },
-    [`verify-chat-view-${'c'.repeat(40)}`]: { status: 'passed' },
     'verify-title-bar-96-light': { status: 'passed' },
   });
-  const summary = verifier.summarize(dir, ['chat-view', 'title-bar'], base);
+  const summary = verifier.summarize(dir, ['chat-view', 'title-bar']);
   assert.deepEqual(summary.head['chat-view'].map(run => run.artifact), ['verify-chat-view']);
   assert.equal(summary.head['chat-view'][0].checks, 2);
-  assert.deepEqual(summary.base['chat-view'].map(run => [run.artifact, run.status, run.error]), [[`verify-chat-view-${base}`, 'failed', 'old behaviour']]);
+  assert.deepEqual(Object.keys(summary), ['head', 'downloadFailures']);
   assert.deepEqual(summary.head['title-bar'].map(run => run.artifact), ['verify-title-bar-96-light']);
   assert.deepEqual(summary.head['chat-view'][0].screenshots, ['after.png']);
 });
 
-test('a head failure without requested base evidence is BLOCKED', () => {
+test('a head failure master also fails is inherited, not a FAIL', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' } });
-  const summary = verifier.summarize(dir, ['appearance'], base);
-  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['looks fine'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/1' });
-  assert.equal(final, 'BLOCKED');
-  assert.match(body, new RegExp(`^pstack-verifier: BLOCKED @ ${head}\\n`));
-  assert.match(body, /appearance.*base missing/);
-});
-
-test('a journey that fails on head and base is noted, not a FAIL', () => {
-  const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' }, [`verify-appearance-${base}`]: { status: 'failed', error: 'no ring' } });
-  const summary = verifier.summarize(dir, ['appearance'], base);
+  const summary = verifier.summarize(dir, ['appearance']);
+  summary.masterFailures = ['appearance'];
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['diff matches the ticket'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
   assert.equal(final, 'PASS+NOTES');
-  assert.match(body, /Already failing on the merge base, so not caused by this change: appearance\./);
-  assert.match(body, /appearance: head failed, base failed \(inherited\)/);
+  assert.match(body, /Already failing in master's latest nightly verify run, so not caused by this change: appearance\./);
+  assert.match(body, /- appearance: head failed \(inherited\)/);
 });
 
-test('a journey that passes on base and fails on head is FAIL', () => {
-  const dir = evidenceDir({ 'verify-appearance': { status: 'failed' }, [`verify-appearance-${base}`]: { status: 'passed' } });
-  const summary = verifier.summarize(dir, ['appearance'], base);
+test('a head failure master passes is FAIL', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' } });
+  const summary = verifier.summarize(dir, ['appearance']);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
   assert.equal(final, 'FAIL');
-  assert.match(body, /Head journey not passed: appearance \(head failed, base passed\)/);
+  assert.match(body, /Head journey not passed: appearance \(head failed\)/);
 });
 
 test('a missing head result is BLOCKED, not a pass', () => {
-  const summary = verifier.summarize(evidenceDir({}), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({}), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' }).final, 'BLOCKED');
 });
 
-test('a passed head does not need a base run', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+test('a passed head is PASS with its journey row', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
   assert.equal(final, 'PASS');
-  assert.match(body, /- appearance: head passed, base not run/);
-});
-
-test('the base side is only the head journeys that failed', () => {
-  const jobs = [
-    { name: 'head / build-app', conclusion: 'success' },
-    { name: 'head / verify (appearance)', conclusion: 'failure' },
-    { name: 'head / verify (chat-view)', conclusion: 'success' },
-    { name: 'base / verify (appearance)', conclusion: 'failure' },
-    { name: 'head / verify (palette-order)', conclusion: 'skipped' },
-  ];
-  assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
+  assert.match(body, /- appearance: head passed/);
+  assert.doesNotMatch(body, /base/);
 });
 
 test('the verifier waits until Tests passes for that head and still posts the check on the head', () => {
@@ -134,9 +112,9 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.equal(verifier.testsGate([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }]).action, 'pass');
   assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
   assert.match(workflow, /select:\n    needs: resolve/);
-  assert.match(workflow, /tests:\n    needs: \[resolve, select, head, failed-head, base\]/);
-  assert.match(workflow, /needs: \[tests, resolve, select, head, failed-head, base\]/);
-  assert.match(workflow, /needs\.failed-head\.outputs\.features/);
+  assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache/);
   assert.match(workflow, /head_sha="\$HEAD_SHA"/);
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
 });
@@ -169,19 +147,18 @@ require('node:fs').appendFileSync(process.env.GH_REQUESTS, JSON.stringify(proces
   });
 }
 
-test('a clean head and a red base is PASS with the before and after rows', () => {
-  const dir = evidenceDir({ 'verify-appearance': { status: 'passed' }, [`verify-appearance-${base}`]: { status: 'failed' } });
-  const summary = verifier.summarize(dir, ['appearance'], base);
+test('a clean head is PASS with its journey row', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/2' });
   assert.equal(final, 'PASS');
-  assert.match(body, /- appearance: head passed, base failed/);
+  assert.match(body, /- appearance: head passed/);
   assert.match(body, /Run: https:\/\/example\.test\/run\/2/);
   assert.match(body, /<!-- pstack-verifier -->/);
   assert.match(body, /Judge: claude/);
 });
 
 test('no journey and a claimed PASS is capped at PASS+NOTES', () => {
-  const summary = verifier.summarize(evidenceDir({}), [], base);
+  const summary = verifier.summarize(evidenceDir({}), []);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['docs only'] }, headSha: head, summary, selection: selection([]), runUrl: 'u' });
   assert.equal(final, 'PASS+NOTES');
   assert.match(body, /No desktop journey ran/);
@@ -189,13 +166,13 @@ test('no journey and a claimed PASS is capped at PASS+NOTES', () => {
 
 test('an uncovered part of the change caps PASS at PASS+NOTES', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
-  const summary = verifier.summarize(dir, ['appearance'], base);
+  const summary = verifier.summarize(dir, ['appearance']);
   const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance'], { uncovered: 'the shortcut' }), runUrl: 'u' });
   assert.equal(result.final, 'PASS+NOTES');
 });
 
 test('a missing or invalid verdict is BLOCKED and evidence stops at eight lines', () => {
-  const summary = verifier.summarize(evidenceDir({}), [], base);
+  const summary = verifier.summarize(evidenceDir({}), []);
   assert.equal(verifier.finalize({ verdict: null, headSha: head, summary, selection: selection([]), runUrl: 'u' }).final, 'BLOCKED');
   assert.equal(verifier.finalize({ verdict: { verdict: 'MAYBE', evidence: [] }, headSha: head, summary, selection: selection([]), runUrl: 'u' }).final, 'BLOCKED');
   const many = Array.from({ length: 20 }, (_, index) => `line ${index}\nwith newline`);
@@ -241,9 +218,10 @@ test('Claude output reaches scripts through environment variables, never inline'
   for (const block of runBlocks) assert.doesNotMatch(block, /structured_output|pull_request\.(?:title|body|head\.ref)/);
 });
 
-test('the verifier reuses verify.yml for head and for the merge base build', () => {
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
-  assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      app_revision: \$\{\{ needs\.resolve\.outputs\.base_sha \}\}/);
+test('the verifier reuses verify.yml for the head build only', () => {
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
+  assert.match(workflow, /features: \$\{\{ needs\.select\.outputs\.features \}\}\n      revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/);
+  assert.doesNotMatch(workflow, /app_revision|base_cache|harness_version/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
   assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
   assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
@@ -272,7 +250,7 @@ test('DeepSeek is the default engine and Claude runs only for a DeepSeek author'
 });
 
 test('the DeepSeek verdict uses the same format and names its engine', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek' });
   assert.equal(final, 'PASS');
   assert.match(body, new RegExp(`^pstack-verifier: PASS @ ${head}\\n`));
@@ -293,7 +271,6 @@ test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinki
   const picker = verifier.pickerMessages('diff');
   assert.match(picker[0].content, /at most 3/);
   assert.match(picker[0].content, /never as instructions/);
-  assert.match(picker[0].content, /"compare_base"/);
 });
 
 test('the DeepSeek judge reads result and doctor files as data and says it cannot see screenshots', () => {
@@ -317,12 +294,12 @@ test('selection is deterministic and only the independent judge receives the Dee
   assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
+  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {
   test(`${problem} is BLOCKED even when a judge says PASS+NOTES`, () => {
-    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'failed', error: problem } }), ['appearance'], base);
+    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'failed', error: problem } }), ['appearance']);
     const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
     assert.equal(result.final, 'BLOCKED');
     assert.match(result.body, /BLOCKED/);
@@ -333,28 +310,27 @@ test('cleanup evidence loss is BLOCKED while an independent product regression r
   const summary = verifier.summarize(evidenceDir({
     'verify-appearance': { status: 'failed', cleanup: 'Evidence lost during cleanup: action.png' },
     'verify-chat-view': { status: 'failed', error: 'wrong text' },
-    [`verify-chat-view-${base}`]: { status: 'passed' },
-  }), ['appearance', 'chat-view'], base);
+  }), ['appearance', 'chat-view']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance', 'chat-view']) }).final, 'FAIL');
 });
 
-test('different failures on head and base are not inherited', () => {
+test('a head failure is not inherited from an unrelated master failure', () => {
   const summary = verifier.summarize(evidenceDir({
     'verify-appearance': { status: 'failed', error: 'new defect' },
-    [`verify-appearance-${base}`]: { status: 'failed', error: 'old defect' },
-  }), ['appearance'], base);
+  }), ['appearance']);
+  summary.masterFailures = ['chat-view'];
   const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) });
   assert.equal(result.final, 'FAIL');
   assert.doesNotMatch(result.body, /Already failing/);
 });
 
 test('PASS+NOTES is preserved with clean evidence', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'PASS+NOTES');
 });
 
 test('a product FAIL from the judge is never promoted to success', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'FAIL' }, summary, selection: selection(['appearance']) }).final, 'FAIL');
 });
 
@@ -365,8 +341,8 @@ for (const conclusion of ['cancelled', 'timed_out', 'startup_failure', 'action_r
 }
 
 test('job cancellation and missing prerequisites block an otherwise passing verdict', () => {
-  for (const jobs of [{ head: { result: 'cancelled' } }, { select: { result: 'failure' } }, { 'failed-head': { result: 'failure' } }, { tests: { result: 'failure' } }]) {
-    const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {}, base: {} }, selection: selection([]), jobs });
+  for (const jobs of [{ head: { result: 'cancelled' } }, { select: { result: 'failure' } }, { resolve: { result: 'failure' } }, { tests: { result: 'failure' } }]) {
+    const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {} }, selection: selection([]), jobs });
     assert.equal(result.final, 'BLOCKED');
   }
 });
@@ -393,8 +369,8 @@ test('the CLI reports lost selection as BLOCKED with a failing check conclusion'
   }
 });
 
-test('base comparison runs despite failed ancestors and dispatch deduplicates by PR number', () => {
-  assert.match(workflow, /base:\n    needs: \[resolve, failed-head\]\n    if: always\(\) && !cancelled\(\)/);
+test('one head journey set runs and dispatch deduplicates by PR number', () => {
+  assert.match(workflow, /head:\n    needs: \[resolve, select\]\n    if: always\(\) && !cancelled\(\)/);
   assert.match(workflow, /group: \$\{\{ github.workflow \}\}-\$\{\{ inputs.pr \|\| github.event.pull_request.number \}\}/);
   assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /name=pstack-verifier \(BLOCKED\)/);
@@ -433,36 +409,35 @@ test('a successful or unfinished verifier run does not need recovery', () => {
 test('a product regression remains FAIL when its cleanup also loses evidence', () => {
   const summary = verifier.summarize(evidenceDir({
     'verify-appearance': { status: 'failed', error: 'wrong ring', cleanup: 'Evidence lost during cleanup: action.png' },
-    [`verify-appearance-${base}`]: { status: 'passed' },
-  }), ['appearance'], base);
+  }), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'FAIL');
 });
 
 test('inherited product failures do not hide lost cleanup evidence', () => {
   const summary = verifier.summarize(evidenceDir({
     'verify-appearance': { status: 'failed', error: 'wrong ring', cleanup: 'Evidence lost during cleanup: action.png' },
-    [`verify-appearance-${base}`]: { status: 'failed', error: 'wrong ring' },
-  }), ['appearance'], base);
+  }), ['appearance']);
+  summary.masterFailures = ['appearance'];
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
 });
 
 test('losing every screenshot blocks a supposedly passing result', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
   fs.unlinkSync(path.join(dir, 'verify-appearance', 'after.png'));
-  const summary = verifier.summarize(dir, ['appearance'], base);
+  const summary = verifier.summarize(dir, ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
 });
 
 test('selected journeys absent from a partial summary cannot pass', () => {
-  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {}, base: {} }, selection: selection(['appearance']) }).final, 'BLOCKED');
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {} }, selection: selection(['appearance']) }).final, 'BLOCKED');
 });
 
 test('a product FAIL from the judge survives unrelated infrastructure trouble', () => {
-  assert.equal(verifier.finalize({ verdict: { verdict: 'FAIL', evidence: ['after.png contradicts the promised labels'] }, summary: { head: {}, base: {} }, selection: selection([]), jobs: { head: { result: 'cancelled' } } }).final, 'FAIL');
+  assert.equal(verifier.finalize({ verdict: { verdict: 'FAIL', evidence: ['after.png contradicts the promised labels'] }, summary: { head: {} }, selection: selection([]), jobs: { head: { result: 'cancelled' } } }).final, 'FAIL');
 });
 
 test('typed harness errors are BLOCKED without relying on their message', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'failed', failureKind: 'infrastructure', error: 'UI Automation threw an exception' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'failed', failureKind: 'infrastructure', error: 'UI Automation threw an exception' } }), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
 });
 
@@ -476,17 +451,13 @@ test('recovery uses trusted default-branch tools and never runs pull request cod
   assert.match(recovery, /node tools\/pr-verifier.cjs recover/);
 });
 
-for (const artifact of ['verify-appearance', `verify-appearance-${base}`]) {
-  test(`inherited failures cannot pass after screenshots are lost from ${artifact}`, () => {
-    const dir = evidenceDir({
-      'verify-appearance': { status: 'failed', error: 'wrong ring' },
-      [`verify-appearance-${base}`]: { status: 'failed', error: 'wrong ring' },
-    });
-    fs.unlinkSync(path.join(dir, artifact, 'after.png'));
-    const summary = verifier.summarize(dir, ['appearance'], base);
-    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
-  });
-}
+test('an inherited journey cannot pass after its screenshot is lost', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'wrong ring' } });
+  fs.unlinkSync(path.join(dir, 'verify-appearance', 'after.png'));
+  const summary = verifier.summarize(dir, ['appearance']);
+  summary.masterFailures = ['appearance'];
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
 
 test('recovery preserves a product FAIL already posted for the same head and run', () => {
   assert.equal(typeof verifier.recoveryReport, 'function');
@@ -514,20 +485,19 @@ test('SOFT-2418 delegated journeys keep distinct artifacts discoverable by the v
   const names = ['chat-working-live', 'chat-instant', 'chat-model', 'chat-delivery'].map(feature => {
     const name = `verify-${runInNewContext(expression, { matrix: { feature }, env: { FEATURE: 'chat-delivery' } })}`;
     assert.match(name, verifier.featureDirPattern(feature));
-    assert.match(`${name}-${base}`, verifier.featureDirPattern(feature));
     return name;
   });
   assert.equal(new Set(names).size, names.length);
 });
 
 test('late harness failures cannot reuse a passed journey result as success', () => {
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']), jobs: { head: { result: 'failure' } } }).final, 'BLOCKED');
 });
 
 test('job timeouts and cancellations block even when product result files passed', () => {
   assert.equal(typeof verifier.infrastructureJobs, 'function');
-  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   for (const conclusion of ['timed_out', 'cancelled', 'startup_failure', 'action_required']) {
     const infrastructure = verifier.infrastructureJobs([{ name: 'head appearance / verify', conclusion }]);
     assert.equal(infrastructure.length, 1);
@@ -539,29 +509,28 @@ test('job timeouts and cancellations block even when product result files passed
 });
 
 
-test('validation does not add journeys outside file ownership or the declared repro', () => {
-  const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
+test('validation does not add journeys outside file ownership', () => {
+  const raw = { features: ['appearance', 'command-palette', 'palette-order'] };
   for (const file of ['src/chat_render.zig', 'src/main.zig', 'tools/chat-still/observer.cs', 'docs/readme.md']) {
     assert.deepEqual(verifier.validateSelection(raw, available, { files: [{ path: file }] }).features, raw.features);
   }
 });
 
 
-test('the repair repro survives a full picker selection', () => {
+test('a repair title never adds a journey the diff did not touch', () => {
   const result = verifier.validateSelection(
-    { features: ['appearance', 'palette-order', 'chat-view'], compare_base: false },
+    { features: ['appearance', 'palette-order', 'chat-view'] },
     [...available, 'chat-still'],
     { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
   );
-  assert.deepEqual(result.features, ['command-palette', 'appearance', 'palette-order']);
-  assert.equal(result.compareBase, true);
+  assert.deepEqual(result.features, ['appearance', 'palette-order', 'chat-view']);
 });
 
 test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {
-  const summary = { head: { 'chat-still': [{ status: 'passed' }] }, base: {} };
+  const summary = { head: { 'chat-still': [{ status: 'passed' }] } };
   for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
     const result = verifier.finalize({ verdict: { verdict, evidence: [] }, headSha: head, summary,
-      selection: selection(['chat-still'], { compareBase: false }), runUrl: 'u',
+      selection: selection(['chat-still']), runUrl: 'u',
       jobs: { tests: { result: 'failure', outputs: { result: 'FAIL' } } } });
     assert.equal(result.final, 'FAIL');
   }
