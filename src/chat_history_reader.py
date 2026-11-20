@@ -3563,9 +3563,7 @@ def host_agent_env(provider, sid):
     env['MULTIBOT_PROVIDER'] = provider
     env['MULTIBOT_SID'] = sid
     env['MULTIBOT_APP_VERSION'] = globals().get('MULTIBOT_APP_VERSION', '')
-    if provider == 'claude':
-        env['DISABLE_AUTO_COMPACT'] = '1'
-    else:
+    if provider != 'claude':
         env['MULTIBOT_HOST'] = host_key(provider, sid)
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:

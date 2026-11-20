@@ -26,8 +26,17 @@ test('mp-fresh exit codes and hosted env wiring', () => {
   assert.match(hosted.stderr, /host_not_running|unavailable/);
   const body = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
   assert.match(body, /env\['MULTIBOT_SID'\] = sid/);
-  assert.match(body, /env\['DISABLE_AUTO_COMPACT'\] = '1'/);
+  assert.doesNotMatch(body, /DISABLE_AUTO_COMPACT/);
   assert.match(body, /publish_named_tool\('mp-fresh'/);
+});
+
+test('hosted Claude agent env leaves auto-compact enabled', () => {
+  python(String.raw`
+sid = '11111111-2222-4333-8444-555555555555'
+env = r['host_agent_env']('claude', sid)
+assert 'DISABLE_AUTO_COMPACT' not in env
+print('MP_FRESH_PASS')
+`);
 });
 
 test('a custom handover file skips the host prompt and seeds the resume phase', () => {
