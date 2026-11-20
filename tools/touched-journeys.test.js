@@ -31,6 +31,11 @@ test('source-file mapping runs only the touched journeys', t => {
   assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory), { features: ['appearance'], unmapped: ['src/chat_inputXzig'] });
 });
 
+test('the CI repair receipt stays out of the verifier wait list', () => {
+  const result = touchedJourneys(['.github/workflows/ci-repair-receipt.yml']);
+  assert.equal(result.ciWorkflows, undefined);
+});
+
 test('formal verification owns its files without selecting an unrelated desktop journey', t => {
   const directory = maps(t);
   fs.writeFileSync(path.join(directory, 'chat-delivery-formal.md'), '# Formal chat delivery\nSource files: .claude/skills/verify-chat-delivery-formal/*, .github/workflows/chat-delivery-formal.yml\nCI workflow: chat-delivery-formal.yml\n');

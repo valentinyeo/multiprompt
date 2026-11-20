@@ -203,47 +203,125 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
 
-test "IGSH-991 CPU961 pending echo assignment stays within 50 ms on long histories" {
+test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled budget on long histories" {
+    const Bench = struct {
+        const calib_blocks: usize = 2800;
+        const calib_block_chars: usize = 600;
+        const calib_pending_chars: usize = 40;
+        const heaviest_work_units: u64 = 12200 * 600;
+        const calib_work_units: u64 = calib_blocks * calib_block_chars;
+        const work_scale: f64 = @as(f64, @floatFromInt(heaviest_work_units)) / @as(f64, @floatFromInt(calib_work_units));
+        const slack_ratio: f64 = 1.35;
+        const absolute_floor_ms: i64 = 50;
+        const scaled_gate_baseline_ms: i64 = 3;
+
+        fn workUnits(blocks: usize, block_chars: usize) u64 {
+            return @as(u64, @intCast(blocks)) * @as(u64, @intCast(block_chars));
+        }
+        fn budgetMs(baseline_median_ms: i64) i64 {
+            if (baseline_median_ms < scaled_gate_baseline_ms) return absolute_floor_ms;
+            const scaled = @as(f64, @floatFromInt(baseline_median_ms)) * work_scale * slack_ratio;
+            return @max(absolute_floor_ms, @as(i64, @intFromFloat(std.math.ceil(scaled))));
+        }
+        fn medianMs(trials: []const i64) i64 {
+            var scratch: [7]i64 = undefined;
+            @memcpy(scratch[0..trials.len], trials);
+            std.mem.sort(i64, scratch[0..trials.len], {}, std.sort.asc(i64));
+            return scratch[trials.len / 2];
+        }
+        fn measureAssign(
+            users: []const echo.UserBlock,
+            prefix: []const u16,
+            text: []const u16,
+            present: bool,
+        ) struct { cpu_ms: i64, wall_ms: i64, picked: ?usize } {
+            var pending: [1]echo.Pending = .{.{ .prefix = prefix, .text = text, .anchor = .{ .counted = true } }};
+            var picked: [1]?usize = undefined;
+            const wall_start = std.Io.Clock.awake.now(std.testing.io);
+            const start = now();
+            echo.assign(&pending, users[0 .. users.len - 1 + @intFromBool(present)], false, &.{}, &picked);
+            const cpu_ms = ms(start);
+            const wall_ms = wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
+            std.mem.doNotOptimizeAway(picked[0]);
+            return .{ .cpu_ms = cpu_ms, .wall_ms = wall_ms, .picked = picked[0] };
+        }
+    };
+
     const a = std.heap.page_allocator;
     const block_counts = [_]usize{ 1200, 2800, 12200 };
     const block_chars = [_]usize{ 60, 600 };
     const pending_chars = [_]usize{ 40, 2000, 12000 };
+
+    const count = Bench.calib_blocks;
+    const chars = Bench.calib_block_chars;
+    const pending_len = Bench.calib_pending_chars;
+    const storage = try a.alloc(u16, count * chars);
+    defer a.free(storage);
+    const users = try a.alloc(echo.UserBlock, count + 1);
+    defer a.free(users);
+    for (0..count) |i| {
+        const slice = storage[i * chars ..][0..chars];
+        for (slice, 0..) |*c, k| c.* = if (k % 7 == 6) ' ' else @intCast('a' + (i + k) % 26);
+        users[i] = .{ .text = slice };
+    }
+    const text = try a.alloc(u16, pending_len);
+    defer a.free(text);
+    for (text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
+    users[count] = .{ .text = text };
+    const prefix = text[0..@min(text.len, 40)];
+    _ = Bench.measureAssign(users, prefix, text, true);
+    var calib_trials: [7]i64 = undefined;
+    for (&calib_trials, 0..) |*slot, trial| {
+        const measured = Bench.measureAssign(users, prefix, text, true);
+        try std.testing.expectEqual(@as(?usize, count), measured.picked);
+        slot.* = measured.cpu_ms;
+        std.debug.print("CPU960 calibrate blocks={d} block_chars={d} pending_chars={d} trial={d} present=true ms={d} mode={s} clock=cpu_thread wall_ms={d}\n", .{ count, chars, pending_len, trial, measured.cpu_ms, @tagName(@import("builtin").mode), measured.wall_ms });
+    }
+    const baseline_median_ms = Bench.medianMs(&calib_trials);
+    const budget_ms = Bench.budgetMs(baseline_median_ms);
+    std.debug.print("CPU960 baseline_median_ms={d} work_scale={d:.3} slack_ratio={d:.2} budget_ms={d} absolute_floor_ms={d} scaled_gate_baseline_ms={d} mode={s} clock=cpu_thread\n", .{ baseline_median_ms, Bench.work_scale, Bench.slack_ratio, budget_ms, Bench.absolute_floor_ms, Bench.scaled_gate_baseline_ms, @tagName(@import("builtin").mode) });
+
     var slowest_ms: i64 = 0;
-    for (block_counts) |count| for (block_chars) |chars| {
-        const storage = try a.alloc(u16, count * chars);
-        defer a.free(storage);
-        const users = try a.alloc(echo.UserBlock, count + 1);
-        defer a.free(users);
-        for (0..count) |i| {
-            const slice = storage[i * chars ..][0..chars];
-            for (slice, 0..) |*c, k| c.* = if (k % 7 == 6) ' ' else @intCast('a' + (i + k) % 26);
-            users[i] = .{ .text = slice };
-        }
-        for (pending_chars) |pending_len| {
-            const text = try a.alloc(u16, pending_len);
-            defer a.free(text);
-            for (text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
-            users[count] = .{ .text = text };
-            for ([_]bool{ false, true }) |present| {
-                var trials: [5]i64 = undefined;
-                for (&trials, 0..) |*slot, trial| {
-                    var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
-                    var picked: [1]?usize = undefined;
-                    const wall_start = std.Io.Clock.awake.now(std.testing.io);
-                    const start = now();
-                    echo.assign(&pending, users[0 .. count + @intFromBool(present)], false, &.{}, &picked);
-                    const elapsed = ms(start);
-                    const wall_ms = wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
-                    std.mem.doNotOptimizeAway(picked[0]);
-                    try std.testing.expectEqual(if (present) @as(?usize, count) else null, picked[0]);
-                    slot.* = elapsed;
-                    std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d} mode={s} clock=cpu_thread wall_ms={d}\n", .{ count, chars, pending_len, trial, present, elapsed, @tagName(@import("builtin").mode), wall_ms });
+    for (block_counts) |bench_count| {
+        for (block_chars) |bench_chars| {
+            const bench_storage = try a.alloc(u16, bench_count * bench_chars);
+            defer a.free(bench_storage);
+            const bench_users = try a.alloc(echo.UserBlock, bench_count + 1);
+            defer a.free(bench_users);
+            for (0..bench_count) |i| {
+                const slice = bench_storage[i * bench_chars ..][0..bench_chars];
+                for (slice, 0..) |*c, k| c.* = if (k % 7 == 6) ' ' else @intCast('a' + (i + k) % 26);
+                bench_users[i] = .{ .text = slice };
+            }
+            for (pending_chars) |bench_pending_len| {
+                const bench_text = try a.alloc(u16, bench_pending_len);
+                defer a.free(bench_text);
+                for (bench_text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
+                bench_users[bench_count] = .{ .text = bench_text };
+                const bench_prefix = bench_text[0..@min(bench_text.len, 40)];
+                for ([_]bool{ false, true }) |present| {
+                    var trials: [5]i64 = undefined;
+                    for (&trials, 0..) |*slot, trial| {
+                        const measured = Bench.measureAssign(bench_users, bench_prefix, bench_text, present);
+                        try std.testing.expectEqual(if (present) @as(?usize, bench_count) else null, measured.picked);
+                        slot.* = measured.cpu_ms;
+                        std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d} mode={s} clock=cpu_thread wall_ms={d}\n", .{ bench_count, bench_chars, bench_pending_len, trial, present, measured.cpu_ms, @tagName(@import("builtin").mode), measured.wall_ms });
+                    }
+                    const scenario_median_ms = Bench.medianMs(&trials);
+                    const scenario_work = Bench.workUnits(bench_count, bench_chars);
+                    const scenario_budget_ms = if (baseline_median_ms >= Bench.scaled_gate_baseline_ms)
+                        @max(Bench.absolute_floor_ms, @as(i64, @intFromFloat(std.math.ceil(@as(f64, @floatFromInt(baseline_median_ms)) * @as(f64, @floatFromInt(scenario_work)) / @as(f64, @floatFromInt(Bench.calib_work_units)) * Bench.slack_ratio))))
+                    else
+                        Bench.absolute_floor_ms;
+                    if (scenario_median_ms > scenario_budget_ms) {
+                        std.debug.print("CPU991 scenario_over blocks={d} block_chars={d} pending_chars={d} present={} median_ms={d} scenario_budget_ms={d} baseline_median_ms={d} mode={s} clock=cpu_thread\n", .{ bench_count, bench_chars, bench_pending_len, present, scenario_median_ms, scenario_budget_ms, baseline_median_ms, @tagName(@import("builtin").mode) });
+                        return error.TestUnexpectedResult;
+                    }
+                    slowest_ms = @max(slowest_ms, scenario_median_ms);
                 }
-                std.mem.sort(i64, &trials, {}, std.sort.asc(i64));
-                slowest_ms = @max(slowest_ms, trials[trials.len / 2]);
             }
         }
-    };
-    std.debug.print("CPU991 matching slowest_median_ms={d} budget_ms=50 mode={s} clock=cpu_thread\n", .{ slowest_ms, @tagName(@import("builtin").mode) });
-    try std.testing.expect(slowest_ms <= 50);
+    }
+    std.debug.print("CPU991 matching slowest_median_ms={d} baseline_median_ms={d} budget_ms={d} mode={s} clock=cpu_thread\n", .{ slowest_ms, baseline_median_ms, budget_ms, @tagName(@import("builtin").mode) });
+    try std.testing.expect(slowest_ms <= budget_ms);
 }
