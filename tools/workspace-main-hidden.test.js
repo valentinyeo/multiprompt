@@ -18,6 +18,7 @@ test('IGSH-2281 workspace card rows skip the hidden empty Main', () => {
   assert.match(journey, /function Get-WorkspaceCardRow/);
   assert.match(journey, /Get-WorkspaceCardRow \$Workspace/);
   assert.match(journey, /ClickOwnedChildClient\(\$card, \$script:window/);
+  assert.match(journey, /function Dismiss-WorkspaceCard/);
   const native = read('.claude/skills/verify-multiprompt/control-native.cs');
   assert.match(native, /public static void ClickOwnedChildClient/);
   assert.match(native, /MultiPromptWorkspaceSwitcher/);
