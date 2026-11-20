@@ -32,7 +32,7 @@ const reviewedReleases = {
   'v0.28.1339': ['1f91520248bd00bf99308dcec5717b3199574fdf', { 'IGSH-1266': 'A failed move to the terminal keeps your chat open.' }],
 };
 
-const reviewedCommits = {
+export const reviewedCommits = {
   'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83a': 'HYCI-158',
   'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1': 'HYCI-168',
   '31797d916a1d68082901de71966c2e4a02036e80': 'HYCI-147',
@@ -47,6 +47,7 @@ const reviewedCommits = {
   '17ff55175dfff3ceffd45d41d8517d149c6be787': 'SOFT-2718',
   '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
   '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
+  '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9': 'SOFT-2902',
 };
 
 const mainPath = 'src/main.zig';
