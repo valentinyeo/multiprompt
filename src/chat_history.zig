@@ -81,7 +81,44 @@ pub const History = struct {
         self.blocks.items[first_block].zone = recorded.zone;
     }
 
+    fn compactIdentityRows(self: *History, a: std.mem.Allocator) !void {
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        var indexed = std.StringHashMap(usize).init(scratch);
+        var slots: std.ArrayList(struct { line: []const u8, offset: u64, keep: bool }) = .empty;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const m = try std.json.parseFromSliceLeaky(Message, scratch, line, .{ .ignore_unknown_fields = true });
+            var keep = true;
+            const id = m.read_id orelse m.id;
+            if ((std.mem.eql(u8, m.role, "user") or std.mem.eql(u8, m.role, "assistant")) and id.len > 0 and std.mem.indexOf(u8, id, ":text:") == null) {
+                const slot = try indexed.getOrPut(id);
+                if (slot.found_existing) {
+                    const prior = slots.items[slot.value_ptr.*];
+                    if (m.offset >= prior.offset) {
+                        slots.items[slot.value_ptr.*].keep = false;
+                        slot.value_ptr.* = slots.items.len;
+                    } else keep = false;
+                } else slot.value_ptr.* = slots.items.len;
+            }
+            try slots.append(scratch, .{ .line = line, .offset = m.offset, .keep = keep });
+        }
+        var rebuilt: std.ArrayList(u8) = .empty;
+        errdefer rebuilt.deinit(a);
+        for (slots.items) |item| {
+            if (!item.keep) continue;
+            try rebuilt.appendSlice(a, item.line);
+            try rebuilt.append(a, '\n');
+        }
+        if (rebuilt.items.len == self.rows.items.len and std.mem.eql(u8, rebuilt.items, self.rows.items)) return;
+        self.rows.deinit(a);
+        self.rows = rebuilt;
+    }
+
     fn render(self: *History, a: std.mem.Allocator) !void {
+        try self.compactIdentityRows(a);
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         var last_id: std.ArrayList(u8) = .empty;
         defer last_id.deinit(a);
@@ -2252,6 +2289,18 @@ test "IGSH-1019 copying a request ID returns the original ID not its display has
     var missing = h.blocks.items[0];
     missing.message_id = 0;
     try std.testing.expectEqual(@as(?[]u16, null), try h.requestIdAlloc(a, missing));
+}
+
+test "SOFT-2582 duplicate provider ids collapse to one visible block" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(2582, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t400\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"msg_hook\",\"text\":\"first hook copy\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"msg_hook\",\"text\":\"latest hook copy\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("latest hook copy"), h.text.items);
 }
 
 test "IGSH-1674 appending positioned rows does not decode settled message bodies" {

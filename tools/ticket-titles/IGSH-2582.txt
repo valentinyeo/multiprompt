@@ -1,0 +1,1 @@
+Hook messages make chats show each reply twice

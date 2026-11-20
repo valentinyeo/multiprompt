@@ -1098,6 +1098,16 @@ class HistoryReaderTest(unittest.TestCase):
                     replay = reader.response(dict(self.query, cached_sid='', offset=0)).splitlines()[1:-1]
                     self.assertEqual(replay, [reader.wire_row(row) for row in rows])
 
+    def test_soft_2582_hook_reemit_keeps_latest_assistant_row(self):
+        rows = [
+            dict(role='assistant', id='msg_hook_demo_2582', text='HOOK_DEMO_FIRST', offset=10, end=20),
+            dict(role='assistant', id='msg_hook_demo_2582', text='HOOK_DEMO_LATEST', offset=30, end=40),
+        ]
+        paired = reader.dedupe_identity_rows(reader.pair_tool_rows(rows))
+        assistant = [row for row in paired if row['role'] == 'assistant']
+        self.assertEqual(len(assistant), 1)
+        self.assertEqual(assistant[0]['text'], 'HOOK_DEMO_LATEST')
+
     def test_igsh402_hidden_events_and_disabled_tools_keep_previous_contract(self):
         event = self.tool_call()
         event['message'].update(id='reply-402', content=[dict(type='text', text='Before'),

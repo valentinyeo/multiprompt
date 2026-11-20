@@ -1058,6 +1058,28 @@ def conversation_rows(event, agent, offset=0, search=False):
     return rows
 
 
+def dedupe_identity_rows(rows):
+    indexed = {}
+    out = []
+    for row in rows:
+        if row.get("role") not in ("user", "assistant"):
+            out.append(row)
+            continue
+        token = row.get("id") or ""
+        if not token or ":text:" in token:
+            out.append(row)
+            continue
+        slot = indexed.get(token)
+        if slot is None:
+            indexed[token] = len(out)
+            out.append(row)
+            continue
+        previous = out[slot]
+        if row.get("offset", 0) >= previous.get("offset", 0):
+            out[slot] = row
+    return out
+
+
 def pair_tool_rows(rows):
     calls = {row["id"]: row for row in rows if row["role"] == "tool"}
     inputs = {identity: row["detail"] for identity, row in calls.items()}
@@ -2179,7 +2201,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
-        paired = pair_tool_rows(rows)
+        paired = dedupe_identity_rows(pair_tool_rows(rows))
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
@@ -8231,7 +8253,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 132
+RUNTIME_GENERATION = 133
 
 if __name__ == '__main__':
     import base64 as _base64

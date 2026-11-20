@@ -1,0 +1,1 @@
+Chat View no longer shows the same Claude message twice after a hook retries it.
