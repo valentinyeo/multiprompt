@@ -1,0 +1,1 @@
+Switching chats and answering questions keeps the conversation steady instead of jumping or dropping cards.
