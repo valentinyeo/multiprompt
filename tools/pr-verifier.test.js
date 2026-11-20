@@ -84,6 +84,42 @@ test('a head failure master also fails is inherited, not a FAIL', () => {
   assert.match(body, /- appearance: head failed \(inherited\)/);
 });
 
+test('SOFT-2902: a journey timeout listed in masterFailures is inherited, not BLOCKED', () => {
+  const dir = evidenceDir({
+    'verify-chat-messages-only': { status: 'failed', error: 'Timed out: arrival at bottom stays clear' },
+  });
+  const summary = verifier.summarize(dir, ['chat-messages-only']);
+  summary.masterFailures = ['chat-messages-only'];
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['diff matches the ticket'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-messages-only']),
+    runUrl: 'https://github.com/valentinyeo/multiprompt/actions/runs/44817094076',
+    jobs: { head: { result: 'failure' } },
+  });
+  assert.equal(final, 'PASS+NOTES');
+  assert.match(body, /Already failing in master's latest nightly verify run.*chat-messages-only/);
+  assert.match(body, /- chat-messages-only: head blocked \(inherited\)/);
+  assert.doesNotMatch(body, /Journey verification blocked:.*chat-messages-only/);
+  assert.doesNotMatch(body, /head job failure; full verification could not complete/);
+});
+
+test('SOFT-2902: the same journey timeout without masterFailures is not PASS', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-messages-only': { status: 'failed', error: 'Timed out: arrival at bottom stays clear' },
+  }), ['chat-messages-only']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: [] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-messages-only']),
+    runUrl: 'u',
+    jobs: { head: { result: 'failure' } },
+  });
+  assert.equal(final, 'BLOCKED');
+});
+
 test('a head failure master passes is FAIL', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' } });
   const summary = verifier.summarize(dir, ['appearance']);

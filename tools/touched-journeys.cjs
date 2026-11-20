@@ -5,6 +5,7 @@ const { discoverFeatures } = require('./verify-features.cjs');
 const SHARED_CORE_MAPS = 5;
 const MAX_JOURNEYS = 8;
 const SMOKE_JOURNEY = 'appearance';
+const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml']);
 
 function patternFor(source) {
   return new RegExp(`^${source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
@@ -38,7 +39,7 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
       if (!patterns.length && !changedMap) continue;
       owned = true;
       if (map.ciWorkflow) {
-        ciWorkflows.add(map.ciWorkflow);
+        if (!VERIFIER_OWN_CI_WORKFLOWS.has(map.ciWorkflow)) ciWorkflows.add(map.ciWorkflow);
         continue;
       }
       const specificity = changedMap ? 0 : Math.min(...patterns.map(source => ownership.get(source)));

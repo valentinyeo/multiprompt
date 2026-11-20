@@ -48,6 +48,17 @@ test("reposition and the delayed re-show settle both park during an overlay", ()
   assert.match(arm, /if \(browserChromeHiddenForOverlay\(\)\) \{\s*cancelBrowserVisibilitySettle\(\);\s*return;/, "a delayed re-show is never armed while an overlay is open");
 });
 
+test("SOFT-2990 a missing restored pane still launches while Shortcuts hides chrome", () => {
+  const body = functionBody("updateBrowserVisibility");
+  assert.match(body, /if \(hide_for_overlay\) \{[\s\S]*?tryLaunchActiveBrowserIfNeeded\(\);/, "overlay parking must not skip the launch pass");
+  const launch = functionBody("tryLaunchActiveBrowserIfNeeded");
+  assert.match(
+    launch,
+    /else if \(browserChromeHiddenForOverlay\(\) and !g_chat_active\) \{\s*launchBrowserForShell\(active_shell\);/,
+    "Shortcuts may hide chrome but must not block the launch",
+  );
+});
+
 test("closing the Inbox re-shows the active pane through updateBrowserVisibility", () => {
   const close = functionBody("closeInbox");
   const refreshes = close.match(/updateBrowserVisibility\(\);/g) || [];

@@ -1,0 +1,14 @@
+SOFT-2992 CPU991 VPS replay (ReleaseSmall unless noted)
+Old gate: slowest_median_ms <= 50
+New gate: slowest_median_ms <= max(50, ceil(baseline_median_ms * 4.357 * 1.35))
+baseline proxy: 2800x600x40 present=true trial=2 ms from the same run (until CPU960 exists on master)
+
+run        | slowest | baseline | old budget | new budget | old | new
+44816468510 | 74     | 16       | 50         | 94         | FAIL | PASS
+44821414996 | 34     | 8        | 50         | 50         | PASS | PASS
+44815030127 | 50     | 10       | 50         | 59         | PASS | PASS
+44808619663 | 17     | 6        | 50         | 50         | PASS | PASS
+44803544730 | 32     | 6        | 50         | 50         | PASS | PASS
+
+Windows run 44816468510 slowest 46 ms at baseline ~15 ms: new budget 88 ms -> PASS
+Synthetic regression slowest 92 ms at baseline 15 ms: new budget 88 ms -> FAIL
