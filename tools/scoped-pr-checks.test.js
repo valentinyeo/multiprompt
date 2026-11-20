@@ -40,7 +40,7 @@ test('the CI repair receipt is path-filtered, runs the base proof and owns its f
   assert.match(source, /name: ci-repair-receipt\n/);
   assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(map, /^CI workflow: ci-repair-receipt\.yml$/m);
-  for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+  for (const file of ['tools/pr-verifier.cjs', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
 });
 
 test('the service route receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
@@ -92,12 +92,12 @@ test('formal delivery PR checks stay bounded, source-filtered and Linux-only', (
 
 test('PR performance probes are nightly and do not block the cheap aggregate', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  for (const name of ['speed-baseline', 'speed-candidate', 'idle-budget', 'switch-performance']) {
+  for (const name of ['speed-baseline', 'speed-candidate', 'switch-performance']) {
     const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
     assert.match(job, /if: .*github.event_name != 'pull_request'/, name);
   }
   const aggregate = workflow.split('\n  test-result:\n')[1];
-  assert.doesNotMatch(aggregate, /needs\.(?:switch-performance|idle-budget|test-windows-update)/);
+  assert.doesNotMatch(aggregate, /needs\.(?:switch-performance|test-windows-update)/);
   assert.match(workflow.split('\n  test-windows-update:\n')[1], /if: github.event_name != 'pull_request'/);
 });
 

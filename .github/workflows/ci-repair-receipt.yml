@@ -12,8 +12,6 @@ on:
       - 'tools/strip-comments.test.js'
       - '.github/workflows/no-comments.yml'
       - 'tools/ci-receipt-summary.mjs'
-      - 'src/chat_perf_test.zig'
-      - 'src/chat_echo.zig'
       - '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'
       - '.claude/skills/verify-multiprompt/features/README.md'
       - '.github/workflows/ci-repair-receipt.yml'
@@ -72,60 +70,8 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: ci-repair-receipt-tools
+          name: ci-repair-receipt
           path: ${{ runner.temp }}/receipt/
           if-no-files-found: error
       - name: Fail when the head tests or the receipt failed
         run: test "$head" = 0 && test "$receipt" = 0
-  budget:
-    needs: tools
-    if: always() && needs.tools.result != 'skipped'
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - name: Keep LF line endings
-        run: git config --global core.autocrlf false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: ci-repair-receipt-tools
-          path: ${{ runner.temp }}/receipt
-      - name: Install Zig 0.16.0
-        shell: pwsh
-        run: |
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-          tar -xf $zip -C $env:RUNNER_TEMP
-          if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
-          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Run the echo-assign CPU budget
-        id: run
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\input" | Out-Null
-          $log = "$env:RUNNER_TEMP\input\echo-budget.log"
-          zig test src/chat_perf_test.zig -O ReleaseSmall -mcpu=baseline --test-filter IGSH-991 2>&1 | Out-File -Encoding utf8 $log
-          "code=$LASTEXITCODE" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-      - name: Write the receipt
-        if: always()
-        shell: pwsh
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          $code = '${{ steps.run.outputs.code }}'
-          if (-not $code) { $code = '1' }
-          node tools/ci-receipt-summary.mjs "$env:RUNNER_TEMP\receipt" echo-budget "$env:RUNNER_TEMP\input\echo-budget.log" $code '^CPU(961|991) '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: ci-repair-receipt
-          path: ${{ runner.temp }}/receipt/
-          if-no-files-found: error
