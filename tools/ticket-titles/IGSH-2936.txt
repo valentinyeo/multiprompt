@@ -1,0 +1,1 @@
+Workspace "ceo runners" cannot be deleted

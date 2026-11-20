@@ -57,7 +57,7 @@ test('IGSH-1832 production delete routing closes legacy and stale-host local slo
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
 const HANDLE = ?*anyopaque;
-const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0, archived: bool = false };
+const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, name: [64]u8 = @splat(0), name_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0, archived: bool = false };
 const app_state = struct {
     var g_workspace_count: u32 = 1;
     var g_workspaces: [1]Entry = @splat(.{});
@@ -90,6 +90,7 @@ fn unlockWorkspaceRegistry(_: u8) void {}
 fn mergeWorkspaceRegistryFromDisk() void {}
 fn findWorkspace(_: []const u8) ?u32 { return 0; }
 fn removeWorkspaceEntryAt(_: u32) void { removed = true; }
+fn rememberRemovedWorkspace(_: []const u8) void {}
 fn writeWorkspaceRegistryFile() void {}
 fn workspaceDeleteStamp(_: *[32]u8) []const u8 { return "stamp"; }
 fn getSessionPathForWorkspace(_: *[512]u8, _: []const u8) ?[]const u8 { return null; }
