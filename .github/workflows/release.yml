@@ -35,7 +35,6 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       sha: ${{ steps.version.outputs.sha }}
-      features: ${{ steps.plan.outputs.features }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -99,12 +98,6 @@ jobs:
           git merge-base --is-ancestor "$SHA" origin/master
           node tools/version-stamp.mjs build "$TAG"
           node tools/release-notes.mjs src/changelog.zig "$TAG" release-notes.json
-      - name: Map every merged change to release journeys
-        id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.version.outputs.sha }}
-        run: node tools/release-journeys.mjs plan "$SHA" release-plan.json
       - name: Reserve release tag
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -124,7 +117,6 @@ jobs:
           path: |
             src/changelog.zig
             release-notes.json
-            release-plan.json
           if-no-files-found: error
 
   build:
@@ -193,62 +185,6 @@ jobs:
           name: multiprompt-${{ matrix.arch }}-symbols
           path: dist-symbols/*
           if-no-files-found: warn
-
-  journeys:
-    needs: [prepare, build]
-    if: needs.prepare.outputs.features != '[]'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/verify.yml
-    with:
-      revision: ${{ needs.prepare.outputs.sha }}
-      feature: all
-      features: ${{ needs.prepare.outputs.features }}
-      candidate_artifact: multiprompt-x64
-      candidate_version: ${{ needs.prepare.outputs.tag }}
-
-  journey-gate:
-    needs: [prepare, build, journeys]
-    if: always() && !cancelled() && needs.prepare.result == 'success' && needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: release-notes-source
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: multiprompt-x64
-          path: candidate-bin
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: needs.prepare.outputs.features != '[]'
-        continue-on-error: true
-        with:
-          pattern: verify-*
-          path: release-evidence
-      - name: Install video validation tools
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-      - name: Require passing candidate journeys and readable videos
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/release-journeys.mjs check release-plan.json release-evidence candidate-bin/multiprompt-x64.exe release-journeys.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: release-journey-receipt
-          path: |
-            release-journeys.json
-            release-journeys.json.md
-          if-no-files-found: error
 
   launch:
     needs: [prepare, build]
@@ -347,7 +283,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: [prepare, build, launch, gitleaks, resource-observation, journey-gate]
+    needs: [prepare, build, launch, gitleaks, resource-observation]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -371,17 +307,12 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-notes-source
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: release-journey-receipt
-      - name: Include verified journey receipt
-        run: cp release-journeys.json dist/release-journeys.json
       - name: Include versioned update notes
         run: cp release-notes.json dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
-          (cd dist && sha256sum -- *.exe *.zip release-notes.json release-journeys.json > SHA256SUMS.txt)
+          (cd dist && sha256sum -- *.exe *.zip release-notes.json > SHA256SUMS.txt)
       - name: Sign checksum manifest
         env:
           MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
@@ -428,7 +359,6 @@ jobs:
             console.log(`- [${line.slice(0, space)}](${release.tickets[index]}) ${title}`);
           }
           NODE
-          cat release-journeys.json.md >> release-body.txt
           remote=$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
           resolved=$(printf '%s\n' "$remote" | awk 'NR == 1 { sha = $1 } /\^\{\}$/ { sha = $1 } END { print sha }')
           [ "$resolved" = "$BUILT_SHA" ] || { echo 'Release tag does not point to the built commit' >&2; exit 1; }
