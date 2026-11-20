@@ -28,29 +28,64 @@ fn pastedTagLen(text: []const u16, i: usize) usize {
     return 0;
 }
 
+const CommandKind = enum { none, name, message, args };
+
+const CommandTag = struct { len: usize = 0, kind: CommandKind = .none, closing: bool = false };
+
+fn commandTag(text: []const u16, i: usize) CommandTag {
+    if (i >= text.len or text[i] != '<') return .{};
+    const names = [_][]const u8{ "command-name", "command-message", "command-args" };
+    var j = i + 1;
+    const closing = j < text.len and text[j] == '/';
+    if (closing) j += 1;
+    for (names, 0..) |name, k| {
+        if (j + name.len > text.len) continue;
+        var match = true;
+        for (name, 0..) |ch, m| if (asciiLower(text[j + m]) != ch) {
+            match = false;
+            break;
+        };
+        if (!match) continue;
+        j += name.len;
+        while (j < text.len) : (j += 1) {
+            if (text[j] == '>') return .{ .len = j + 1 - i, .kind = @enumFromInt(k + 1), .closing = closing };
+            if (text[j] == '<') return .{};
+        }
+        return .{};
+    }
+    return .{};
+}
+
+fn liveMarkerLen(text: []const u16, i: usize) usize {
+    if (i >= text.len or text[i] != '{') return 0;
+    const lead = "live-";
+    if (i + 1 + lead.len > text.len) return 0;
+    for (lead, 0..) |ch, k| if (asciiLower(text[i + 1 + k]) != ch) return 0;
+    var j = i + 1 + lead.len;
+    while (j < text.len and text[j] != '}') : (j += 1) {
+        const c = text[j];
+        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.' or c == ':' or c == '-')) return 0;
+        if (j - i > 65) return 0;
+    }
+    if (j >= text.len or text[j] != '}') return 0;
+    return j + 1 - i;
+}
+
+fn commandNameAhead(text: []const u16, from: usize) bool {
+    var i = from;
+    while (i < text.len) : (i += 1) {
+        if (text[i] != '<') continue;
+        const tag = commandTag(text, i);
+        if (tag.kind == .name and !tag.closing) return true;
+        if (tag.len > 0) i += tag.len - 1;
+    }
+    return false;
+}
+
 pub fn normalize(text: []const u16, out: []u16) []const u16 {
     var n: usize = 0;
-    var pending_space = false;
-    var i: usize = 0;
-    while (i < text.len) {
-        const tag = if (text[i] == '<') pastedTagLen(text, i) else 0;
-        if (tag > 0) {
-            if (n > 0) pending_space = true;
-            i += tag;
-            continue;
-        }
-        const c = text[i];
-        i += 1;
-        if (isSpace(c)) {
-            if (n > 0) pending_space = true;
-            continue;
-        }
-        if (pending_space) {
-            if (n >= out.len) break;
-            out[n] = ' ';
-            n += 1;
-            pending_space = false;
-        }
+    var it = Normalized{ .text = text };
+    while (it.next()) |c| {
         if (n >= out.len) break;
         out[n] = c;
         n += 1;
@@ -187,17 +222,61 @@ const Normalized = struct {
     pos: usize = 0,
     started: bool = false,
 
+    fn skipMessageElement(self: *Normalized, after_open: usize) void {
+        self.pos = after_open;
+        while (self.pos < self.text.len) {
+            const tag = commandTag(self.text, self.pos);
+            if (tag.kind == .message and tag.closing) {
+                self.pos += tag.len;
+                return;
+            }
+            self.pos += 1;
+        }
+    }
+
     fn next(self: *Normalized) ?u16 {
         var space = false;
         while (self.pos < self.text.len) {
-            const tag = if (self.text[self.pos] == '<') pastedTagLen(self.text, self.pos) else 0;
-            if (tag > 0 or isSpace(self.text[self.pos])) {
-                self.pos += if (tag > 0) tag else 1;
-                space = self.started;
+            const c = self.text[self.pos];
+            if (c == '<') {
+                const tag = commandTag(self.text, self.pos);
+                if (tag.kind != .none) {
+                    if (tag.kind == .message and !tag.closing) {
+                        if (commandNameAhead(self.text, self.pos + tag.len)) {
+                            self.skipMessageElement(self.pos + tag.len);
+                            space = self.started;
+                            continue;
+                        }
+                        self.pos += tag.len;
+                        if (!self.started) {
+                            self.started = true;
+                            return '/';
+                        }
+                        continue;
+                    }
+                    self.pos += tag.len;
+                    if (tag.closing and self.started) space = true;
+                    continue;
+                }
+                const pasted = pastedTagLen(self.text, self.pos);
+                if (pasted > 0) {
+                    self.pos += pasted;
+                    space = self.started;
+                    continue;
+                }
+            } else if (c == '{') {
+                const marker = liveMarkerLen(self.text, self.pos);
+                if (marker > 0) {
+                    self.pos += marker;
+                    continue;
+                }
+            }
+            if (isSpace(c)) {
+                self.pos += 1;
+                if (self.started) space = true;
                 continue;
             }
             if (space) return ' ';
-            const c = self.text[self.pos];
             self.pos += 1;
             self.started = true;
             return c;
@@ -661,6 +740,41 @@ test "SOFT-2929 a cut-short or collapsed queue copy is the waiting message, not 
     try std.testing.expect(!queueTextMatches(&w("deploy the staging build"), &w("deploy the production build")));
     try std.testing.expect(!queueTextMatches(&w("yes"), &w("no")));
     try std.testing.expect(!queueTextMatches(&huge, &w("look at this [Pasted text #2 +12 lines]")));
+}
+
+test "SOFT-2929 a mention suffix the transcript adds still matches the waiting copy" {
+    const typed = w("deploy the fix to staging @Builder");
+    const marked = w("deploy the fix to staging @Builder{live-0123abcd}");
+    const elsewhere = w("deploy the fix to production @Builder{live-0123abcd}");
+    const extended = w("deploy the fix to staging @Builder{live-0123abcd} and reboot");
+    var buf: [64]u16 = undefined;
+    const prefix = prefixOf("deploy the fix to staging @Builder", &buf);
+    var pending = [_]Pending{.{ .prefix = prefix, .text = &typed, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
+    const blocks = [_]UserBlock{.{ .text = &marked, .stamp_ms = 2000 }};
+    var out: [1]?usize = @splat(null);
+    assign(&pending, &blocks, false, &.{}, &out);
+    try std.testing.expectEqual(@as(?usize, 0), out[0]);
+    try std.testing.expect(sameText(&typed, &marked));
+    try std.testing.expect(sameText(&marked, &typed));
+    try std.testing.expect(blockMatches(&marked, prefix));
+    try std.testing.expect(!sameText(&typed, &elsewhere));
+    try std.testing.expect(!sameText(&typed, &extended));
+}
+
+test "SOFT-2929 a slash command wrapped in command tags matches the typed copy" {
+    const typed = w("/valentin-mode quote the first heading");
+    const wrapped = w("<command-message>valentin-mode</command-message>\n<command-name>/valentin-mode</command-name>\n<command-args>quote the first heading</command-args>");
+    const message_only = w("<command-message>clear</command-message><command-args>keep notes</command-args>");
+    const keep = w("/clear keep notes");
+    const drop = w("/clear drop notes");
+    var buf: [256]u16 = undefined;
+    try std.testing.expect(sameText(&typed, &wrapped));
+    try std.testing.expect(sameText(&wrapped, &typed));
+    try std.testing.expectEqualSlices(u16, &typed, normalize(&wrapped, &buf));
+    try std.testing.expect(blockMatches(&wrapped, prefixOf("/valentin-mode quote the first heading", &buf)));
+    try std.testing.expect(sameText(&keep, &message_only));
+    try std.testing.expectEqualSlices(u16, &keep, normalize(&message_only, &buf));
+    try std.testing.expect(!sameText(&drop, &message_only));
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {

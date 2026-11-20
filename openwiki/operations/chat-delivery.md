@@ -16,6 +16,12 @@ waiting bubble until Claude starts on it. Reply events and cached history apply
 this to background chats too. Unconfirmed messages never expire through this
 path.
 
+The waiting copy matches its transcript line through the shared text
+normalization: a live mention marker (`@Name{live-xxxx}`) the user did not type,
+a slash command wrapped in `<command-message>`/`<command-args>` tags and a long
+paste collapsed to `[Pasted text #N +M lines]` all still match. A row that is
+already drawn also retires the copy, so the message is shown exactly once.
+
 The persisted send time survives restart. Missing times are recovered from the
 server's message creation time. Startup removes old confirmed echoes, including
 legacy confirmed entries without a usable send time. Resync clears only confirmed

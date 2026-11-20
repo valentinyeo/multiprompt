@@ -1938,7 +1938,9 @@ fn chatEchoTranscriptHasRow(e: ChatOutboxEntry) bool {
 }
 
 pub fn chatEchoRowKnown(e: ChatOutboxEntry, force: bool) bool {
-    return force or chatEchoRowLanded(e) or chatEchoTranscriptHasRow(e);
+    if (force or chatEchoTranscriptHasRow(e)) return true;
+    const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
+    return shell == app_state.active_shell and chatEchoRowLanded(e);
 }
 
 pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {

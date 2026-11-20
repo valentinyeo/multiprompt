@@ -35,6 +35,20 @@ function run(control) {
       assert.notEqual(changed, source, 'the queue copy matcher must be present');
       fs.writeFileSync(file, changed);
     }
+    if (control === 'raw-mention') {
+      const file = path.join(dir, 'chat_echo.zig');
+      const source = fs.readFileSync(file, 'utf8');
+      const changed = source.replace('if (marker > 0) {', 'if (marker > 0 and false) {');
+      assert.notEqual(changed, source, 'the live mention marker skip must be present');
+      fs.writeFileSync(file, changed);
+    }
+    if (control === 'raw-command') {
+      const file = path.join(dir, 'chat_echo.zig');
+      const source = fs.readFileSync(file, 'utf8');
+      const changed = source.replace('if (tag.kind != .none) {', 'if (tag.kind != .none and false) {');
+      assert.notEqual(changed, source, 'the command tag handling must be present');
+      fs.writeFileSync(file, changed);
+    }
     fs.writeFileSync(path.join(dir, 'parity.zig'), String.raw`
 const std = @import("std");
 const echo = @import("chat_echo.zig");
@@ -65,6 +79,7 @@ const ChatOutboxEntry = struct {
 
 pub var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 101 }};
 pub var shell_count: usize = 1;
+pub var active_shell: u32 = 0;
 pub var g_chat_blocks: []const md.Block = &.{};
 pub var g_chat_block_count: usize = 0;
 pub var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
@@ -116,6 +131,26 @@ fn waitingCopies(entry: *const ChatOutboxEntry, queue_text: []const u16, queue_s
 
 fn refresh(entry: *const ChatOutboxEntry, reply_ms: i64, now_ms: i64) bool {
     return chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.testing.allocator, entry.key[0..entry.key_len], reply_ms, now_ms, false, true);
+}
+
+fn queueRowCount(text: []const u16, item: []const u16) usize {
+    var status = statusWith(item, false);
+    const pending = [_]sync.Pending{.{ .id = 7, .text = text }};
+    var view: sync.View = .{};
+    sync.build(&view, &status, &pending);
+    return view.count;
+}
+
+test "SOFT-2929 a mention suffix and a command wrapper stay one row" {
+    const typed = std.unicode.utf8ToUtf16LeStringLiteral("send the release notes @Builder");
+    const marked = std.unicode.utf8ToUtf16LeStringLiteral("send the release notes @Builder{live-0123abcd}");
+    try std.testing.expectEqual(@as(usize, 1), queueRowCount(typed, marked));
+    try std.testing.expectEqual(@as(usize, 1), queueRowCount(marked, typed));
+    const cmd = std.unicode.utf8ToUtf16LeStringLiteral("/clear keep the plan");
+    const wrapped = std.unicode.utf8ToUtf16LeStringLiteral("<command-message>clear</command-message>\n<command-name>/clear</command-name>\n<command-args>keep the plan</command-args>");
+    try std.testing.expectEqual(@as(usize, 1), queueRowCount(cmd, wrapped));
+    try std.testing.expectEqual(@as(usize, 1), queueRowCount(wrapped, cmd));
+    try std.testing.expectEqual(@as(usize, 2), queueRowCount(std.unicode.utf8ToUtf16LeStringLiteral("yes"), std.unicode.utf8ToUtf16LeStringLiteral("no")));
 }
 
 test "SOFT-2929 a long waiting message stays rendered until its transcript line arrives, then once" {
@@ -199,11 +234,11 @@ test('SOFT-2929 a long waiting message stays rendered until its transcript line 
   const result = run();
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 5 tests passed/);
+  assert.match(result.stderr, /All 8 tests passed/);
   console.log(result.stderr.trim());
 });
 
-for (const control of ['retire-while-waiting', 'raw-queue-match']) {
+for (const control of ['retire-while-waiting', 'raw-queue-match', 'raw-mention', 'raw-command']) {
   test(`SOFT-2929 parity oracle rejects ${control}`, () => {
     const result = run(control);
     assert.equal(result.error, undefined);
