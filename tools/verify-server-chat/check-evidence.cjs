@@ -8,11 +8,15 @@ const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\u
 const json = name => JSON.parse(text(name));
 const result = json('result.json');
 assert.equal(result.status, 'passed');
-assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
+assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['new-chat', true], ['send', true], ['clear', true], ['after-clear', true]]);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
+const newChat = 'windows new live chat proof';
+assert.ok(text('new-chat-copied.txt').includes(`Server received: ${newChat}`));
+assert.doesNotMatch(text('new-chat-copied.txt'), /^\s*Not sent\s*$/m);
+assert.equal(json('new-chat-server.json').inputs.filter(row => row.text === newChat).length, 1);
 for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear']]) {
   const wireText = name === 'clear' ? '/clear ' : message;
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);

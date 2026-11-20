@@ -6,6 +6,7 @@ Verify on: push, pull_request
 
 ## Sub-features
 
+- With the shared server connection on and a declared workspace folder, press Ctrl+T to create a new Claude live chat on the real SSH server. Send its first message and require one provider receipt, a copied reply, and no stuck Not sent state (SOFT-1925).
 - Open a saved Linux tmux chat and copy its persisted seed reply from the Windows Chat View.
 - Send a message with the real composer and Enter. Require exactly one server-side provider receipt and the reply copied from the visible transcript.
 - Type `/clear`, dismiss autocomplete, and send it. The production composer terminates bare trigger tokens with one space, so require exactly one provider receipt of `/clear ` and its rendered reply, then send another message successfully.
@@ -24,7 +25,7 @@ Preconditions: GitHub `windows-latest`, the branch executable, WSL2 Ubuntu 24.04
 
 The PR verifier can select this map automatically. Do not dispatch another run while its push-triggered checks are running. For a separate authorized manual run, select `feature=server-chat` in `verify.yml`.
 
-Require `result.json` status `passed`, all four named cases passed, zero app processes after owned-job cleanup, `keyRemoved=true`, and successful `videoExit`. Watch `journey.mp4`; inspect `open.png`, `send.png`, `clear.png`, `after-clear.png`, copied text, `*-server.json`, `key-acl.json`, `ssh-preflight.txt`, `sshd.log`, `actions.json`, `doctor.json` and `build.json` in `verify-server-chat`. The private key and profile never enter the artifact. Cleanup stops the dedicated WSL distribution and deletes the disposable Windows profile.
+Require `result.json` status `passed`, all five named cases passed (`open`, `new-chat`, `send`, `clear`, `after-clear`), zero app processes after owned-job cleanup, `keyRemoved=true`, and successful `videoExit`. Watch `journey.mp4`; inspect `open.png`, `new-chat.png`, `send.png`, `clear.png`, `after-clear.png`, copied text, `*-server.json`, `key-acl.json`, `ssh-preflight.txt`, `sshd.log`, `actions.json`, `doctor.json` and `build.json` in `verify-server-chat`. The private key and profile never enter the artifact. Cleanup stops the dedicated WSL distribution and deletes the disposable Windows profile.
 
 ## Gotchas
 

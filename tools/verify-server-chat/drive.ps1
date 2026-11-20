@@ -94,7 +94,15 @@ try {
     $env:ZIGSHELL_DEBUG = '1'
     $env:IGSH_246 = '0'
     $env:PATH = (Split-Path $ssh) + ';' + $env:PATH
-    Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 }) } "$settings/session.json"
+    $commandsPath = Join-Path $settings 'commands.json'
+    @'
+{
+  "commands": [
+    {"label":"Folder","kind":"vps","folder_host":"0","cwd":"/home/mpverify","workspace":"Workspace 1","default":true}
+  ]
+}
+'@ | Set-Content -Encoding UTF8 $commandsPath
+    Save @{ active_tab = 0; single_window = $false; chat_active = $false; shared_server_connection = $true; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 }) } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
@@ -118,6 +126,18 @@ try {
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
+    $newChatOffset = (Log-Text).Length
+    Press @(0x11, 0x54) 'Ctrl+T: new Claude live chat on the shared server connection'
+    [void](Wait-For 'new live chat spawned' { (Log-Text).Substring($newChatOffset) -match 'new-chat session spawned' })
+    [void](Wait-For 'new live chat transcript ready' { (Log-Text).Substring($newChatOffset) -match '\[chat\] transcript load shell=\d+ ok' } 120)
+    $newChatText = 'windows new live chat proof'
+    Send-Line $newChatText
+    [void](Wait-For 'new chat server receipt' { $snapshot = Server-Snapshot 'new-chat-server'; @($snapshot.inputs | Where-Object { $_.text -ceq $newChatText }).Count -eq 1 } 120)
+    $newCopied = Copy-Chat 'new-chat-copied'
+    if ($newCopied -match '(?m)^Not sent\s*$') { throw 'The new chat first message stayed Not sent' }
+    if (-not $newCopied.Contains("Server received: $newChatText")) { throw 'The new chat did not copy a provider reply' }
+    Shot 'new-chat'
+    $result.cases += @{ name = 'new-chat'; passed = $true; detail = 'Ctrl+T started a new live chat on the shared connection; its first message reached the host and was not left Not sent' }
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
         $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
