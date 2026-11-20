@@ -347,17 +347,26 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             [VerifyNative]::ClickClient($menu, $pillX, $pillY)
             Save-Json ([VerifyNative]::ObserveUsageHover($script:window, [uint32]$process.Id, $pillX, $pillY)) 'footer-click-second.json'
             Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel closes on second click'
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, $pillX, $pillY)
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel reopens'
+            $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)
             Press @(0x1B) 'Escape: dismiss AI usage panel'
             Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel closes on Escape'
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, $pillX, $pillY)
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel reopens before outside click'
+            $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)
             [VerifyNative]::ClickClient($menu, [int]($client.Right * 3 / 4), ($client.Bottom - [int][Math]::Round(4 * $scale)))
             Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel closes on outside click'
             Snapshot 'pill-dismissed'
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+            [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, $pillX, $pillY)
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
-            Wait-Until { [VerifyNative]::IsWindowVisible($menu) } 'usage panel reopens for release notes'
+            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)) } 'usage panel reopens for release notes'
+            $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $iconGeometry.card.title)
             Press @(0x09) 'Tab: focus release notes'
             Press @(0x0D) 'Enter: open release notes'
             Wait-Until { -not [VerifyNative]::IsWindowVisible($menu) } 'release notes closes usage card'
