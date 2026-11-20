@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +53,7 @@ const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
-export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
+export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the automatic release stamps the version after merge';
 
 export function autoRevertBranch(env = process.env) {
   return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
@@ -312,29 +311,6 @@ function check(baseRev, headRev) {
   return kind === 'HAND_EDIT' ? 1 : 0;
 }
 
-async function release() {
-  const root = git(['rev-parse', '--show-toplevel']).trim();
-  git(['fetch', 'origin', 'master'], root);
-  const sha = git(['rev-parse', 'origin/master'], root).trim();
-  const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: 45 * 60 * 1000, stdio: ['ignore', 'pipe', 'inherit'] }).trim();
-  const runs = JSON.parse(gh(['run', 'list', '--workflow', 'auto-release.yml', '--event', 'push', '--commit', sha, '--json', 'databaseId,headSha,url', '--limit', '10']));
-  const run = runs.filter(run => run.headSha === sha).sort((a, b) => b.databaseId - a.databaseId)[0];
-  if (!run) throw new Error('No automatic release run for origin/master; publication starts only from the normal master push');
-  console.log(run.url);
-  gh(['run', 'watch', String(run.databaseId), '--exit-status', '--interval', '60']);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-receipt-'));
-  try {
-    gh(['run', 'download', String(run.databaseId), '--name', 'release-journey-receipt', '--dir', directory]);
-    const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'release-journeys.json'), 'utf8'));
-    if (receipt.status !== 'passed' || receipt.sha !== sha || receipt.run !== run.url || !Array.isArray(receipt.features) || receipt.features.some(feature => !feature.video?.startsWith(`${run.url}/artifacts/`))) {
-      throw new Error('Automatic release lacks passing candidate journeys with video');
-    }
-    console.log(`RELEASE_VERIFIED ${sha} ${run.url}`);
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, base, head, ...extra] = process.argv.slice(2);
@@ -353,8 +329,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const unresolved = buildUnresolvedChangelog(files, base, history, commits);
       const titles = await resolveTicketTitles(changelogTicketIds(unresolved), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
       fs.writeFileSync(changelogPath, applyTicketTitles(unresolved, titles));
-    } else if (command === 'release' && !base) await release();
-    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json] | release');
+    } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
