@@ -28,29 +28,64 @@ fn pastedTagLen(text: []const u16, i: usize) usize {
     return 0;
 }
 
+const CommandKind = enum { none, name, message, args };
+
+const CommandTag = struct { len: usize = 0, kind: CommandKind = .none, closing: bool = false };
+
+fn commandTag(text: []const u16, i: usize) CommandTag {
+    if (i >= text.len or text[i] != '<') return .{};
+    const names = [_][]const u8{ "command-name", "command-message", "command-args" };
+    var j = i + 1;
+    const closing = j < text.len and text[j] == '/';
+    if (closing) j += 1;
+    for (names, 0..) |name, k| {
+        if (j + name.len > text.len) continue;
+        var match = true;
+        for (name, 0..) |ch, m| if (asciiLower(text[j + m]) != ch) {
+            match = false;
+            break;
+        };
+        if (!match) continue;
+        j += name.len;
+        while (j < text.len) : (j += 1) {
+            if (text[j] == '>') return .{ .len = j + 1 - i, .kind = @enumFromInt(k + 1), .closing = closing };
+            if (text[j] == '<') return .{};
+        }
+        return .{};
+    }
+    return .{};
+}
+
+fn liveMarkerLen(text: []const u16, i: usize) usize {
+    if (i >= text.len or text[i] != '{') return 0;
+    const lead = "live-";
+    if (i + 1 + lead.len > text.len) return 0;
+    for (lead, 0..) |ch, k| if (asciiLower(text[i + 1 + k]) != ch) return 0;
+    var j = i + 1 + lead.len;
+    while (j < text.len and text[j] != '}') : (j += 1) {
+        const c = text[j];
+        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.' or c == ':' or c == '-')) return 0;
+        if (j - i > 65) return 0;
+    }
+    if (j >= text.len or text[j] != '}') return 0;
+    return j + 1 - i;
+}
+
+fn commandNameAhead(text: []const u16, from: usize) bool {
+    var i = from;
+    while (i < text.len) : (i += 1) {
+        if (text[i] != '<') continue;
+        const tag = commandTag(text, i);
+        if (tag.kind == .name and !tag.closing) return true;
+        if (tag.len > 0) i += tag.len - 1;
+    }
+    return false;
+}
+
 pub fn normalize(text: []const u16, out: []u16) []const u16 {
     var n: usize = 0;
-    var pending_space = false;
-    var i: usize = 0;
-    while (i < text.len) {
-        const tag = if (text[i] == '<') pastedTagLen(text, i) else 0;
-        if (tag > 0) {
-            if (n > 0) pending_space = true;
-            i += tag;
-            continue;
-        }
-        const c = text[i];
-        i += 1;
-        if (isSpace(c)) {
-            if (n > 0) pending_space = true;
-            continue;
-        }
-        if (pending_space) {
-            if (n >= out.len) break;
-            out[n] = ' ';
-            n += 1;
-            pending_space = false;
-        }
+    var it = Normalized{ .text = text };
+    while (it.next()) |c| {
         if (n >= out.len) break;
         out[n] = c;
         n += 1;
@@ -187,17 +222,61 @@ const Normalized = struct {
     pos: usize = 0,
     started: bool = false,
 
+    fn skipMessageElement(self: *Normalized, after_open: usize) void {
+        self.pos = after_open;
+        while (self.pos < self.text.len) {
+            const tag = commandTag(self.text, self.pos);
+            if (tag.kind == .message and tag.closing) {
+                self.pos += tag.len;
+                return;
+            }
+            self.pos += 1;
+        }
+    }
+
     fn next(self: *Normalized) ?u16 {
         var space = false;
         while (self.pos < self.text.len) {
-            const tag = if (self.text[self.pos] == '<') pastedTagLen(self.text, self.pos) else 0;
-            if (tag > 0 or isSpace(self.text[self.pos])) {
-                self.pos += if (tag > 0) tag else 1;
-                space = self.started;
+            const c = self.text[self.pos];
+            if (c == '<') {
+                const tag = commandTag(self.text, self.pos);
+                if (tag.kind != .none) {
+                    if (tag.kind == .message and !tag.closing) {
+                        if (commandNameAhead(self.text, self.pos + tag.len)) {
+                            self.skipMessageElement(self.pos + tag.len);
+                            space = self.started;
+                            continue;
+                        }
+                        self.pos += tag.len;
+                        if (!self.started) {
+                            self.started = true;
+                            return '/';
+                        }
+                        continue;
+                    }
+                    self.pos += tag.len;
+                    if (tag.closing and self.started) space = true;
+                    continue;
+                }
+                const pasted = pastedTagLen(self.text, self.pos);
+                if (pasted > 0) {
+                    self.pos += pasted;
+                    space = self.started;
+                    continue;
+                }
+            } else if (c == '{') {
+                const marker = liveMarkerLen(self.text, self.pos);
+                if (marker > 0) {
+                    self.pos += marker;
+                    continue;
+                }
+            }
+            if (isSpace(c)) {
+                self.pos += 1;
+                if (self.started) space = true;
                 continue;
             }
             if (space) return ' ';
-            const c = self.text[self.pos];
             self.pos += 1;
             self.started = true;
             return c;
@@ -463,40 +542,50 @@ test "SOFT-2418 an accepted message keeps working until the reply starts or the 
 
 pub const TAKEN_MAX_AGE_MS: i64 = 60_000;
 
-pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {
-    if (state != .delivered or !phaseTaken(phase)) return false;
+pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, landed: bool, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {
+    if (state != .delivered or !phaseTaken(phase) or !landed) return false;
     if (replied) return true;
     if (watch.taken_since_ms == 0) watch.taken_since_ms = if (sent_tick_ms != 0) sent_tick_ms else now_ms;
     return now_ms >= watch.taken_since_ms and now_ms - watch.taken_since_ms >= TAKEN_MAX_AGE_MS;
 }
 
-test "IGSH-1831 normal slash and mid-turn receipts settle after a reply without idle" {
+test "IGSH-1831 normal slash and mid-turn receipts settle after a reply once their row is drawn" {
     for ([_][]const u8{ "accepted", "started" }) |phase| {
         var watch = DeliveryWatch{};
         watch.observe(true, 2000);
-        try std.testing.expect(takenSettled(&watch, .delivered, phase, true, 2000, 1000));
+        try std.testing.expect(takenSettled(&watch, .delivered, phase, true, true, 2000, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, true, 2000, 1000));
     }
 }
 
-test "IGSH-1831 confirmed messages age out without history and across a fresh boot" {
+test "SOFT-2929 a message queued behind a busy turn waits for its own row, not the current reply" {
+    for ([_][]const u8{ "accepted", "started" }) |phase| {
+        var watch = DeliveryWatch{};
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, true, 2000, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, false, 1000 + TAKEN_MAX_AGE_MS, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, false, 1000 + TAKEN_MAX_AGE_MS * 60, 1000));
+    }
+}
+
+test "IGSH-1831 a drawn confirmed row ages out without history and across a fresh boot" {
     for ([_]i64{ 1000, 1000 - TAKEN_MAX_AGE_MS }) |sent| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS - 1, sent));
-        try std.testing.expect(takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS, sent));
+        try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", true, false, sent + TAKEN_MAX_AGE_MS - 1, sent));
+        try std.testing.expect(takenSettled(&watch, .delivered, "accepted", true, false, sent + TAKEN_MAX_AGE_MS, sent));
     }
     var unknown = DeliveryWatch{};
-    try std.testing.expect(!takenSettled(&unknown, .delivered, "started", false, 5000, 0));
-    try std.testing.expect(takenSettled(&unknown, .delivered, "started", false, 5000 + TAKEN_MAX_AGE_MS, 0));
+    try std.testing.expect(!takenSettled(&unknown, .delivered, "started", true, false, 5000, 0));
+    try std.testing.expect(takenSettled(&unknown, .delivered, "started", true, false, 5000 + TAKEN_MAX_AGE_MS, 0));
 }
 
 test "IGSH-1831 unconfirmed phases and unsent states never settle by reply or age" {
     for ([_][]const u8{ "", "queued", "sent", "failed", "cancelled" }) |phase| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, .delivered, phase, true, TAKEN_MAX_AGE_MS * 10, 1));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, true, true, TAKEN_MAX_AGE_MS * 10, 1));
     }
     for ([_]OutboxState{ .queued, .sending, .not_sent, .cancelled }) |state| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, state, "accepted", true, TAKEN_MAX_AGE_MS * 10, 1));
+        try std.testing.expect(!takenSettled(&watch, state, "accepted", true, true, TAKEN_MAX_AGE_MS * 10, 1));
     }
 }
 
@@ -618,6 +707,74 @@ pub fn newBlockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (blockMatches(block_text, prefix)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     return pastePlaceholderMatches(normalize(block_text, &buf), prefix);
+}
+
+pub const PASTE_COLLAPSE_MIN: usize = 128;
+
+pub fn queueTextMatches(pending: []const u16, item: []const u16) bool {
+    if (sameText(pending, item)) return true;
+    var pending_buf: [BLOCK_NORM_CAP]u16 = undefined;
+    var item_buf: [BLOCK_NORM_CAP]u16 = undefined;
+    const want = normalize(pending, &pending_buf);
+    const got = normalize(item, &item_buf);
+    if (want.len == 0 or got.len == 0) return false;
+    if (pastePlaceholderMatches(got, want)) return want.len >= PASTE_COLLAPSE_MIN;
+    if (got.len >= MIN_PARTIAL and want.len >= got.len and std.mem.startsWith(u16, want, got)) return true;
+    if (want.len >= MIN_PARTIAL and got.len >= want.len and std.mem.startsWith(u16, got, want)) return true;
+    return false;
+}
+
+test "SOFT-2929 a cut-short or collapsed queue copy is the waiting message, not a second row" {
+    const long = w("please refactor the whole settings page and add tests for every branch of the paste path");
+    const short = w("please refactor the whole");
+    const placeholder = w("[Pasted text #1 +40 lines]");
+    var huge: [600]u16 = undefined;
+    for (&huge, 0..) |*c, i| c.* = if (i % 7 == 6) ' ' else 'a' + @as(u16, @intCast(i % 26));
+    try std.testing.expect(queueTextMatches(&long, &long));
+    try std.testing.expect(queueTextMatches(&long, &short));
+    try std.testing.expect(queueTextMatches(&short, &long));
+    try std.testing.expect(queueTextMatches(&huge, &placeholder));
+    try std.testing.expect(queueTextMatches(&huge, huge[0..256]));
+    try std.testing.expect(!queueTextMatches(&long, &placeholder));
+    try std.testing.expect(!queueTextMatches(&short, &placeholder));
+    try std.testing.expect(!queueTextMatches(&w("deploy the staging build"), &w("deploy the production build")));
+    try std.testing.expect(!queueTextMatches(&w("yes"), &w("no")));
+    try std.testing.expect(!queueTextMatches(&huge, &w("look at this [Pasted text #2 +12 lines]")));
+}
+
+test "SOFT-2929 a mention suffix the transcript adds still matches the waiting copy" {
+    const typed = w("deploy the fix to staging @Builder");
+    const marked = w("deploy the fix to staging @Builder{live-0123abcd}");
+    const elsewhere = w("deploy the fix to production @Builder{live-0123abcd}");
+    const extended = w("deploy the fix to staging @Builder{live-0123abcd} and reboot");
+    var buf: [64]u16 = undefined;
+    const prefix = prefixOf("deploy the fix to staging @Builder", &buf);
+    var pending = [_]Pending{.{ .prefix = prefix, .text = &typed, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
+    const blocks = [_]UserBlock{.{ .text = &marked, .stamp_ms = 2000 }};
+    var out: [1]?usize = @splat(null);
+    assign(&pending, &blocks, false, &.{}, &out);
+    try std.testing.expectEqual(@as(?usize, 0), out[0]);
+    try std.testing.expect(sameText(&typed, &marked));
+    try std.testing.expect(sameText(&marked, &typed));
+    try std.testing.expect(blockMatches(&marked, prefix));
+    try std.testing.expect(!sameText(&typed, &elsewhere));
+    try std.testing.expect(!sameText(&typed, &extended));
+}
+
+test "SOFT-2929 a slash command wrapped in command tags matches the typed copy" {
+    const typed = w("/valentin-mode quote the first heading");
+    const wrapped = w("<command-message>valentin-mode</command-message>\n<command-name>/valentin-mode</command-name>\n<command-args>quote the first heading</command-args>");
+    const message_only = w("<command-message>clear</command-message><command-args>keep notes</command-args>");
+    const keep = w("/clear keep notes");
+    const drop = w("/clear drop notes");
+    var buf: [256]u16 = undefined;
+    try std.testing.expect(sameText(&typed, &wrapped));
+    try std.testing.expect(sameText(&wrapped, &typed));
+    try std.testing.expectEqualSlices(u16, &typed, normalize(&wrapped, &buf));
+    try std.testing.expect(blockMatches(&wrapped, prefixOf("/valentin-mode quote the first heading", &buf)));
+    try std.testing.expect(sameText(&keep, &message_only));
+    try std.testing.expectEqualSlices(u16, &keep, normalize(&message_only, &buf));
+    try std.testing.expect(!sameText(&drop, &message_only));
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {

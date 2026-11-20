@@ -241,6 +241,7 @@ const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardU
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
+const chatEchoPushQueuedNowForId = @import("chat_send.zig").chatEchoPushQueuedNowForId;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const chatWorkingIndicatorText = @import("window_layout.zig").chatWorkingIndicatorText;
@@ -4276,8 +4277,9 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
 
 pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
     if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
+    _ = reference;
     var out: [256]u16 = undefined;
-    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return false;
+    const line = chat_reaction.spoken(emoji, quote, &out) orelse return false;
     if (!@import("chat_send.zig").sendChatMessage(line)) {
         showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
         return false;
@@ -6372,7 +6374,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     if (chatEchoAt(GET_X(lp), GET_Y(lp))) |id| {
                         if (chatOutboxIndexById(id)) |ei| {
                             const entry = app_state.g_chat_outbox.items[ei];
-                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNow();
+                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNowForId(entry.id);
                         }
                     }
                 }

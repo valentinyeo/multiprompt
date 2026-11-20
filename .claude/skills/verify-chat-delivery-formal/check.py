@@ -101,6 +101,15 @@ def check(values, output, reliable=False):
     return results
 
 
+def base_tables(baseline, output):
+    with tempfile.TemporaryDirectory(prefix="delivery-base-") as directory:
+        root = pathlib.Path(directory)
+        (root / "src").mkdir()
+        for source in ("src/chat_echo.zig", "src/chat_send.zig"):
+            (root / source).write_bytes(subprocess.check_output(["git", "show", baseline + ":" + source], cwd=ROOT))
+        return tables(root, output)
+
+
 def self_test(root, output):
     reliable = check(json.loads((HERE / "decisions.json").read_text()), output / "reliable-control", reliable=True)
     if any(result["status"] != "PASS" for result in reliable.values()):
@@ -163,11 +172,12 @@ def main():
     if failures and args.inherit_from:
         if not mutations:
             raise ValueError("Inherited findings require --self-test")
-        for file in record["files"]:
-            base = subprocess.check_output(["git", "show", args.inherit_from + ":" + file], cwd=ROOT)
-            if base != (ROOT / file).read_bytes():
-                raise ValueError("Covered source differs from base: " + file)
-        inherited = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
+        baseline = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
+        before = base_tables(baseline, output / "inherited-native")
+        differing = sorted(name for name in values if before.get(name) != values[name])
+        if differing:
+            raise ValueError("Base source decides differently: " + ", ".join(differing))
+        inherited = baseline
     summary = {"source_sync": record["sync_commit"], "model_only": args.model_only,
                "failures": failures, "mutations_caught": mutations, "inherited_from": inherited}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

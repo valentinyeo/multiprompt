@@ -263,7 +263,9 @@ pub fn build(b: *std.Build) void {
     });
     emoji_tests.stack_size = MAIN_STACK_SIZE;
     linkColorEmoji(b, emoji_tests.root_module);
-    const run_emoji_tests = b.addRunArtifact(emoji_tests);
+    const run_emoji_tests = std.Build.Step.Run.create(b, "run color emoji pixel regressions");
+    run_emoji_tests.addArtifactArg(emoji_tests);
+    run_emoji_tests.expectExitCode(0);
     run_emoji_tests.has_side_effects = true;
     b.step("test-emoji", "Run native color emoji pixel regressions").dependOn(&run_emoji_tests.step);
 

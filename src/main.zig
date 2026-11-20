@@ -1131,6 +1131,7 @@ const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
 const chatEchoRetryAllForActive = @import("chat_send.zig").chatEchoRetryAllForActive;
 const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardUnsentForActive;
 const chatOutboxTick = @import("chat_send.zig").chatOutboxTick;
+const chatSendNowFinish = @import("chat_send.zig").chatSendNowFinish;
 const chatOutboxFlushActiveNow = @import("chat_send.zig").chatOutboxFlushActiveNow;
 const chatOutboxClearActive = @import("chat_send.zig").chatOutboxClearActive;
 const sshAutoReconnectTick = @import("chat_send.zig").sshAutoReconnectTick;
@@ -2409,8 +2410,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             var leave_pt: POINT = undefined;
             _ = GetCursorPos(&leave_pt);
+            const leave_screen: POINT = leave_pt;
             _ = ScreenToClient(hwnd, &leave_pt);
-            if (!app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
+            var leave_client: RECT = std.mem.zeroes(RECT);
+            _ = GetClientRect(hwnd, &leave_client);
+            const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
+            const rearm_sidebar_hover = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
+                @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
+            if (rearm_sidebar_hover) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             } else if (@import("sidebar.zig").thawSidebarOrder()) {
@@ -8464,6 +8471,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_OUTBOX) {
+                chatSendNowFinish();
                 chatOutboxTick();
                 return 0;
             }
