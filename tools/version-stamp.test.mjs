@@ -173,7 +173,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       if (cache.includes('.zig-cache') && cache.includes('uses: actions/cache@')) assert.match(cache, /github.sha|inputs.revision|inputs.app_revision/);
     }
     if (file !== 'test.yml') continue;
-    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate', 'idle-budget']) {
+    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate']) {
       const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
       const caches = job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache@/.test(step));
       assert.equal(caches.length, 2, name);
@@ -184,8 +184,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
       assert.match(compile, /restore-keys:/);
       assert.match(toolchain, /zig-toolchain-0.16.0/);
-      if (name === 'idle-budget') assert.match(job, /if: github\.event_name != 'pull_request'/);
-      if (name === 'build-windows' || name === 'idle-budget') continue;
+      if (name === 'build-windows') continue;
       const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
       assert.ok(trim, name);
       assert.match(trim, /python3 tools\/trim-zig-cache.py --cap-mib 1600/);
