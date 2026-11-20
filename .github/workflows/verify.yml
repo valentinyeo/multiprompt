@@ -1046,6 +1046,10 @@ jobs:
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
+          if (-not (Test-Path evidence/result.json)) { throw 'Desktop journey produced no result.json' }
+          $verdict = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+          if ($verdict.status -ne 'passed') { throw ('Verification failed: ' + ($verdict | ConvertTo-Json -Depth 8 -Compress)) }
+          $global:LASTEXITCODE = 0
       - name: Check real server chat evidence
         if: env.FEATURE == 'server-chat'
         run: node tools/verify-server-chat/check-evidence.cjs evidence

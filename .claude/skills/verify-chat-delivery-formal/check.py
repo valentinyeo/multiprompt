@@ -41,15 +41,6 @@ def coverage(root):
     return record
 
 
-def tables_at(root, commit, output):
-    with tempfile.TemporaryDirectory(prefix="delivery-base-") as directory:
-        scratch = pathlib.Path(directory)
-        (scratch / "src").mkdir()
-        for file in ("src/chat_echo.zig", "src/chat_send.zig"):
-            (scratch / file).write_bytes(subprocess.check_output(["git", "show", commit + ":" + file], cwd=root))
-        return tables(scratch, output)
-
-
 def config(values, rule, scenario):
     lines = ["SPECIFICATION Spec", "CHECK_DEADLOCK FALSE", "CONSTANTS"]
     for key, value in values.items():
@@ -108,6 +99,15 @@ def check(values, output, reliable=False):
             raise ValueError("TLC did not finish " + rule + "; see " + str(output / (rule + ".log")))
     (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     return results
+
+
+def base_tables(baseline, output):
+    with tempfile.TemporaryDirectory(prefix="delivery-base-") as directory:
+        root = pathlib.Path(directory)
+        (root / "src").mkdir()
+        for source in ("src/chat_echo.zig", "src/chat_send.zig"):
+            (root / source).write_bytes(subprocess.check_output(["git", "show", baseline + ":" + source], cwd=ROOT))
+        return tables(root, output)
 
 
 def self_test(root, output):
@@ -169,23 +169,17 @@ def main():
         replay(ROOT, restored_results, output / "restored-replay")
     failures = [rule for rule in RULES if results[rule]["status"] == "FAIL"]
     inherited = None
-    changed = []
-    base_decisions_match = None
     if failures and args.inherit_from:
         if not mutations:
             raise ValueError("Inherited findings require --self-test")
-        base = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
-        for file in record["files"]:
-            if subprocess.check_output(["git", "show", base + ":" + file], cwd=ROOT) != (ROOT / file).read_bytes():
-                changed.append(file)
-        if changed:
-            base_decisions_match = tables_at(ROOT, base, output / "base-native") == values
-            if not base_decisions_match:
-                raise ValueError("Production decisions differ from base " + base + ": " + ", ".join(changed) + "; re-verify the model instead of inheriting its findings")
-        inherited = base
+        baseline = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
+        before = base_tables(baseline, output / "inherited-native")
+        differing = sorted(name for name in values if before.get(name) != values[name])
+        if differing:
+            raise ValueError("Base source decides differently: " + ", ".join(differing))
+        inherited = baseline
     summary = {"source_sync": record["sync_commit"], "model_only": args.model_only,
-               "failures": failures, "mutations_caught": mutations, "inherited_from": inherited,
-               "changed_covered_files": changed, "base_decisions_match": base_decisions_match}
+               "failures": failures, "mutations_caught": mutations, "inherited_from": inherited}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
     return 1 if failures and not inherited else 0
