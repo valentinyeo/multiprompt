@@ -1,13 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'browser_pane.zig'), 'utf8');
+const source = require('./app-source').readAppSource();
+function body(name) {
+  const start = source.indexOf(`fn ${name}(`);
+  assert.notEqual(start, -1, name);
+  const end = source.indexOf('\nfn ', start + 1);
+  return source.slice(start, end < 0 ? source.length : end);
+}
 
 test('a chat tab whose browser slot is on screen starts the browser on its own', () => {
-  const start = source.indexOf('pub fn updateBrowserVisibility(');
-  assert.ok(start >= 0);
-  const body = source.slice(start, source.indexOf('\npub fn ', start + 10));
-  const tail = body.slice(body.lastIndexOf('browser_launch_tick == 0'));
-  assert.match(tail, /startupSettled\(\) and browserPaneMayOccupyLayout\(app_state\.active_shell\)\)\s*\{\s*launchBrowserForShell\(app_state\.active_shell\);/);
+  const launch = body('tryLaunchActiveBrowserIfNeeded');
+  const tail = launch.slice(launch.lastIndexOf('browser_launch_tick != 0'));
+  assert.match(tail, /startupSettled\(\) and browserPaneMayOccupyLayout\(active_shell\)\)\s*\{\s*launchBrowserForShell\(active_shell\);/);
 });

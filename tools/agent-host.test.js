@@ -101,6 +101,23 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
   assert.match(read('tools/mp-send'), /runpy\.run_path\(str\(target\), run_name="__main__"\)/);
 });
 
+test('SOFT-2838 the runtime bundle publishes the session list and the layout tool', () => {
+  const session = read('src/chat_session.zig');
+  assert.match(session, /const sessions = @embedFile\("mp_sessions\.py"\);/);
+  assert.match(session, /MP_SESSIONS_SOURCE = '\{s\}'/);
+  assert.match(session, /const layout = @embedFile\("mp_layout\.mjs"\);/);
+  assert.match(session, /MP_LAYOUT_SOURCE = '\{s\}'/);
+
+  const reader = read('src/chat_history_reader.py');
+  assert.match(reader, /publish_named_tool\('mp-sessions', _base64\.b64decode\(sessions_source\)\)/);
+  assert.match(reader, /_os\.chmod\('mp-sessions', 0o700, dir_fd=directory\)/);
+  assert.match(reader, /publish_named_tool\('mp-layout\.mjs', _base64\.b64decode\(layout_source\)\)/);
+  assert.match(reader, /relink\('mp-layout', publish_named_tool\('mp-layout\.mjs'/);
+  assert.match(reader, /_os\.chmod\('mp-layout', 0o700, dir_fd=directory\)/);
+  assert.equal(read('src/mp_layout.mjs'), read('tools/mp-layout.mjs'), 'the runtime copy of mp-layout matches the installed tool');
+  assert.match(read('src/mp_sessions.py'), /with_name\("mp-send"\)/, 'the published session list loads the published sender');
+});
+
 test('IGSH-1266 a stopped live chat host restarts with the reader even when mp-send loaded it', () => {
   const reader = path.resolve('src/chat_history_reader.py');
   const run = spawnSync('python3', ['-I', '-c', [

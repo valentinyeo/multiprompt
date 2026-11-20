@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `03505696cbde973bb4b67c5edd04db877ac9f300`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+Last confirmed source/model sync commit is `b857b994e454aa2afea518a52060a9826ed8e989`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |
@@ -67,6 +67,6 @@ The current source violates `NoFalseNotSent` through timeout and restart, and `S
 
 The [formal feature map](../verify-multiprompt/features/chat-delivery-formal.md) owns this skill and its workflow. The independent PR verifier requires the exact-head formal CI run and reads its raw summary, rather than substituting a nearest-name Windows journey.
 
-The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if **every guarded source file is byte-identical to that base**. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. Changed covered code, drift and replay errors never inherit. This classifies a verification-only PR's pre-existing bugs without calling them passes.
+The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if the production decision table compiled from that base is identical to this head's table. The table is the model's whole input from production, so equal tables mean equal findings. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. A decision that differs from base, drift and replay errors never inherit. This classifies a PR's pre-existing bugs without calling them passes, and it does not stop a PR that edits a guarded file without changing any decision.
 
 After a source change that did not recheck this model, use pstack /maintain-formal-verification-skill.
