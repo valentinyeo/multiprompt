@@ -3903,6 +3903,8 @@ def host_fresh_archive(provider, sid, tmux, session):
             native = session["state"].get("native_session") or sid
             with host_fresh_transcript(provider, sid, native) as transcript:
                 if transcript is not None:
+                    host_fresh_note_transcript(session["state"], transcript)
+                    transcript.seek(0)
                     offset = 0
                     for line in transcript:
                         try:
@@ -3942,6 +3944,42 @@ def host_fresh_archive(provider, sid, tmux, session):
 def host_fresh_note_user(state, text):
     if isinstance(text, str) and re.search(r"(?<!\S)/valentin-mode(?=\s|$)", text):
         state["valentin_mode"] = True
+
+
+VALENTIN_MODE_CHUNK = 1 << 20
+VALENTIN_MODE_KEEP = 512
+VALENTIN_MODE_WORD = b"valentin-mode"
+VALENTIN_MODE_COMMAND = re.compile(rb"<command-name>/valentin-mode</command-name>")
+VALENTIN_MODE_SKILL = re.compile(rb'"skill"\s*:\s*"valentin-mode"')
+VALENTIN_MODE_BASE_DIR = re.compile(rb"Base directory for this skill:\s*([^\s\"\\]+)")
+
+
+def host_fresh_transcript_valentin(buffer):
+    if VALENTIN_MODE_COMMAND.search(buffer) or VALENTIN_MODE_SKILL.search(buffer):
+        return True
+    return any(match.group(1).endswith(b"/valentin-mode") for match in VALENTIN_MODE_BASE_DIR.finditer(buffer))
+
+
+def host_fresh_note_transcript(state, transcript):
+    if state.get("valentin_mode") or transcript is None:
+        return
+    try:
+        transcript.seek(0)
+        carry = b""
+        while True:
+            chunk = transcript.read(VALENTIN_MODE_CHUNK)
+            if not chunk:
+                return
+            buffer = carry + chunk
+            at = buffer.find(VALENTIN_MODE_WORD)
+            while at != -1:
+                if host_fresh_transcript_valentin(buffer[max(0, at - VALENTIN_MODE_KEEP):at + VALENTIN_MODE_KEEP]):
+                    state["valentin_mode"] = True
+                    return
+                at = buffer.find(VALENTIN_MODE_WORD, at + 1)
+            carry = buffer[-VALENTIN_MODE_KEEP:]
+    except (OSError, TypeError, AttributeError, ValueError):
+        return
 
 
 def host_fresh_busy(session):
@@ -4210,7 +4248,8 @@ def host_fresh_resume(provider, sid, tmux, session):
                   "\n\nAcknowledge reading this handover and name the next unfinished task. "
                   "Do not execute work or call tools in this first reply.")
     elif session["state"].get("valentin_mode"):
-        prompt = ("Load /valentin-mode, read the handover at " + str(host_paths(provider, sid)["root"] / fresh["file"]) +
+        handover_path = (host_paths(provider, sid)["root"] / fresh["file"]).resolve()
+        prompt = ("/valentin-mode Fresh start: read the handover at " + str(handover_path) +
                   ", re-run /board-drain, resume.")
     else:
         prompt = ("You are the same chat after a fresh start. Your name, picture, address and board login "

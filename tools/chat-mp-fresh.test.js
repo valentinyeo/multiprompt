@@ -92,7 +92,7 @@ print('MP_FRESH_PASS')
 
 test('fresh-start prepares a new native session, publishes csid to account layout and uses valentin-mode resume', () => {
   python(String.raw`
-import io, tempfile
+import io, json, tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -114,8 +114,76 @@ with tempfile.TemporaryDirectory() as directory:
     assert published and published[0] == state['context_session']
     session['state'] = state
     r['host_fresh_resume'](provider, sid, tmux, session)
-    prompt = session['agent'].stdin.getvalue().decode()
-    assert '/valentin-mode' in prompt and '/board-drain' in prompt and 'saved.json' in prompt
+    sent = json.loads(session['agent'].stdin.getvalue().decode())
+    prompt = sent['message']['content'][0]['text']
+    assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
+    assert '/board-drain' in prompt and 'saved.json' in prompt
+print('MP_FRESH_PASS')
+`);
+});
+
+test('transcript load markers set valentin_mode before resume uses the slash prompt', () => {
+  python(String.raw`
+import io, json, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+sid = '11111111-2222-4333-8444-555555555555'
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    provider, tmux = 'claude', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    r['host_write'](paths['config'], dict(enabled=True, tmux=tmux, cwd=directory))
+    state = dict(native_session=sid)
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    session['ready'] = True
+    transcript = Path(directory) / 'load.jsonl'
+    transcript.write_bytes(
+        b'{"type":"user","message":{"role":"user","content":'
+        b'"<command-name>/valentin-mode</command-name>"}\\n')
+    with patch.dict(r, conversation_path=lambda *args: transcript, host_layout_publish_conversation=lambda *args: True):
+        r['host_fresh_archive'](provider, sid, tmux, session)
+        assert state['valentin_mode'] is True
+        r['host_write'](paths['root'] / 'saved.json', dict(text='Resume after transcript load.'))
+        state['fresh_start'] = dict(phase='reset', file='saved.json')
+        assert r['host_fresh_prepare'](provider, sid, state)
+    session['state'] = state
+    r['host_fresh_resume'](provider, sid, tmux, session)
+    sent = json.loads(session['agent'].stdin.getvalue().decode())
+    prompt = sent['message']['content'][0]['text']
+    assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
+print('MP_FRESH_PASS')
+`);
+});
+
+test('a non-valentin chat gets the plain handover resume prompt', () => {
+  python(String.raw`
+import io, json, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+sid = '11111111-2222-4333-8444-555555555555'
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    provider, tmux = 'claude', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    r['host_write'](paths['config'], dict(enabled=True, tmux=tmux, cwd=directory))
+    state = dict(native_session=sid)
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    session['ready'] = True
+    r['host_write'](paths['root'] / 'saved.json', dict(text='Continue the ordinary task.'))
+    state['fresh_start'] = dict(phase='reset', file='saved.json')
+    with patch.dict(r, host_layout_publish_conversation=lambda *args: True):
+        assert r['host_fresh_prepare'](provider, sid, state)
+    session['state'] = state
+    r['host_fresh_resume'](provider, sid, tmux, session)
+    sent = json.loads(session['agent'].stdin.getvalue().decode())
+    prompt = sent['message']['content'][0]['text']
+    assert prompt.startswith('You are the same chat after a fresh start.')
+    assert 'Continue the ordinary task.' in prompt
+    assert not prompt.startswith('/valentin-mode')
 print('MP_FRESH_PASS')
 `);
 });
