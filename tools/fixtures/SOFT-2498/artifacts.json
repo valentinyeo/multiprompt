@@ -1,7 +1,7 @@
 {
   "runId": "43897757240",
   "baseSha": "3cec5dd072fe8ddb64042cf96af49fcb037c1ccb",
-  "selection": {"features": ["chat-focus", "command-palette"], "compareBase": true},
+  "selection": {"features": ["chat-focus", "command-palette"]},
   "artifacts": [
     {"id": 14246149485, "name": "verify-chat-focus-3cec5dd072fe8ddb64042cf96af49fcb037c1ccb", "created_at": "2026-11-16T16:37:35Z"},
     {"id": 14246145450, "name": "verify-command-palette-3cec5dd072fe8ddb64042cf96af49fcb037c1ccb", "created_at": "2026-11-16T16:11:45Z"},
@@ -12,5 +12,5 @@
     {"id": 14240132881, "name": "verify-command-palette", "created_at": "2026-11-16T15:45:51Z"},
     {"id": 14239289448, "name": "verify-app", "created_at": "2026-11-16T15:42:18Z"}
   ],
-  "expectedIds": [14243779767, 14246112497, 14246149485, 14246145450]
+  "expectedIds": [14243779767, 14246112497]
 }
