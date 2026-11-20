@@ -117,7 +117,7 @@ gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 timeout 3000 gh run watch <id> --interval 300
 ```
 
-The selector matches changed files to `Source files:` ownership in each runnable feature map. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector picks one nearest feature by map names and source paths and discloses the gap in the verdict.
+The selector matches changed files to `Source files:` ownership in each runnable feature map. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector runs no desktop journey and the verdict names the unmapped files.
 
 `verify.yml` runs only that set on head and parent with the same harness. Matching parent evidence is restored through the base cache before scheduling Windows jobs. DeepSeek Flash judges the patch and real evidence against the PR outcomes. Claude is the fallback when DeepSeek authored the patch. Green CI alone is never the verdict. One independent verifier posts PASS, PASS+NOTES or FAIL; missing evidence blocks passage. Only `pstack-verifier` is required.
 

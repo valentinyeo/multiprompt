@@ -32,7 +32,7 @@ function isRepair(pr) {
 function ciRepro(selection, summary) {
   const workflows = selection.ciWorkflows || [];
   const receipts = summary?.ciRepro || [];
-  if (selection.features?.length || !workflows.length || selection.unmapped?.length || selection.nearest?.length) return null;
+  if (selection.features?.length || !workflows.length || selection.unmapped?.length) return null;
   const proofs = workflows.map(workflow => receipts.find(item => item.workflow === workflow));
   const proven = proofs.every(item => item && Number.isInteger(item.base_exit_code) && item.base_exit_code !== 0 && item.head_exit_code === 0);
   return proven ? proofs : null;
@@ -285,9 +285,8 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const compareBase = selection.compareBase;
   const rows = journeyRows(summary, compareBase, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
-  const notes = (selection.nearest || []).map(entry => `Nearest mapped feature ${entry.feature} selected for ${entry.file}; no file ownership matched.`);
+  const notes = [];
   let final = VERDICTS.includes(verdict?.verdict) ? verdict.verdict : 'BLOCKED';
-  if (notes.length && final === 'PASS') final = 'PASS+NOTES';
   if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid assessment.');
   const failedHead = rows.filter(row => row.head !== 'passed');
   const brokenOnBase = failedHead.filter(row => row.inherited);
@@ -813,13 +812,8 @@ async function main(argv, env) {
     selection.dropped = [];
     selection.compareBase = selection.features.length > 0;
     selection.unmapped = mapped.unmapped;
-    selection.nearest = mapped.nearest || [];
     selection.ciWorkflows = mapped.ciWorkflows || [];
-    if (selection.nearest.length) {
-      const note = `No file ownership matched; nearest feature by map: ${selection.nearest.map(entry => `${entry.feature} for ${entry.file}`).join(', ')}.`;
-      selection.reason = note;
-      selection.uncovered = note;
-    } else if (mapped.unmapped.length) {
+    if (mapped.unmapped.length) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
     }
     fs.mkdirSync(outDir, { recursive: true });
