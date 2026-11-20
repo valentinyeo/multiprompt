@@ -25,6 +25,9 @@ jobs:
           ref: master
           fetch-depth: 0
           persist-credentials: false
+      - name: Report feature journey coverage
+        continue-on-error: true
+        run: node tools/check-feature-coverage.mjs
       - name: Keep at most one maintenance pull request open
         id: pending
         env:
