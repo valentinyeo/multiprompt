@@ -252,3 +252,11 @@ test('SOFT-2762 session-actions owns its hosted driver and fixtures', () => {
   assert.deepEqual(touchedJourneys(['tools/verify-session-actions/drive.ps1'], real), { features: ['session-actions'], unmapped: [] });
   assert.deepEqual(touchedJourneys(['tools/fixtures/SOFT-2762/sidebar-row-rect.log'], real), { features: ['session-actions'], unmapped: [] });
 });
+
+test('SOFT-2890 the test CLI selects its own workflow, not a desktop journey', () => {
+  const real = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  for (const file of ['tools/mbv.mjs', 'tools/fixtures/SOFT-2755/result-passed.json', '.github/workflows/verify-cli.yml', '.claude/skills/verify-multiprompt/features/verify-cli.md']) {
+    assert.deepEqual(touchedJourneys([file], real), { features: [], unmapped: [], ciWorkflows: ['verify-cli.yml'] }, `${file} must run the CLI check and no desktop journey`);
+  }
+  assert.deepEqual(touchedJourneys(['tools/mbv.mjs', 'src/themes.zig'], real), { features: ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card'], unmapped: [], ciWorkflows: ['verify-cli.yml'] });
+});
