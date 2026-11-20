@@ -127,12 +127,18 @@ test('a CI receipt is not a repro when base stayed green, head is red, or the re
   }
 });
 
-test('a product fix, an unmapped file or a nearest-journey guess still needs a repro journey despite a CI receipt', () => {
-  for (const extra of [{ features: ['appearance'] }, { unmapped: ['src/main.zig'] }, { nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }, { ciWorkflows: [] }]) {
+test('a product fix or an unmapped file still needs a repro journey despite a CI receipt', () => {
+  for (const extra of [{ features: ['appearance'] }, { unmapped: ['src/main.zig'] }, { ciWorkflows: [] }]) {
     const result = ciFinish(ciSelection(extra), ciReceipt());
     assert.equal(result.final, 'FAIL', JSON.stringify(extra));
     assert.match(result.body, /Repro journey.*master.*failed.*head.*passed/i);
   }
+});
+
+test('a leftover nearest field never turns a proven CI repro into a missing journey', () => {
+  const result = ciFinish(ciSelection({ nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }), ciReceipt());
+  assert.notEqual(result.final, 'FAIL');
+  assert.doesNotMatch(result.body, /Nearest mapped feature/);
 });
 
 test('a PR that is not a fix never needs the CI repro', () => {
