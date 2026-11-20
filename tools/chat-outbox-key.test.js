@@ -198,6 +198,7 @@ var malformed = false;
 fn chatDraftFlush() void {}
 fn chatDraftWriteFile(_: []const u8, _: []const u8) bool { return true; }
 fn chatComposerAutoGrow() void {}
+fn chatLiveStripFromStore() void {}
 fn SetWindowTextW(_: HANDLE, text: [*:0]const u16) i32 {
     const s = std.mem.span(text);
     @memcpy(composer[0..s.len], s);
@@ -258,4 +259,9 @@ test "legacy draft migration" {
     try std.testing.expect(!g_chat_draft_dirty);
 }
 `, ['chat_drafts.zig']);
+});
+
+test('IGSH-2278 switching chats strips live dictation words before the old draft is saved', () => {
+  const bind = body('chatDraftBindToActive');
+  assert.ok(bind.includes('chatLiveStripFromStore();'), 'live words must leave the old chat draft on a switch');
 });
