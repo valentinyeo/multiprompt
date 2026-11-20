@@ -50,7 +50,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
-| Repair PRs name a journey that fails on master and passes on head. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |

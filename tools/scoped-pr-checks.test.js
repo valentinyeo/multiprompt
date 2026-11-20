@@ -7,16 +7,14 @@ const { touchedJourneys } = require('./touched-journeys.cjs');
 
 const root = path.join(__dirname, '..');
 
-test('unmapped files select one nearest feature, never the full suite', t => {
+test('unmapped files select no journey, never the full suite', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scoped-pr-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   for (const [name, sources] of [['appearance', 'src/themes.zig'], ['chat-history', 'src/history.zig'], ['pane-layout', 'src/panes.zig']]) {
     fs.writeFileSync(path.join(directory, `${name}.md`), `# ${name}\nSource files: ${sources}\nVerify on: push, pull_request\n## Driving it with control.ps1\n`);
   }
   const result = touchedJourneys(['src/new_chat_history.py'], directory);
-  assert.deepEqual(result.features, ['chat-history']);
-  assert.deepEqual(result.unmapped, ['src/new_chat_history.py']);
-  assert.deepEqual(result.nearest, [{ file: 'src/new_chat_history.py', feature: 'chat-history' }]);
+  assert.deepEqual(result, { features: [], unmapped: ['src/new_chat_history.py'] });
 });
 
 test('a feature driver and its map select their own journey', () => {
@@ -63,7 +61,7 @@ test('the service route receipt is path-filtered, runs the base proof and owns i
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml', 'service-route-receipt.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
@@ -156,14 +154,14 @@ test('nightly reporting creates one board 2060 ticket, updates it, and deduplica
   assert.equal(await reportNightly({ failures: [], api: () => assert.fail('Clean runs never write tickets') }), 'clean');
 });
 
-test('nearest feature selection is disclosed in every verdict', () => {
+test('a plan with no desktop journey says so in the verdict', () => {
   const { finalize } = require('./pr-verifier.cjs');
   const result = finalize({
     verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), runUrl: 'run',
-    selection: { features: [], nearest: [{ file: 'tools/new.cjs', feature: 'appearance' }] },
+    selection: { features: [], uncovered: 'Unmapped files: tools/new.cjs' },
     summary: { head: {}, base: {} },
   });
-  assert.match(result.body, /Nearest mapped feature appearance selected for tools\/new.cjs/);
+  assert.match(result.body, /- No desktop journey ran for this change, so the app was not driven\./);
   assert.equal(result.final, 'PASS+NOTES');
 });
 

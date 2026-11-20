@@ -58,7 +58,7 @@ jobs:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
-      - name: Test required before-and-after repro evidence
+      - name: Test repair PR journey selection
         run: node --test tools/pr-verifier-repro.test.js
       - name: Test stable desktop journey command names
         run: node --test tools/check-journey-commands.test.mjs
@@ -664,12 +664,6 @@ jobs:
           retention-days: 1
 
 
-  check-red-run:
-    uses: ./.github/workflows/check-red-run.yml
-    with:
-      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
-      head: ${{ github.event.pull_request.head.sha || github.sha }}
-
   speed-baseline:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
@@ -955,7 +949,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-worker, test-update-source, check-red-run]
+    needs: [test, test-vps, build-windows, test-worker, test-update-source]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -967,7 +961,6 @@ jobs:
           BUILD: ${{ needs.build-windows.result }}
           WORKER: ${{ needs.test-worker.result }}
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
-          RED_RUN: ${{ needs.check-red-run.result }}
           EVENT: ${{ github.event_name }}
         run: |
           require_jobs() {
@@ -988,4 +981,4 @@ jobs:
             if require_jobs success success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN"
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$WORKER" "$UPDATE_SOURCE"

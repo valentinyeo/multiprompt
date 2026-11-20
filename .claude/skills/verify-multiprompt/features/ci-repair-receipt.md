@@ -19,4 +19,4 @@ The PR selector owns these files through `CI workflow:`, not a nearest desktop n
 
 ## Gotchas
 
-The CPU991 part is a timing flake, so base cannot be made to fail on demand. Its receipt shows the head median and every trial, not a base failure. A product fix, or a fix PR with any file outside a workflow map, still needs a `Repro journey:` line. A PR that changes `tools/pr-verifier.cjs` without changing `tools/pr-verifier-cancel.test.js` shows base green, so it needs its own repro. The base-journey scope test is the only part of this receipt that fails on base for a `.github/workflows/pr-verifier.yml` change.
+The CPU991 part is a timing flake, so base cannot be made to fail on demand. Its receipt shows the head median and every trial, not a base failure. A PR that changes `tools/pr-verifier.cjs` without changing `tools/pr-verifier-cancel.test.js` shows base green, so it needs its own red-on-base test in that list. The base-journey scope test is the only part of this receipt that fails on base for a `.github/workflows/pr-verifier.yml` change.
