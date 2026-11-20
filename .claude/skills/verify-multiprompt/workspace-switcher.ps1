@@ -131,8 +131,7 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $look = [VerifyNative]::MenuLook($card)
     $expected = if ($theme -eq 'light') { 'F9F9F9' } elseif ($theme -eq 'system') { $null } elseif ($theme -eq 'multiprompt') { '0F1011' } else { '262626' }
     if ($null -ne $expected -and $look.fill -cne $expected) { throw "Workspace card unreadable fill in ${theme}: $($look.fill)" }
-    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $expectedHeight = 19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28
+    $expectedHeight = 19 + (Get-VisibleWorkspaceCardRows + 2) * 28
     if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
     Dismiss-WorkspaceCard 'Miss-click the workspace card padding to dismiss without switching' -WithEscape
@@ -143,13 +142,16 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
 $card = Open-WorkspaceCard 'workspace-keyboard-open'
 $currentRow = Get-WorkspaceCardRow $created
 $targetRow = Get-WorkspaceCardRow 0
+Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card keyboard navigation'
 Record 'Arrow Up and Down preserve selection, then arrows select first workspace'
-[VerifyNative]::Chord(@(0x26))
-[VerifyNative]::Chord(@(0x28))
+Press @(0x26) 'Arrow Up in workspace card'
+Press @(0x28) 'Arrow Down in workspace card'
 $arrow = if ($targetRow -lt $currentRow) { 0x26 } else { 0x28 }
-for ($index = 0; $index -lt [Math]::Abs($targetRow - $currentRow); $index++) { [VerifyNative]::Chord(@($arrow)) }
+for ($index = 0; $index -lt [Math]::Abs($targetRow - $currentRow); $index++) {
+    Press @($arrow) 'Arrow to the target workspace row'
+}
 Snapshot 'workspace-keyboard-selected'
-[VerifyNative]::Chord(@(0x0D))
+Press @(0x0D) 'Enter activates arrow-selected workspace'
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq 0 -and -not (Read-Session).starred_view } 'Enter activates arrow-selected workspace'
 $result.checks += @{ name = 'workspace-card-arrow-enter'; workspace = 0 }
 Select-WorkspaceCard $created 'workspace-keyboard-return'
