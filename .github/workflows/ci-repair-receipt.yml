@@ -16,6 +16,7 @@ on:
       - 'src/chat_perf_test.zig'
       - 'src/chat_echo.zig'
       - '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'
+      - '.claude/skills/verify-multiprompt/features/README.md'
       - '.github/workflows/ci-repair-receipt.yml'
       - '.github/workflows/pr-verifier.yml'
       - 'openwiki/operations/base-journey-reuse.md'
