@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { chatHostIsolatedEnv } = require('./chat-host-test-env');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
@@ -124,7 +125,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['message_store_request'](dict(other_request, op='message_status', message_id=other_message['id']))['message'] == other_message
 print('retry survived restart and delivered one saved message')
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /retry survived restart and delivered one saved message/);
 });

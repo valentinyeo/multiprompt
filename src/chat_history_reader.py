@@ -2725,19 +2725,15 @@ def host_key(provider, sid):
 def host_socket_root():
     import tempfile
     root = Path(tempfile.gettempdir()) / ("mp-agent-host-" + str(getattr(os, "getuid", lambda: 0)()))
-    if root.is_dir():
-        root.chmod(0o700)
-    else:
-        root.mkdir(mode=0o700)
+    root.mkdir(mode=0o700, exist_ok=True)
+    root.chmod(0o700)
     return root
 
 
 def host_paths(provider, sid):
     root = HOME / ".local/state/multiprompt/agent-host"
-    if root.is_dir():
-        root.chmod(0o700)
-    else:
-        root.mkdir(mode=0o700, parents=True)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
     key = host_key(provider, sid)
     return dict(root=root, key=key, config=root / (key + ".config.json"), lock=root / (key + ".owner.lock"),
                 owner=root / (key + ".owner.json"), socket=host_socket_root() / (key + ".sock"),
@@ -8189,7 +8185,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 131
+RUNTIME_GENERATION = 132
 
 if __name__ == '__main__':
     import base64 as _base64

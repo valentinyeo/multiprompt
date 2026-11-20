@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { chatHostIsolatedEnv } = require('./chat-host-test-env');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
@@ -51,7 +52,8 @@ with tempfile.TemporaryDirectory() as directory:
         r['host_loop']('claude', 'synthetic-home', 'synthetic-chat', dict(state=state), None, agent)
     assert state['startup_failure']['reason'] == 'owner_unavailable'
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
@@ -189,7 +191,8 @@ with tempfile.TemporaryDirectory() as directory:
                         if e['event'].get('kind') == 'text.done']) == 1
 print('validated owner command uses isolated environment and argument boundaries')
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
@@ -237,6 +240,7 @@ with tempfile.TemporaryDirectory(prefix='synthetic home ') as directory:
         assert launch.call_args.kwargs['env'] == {'PATH': '/usr/bin:/bin'}
         binary.unlink()
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });

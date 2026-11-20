@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { chatHostIsolatedEnv } = require('./chat-host-test-env');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
@@ -61,7 +62,8 @@ with tempfile.TemporaryDirectory() as directory:
         assert r['host_start'](provider, sid)['reason'] == 'host_launch_unavailable'
 print('three permanent failures persisted; one line each; no respawns')
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /three permanent failures persisted/);
 });

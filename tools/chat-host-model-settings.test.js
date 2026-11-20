@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { chatHostIsolatedEnv } = require('./chat-host-test-env');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
@@ -375,7 +376,8 @@ with tempfile.TemporaryDirectory() as directory:
             assert not any('host_settings' in item for item in snapshot['items']), snapshot
 print('settings verified')
 `;
-  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000, env });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /settings verified/);
 });
@@ -545,6 +547,7 @@ test('live proof harness parses without credentials', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 test('subscription host settings live proof', { skip: !liveProof, timeout: 600000 }, () => {
-  const result = spawnSync('python3', ['-'], { input: liveProgram, encoding: 'utf8', timeout: 590000 });
+  const { env } = chatHostIsolatedEnv();
+  const result = spawnSync('python3', ['-'], { input: liveProgram, encoding: 'utf8', timeout: 590000, env });
   assert.equal(result.status, 0, 'Live proof failed. Inspect the sanitized evidence file.');
 });
