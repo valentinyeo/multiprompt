@@ -1780,9 +1780,10 @@ test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" 
     composer_text = draft;
     try std.testing.expect(chatReactToMessage(reference, snapshot, .like));
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
-    const sent = chat_reaction.parse(g_chat_outbox.items[0].text).?;
-    try std.testing.expectEqual(reference, sent.reference);
+    const sent = chat_reaction.parseSpoken(g_chat_outbox.items[0].text).?;
+    try std.testing.expectEqual(@as(u64, 0), sent.reference);
     try std.testing.expectEqualSlices(u16, quote, sent.quote);
+    try std.testing.expect(std.mem.indexOfScalar(u16, g_chat_outbox.items[0].text, '[') == null);
     try std.testing.expectEqualSlices(u16, draft, composer_text);
 }
 
@@ -2161,7 +2162,7 @@ function runHarness(control = false) {
     }
     if (control === 'reaction-index') {
       const original = functions;
-      functions = functions.replace('const line = chat_reaction.format(emoji, reference, quote, &out)', 'const wrong = g_chat_blocks[0];\n    _ = reference;\n    _ = quote;\n    const line = chat_reaction.format(emoji, wrong.reaction_reference, g_chat_capture[wrong.start..][0..wrong.len], &out)');
+      functions = functions.replace('const line = chat_reaction.spoken(emoji, quote, &out)', 'const wrong = g_chat_blocks[0];\n    _ = reference;\n    _ = quote;\n    const line = chat_reaction.spoken(emoji, g_chat_capture[wrong.start..][0..wrong.len], &out)');
       assert.notEqual(functions, original);
     }
     if (control === 'repeats' || control === 'unreadable') {
