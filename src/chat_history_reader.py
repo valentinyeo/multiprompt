@@ -2669,6 +2669,7 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
                       "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
+                      "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
@@ -8231,7 +8232,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 132
+RUNTIME_GENERATION = 133
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8334,6 +8335,13 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    shell_source = globals().get('MP_SHELL_SOURCE')
+                    if isinstance(shell_source, str) and shell_source:
+                        try:
+                            publish_named_tool('mp-shell', _base64.b64decode(shell_source))
+                            _os.chmod('mp-shell', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     sessions_source = globals().get('MP_SESSIONS_SOURCE')

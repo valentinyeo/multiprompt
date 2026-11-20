@@ -20,5 +20,6 @@ mp-send --to "<chat name>" "<message>"
 - The receiver sees `From <your chat name>:` before your text. Outside a chat, add `--from NAME`.
 - A busy chat takes the message when its turn ends.
 - Missing commands: run `tools/install-mp-talk.sh` from the Multiprompt checkout.
+- `mp-shell open` asks the desktop to open a VPS shell tab or attach tmux (`--attach`, `--run`, `--folder`). It fails plainly when the desktop is offline.
 
 Details: `openwiki/operations/chats-talk.md`.

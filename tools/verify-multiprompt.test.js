@@ -705,6 +705,7 @@ test('G3: four-section feature map is indexed and workspace entry points link it
   const workspaces = read(skill + 'features/workspaces.md').split('## How to get to it (user POV)')[1].split('## Driving it')[0];
   assert.match(workspaces, /zsb workspace-list/);
   assert.match(workspaces, /zsb session-open --workspace/);
+  assert.match(read('src/mp_zsb.sh'), /shell-open --workspace/);
   assert.match(workspaces, /\[Session open\]\(session-open.md\)/);
   assert.match(map, /not a Windows journey result/);
 });

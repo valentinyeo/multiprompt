@@ -159,6 +159,7 @@ class RuntimeTest(unittest.TestCase):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
             ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
+            ('MP_SHELL_SOURCE', 'src/mp_shell.py'),
             ('MP_SESSIONS_SOURCE', 'src/mp_sessions.py'),
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),

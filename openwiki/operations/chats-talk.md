@@ -4,7 +4,7 @@ Agent sessions on the server, Claude, Codex, Pi, hax or Cursor, can list the liv
 
 ## Install
 
-Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py`, `mp_helper.py`, `multibot_feedback.py` and `mp-layout.mjs` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions`, `mp-helper`, `multibot-feedback` and `mp-layout` wrappers into `~/.local/bin`. Run it again after a release to update.
+Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py`, `mp_helper.py`, `mp_shell.py`, `multibot_feedback.py` and `mp-layout.mjs` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multibot-feedback` and `mp-layout` wrappers into `~/.local/bin`. Run it again after a release to update.
 
 Every server account that runs chats needs its own copy, because `~/.local/bin` and `~/.multiprompt-runtime` belong to one account. `--user` repeats the install for another account on the same server and needs password-free sudo:
 
@@ -18,7 +18,7 @@ sudo tools/install-mp-talk.sh --user inne --user valentin
 sudo tools/install-mp-talk.sh --check --user inne --user valentin
 ```
 
-The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `multibot-feedback`, `mp-layout` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime, so an account whose chats use the runtime copy needs no install step. An account on the same server that has no `~/.multiprompt-runtime` gets the tools from the install step above and nothing else.
+The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multibot-feedback`, `mp-layout` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime, so an account whose chats use the runtime copy needs no install step. An account on the same server that has no `~/.multiprompt-runtime` gets the tools from the install step above and nothing else.
 
 ## List chats
 
@@ -76,6 +76,23 @@ mp-helper close "Research A"
 - `send` puts a message into the helper, starting with `From <parent name>:`.
 - `list` and `close` see only the calling chat's helpers. `close` stops the helper and closes its tab. The desktop refuses to close the tab you are looking at; the helper still stops.
 - When the parent tab is not open on a desktop, the helper still runs and `start` reports `"visible":false`.
+
+## Server shell tabs
+
+From a live chat, `mp-shell` asks the signed-in desktop app to open a server shell tab. It uses the same zsb bridge as `mp-helper`, not the account layout API. When the desktop is offline the command exits with a plain error.
+
+```sh
+mp-shell open
+mp-shell open --attach projects-2
+mp-shell open --attach projects-2 --folder ~/projects/foo
+mp-shell open --run "tmux new -A -s work"
+mp-shell open --workspace Research --group Ops --host remote-1 --name "VPS shell"
+```
+
+- `open` with no options opens a plain VPS shell on the chat's host, placed below the chat tab (or in its group when `--after-tab` is unavailable).
+- `--attach` attaches a named tmux session on the server. `--folder` runs `cd` before attach or `--run`.
+- `--run` sets the remote startup command. When omitted with `--attach`, the desktop runs a normal `tmux attach`.
+- `--workspace`, `--group`, `--host`, and `--after-tab` work without a parent chat when you name the placement explicitly.
 
 ## Where names come from
 

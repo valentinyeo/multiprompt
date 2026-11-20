@@ -1871,6 +1871,17 @@ pub fn notifyTabCapReached() void {
 }
 
 pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) bool {
+    const old_cmd_len = app_state.g_pending_tmux_cmd_len;
+    const old_resurrect_len = app_state.g_pending_resurrect_len;
+    app_state.g_pending_tmux_cmd_len = 0;
+    app_state.g_pending_resurrect_len = 0;
+    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session);
+    app_state.g_pending_tmux_cmd_len = old_cmd_len;
+    app_state.g_pending_resurrect_len = old_resurrect_len;
+    return ok;
+}
+
+pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8) bool {
     const old_host = app_state.g_pending_tmux_host;
     const old_workspace = app_state.g_pending_background_workspace;
     defer {
@@ -1885,9 +1896,11 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
         app_state.g_pending_tmux_cmd_len = old_cmd_len;
         app_state.g_pending_resurrect_len = old_resurrect_len;
     }
-    app_state.g_pending_tmux_cmd_len = 0;
-    app_state.g_pending_resurrect_len = 0;
-    return spawnShellWithSession(.tmux, session, null, null);
+    if (kind != .tmux) {
+        app_state.g_pending_tmux_cmd_len = 0;
+        app_state.g_pending_resurrect_len = 0;
+    }
+    return spawnShellWithSession(kind, tmux_session, null, null);
 }
 
 fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {

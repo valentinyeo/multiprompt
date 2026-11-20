@@ -1313,7 +1313,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "navigate",         "open",           "pane-info",      "reload",
         "reset",            "resolve-window", "routing-audit",  "screenshot",
         "script",           "session-close",  "session-move",   "session-open",
-        "session-rebind",   "session-rename", "session-status", "shoturl",
+        "session-rebind",   "session-rename", "session-status", "shell-open",
+        "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
         "version",          "workspace-list",
@@ -1340,7 +1341,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
-    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or zsbIsTabVerb(argv[0])) {
+    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
@@ -2186,6 +2187,173 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
     return pos;
 }
 
+const ZsbShellOpenArgs = struct {
+    workspace: []const u8,
+    group: []const u8,
+    host: []const u8,
+    name: []const u8,
+    attach: ?[]const u8 = null,
+    run: ?[]const u8 = null,
+    after_tab: ?u32 = null,
+};
+
+const ZsbShellFlag = enum(u3) { workspace, group, host, name, attach, run, after_tab };
+
+fn zsbShellFlagFor(arg: []const u8) ?ZsbShellFlag {
+    if (std.mem.eql(u8, arg, "--workspace")) return .workspace;
+    if (std.mem.eql(u8, arg, "--group")) return .group;
+    if (std.mem.eql(u8, arg, "--host")) return .host;
+    if (std.mem.eql(u8, arg, "--name")) return .name;
+    if (std.mem.eql(u8, arg, "--attach")) return .attach;
+    if (std.mem.eql(u8, arg, "--run")) return .run;
+    if (std.mem.eql(u8, arg, "--after-tab")) return .after_tab;
+    return null;
+}
+
+fn validateZsbShellRun(command: []const u8) !void {
+    if (command.len == 0 or command.len >= app_state.g_pending_spawn_cmd.len) return error.BadArgs;
+    var codepoints = (std.unicode.Utf8View.init(command) catch return error.BadArgs).iterator();
+    while (codepoints.nextCodepoint()) |c| if (c < 32 or (c >= 127 and c <= 159)) return error.BadArgs;
+}
+
+fn setPendingRemoteRun(tmux_kind: bool, command: []const u8) bool {
+    if (tmux_kind) {
+        if (command.len >= app_state.g_pending_tmux_cmd.len) return false;
+        @memcpy(app_state.g_pending_tmux_cmd[0..command.len], command);
+        app_state.g_pending_tmux_cmd_len = @intCast(command.len);
+        app_state.g_pending_resurrect_len = 0;
+    } else {
+        if (command.len >= app_state.g_pending_spawn_cmd.len) return false;
+        @memcpy(app_state.g_pending_spawn_cmd[0..command.len], command);
+        app_state.g_pending_spawn_cmd_len = @intCast(command.len);
+    }
+    return true;
+}
+
+fn remoteShellKindForHost(host: u8, attach: bool) ?app_state.ShellKind {
+    if (attach) return .tmux;
+    return switch (host) {
+        TMUX_HOST_DE => .vps,
+        TMUX_HOST_UK => .vps2,
+        else => null,
+    };
+}
+
+fn parseZsbShellOpenArgs(argv: []const []const u8) !ZsbShellOpenArgs {
+    if (argv.len < 5 or !std.mem.eql(u8, argv[0], "shell-open")) return error.BadArgs;
+    var values: [7]?[]const u8 = @splat(null);
+    var i: usize = 1;
+    while (i < argv.len) {
+        const flag = zsbShellFlagFor(argv[i]) orelse return error.BadArgs;
+        const slot = @intFromEnum(flag);
+        if (i + 1 >= argv.len or values[slot] != null or argv[i + 1].len == 0) return error.BadArgs;
+        values[slot] = argv[i + 1];
+        i += 2;
+    }
+    const workspace = values[@intFromEnum(ZsbShellFlag.workspace)] orelse return error.BadArgs;
+    const host = values[@intFromEnum(ZsbShellFlag.host)] orelse return error.BadArgs;
+    const name = values[@intFromEnum(ZsbShellFlag.name)] orelse return error.BadArgs;
+    const group = values[@intFromEnum(ZsbShellFlag.group)] orelse "";
+    const after_text = values[@intFromEnum(ZsbShellFlag.after_tab)];
+    if ((group.len == 0) == (after_text == null)) return error.BadArgs;
+    try validateZsbName(name);
+    const attach = values[@intFromEnum(ZsbShellFlag.attach)];
+    if (attach) |session| try validateZsbTmux(session);
+    const run = values[@intFromEnum(ZsbShellFlag.run)];
+    if (run) |command| try validateZsbShellRun(command);
+    var after_tab: ?u32 = null;
+    if (after_text) |tab_text| {
+        for (tab_text) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+        const tab = std.fmt.parseInt(u32, tab_text, 10) catch return error.BadArgs;
+        if (tab == 0) return error.BadArgs;
+        after_tab = tab;
+    }
+    for (values) |value| if (value) |text| if (text.len > 256) return error.BadArgs;
+    return .{ .workspace = workspace, .group = group, .host = host, .name = name, .attach = attach, .run = run, .after_tab = after_tab };
+}
+
+fn zsbShellOpen(argv: []const []const u8, out: []u8) usize {
+    const args = parseZsbShellOpenArgs(argv) catch |err| return zsbWorkspaceError(out, switch (err) {
+        error.InvalidTmux => "invalid_tmux",
+        error.InvalidName => "invalid_name",
+        else => "bad_args",
+    });
+    var ws_names: [MAX_LWS][]const u8 = undefined;
+    var ws_bufs: [MAX_LWS][32]u8 = undefined;
+    var workspace: ?u8 = null;
+    for (0..app_state.g_lws_count) |wi| {
+        ws_names[wi] = workspaceDisplayName(@intCast(wi), &ws_bufs[wi]);
+        if (std.mem.eql(u8, ws_names[wi], args.workspace)) workspace = @intCast(wi);
+    }
+    const ws = workspace orelse return zsbUnknownName(out, "unknown_workspace", ws_names[0..app_state.g_lws_count]);
+    var anchor: ?u32 = null;
+    var group_id: ?u32 = null;
+    if (args.after_tab) |tab| {
+        const index = zsbShellIndexForTab(tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+        if (app_state.shells[index].workspace != ws) return zsbWorkspaceError(out, "unknown_tab");
+        anchor = index;
+        group_id = app_state.shells[index].group_id;
+    }
+    var group_names: [app_state.MAX_GROUPS][]const u8 = undefined;
+    var group_bufs: [app_state.MAX_GROUPS][256]u8 = undefined;
+    for (app_state.groups[0..app_state.group_count], 0..) |group, gi| {
+        const len = std.unicode.utf16LeToUtf8(&group_bufs[gi], group.name[0..group.name_len]) catch return zsbWorkspaceError(out, "invalid_group_name");
+        group_names[gi] = group_bufs[gi][0..len];
+        if (anchor == null and std.mem.eql(u8, group_names[gi], args.group)) group_id = group.id;
+    }
+    const gid = group_id orelse return zsbUnknownName(out, "unknown_group", group_names[0..app_state.group_count]);
+    var host_names: [3][]const u8 = undefined;
+    var host_id: ?u8 = null;
+    for ([_]u8{ TMUX_HOST_DE, TMUX_HOST_UK, TMUX_HOST_INNE }, 0..) |host, hi| {
+        host_names[hi] = tmuxSshTarget(host);
+        if (std.mem.eql(u8, host_names[hi], args.host)) host_id = host;
+    }
+    const host = host_id orelse return zsbUnknownName(out, "unknown_host", &host_names);
+    const attach = args.attach != null;
+    const kind = remoteShellKindForHost(host, attach) orelse return zsbWorkspaceError(out, "bad_args");
+    if (attach) {
+        const session = args.attach.?;
+        if (findLocalTmuxTab(host, session)) |existing| {
+            const shell = &app_state.shells[existing];
+            const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"existing\":true,\"tab\":{d},\"workspace\":", .{shell.shell_id}) catch return 0;
+            var pos = text.len;
+            var ws_buf: [32]u8 = undefined;
+            if (!zsbAppendJsonString(out, &pos, workspaceDisplayName(shell.workspace, &ws_buf))) return 0;
+            if (!zsbAppendSessionState(out, &pos, shell)) return 0;
+            if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
+            return pos;
+        }
+    }
+    const tmux_session: ?[]const u8 = if (attach) args.attach else null;
+    const old_spawn_len = app_state.g_pending_spawn_cmd_len;
+    const old_tmux_len = app_state.g_pending_tmux_cmd_len;
+    const old_resurrect_len = app_state.g_pending_resurrect_len;
+    defer {
+        app_state.g_pending_spawn_cmd_len = old_spawn_len;
+        app_state.g_pending_tmux_cmd_len = old_tmux_len;
+        app_state.g_pending_resurrect_len = old_resurrect_len;
+    }
+    app_state.g_pending_spawn_cmd_len = 0;
+    app_state.g_pending_tmux_cmd_len = 0;
+    app_state.g_pending_resurrect_len = 0;
+    if (args.run) |command| {
+        if (!setPendingRemoteRun(kind == .tmux, command)) return zsbWorkspaceError(out, "bad_args");
+    }
+    if (!@import("console.zig").spawnBackgroundRemoteShell(host, ws, kind, tmux_session)) return zsbWorkspaceError(out, "spawn_failed");
+    const placed = if (anchor) |index| zsbPlaceAfter(app_state.shell_count - 1, index) else app_state.shell_count - 1;
+    const shell = &app_state.shells[placed];
+    shell.group_id = gid;
+    shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, args.name) catch unreachable);
+    shell.name[shell.name_len] = 0;
+    shell.name_source = .manual;
+    saveSession();
+    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"created\":true,\"tab\":{d}", .{shell.shell_id}) catch return 0;
+    var pos = text.len;
+    if (!zsbAppendSessionState(out, &pos, shell)) return 0;
+    if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
+    return pos;
+}
+
 const ZsbTabFlag = enum(u3) { tab, workspace, group, host, tmux, name };
 
 const ZsbTabArgs = struct {
@@ -2449,7 +2617,7 @@ pub fn handleZsbWorkspaceRequest() void {
     while (!app_state.g_zsb_workspace_mutex.tryLock()) Sleep(0);
     defer app_state.g_zsb_workspace_mutex.unlock();
     if (!app_state.g_zsb_workspace_pending) return;
-    var argv: [11][]const u8 = undefined;
+    var argv: [16][]const u8 = undefined;
     for (0..app_state.g_zsb_workspace_argc) |i| argv[i] = app_state.g_zsb_workspace_args[i][0..app_state.g_zsb_workspace_arg_lens[i]];
     const args = argv[0..app_state.g_zsb_workspace_argc];
     const out = &app_state.g_zsb_workspace_response;
@@ -2457,6 +2625,8 @@ pub fn handleZsbWorkspaceRequest() void {
         if (args.len == 1) zsbWorkspaceList(out) else zsbWorkspaceError(out, "bad_args")
     else if (std.mem.eql(u8, args[0], "session-status"))
         zsbSessionStatus(args, out)
+    else if (std.mem.eql(u8, args[0], "shell-open"))
+        zsbShellOpen(args, out)
     else if (zsbIsTabVerb(args[0]))
         zsbTabCommand(args, out, ZsbTabOps)
     else
