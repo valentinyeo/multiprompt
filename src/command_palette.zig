@@ -1997,7 +1997,8 @@ pub fn closePickRepo() void {
     clearPickRepoAnchor();
 }
 
-var g_pick_repo_last_query_len: usize = 0;
+const PICK_REPO_NO_QUERY: usize = std.math.maxInt(usize);
+var g_pick_repo_last_query_len: usize = PICK_REPO_NO_QUERY;
 var g_pick_repo_anchor_valid: bool = false;
 var g_pick_repo_anchor_host: u8 = 0;
 var g_pick_repo_anchor_path_len: u16 = 0;
@@ -2011,7 +2012,7 @@ fn clearPickRepoAnchor() void {
     g_pick_repo_anchor_valid = false;
     g_pick_repo_anchor_host = 0;
     g_pick_repo_anchor_path_len = 0;
-    g_pick_repo_last_query_len = 0;
+    g_pick_repo_last_query_len = PICK_REPO_NO_QUERY;
 }
 
 fn capturePickRepoAnchorFromSelection() void {
@@ -2026,6 +2027,14 @@ fn capturePickRepoAnchorFromSelection() void {
     g_pick_repo_anchor_path_len = row.path_len;
     @memcpy(g_pick_repo_anchor_path[0..row.path_len], row.path[0..row.path_len]);
     g_pick_repo_anchor_valid = true;
+}
+
+fn beginPickRepoRefresh() bool {
+    if (!app_state.g_search_pick_repo_mode) return false;
+    const query_changed = app_state.g_search_len != g_pick_repo_last_query_len;
+    g_pick_repo_last_query_len = app_state.g_search_len;
+    if (!query_changed) capturePickRepoAnchorFromSelection();
+    return query_changed;
 }
 
 fn pickRepoResultIndexForRow(row_idx: u32) ?u32 {
@@ -2047,23 +2056,20 @@ fn applyPickRepoAnchorToSelection() void {
         }
     }
     g_pick_repo_anchor_valid = false;
+    if (app_state.g_search_sel >= app_state.g_search_result_count and app_state.g_search_result_count > 0)
+        app_state.g_search_sel = app_state.g_search_result_count - 1;
 }
 
 fn finishPickRepoSelectionAfterRebuild(query_changed: bool) void {
-    if (query_changed and app_state.g_search_len > 0 and app_state.g_search_result_count > 1) {
-        app_state.g_search_sel = 1;
-        app_state.g_search_scroll = 0;
-        capturePickRepoAnchorFromSelection();
-        return;
-    }
-    if (g_pick_repo_anchor_valid) {
+    if (!query_changed) {
         applyPickRepoAnchorToSelection();
         return;
     }
-    if (app_state.g_search_sel == 0 and app_state.g_search_result_count > 1) {
+    if (app_state.g_search_len > 0 and app_state.g_search_result_count > 1) {
         app_state.g_search_sel = 1;
         app_state.g_search_scroll = 0;
     }
+    capturePickRepoAnchorFromSelection();
 }
 
 fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
@@ -3532,6 +3538,7 @@ test "SOFT-2444 Ctrl+K session rows keep active sessions and drop archived ones"
 pub fn updateSearchResults() void {
     app_state.g_search_revision +%= 1;
     if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
+    const pick_repo_query_changed = beginPickRepoRefresh();
     @import("room_frontend.zig").resetPaletteRooms();
     defer {
         if (app_state.g_search_active) {
@@ -3555,9 +3562,6 @@ pub fn updateSearchResults() void {
         return;
     }
     if (app_state.g_search_pick_repo_mode) {
-        const query_changed = app_state.g_search_len != g_pick_repo_last_query_len;
-        if (!query_changed) capturePickRepoAnchorFromSelection();
-        g_pick_repo_last_query_len = app_state.g_search_len;
         app_state.g_search_result_count = 0;
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_BACK_OFFSET;
         app_state.g_search_result_count += 1;
@@ -3577,7 +3581,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         sortFilteredResultsAfterBack();
-        finishPickRepoSelectionAfterRebuild(query_changed);
+        finishPickRepoSelectionAfterRebuild(pick_repo_query_changed);
         if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
         return;
     }
@@ -6256,59 +6260,61 @@ test "IGSH-1266 pick repo typing filters paths case insensitively" {
     try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
 }
 
+fn pickRepoSelectedPath() []const u8 {
+    const target = app_state.g_search_results[app_state.g_search_sel];
+    const row = &g_presented_repo_rows[target - SEARCH_PICK_REPO_ROW_OFFSET];
+    return row.path[0..row.path_len];
+}
+
+fn pickRepoSelectPath(path: []const u8) !void {
+    for (0..app_state.g_search_result_count) |sel| {
+        const target = app_state.g_search_results[sel];
+        if (target < SEARCH_PICK_REPO_ROW_OFFSET) continue;
+        const row = &g_presented_repo_rows[target - SEARCH_PICK_REPO_ROW_OFFSET];
+        if (std.mem.eql(u8, row.path[0..row.path_len], path)) {
+            app_state.g_search_sel = @intCast(sel);
+            return;
+        }
+    }
+    return error.TestUnexpectedResult;
+}
+
 test "SOFT-2883 pick repo keeps the highlighted folder when the list refreshes" {
-    const old_mode = app_state.g_search_pick_repo_mode;
+    const vps = @import("vps.zig");
     const old_len = app_state.g_search_len;
-    const old_results = app_state.g_search_results;
-    const old_result_count = app_state.g_search_result_count;
     const old_sel = app_state.g_search_sel;
-    const old_presented_count = g_presented_repo_count;
-    const old_presented = g_presented_repo_rows;
-    const old_anchor_valid = g_pick_repo_anchor_valid;
-    const old_last_query = g_pick_repo_last_query_len;
+    const old_scroll = app_state.g_search_scroll;
+    const old_shell_count = app_state.shell_count;
     defer {
-        app_state.g_search_pick_repo_mode = old_mode;
+        vps.replaceRepoRowsForTest(0, &.{});
+        closePickRepo();
         app_state.g_search_len = old_len;
-        app_state.g_search_results = old_results;
-        app_state.g_search_result_count = old_result_count;
         app_state.g_search_sel = old_sel;
-        g_presented_repo_count = old_presented_count;
-        g_presented_repo_rows = old_presented;
-        g_pick_repo_anchor_valid = old_anchor_valid;
-        g_pick_repo_last_query_len = old_last_query;
+        app_state.g_search_scroll = old_scroll;
+        app_state.shell_count = old_shell_count;
     }
     const multiprompt = "/home/valentin/projects/multiprompt";
     const android = "/home/valentin/projects/multiprompt-android";
-    app_state.g_search_pick_repo_mode = true;
-    app_state.g_search_len = 11;
-    g_pick_repo_last_query_len = 11;
-    g_presented_repo_count = 2;
-    g_presented_repo_rows[0] = .{};
-    g_presented_repo_rows[0].host = 0;
-    g_presented_repo_rows[0].path_len = @intCast(multiprompt.len);
-    @memcpy(g_presented_repo_rows[0].path[0..multiprompt.len], multiprompt);
-    g_presented_repo_rows[1] = .{};
-    g_presented_repo_rows[1].host = 0;
-    g_presented_repo_rows[1].path_len = @intCast(android.len);
-    @memcpy(g_presented_repo_rows[1].path[0..android.len], android);
-    app_state.g_search_result_count = 3;
-    app_state.g_search_results[0] = SEARCH_PICK_REPO_BACK_OFFSET;
-    app_state.g_search_results[1] = SEARCH_PICK_REPO_ROW_OFFSET;
-    app_state.g_search_results[2] = SEARCH_PICK_REPO_ROW_OFFSET + 1;
-    app_state.g_search_sel = 1;
-    capturePickRepoAnchorFromSelection();
-    g_presented_repo_rows[0] = g_presented_repo_rows[1];
-    g_presented_repo_rows[1] = .{};
-    g_presented_repo_rows[1].host = 0;
-    g_presented_repo_rows[1].path_len = @intCast(multiprompt.len);
-    @memcpy(g_presented_repo_rows[1].path[0..multiprompt.len], multiprompt);
-    app_state.g_search_results[1] = SEARCH_PICK_REPO_ROW_OFFSET;
-    app_state.g_search_results[2] = SEARCH_PICK_REPO_ROW_OFFSET + 1;
-    finishPickRepoSelectionAfterRebuild(false);
-    const target = app_state.g_search_results[app_state.g_search_sel];
-    const row_idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
-    try std.testing.expectEqualStrings(multiprompt, g_presented_repo_rows[row_idx].path[0..g_presented_repo_rows[row_idx].path_len]);
-    try std.testing.expectEqualStrings(multiprompt, g_pick_repo_anchor_path[0..g_pick_repo_anchor_path_len]);
+    const ios = "/home/valentin/projects/multiprompt-ios";
+    app_state.shell_count = 0;
+    vps.replaceRepoRowsForTest(0, &.{ android, multiprompt });
+    pickRepoOpen(true, false, 0, false);
+    @memcpy(app_state.g_search_buf[0..5], L("multi")[0..5]);
+    app_state.g_search_len = 5;
+    app_state.g_search_sel = 0;
+    updateSearchResults();
+    try pickRepoSelectPath(multiprompt);
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ ios, android, multiprompt });
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ multiprompt, android });
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ android, ios });
+    updateSearchResults();
+    try std.testing.expect(app_state.g_search_sel < app_state.g_search_result_count);
 }
 
 fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
