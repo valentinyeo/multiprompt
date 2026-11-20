@@ -68,6 +68,19 @@ test('Native pixel regression is discovered directly and required by the full te
   assert.match(graph, /test_step.dependOn\(&run_emoji_tests.step\)/);
 });
 
+test('Color emoji pixel proof finishes without the listen transport and preserves failing exit codes', () => {
+  const graph = read('build.zig');
+  const start = graph.indexOf('    const emoji_tests =');
+  const end = graph.indexOf('    const font_tests =', start);
+  assert.ok(start >= 0 && end > start, 'emoji test wiring');
+  const launch = graph.slice(start, end);
+  assert.match(launch, /const run_emoji_tests = std\.Build\.Step\.Run\.create\(b, "run color emoji pixel regressions"\)/);
+  assert.match(launch, /run_emoji_tests\.addArtifactArg\(emoji_tests\)/);
+  assert.match(launch, /run_emoji_tests\.expectExitCode\(0\)/);
+  assert.match(launch, /run_emoji_tests\.has_side_effects = true/);
+  assert.doesNotMatch(launch, /addRunArtifact\(emoji_tests\)/);
+});
+
 test('Successful color-font runs remain visible to native rendering diagnostics', () => {
   assert.match(read('src/dwrite_text.zig'), /if \(height != 0\) \{\s*if \(enabled\(\)\) painted_runs \+= 1;\s*return height;/);
 });
