@@ -4659,6 +4659,14 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIDESIDEBAR_OFFSET;
             app_state.g_search_result_count += 1;
         }
+        if (show_collapse and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SIDEBAR_COLLAPSE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (show_hide_sb and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SIDEBAR_HIDE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
     }
 
     if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len) {

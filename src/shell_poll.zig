@@ -20,10 +20,9 @@ const OpenProcess = @import("win32.zig").OpenProcess;
 const ReadProcessMemory = @import("win32.zig").ReadProcessMemory;
 const AttachConsole = @import("win32.zig").AttachConsole;
 const FreeConsole = @import("win32.zig").FreeConsole;
-const GetStdHandle = @import("win32.zig").GetStdHandle;
 const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
-const STD_OUTPUT_HANDLE = @import("win32.zig").STD_OUTPUT_HANDLE;
+const w32 = @import("win32.zig");
 const COORD = @import("win32.zig").COORD;
 const CONSOLE_SCREEN_BUFFER_INFO = @import("win32.zig").CONSOLE_SCREEN_BUFFER_INFO;
 const PROCESS_QUERY_INFORMATION = @import("win32.zig").PROCESS_QUERY_INFORMATION;
@@ -735,8 +734,9 @@ fn isTmuxRunningInConsole(pid: DWORD) bool {
     if (AttachConsole(pid) == 0) return false;
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return false;
+    const handle = w32.CreateFileW(std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"), w32.GENERIC_READ, w32.FILE_SHARE_READ | w32.FILE_SHARE_WRITE, null, w32.OPEN_EXISTING, 0, null);
+    if (handle == null or handle == w32.INVALID_HANDLE_VALUE_PTR) return false;
+    defer _ = CloseHandle(handle);
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return false;
@@ -777,8 +777,9 @@ fn readTmuxStatusTitle(pid: DWORD, out: *[256]u16, ram_out: ?*u32) ?u32 {
     if (AttachConsole(pid) == 0) return null;
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return null;
+    const handle = w32.CreateFileW(std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"), w32.GENERIC_READ, w32.FILE_SHARE_READ | w32.FILE_SHARE_WRITE, null, w32.OPEN_EXISTING, 0, null);
+    if (handle == null or handle == w32.INVALID_HANDLE_VALUE_PTR) return null;
+    defer _ = CloseHandle(handle);
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
@@ -863,8 +864,9 @@ fn readVpsPromptCwd(pid: DWORD, out: *[128]u16) ?[]const u16 {
     if (AttachConsole(pid) == 0) return null;
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return null;
+    const handle = w32.CreateFileW(std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"), w32.GENERIC_READ, w32.FILE_SHARE_READ | w32.FILE_SHARE_WRITE, null, w32.OPEN_EXISTING, 0, null);
+    if (handle == null or handle == w32.INVALID_HANDLE_VALUE_PTR) return null;
+    defer _ = CloseHandle(handle);
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
@@ -1037,11 +1039,12 @@ pub fn extractTmuxSessionFromStatus(pid: DWORD, out: *[64]u8, out_len: *u32) boo
     }
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) {
-        debugLog("tmux-extract: no stdout handle");
+    const handle = w32.CreateFileW(std.unicode.utf8ToUtf16LeStringLiteral("CONOUT$"), w32.GENERIC_READ, w32.FILE_SHARE_READ | w32.FILE_SHARE_WRITE, null, w32.OPEN_EXISTING, 0, null);
+    if (handle == null or handle == w32.INVALID_HANDLE_VALUE_PTR) {
+        debugLog("tmux-extract: no console output buffer");
         return false;
     }
+    defer _ = CloseHandle(handle);
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) {

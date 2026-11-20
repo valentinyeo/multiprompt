@@ -2662,7 +2662,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
-    const held_y = app_state.g_chat_scroll_y;
+    const held_y = app_state.g_chat_scroll_y + delta;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);

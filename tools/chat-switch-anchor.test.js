@@ -18,6 +18,9 @@ function between(source, start, end) {
 
 const harness = (scroll, historySource) => `const std = @import("std");
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 800, bottom: i32 = 600 };
+const md = struct {
+  const Block = struct { start: usize = 0, role: enum { prose, tool } = .prose, first: bool = true, message_id: u64 = 0, source_offset: u64 = 0 };
+};
 const chat_history = struct {
 ${between(history, 'pub const ReadBoundary = struct', '\n')}
 ${between(historySource, 'pub const Anchor =', 'pub const MISSING_RETRY_MS')}
@@ -41,6 +44,8 @@ const app_state = struct {
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = false;
   var g_chat_read_hold = false;
+  var g_chat_read_anchor: ?chat_history.ReadAnchor = null;
+  var g_chat_blocks: [128]md.Block = undefined;
   var g_chat_scroll_bottom_pending = false;
   var g_chat_scrolled_up = false;
   var g_chat_prepend_pending = false;
@@ -89,6 +94,8 @@ fn openTab(blocks: usize) void {
   app_state.g_chat_scrolled_up = false;
   app_state.g_chat_read_boundary = .{};
   app_state.g_chat_read_hold = true;
+  app_state.g_chat_read_anchor = null;
+  for (&app_state.g_chat_blocks, 0..) |*block, i| block.* = .{ .message_id = i + 1 };
   chatRelayoutPreservingScroll(800, 600);
 }
 fn dividerTop() i32 { return app_state.g_chat_read_divider_y - app_state.g_chat_top_pad; }
@@ -103,9 +110,12 @@ test "IGSH-1924 a switch opens on the New divider and later content never moves 
   app_state.next_blocks = 40;
   refreshChatTranscript(false);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+  const anchor = chat_history.readAnchor(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y, 600).?;
+  const before_y = chat_history.readAnchorTop(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], anchor).? - app_state.g_chat_scroll_y;
   app_state.g_chat_top_pad = 82;
   chatRelayoutPreservingScroll(800, 600);
-  try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(first + 62, app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(before_y, chat_history.readAnchorTop(app_state.g_chat_blocks[0..40], app_state.g_chat_layout_rects[0..40], anchor).? - app_state.g_chat_scroll_y);
   app_state.g_chat_top_pad = 20;
 }
 test "SOFT-2557 a late New divider never moves the first painted row" {
