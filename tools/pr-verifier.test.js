@@ -171,6 +171,15 @@ test('an uncovered part of the change caps PASS at PASS+NOTES', () => {
   assert.equal(result.final, 'PASS+NOTES');
 });
 
+test('journeys dropped over the eight-journey cap are named in the verdict as notes', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
+  const summary = verifier.summarize(dir, ['appearance']);
+  const note = 'Over the 8-journey cap, only the most specific journeys ran; dropped: chat-view, pane-layout.';
+  const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance'], { journeyNotes: [note] }), runUrl: 'u' });
+  assert.equal(result.final, 'PASS+NOTES');
+  assert.match(result.body, /Over the 8-journey cap/, 'the dropped journeys are printed as a note');
+});
+
 test('a missing or invalid verdict is BLOCKED and evidence stops at eight lines', () => {
   const summary = verifier.summarize(evidenceDir({}), []);
   assert.equal(verifier.finalize({ verdict: null, headSha: head, summary, selection: selection([]), runUrl: 'u' }).final, 'BLOCKED');

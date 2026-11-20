@@ -334,6 +334,10 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     if (final === 'PASS') final = 'PASS+NOTES';
     notes.push(`Already failing in master's latest nightly verify run, so not caused by this change: ${inherited.map(row => row.feature).join(', ')}.`);
   }
+  if (selection.journeyNotes?.length) {
+    if (final === 'PASS') final = 'PASS+NOTES';
+    for (const note of selection.journeyNotes) notes.push(oneLine(note));
+  }
   if (!ran.length && final === 'PASS') {
     final = 'PASS+NOTES';
     notes.push('No desktop journey ran for this change, so the app was not driven.');
@@ -659,7 +663,7 @@ function judgeMessages(material) {
     'PASS+NOTES: head is clean but a Done-when line is not shown, or no journey covered part of the change. Say which.',
     'FAIL: a product regression on head or evidence contradicting a Done-when line. A journey that evidence.md marks inherited also failed in the latest master nightly run; it is not a PR failure and is never a reason for FAIL or BLOCKED. Say it in a note and judge the remaining evidence.',
     'BLOCKED: infrastructure prevented verification, including timeout, cancellation, missing evidence, harness error or runner queue. Missing cleanup evidence is BLOCKED, not a product FAIL.',
-    'selection.features is the authoritative execution plan; picker suggestions in reason or doneWhen do not add planned journeys.',
+    'selection.features is the authoritative execution plan; picker suggestions in reason or doneWhen do not add planned journeys. Journeys dropped over the eight-journey cap are named in selection.journeyNotes; their absence is not missing evidence.',
     'An empty selection.features is an intentional CI-only plan, not missing journey evidence. Review ci.json and diff.patch instead of requiring desktop result.json or doctor.json.',
     'A failing Tests job that also fails the same job on master is inherited, not a PR failure; judge the remaining evidence and say it in a note.',
     'Selected ciWorkflows provide exact-head run receipts and raw summary.json evidence. A successful verification workflow may report inherited source findings; those remain findings, not property passes. Judge them against the patch and inheritance proof.',
@@ -834,6 +838,7 @@ async function main(argv, env) {
     selection.features = [...new Set(mapped.features)].sort();
     selection.dropped = [];
     selection.unmapped = mapped.unmapped;
+    selection.journeyNotes = mapped.notes || [];
     selection.ciWorkflows = mapped.ciWorkflows || [];
     if (mapped.unmapped.length) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
