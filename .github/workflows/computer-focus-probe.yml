@@ -1,22 +1,12 @@
 name: Computer take control
 on:
+  schedule:
+    - cron: '32 5 * * *'
   workflow_dispatch:
-  push:
-    branches: ['igsh-1909-*']
-    paths:
-      - src/computer_view.cpp
-      - tools/computer-focus-probe/**
-      - .github/workflows/computer-focus-probe.yml
-  pull_request:
-    paths:
-      - src/computer_view.cpp
-      - tools/computer-focus-probe/**
-      - .github/workflows/computer-focus-probe.yml
-
 permissions:
   contents: read
 concurrency:
-  group: computer-take-control-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   probe:

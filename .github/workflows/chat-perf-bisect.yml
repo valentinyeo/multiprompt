@@ -22,11 +22,13 @@ on:
         required: true
         default: '3'
         type: string
-  schedule:
-    - cron: '24 2 * * *'
 
 permissions:
   contents: read
+
+concurrency:
+  group: chat-perf-bisect-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   plan:
@@ -232,12 +234,13 @@ jobs:
           sudo sysctl kernel.perf_event_paranoid=-1
           profiler=$(find -L /usr/lib/linux-tools -type f -name perf | head -1)
           test -n "$profiler"
+          set -o pipefail
           for side in before after; do
             set +e
-            sudo "$profiler" record -e cpu-clock -F 499 --call-graph dwarf -o "evidence/$side.perf" -- "./evidence/$side" > "evidence/$side-profile.log" 2>&1
-            printf '%s\n' "$?" > "evidence/$side-profile.exit"
+            sudo "$profiler" record -e cpu-clock -F 499 --call-graph dwarf -o "evidence/$side.perf" -- "./evidence/$side" 2>&1 | tee "evidence/$side-profile.log"
+            printf '%s\n' "${PIPESTATUS[0]}" > "evidence/$side-profile.exit"
             set -e
-            sudo "$profiler" report --stdio --no-children -i "evidence/$side.perf" > "evidence/$side-profile.txt"
+            sudo "$profiler" report --stdio --no-children -i "evidence/$side.perf" | tee "evidence/$side-profile.txt"
             sudo chown "$(id -u):$(id -g)" "evidence/$side.perf"
           done
       - name: Compare all measured work and unchanged limits

@@ -3,6 +3,10 @@ name: check-red-run
 on:
   workflow_dispatch:
     inputs:
+      feature:
+        description: Optional desktop journey to bisect using head harness and base app
+        required: false
+        type: string
       base:
         description: Base revision
         default: master^
@@ -25,10 +29,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: check-red-run-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  journey:
+    if: inputs.feature != ''
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: ${{ inputs.feature }}
+      revision: ${{ inputs.head }}
+      app_revision: ${{ inputs.base }}
+
   check-red-run:
+    if: inputs.feature == ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -49,6 +66,8 @@ jobs:
           fi
           echo "ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Install video validation tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
       - name: Test admission controls
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source

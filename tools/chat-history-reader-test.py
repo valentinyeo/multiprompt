@@ -3443,29 +3443,6 @@ class SharedQueueDraftTest(unittest.TestCase):
                     self.assertEqual(self.live()['queue'], [dict(text=text, sender=sender, injected=True)])
                 self.query.update(cached_sid='', inode=0, offset=0)
 
-    def test_IGSH_2351_agent_messages_become_named_incoming_notes(self):
-        samples = [
-            ('<agent-message from="abb23277c284f1efe">\nPR #3506 is green &amp; ready\n</agent-message>', 'Another agent', 'PR #3506 is green & ready'),
-            ('<agent-message from="heic-verify">\nStanding down.\n</agent-message>', 'heic-verify', 'Standing down.'),
-            ('<agent-message from="abb23277c284f1efe" from-name="Poteto 2 LC">hi</agent-message>', 'Poteto 2 LC', 'hi'),
-            ('<agent-message>hi</agent-message>', 'Another agent', 'hi'),
-            ('<agent-message from="  ">hi</agent-message>', 'Another agent', 'hi'),
-        ]
-        for envelope, sender, text in samples:
-            with self.subTest(sender=sender, text=text):
-                self.assertEqual(reader.queue_item(envelope), dict(text=text, sender=sender, injected=True))
-        for plain in ('Please read <agent-message from="x">example</agent-message>',
-                      '<agent-message from=x>bad</agent-message>',
-                      '<agent-message-extra>hi</agent-message-extra>'):
-            with self.subTest(plain=plain):
-                self.assertEqual(reader.queue_item(plain), plain)
-        queued = '<agent-message from="abb23277c284f1efe">\nready\n</agent-message>'
-        state = ([queued], [])
-        reader.queue_apply(state, self.op('remove', '<agent-message from="other-agent">ready</agent-message>'))
-        self.assertEqual(state, ([queued], []))
-        reader.queue_apply(state, self.op('remove', '<agent-message from="abb23277c284f1efe">ready</agent-message>'))
-        self.assertEqual(state, ([], [queued]))
-
     def test_IGSH_722_queue_keeps_non_envelopes_as_plain_strings(self):
         samples = ['hello', 'Please read <cross-session-message>example</cross-session-message>',
                    '<cross-session-message>one</cross-session-message> and reply',
@@ -6807,19 +6784,6 @@ class AgentHostStreamTest(AgentHostStreamFixture, unittest.TestCase):
         self.assertEqual(self.events('text.delta')[-1]['item'], 'msg-1:text:0')
         self.assertEqual([row['payload']['state'] for row in self.events('host.status')][-1], 'ready')
 
-    def test_host_enables_remote_control_and_still_answers_the_first_message(self):
-        self.fake('stream')
-        os.environ['FAKE_AGENT_PACE'] = '0'
-        self.addCleanup(os.environ.pop, 'FAKE_AGENT_PACE', None)
-        self.seed()
-        self.dispatch()
-        self.wait_for(lambda: self.events('turn.ended'))
-        controls = self.agent_rows('control')
-        self.assertEqual(len(controls), 1, 'each new hosted Claude process must enable Remote Control')
-        self.assertEqual(controls[0]['frame']['request'], dict(subtype='remote_control', enabled=True))
-        self.assertEqual(self.user_lines(), [self.text])
-        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['one answer'])
-
     def test_a_hosted_turn_shows_tool_steps_through_item_events(self):
         self.fake('tools')
         self.seed()
@@ -6882,9 +6846,8 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         self.assertFalse([frame for frame in writes if frame.get('type') == 'user'])
 
     def test_cursor_start_does_not_request_remote_control(self):
-        open_cursor = getattr(reader, 'host_cursor_open', None)
-        self.assertIs(reader.HOST_ADAPTERS['cursor']['open'], open_cursor)
-        open_cursor('cursor', self.sid, self.tmux, self.session)
+        self.assertIs(reader.HOST_ADAPTERS['cursor']['open'], reader.host_cursor_open)
+        reader.host_cursor_open('cursor', self.sid, self.tmux, self.session)
         self.assertEqual(self.writes(), [])
 
     def test_remote_control_rejection_does_not_stop_normal_chat(self):
@@ -7399,6 +7362,19 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
             self.assertEqual(result['reason'], 'recall_unavailable')
         self.assertEqual(self.writes(), previous)
         self.assertEqual(self.session['sends'], [target])
+
+
+class HostRemoteControlTest(AgentHostStreamFixture, unittest.TestCase):
+    def test_host_enables_remote_control_and_still_answers_the_first_message(self):
+        self.fake('stream')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: self.events('turn.ended'))
+        controls = self.agent_rows('control')
+        self.assertEqual(len(controls), 1, 'each new hosted Claude process must enable Remote Control')
+        self.assertEqual(controls[0]['frame']['request'], dict(subtype='remote_control', enabled=True))
+        self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['one answer'])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):

@@ -1,0 +1,76 @@
+name: CI repair receipt
+
+on:
+  pull_request:
+    paths:
+      - 'tools/pr-verifier.cjs'
+      - 'tools/pr-verifier-cancel.test.js'
+      - 'tools/pr-verifier-download-retry.test.js'
+      - 'tools/reusable-workflow-permissions.test.js'
+      - '.github/workflows/auto-release.yml'
+      - 'tools/strip-comments.mjs'
+      - 'tools/strip-comments.test.js'
+      - 'tools/ci-receipt-summary.mjs'
+      - '.claude/skills/verify-multiprompt/features/ci-repair-receipt.md'
+      - '.claude/skills/verify-multiprompt/features/README.md'
+      - '.github/workflows/ci-repair-receipt.yml'
+      - '.github/workflows/pr-verifier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-repair-receipt-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install the video decoder
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Run the verifier recovery tests on head and on the base source
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/input"
+          set +e
+          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js > "$RUNNER_TEMP/input/head.log" 2>&1
+          echo "head=$?" >> "$GITHUB_ENV"
+          if [ -n "$BASE_SHA" ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+            cp tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js "$RUNNER_TEMP/base/tools/"
+            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js) > "$RUNNER_TEMP/input/base.log" 2>&1
+            echo "base=$?" >> "$GITHUB_ENV"
+          fi
+      - name: Write the receipt
+        shell: bash
+        run: |
+          set +e
+          if [ -n "$BASE_SHA" ]; then
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the verifier runs one head journey set and never schedules a base build|^# (pass|fail) ' "$RUNNER_TEMP/input/base.log" "$base"
+          else
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" tools "$RUNNER_TEMP/input/head.log" "$head" 'ENOBUFS|^(ok|not ok) [0-9]+ - (the cancellation observer|CLI --check --added-since|a transient artifact download error is retried|an artifact that never downloads|the journey recorder checks cleanup|missing candidate evidence names|a failed recorder without a result)|the verifier runs one head journey set and never schedules a base build|^# (pass|fail) '
+          fi
+          echo "receipt=$?" >> "$GITHUB_ENV"
+          true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-repair-receipt
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error
+      - name: Fail when the head tests or the receipt failed
+        run: test "$head" = 0 && test "$receipt" = 0

@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: crash-symbols-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   symbols:
     runs-on: windows-latest

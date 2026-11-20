@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: title-pill-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   pane-layout:

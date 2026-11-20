@@ -1,13 +1,6 @@
 name: Legacy update feed
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/legacy-update-feed.yml'
-      - '.github/workflows/release.yml'
-      - 'tools/legacy-update-*'
-      - 'tools/fixtures/HYCI-253/**'
-      - 'src/release_signing_public_key.txt'
   workflow_dispatch:
     inputs:
       bootstrap:
@@ -15,14 +8,17 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '7 5 * * *'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -33,7 +29,6 @@ jobs:
       - run: node --test tools/legacy-update-feed.test.mjs
 
   old-client:
-    if: github.event_name != 'schedule'
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
