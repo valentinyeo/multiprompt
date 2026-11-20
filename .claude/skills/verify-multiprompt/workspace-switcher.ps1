@@ -35,21 +35,47 @@ function Get-PaletteRowIds([string]$Trace, [int]$Chars) {
     return $found[$found.Count - 1].Groups[1].Value.Trim()
 }
 
+function Test-EmptyHomeCardRow([int]$Index, $State) {
+    $workspace = $State.workspaces[$Index]
+    if ($workspace.wid -cne 'default') { return $false }
+    if ($State.active_workspace -eq $Index) { return $false }
+    return (@($State.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $Index }).Count -eq 0)
+}
+
+function Get-WorkspaceCardRow([int]$Workspace) {
+    $state = Read-Session
+    $row = 1
+    for ($index = 0; $index -lt $state.workspace_count; $index++) {
+        if ($state.workspaces[$index].PSObject.Properties['archived'] -and $state.workspaces[$index].archived) { continue }
+        if (Test-EmptyHomeCardRow $index $state) { continue }
+        if ($index -eq $Workspace) { return $row }
+        $row++
+    }
+    throw 'Target workspace missing from visible card rows'
+}
+
+function Get-VisibleWorkspaceCardRows() {
+    $state = Read-Session
+    $count = 0
+    for ($index = 0; $index -lt $state.workspace_count; $index++) {
+        if ($state.workspaces[$index].PSObject.Properties['archived'] -and $state.workspaces[$index].archived) { continue }
+        if (Test-EmptyHomeCardRow $index $state) { continue }
+        $count++
+    }
+    return $count
+}
+
 function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
-    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
-    $target = -1
-    for ($index = 0; $index -lt $windows.Count; $index++) {
-        if ($windows[$index].id -ceq $state.workspaces[$Workspace].wid) { $target = $index + 1 }
-    }
-    if ($target -lt 1) { throw 'Target workspace missing from the card registry' }
+    $target = Get-WorkspaceCardRow $Workspace
+    $visibleRows = Get-VisibleWorkspaceCardRows()
     $rect = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetClientRect($card, [ref]$rect)) { throw 'Card rectangle unavailable' }
-    if ($rect.Bottom -lt (19 + ($windows.Count + 2) * 28)) { throw 'Fixture requires all workspace rows visible' }
+    if ($rect.Bottom -lt (19 + ($visibleRows + 2) * 28)) { throw 'Fixture requires all workspace rows visible' }
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card row click'
     Record ('Click named workspace row ' + $state.workspaces[$Workspace].name)
-    [VerifyNative]::ClickClient($card, 50, (6 + $target * 28 + 14))
+    [VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, (6 + $target * 28 + 14))
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq $Workspace -and -not (Read-Session).starred_view } 'card closed and chosen workspace saved'
     Snapshot $Shot
     Save-Json (Read-Session) ($Shot + '.session.json')
@@ -107,16 +133,8 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
 }
 
 $card = Open-WorkspaceCard 'workspace-keyboard-open'
-$state = Read-Session
-$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
-$currentRow = -1
-$targetRow = -1
-for ($index = 0; $index -lt $windows.Count; $index++) {
-    if ($windows[$index].id -ceq $state.workspaces[$created].wid) { $currentRow = $index + 1 }
-    if ($windows[$index].id -ceq $state.workspaces[0].wid) { $targetRow = $index + 1 }
-}
-if ($currentRow -lt 1 -or $targetRow -lt 1) { throw 'Keyboard fixture workspaces missing' }
+$currentRow = Get-WorkspaceCardRow $created
+$targetRow = Get-WorkspaceCardRow 0
 Record 'Arrow Up and Down preserve selection, then arrows select first workspace'
 [VerifyNative]::Chord(@(0x26))
 [VerifyNative]::Chord(@(0x28))
@@ -130,11 +148,11 @@ Select-WorkspaceCard $created 'workspace-keyboard-return'
 $result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphite 2'; reason = 'Not a shipped theme; Edge Grey is separate' }
 
 $card = Open-WorkspaceCard 'workspace-new-open'
-$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$newRow = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 1
+$newRow = Get-VisibleWorkspaceCardRows() + 1
 $count = (Read-Session).workspace_count
+Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card new row click'
 Record 'Click New workspace in workspace card'
-[VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
+[VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, (6 + $newRow * 28 + 7 + 14))
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspace_count -eq $count + 1 } 'card created one workspace and closed'
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
 
