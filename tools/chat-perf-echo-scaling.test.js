@@ -34,7 +34,7 @@ test('scaled budgets accept slow shared runners but keep the previous fast-runne
   const masterVpsRuns = [
     { id: '44816468510', slowest: 74, baseline: 16, oldPass: false },
     { id: '44821414996', slowest: 34, baseline: 8, oldPass: true },
-    { id: '44815030127', slowest: 50, baseline: 8, oldPass: true },
+    { id: '44815030127', slowest: 50, baseline: 10, oldPass: true },
     { id: '44808619663', slowest: 17, baseline: 6, oldPass: true },
     { id: '44803544730', slowest: 32, baseline: 6, oldPass: true },
   ];
