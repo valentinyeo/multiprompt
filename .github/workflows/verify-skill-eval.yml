@@ -4,17 +4,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '41 5 * * *'
-  pull_request:
-    paths:
-      - '.github/workflows/verify-skill-eval.yml'
-      - 'tools/verify-skill-*'
-      - '.claude/skills/verify-multiprompt/**'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +27,6 @@ jobs:
 
   builds:
     needs: contracts
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
