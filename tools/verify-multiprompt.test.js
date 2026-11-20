@@ -123,20 +123,19 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
-test('PR verification stays unconditional while duplicate click-through drives stay nightly', () => {
+test('PR verification stays unconditional while desktop journeys stay on verify nightly', () => {
   const gate = read('.github/workflows/pr-verifier.yml');
   assert.match(gate, /^  pull_request:/m);
   assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore):/m);
-  const clickThrough = read('.github/workflows/click-through.yml');
-  assert.doesNotMatch(clickThrough, /^  pull_request:/m);
-  assert.match(clickThrough, /^  schedule:/m);
-  assert.match(clickThrough, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(workflow, /^  pull_request:/m);
+  assert.match(workflow, /^  schedule:/m);
+  assert.match(workflow, /^  workflow_dispatch:/m);
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
-  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'release dispatch uses verify through workflow_call, not push or pull_request on verify.yml');
   assert.doesNotMatch(read('.github/workflows/release.yml'), /feature: all|journey-gate/, 'publication runs no journeys');
 });
 
@@ -221,7 +220,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
-  assert.match(read('.github/workflows/click-through.yml'), /touchedJourneys/);
+  assert.match(read('tools/touched-journeys.cjs'), /function touchedJourneys/);
   assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 

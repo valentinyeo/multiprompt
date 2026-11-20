@@ -34,16 +34,11 @@ for sha in $commits; do
         | sort_by(.databaseId) | last | .status == "completed" and .conclusion == "success"' <<< "$runs" >/dev/null; then
         continue
     fi
-    gate_runs=$(gh run list -R "$GITHUB_REPOSITORY" -w release-gate.yml -b master --commit "$sha" --limit 100 \
+    verify_runs=$(gh run list -R "$GITHUB_REPOSITORY" -w verify.yml -b master --commit "$sha" --limit 100 \
         --json databaseId,event,status,conclusion)
-    verify_id=$(jq -r 'map(select(.event == "push" or .event == "workflow_dispatch")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$gate_runs")
+    verify_id=$(jq -r 'map(select(.event == "push" or .event == "workflow_dispatch")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$verify_runs")
     if [ -z "$verify_id" ]; then
-        verify_runs=$(gh run list -R "$GITHUB_REPOSITORY" -w verify.yml -b master --commit "$sha" --limit 100 \
-            --json databaseId,event,status,conclusion)
-        verify_id=$(jq -r 'map(select(.event == "push" or .event == "workflow_dispatch")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$verify_runs")
-    fi
-    if [ -z "$verify_id" ]; then
-        echo "$sha has no release gate or verify run; relaunch-saved-sessions is missing, not releasing" >&2
+        echo "$sha has no verify run; relaunch-saved-sessions is missing, not releasing" >&2
         continue
     fi
     verify_jobs=$(gh run view "$verify_id" -R "$GITHUB_REPOSITORY" --json jobs)

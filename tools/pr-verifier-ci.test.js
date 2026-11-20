@@ -109,7 +109,7 @@ test('an intentional empty plan is distinguished from missing selected journey r
   fs.writeFileSync(path.join(dir, 'pr.json'), JSON.stringify({ headRefOid: head }));
   fs.writeFileSync(path.join(dir, 'ci.json'), JSON.stringify({ checks: [{ name: 'test', head_sha: head, status: 'completed', conclusion: 'success' }] }));
   fs.writeFileSync(path.join(dir, 'diff.patch'), 'actual patch');
-  assert.match(workflow, /Read verifier-out\/judge-inputs\.md/);
+  assert.match(workflow, /write-judge-request verifier-out/);
   for (const features of [[], ['appearance']]) {
     fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features }));
     const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), dir], { encoding: 'utf8' });

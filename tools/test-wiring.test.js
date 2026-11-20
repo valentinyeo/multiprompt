@@ -6,6 +6,9 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const localOnly = new Set(['tools/chat-working-bar.test.mjs', 'tools/chat-permission-buttons.test.mjs']);
+const heavyEnv = { MULTIPROMPT_ALLOW_LOCAL_HEAVY: '1' };
+const zigVersion = spawnSync(process.env.ZIG || 'zig', ['version'], { encoding: 'utf8' });
+const zig016 = (zigVersion.stdout || '').includes('0.16.0');
 const testFile = /(\.test\.[a-z]+|-test\.py)$/;
 
 function testFiles(dirs) {
@@ -82,7 +85,7 @@ test('the Wine runner propagates the selected compiler to native child tests', {
     fs.writeFileSync(path.join(older, 'zig'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const result = spawnSync('bash', ['tools/test-windows-wine.sh', '--toolchain-probe'], {
       cwd: root, encoding: 'utf8', timeout: 120000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
+      env: { ...process.env, ...heavyEnv, NODE_TEST_CONTEXT: undefined, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const calls = result.stdout.trim().split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
@@ -115,7 +118,7 @@ for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
       fs.writeFileSync(path.join(gdiplus, 'gdiplus.dll'), 'mock renderer');
       const prefix = path.join(dir, 'wine-prefix');
       fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
-      const env = { ...process.env, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix };
+      const env = { ...process.env, ...heavyEnv, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix };
       delete env.DISPLAY;
       if (scenario === 'empty') env.DISPLAY = '';
       if (scenario === 'existing') env.DISPLAY = ':existing';
@@ -195,7 +198,7 @@ test('the Wine runner stops before tests when the ARM64 compile fails', { skip: 
     fs.writeFileSync(zig, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$WINE_CALLS"\ncase " $* " in\n  *" -Dtarget=aarch64-windows-gnu "*) printf \'%s\\n\' \'error: @ptrCast increases pointer alignment\' >&2; exit 1 ;;\nesac\n', { mode: 0o755 });
     const result = spawnSync('bash', ['tools/test-windows-wine.sh'], {
       cwd: root, encoding: 'utf8', timeout: 120000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined, ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
+      env: { ...process.env, ...heavyEnv, NODE_TEST_CONTEXT: undefined, ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
     });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stderr, /error: @ptrCast increases pointer alignment/);
@@ -220,7 +223,7 @@ test('the Wine runner stops before Zig when a staged pinned source has no update
     const zig = path.join(dir, 'zig');
     const calls = path.join(dir, 'calls');
     fs.writeFileSync(zig, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$WINE_CALLS"\n', { mode: 0o755 });
-    const env = { ...process.env, NODE_TEST_CONTEXT: undefined, GIT_INDEX_FILE: path.join(dir, 'index'), ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' };
+    const env = { ...process.env, ...heavyEnv, NODE_TEST_CONTEXT: undefined, GIT_INDEX_FILE: path.join(dir, 'index'), ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' };
     const tree = spawnSync('git', ['read-tree', 'HEAD'], { cwd: root, env, encoding: 'utf8' });
     assert.equal(tree.status, 0, tree.stderr);
     const source = fs.readFileSync(path.join(root, 'src/shortcuts.zig'), 'utf8');
@@ -247,7 +250,7 @@ test('ISSUE-543 executable help sweep depends on its installed bridge in every s
   assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\);/);
 });
 
-test('chat CPU budget binaries finish without the listen transport and preserve failing exit codes', () => {
+test('chat CPU budget binaries finish without the listen transport and preserve failing exit codes', { skip: !zig016 && 'requires Zig 0.16.0' }, () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const start = build.indexOf('    const run_chat_echo_budget_tests =');
   const end = build.indexOf('    const chat_perf_step =', start);
