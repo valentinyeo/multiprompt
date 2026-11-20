@@ -4268,6 +4268,19 @@ fn sweepBrowserOrphans(now: u64) void {
     _ = EnumWindows(&enumCloseOrphanPane, 0);
 }
 
+fn tryLaunchActiveBrowserIfNeeded() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const sh = &app_state.shells[app_state.active_shell];
+    if (sh.browser_hwnd != null or app_state.g_restoring or sh.browser_open_failed or sh.browser_launch_tick != 0 or !sh.browser_enabled) return;
+    if (@import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell)) {
+        if (sh.browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
+    } else if (@import("idle_footprint.zig").startupSettled() and browserPaneMayOccupyLayout(app_state.active_shell)) {
+        launchBrowserForShell(app_state.active_shell);
+    } else if (browserChromeHiddenForOverlay() and !app_state.g_chat_active) {
+        launchBrowserForShell(app_state.active_shell);
+    }
+}
+
 pub fn updateBrowserVisibility() void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_visible, timing_started);
@@ -4316,6 +4329,7 @@ pub fn updateBrowserVisibility() void {
     const hide_for_overlay = browserChromeHiddenForOverlay();
     if (hide_for_overlay) {
         hideAllBrowserChrome();
+        tryLaunchActiveBrowserIfNeeded();
         return;
     }
     if (app_state.active_shell >= app_state.shell_count) {
@@ -4357,15 +4371,7 @@ pub fn updateBrowserVisibility() void {
             _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
         hideBrowserEdgeMasks();
     }
-    if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and
-        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0)
-    {
-        if (@import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell)) {
-            if (app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
-        } else if (@import("idle_footprint.zig").startupSettled() and browserPaneMayOccupyLayout(app_state.active_shell)) {
-            launchBrowserForShell(app_state.active_shell);
-        }
-    }
+    tryLaunchActiveBrowserIfNeeded();
 }
 
 pub fn relaunchActiveRestoredBrowserPane() void {

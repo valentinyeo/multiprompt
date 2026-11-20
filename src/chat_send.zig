@@ -1266,7 +1266,7 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - (600_000 - remaining_ms);
                         if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and chat_echo.phaseTaken(std.mem.sliceTo(&entry.message_phase, 0))) {
                             entry.state = .delivered;
-                            if (chat_echo.takenSettled(&entry.delivery_watch, entry.state, std.mem.sliceTo(&entry.message_phase, 0), saved_ms == 0, @intCast(GetTickCount64()), entry.sent_tick_ms)) {
+                            if (chat_echo.takenSettled(&entry.delivery_watch, entry.state, std.mem.sliceTo(&entry.message_phase, 0), true, saved_ms == 0, @intCast(GetTickCount64()), entry.sent_tick_ms)) {
                                 if (list == &app_state.g_chat_outbox) chatConfirmedAddReceipt(entry.*);
                                 chatOutboxRemoveAtIn(list, allocator, list.items.len - 1);
                             }
@@ -1926,6 +1926,23 @@ pub fn chatEchoRowLanded(e: ChatOutboxEntry) bool {
     return false;
 }
 
+fn chatEchoTranscriptHasRow(e: ChatOutboxEntry) bool {
+    const wire = std.mem.sliceTo(&e.message_wire_id, 0);
+    if (wire.len == 0) return false;
+    const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
+    if (shell >= app_state.shell_count) return false;
+    const shell_id = app_state.shells[shell].shell_id;
+    var keys: [@import("chat_live.zig").SENT_KEYS]u64 = @splat(0);
+    if (@import("chat_live.zig").sentRowKeys(shell_id, wire, &keys) == 0) return false;
+    return !@import("chat_live.zig").running(shell_id);
+}
+
+pub fn chatEchoRowKnown(e: ChatOutboxEntry, force: bool) bool {
+    if (force or chatEchoTranscriptHasRow(e)) return true;
+    const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
+    return shell == app_state.active_shell and chatEchoRowLanded(e);
+}
+
 pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     if (app_state.active_shell >= app_state.shell_count or app_state.g_chat_confirmed.items.len == 0) return false;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -1958,6 +1975,12 @@ test "IGSH-1266 a chat typed before the tab finished starting still goes to the 
 
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
     return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
+}
+
+pub const ChatSendNowRoute = enum { host_steer, terminal_key };
+
+pub fn chatSendNowRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8) ChatSendNowRoute {
+    return if (chatMessageGoesToHost(kind, ai_agent)) .host_steer else .terminal_key;
 }
 
 test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
@@ -2090,8 +2113,9 @@ fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.
     var i: usize = 0;
     while (i < list.items.len) {
         const e = &list.items[i];
+        const row_known = chatEchoRowKnown(e.*, force);
         if (!e.message_v1 or e.reset_pending or (key.len > 0 and !std.mem.eql(u8, e.key[0..e.key_len], key)) or
-            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0),
+            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0), row_known,
                 force or (e.anchor.sent_ms > 0 and reply_ms > e.anchor.sent_ms), now_ms, e.sent_tick_ms))
         {
             i += 1;
@@ -2221,11 +2245,37 @@ pub fn chatEchoCountDeliveredForShell(idx: u32) usize {
 }
 
 pub fn chatEchoPushQueuedNow() void {
-    chatEchoPushQueuedForShell(app_state.active_shell);
+    chatEchoPushQueuedForShell(app_state.active_shell, chatQueuedSendNowTarget(app_state.active_shell), false);
 }
 
-fn chatEchoPushQueuedForShell(idx: u32) void {
+pub fn chatEchoPushQueuedNowForId(id: u64) void {
+    chatEchoPushQueuedForShell(app_state.active_shell, id, false);
+}
+
+fn chatQueuedSendNowTarget(idx: u32) ?u64 {
+    var found: ?u64 = null;
+    for (app_state.g_chat_outbox.items) |entry| {
+        const shell = chatOutboxShellForKey(entry.key[0..@as(usize, entry.key_len)]) orelse continue;
+        if (shell != idx) continue;
+        if (entry.state == .delivered or entry.transcript_queued) found = entry.id;
+    }
+    return found;
+}
+
+fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {
     if (idx >= app_state.shell_count) return;
+    if (chatSendNowRoute(app_state.shells[idx].kind, app_state.shells[idx].ai_agent) == .host_steer) {
+        var text: ?[]const u16 = null;
+        if (outbox_id) |id| {
+            if (chatOutboxIndexById(id)) |ei| text = app_state.g_chat_outbox.items[ei].text;
+        }
+        if (!chatHostSendNowStart(idx, text, !quiet)) {
+            if (!quiet) showHeaderNoticeAscii("Could not ask this chat's agent to take the queued message now", 4000, true);
+            return;
+        }
+        chatSendNowDispatched();
+        return;
+    }
     const sent = if (chatTmuxSendEligible(idx))
         chatAgentKey(idx, 0x18)
     else
@@ -2234,16 +2284,84 @@ fn chatEchoPushQueuedForShell(idx: u32) void {
         showHeaderNoticeAscii("Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal", 4000, true);
         return;
     }
-    app_state.g_chat_scroll_bottom_pending = true;
-    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+    chatSendNowDispatched();
     showHeaderNoticeAscii("Asked Claude to take the queued message now", 2500, false);
 }
 
+fn chatSendNowDispatched() void {
+    app_state.g_chat_scroll_bottom_pending = true;
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+}
+
 fn chatSteerAfterDelivery(idx: u32, ei: usize) void {
-    const entry = &app_state.g_chat_outbox.items[ei];
-    if (!entry.steer_pending) return;
-    entry.steer_pending = false;
-    chatEchoPushQueuedForShell(idx);
+    if (!app_state.g_chat_outbox.items[ei].steer_pending) return;
+    app_state.g_chat_outbox.items[ei].steer_pending = false;
+    chatEchoPushQueuedForShell(idx, app_state.g_chat_outbox.items[ei].id, true);
+}
+
+const SEND_NOW_NONE: u8 = 0;
+const SEND_NOW_OK: u8 = 1;
+const SEND_NOW_UNSUPPORTED: u8 = 2;
+const SEND_NOW_NOT_WAITING: u8 = 3;
+const SEND_NOW_UNREACHABLE: u8 = 4;
+const SEND_NOW_QUIET: u8 = 5;
+
+fn chatSendNowResult(wire: []const u8) u8 {
+    if (std.mem.indexOf(u8, wire, "\tsend_now\tok\t") != null) return SEND_NOW_OK;
+    if (std.mem.indexOf(u8, wire, "\tsend_now\terror\tsend_now_unsupported\t") != null) return SEND_NOW_UNSUPPORTED;
+    if (std.mem.indexOf(u8, wire, "\tsend_now\terror\tnot_waiting\t") != null) return SEND_NOW_NOT_WAITING;
+    return SEND_NOW_UNREACHABLE;
+}
+
+fn chatHostSendNowStart(idx: u32, text: ?[]const u16, report: bool) bool {
+    const key = chatFileIdentityForShell(idx);
+    if (key.sid[0] == 0 or key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+    const a = std.heap.page_allocator;
+    const utf8: []u8 = if (text) |wide| std.unicode.utf16LeToUtf8Alloc(a, wide) catch return false else a.alloc(u8, 0) catch return false;
+    const thread = std.Thread.spawn(.{}, chatHostSendNowThread, .{ key, utf8, report }) catch {
+        a.free(utf8);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn chatHostSendNowThread(key: @import("chat_transcript.zig").Identity, text: []u8, report: bool) void {
+    const a = std.heap.page_allocator;
+    defer a.free(text);
+    var reply: u8 = SEND_NOW_QUIET;
+    defer if (report) app_state.g_chat_send_now_result.store(reply, .release);
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "send_now", .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .provider = key.provider(), .sid = std.mem.sliceTo(&key.sid, 0), .text = text }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null)) {
+        reply = SEND_NOW_UNREACHABLE;
+        return;
+    }
+    reply = chatSendNowResult(wire.items);
+}
+
+pub fn chatSendNowFinish() void {
+    const result = app_state.g_chat_send_now_result.swap(SEND_NOW_NONE, .acq_rel);
+    switch (result) {
+        SEND_NOW_OK => showHeaderNoticeAscii("Asked this chat to take the queued message now", 2500, false),
+        SEND_NOW_UNSUPPORTED => showHeaderNoticeAscii("This chat cannot take a queued message early; it runs at its next step", 5000, true),
+        SEND_NOW_NOT_WAITING => showHeaderNoticeAscii("This chat is not holding that message in its queue any more", 4000, true),
+        SEND_NOW_UNREACHABLE => showHeaderNoticeAscii("Could not reach this chat's agent; try again", 4000, true),
+        else => {},
+    }
+}
+
+test "SOFT-2950 a live chat steers through its agent host and only a terminal chat presses the key" {
+    try std.testing.expectEqual(ChatSendNowRoute.host_steer, chatSendNowRoute(.tmux, 1));
+    try std.testing.expectEqual(ChatSendNowRoute.host_steer, chatSendNowRoute(.tmux, 2));
+    try std.testing.expectEqual(ChatSendNowRoute.terminal_key, chatSendNowRoute(.tmux, 0));
+    try std.testing.expectEqual(ChatSendNowRoute.terminal_key, chatSendNowRoute(.vps, 0));
+    try std.testing.expectEqual(SEND_NOW_OK, chatSendNowResult("@mp\t4\tsend_now\tok\t-\t0\n"));
+    try std.testing.expectEqual(SEND_NOW_UNSUPPORTED, chatSendNowResult("@mp\t4\tsend_now\terror\tsend_now_unsupported\t0\n"));
+    try std.testing.expectEqual(SEND_NOW_NOT_WAITING, chatSendNowResult("@mp\t4\tsend_now\terror\tnot_waiting\t0\n"));
+    try std.testing.expectEqual(SEND_NOW_UNREACHABLE, chatSendNowResult(""));
 }
 
 pub fn chatEchoSendAgain(id: u64) void {
@@ -3642,7 +3760,7 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
 }
 
-test "IGSH-1766 a message the host accepted stops floating even when its transcript row is out of view" {
+test "SOFT-2929 a message the host accepted keeps waiting until its transcript row is known" {
     const allocator = std.testing.allocator;
     const saved = app_state.g_chat_outbox;
     const saved_confirmed = app_state.g_chat_confirmed;
@@ -3678,7 +3796,9 @@ test "IGSH-1766 a message the host accepted stops floating even when its transcr
     }
     try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 1000, 2000, false, true));
     try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
-    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, false, true));
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, false, true));
+    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
+    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, true, true));
     try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_outbox.items.len);
     try std.testing.expectEqualStrings("sent", std.mem.sliceTo(&app_state.g_chat_outbox.items[0].message_phase, 0));
     try std.testing.expectEqualStrings("queued", std.mem.sliceTo(&app_state.g_chat_outbox.items[1].message_phase, 0));

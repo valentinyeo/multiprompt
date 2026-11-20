@@ -34,7 +34,7 @@ function checkPendingIsolation(source) {
   const build = body(source, 'build');
   assert.match(build, /\.injected = item\.injected, \.sender = item\.sender/);
   assert.match(build, /if \(item\.injected or i >= MAX_ROWS or used\[i\]\) continue;/);
-  assert.ok(build.indexOf('item.injected or') < build.indexOf('chat_echo.sameText'));
+  assert.ok(build.indexOf('item.injected or') < build.indexOf('chat_echo.queueTextMatches'));
 }
 
 function checkIncomingPaint(source) {

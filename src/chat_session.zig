@@ -1133,6 +1133,8 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const mp_send = @embedFile("mp_send.py");
     const feedback = @embedFile("multibot_feedback.py");
     const helper = @embedFile("mp_helper.py");
+    const sessions = @embedFile("mp_sessions.py");
+    const layout = @embedFile("mp_layout.mjs");
     const zsb = @embedFile("mp_zsb.sh");
     const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
     defer allocator.free(claude64);
@@ -1144,6 +1146,10 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     defer allocator.free(feedback64);
     const helper64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(helper.len)) catch return null;
     defer allocator.free(helper64);
+    const sessions64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(sessions.len)) catch return null;
+    defer allocator.free(sessions64);
+    const layout64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(layout.len)) catch return null;
+    defer allocator.free(layout64);
     const zsb64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(zsb.len)) catch return null;
     defer allocator.free(zsb64);
     _ = std.base64.standard.Encoder.encode(claude64, claude);
@@ -1151,8 +1157,10 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
     _ = std.base64.standard.Encoder.encode(helper64, helper);
+    _ = std.base64.standard.Encoder.encode(sessions64, sessions);
+    _ = std.base64.standard.Encoder.encode(layout64, layout);
     _ = std.base64.standard.Encoder.encode(zsb64, zsb);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, sessions64, layout64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {

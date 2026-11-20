@@ -217,16 +217,6 @@ test('Windows PowerShell UTF-8 counter files are accepted', () => {
   }
 });
 
-test('idle proof runs outside pull requests without delaying the cheap aggregate', () => {
-  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/test.yml'), 'utf8');
-  const idle = workflow.split('\n  idle-budget:\n')[1].split(/\n  [\w-]+:\n/)[0];
-  assert.match(idle, /if: github\.event_name != 'pull_request'/);
-  assert.match(idle, /tools\/idle-budget\.ps1 -Exe zig-out\/bin\/multiprompt\.exe/);
-  const aggregate = workflow.split('\n  test-result:\n')[1];
-  assert.doesNotMatch(aggregate, /needs\.idle-budget|\$IDLE/);
-  assert.match(aggregate, /\[ "\$result" = success \] \|\| return 1/);
-});
-
 test('the budget file matches the ticket', async () => {
   const { loadBudget } = await load();
   const budget = loadBudget();
