@@ -47,7 +47,7 @@ test('workflow restores before the base matrix and publishes reusable bundles on
     assert.throws(() => cache.cacheName({ ...row, 'app-revision': 'master' }, harness));
   });
 
-  await t.test('complete product failures remain reusable and still satisfy the real master repro gate', t => {
+  await t.test('complete product failures remain reusable as baseline evidence', t => {
     const f = fixture(t);
     assert.equal(cache.stamp(f.evidence, f.options), true);
     assert.equal(cache.validEvidence(f.evidence, f.options), true);
@@ -60,7 +60,7 @@ test('workflow restores before the base matrix and publishes reusable bundles on
     const finish = () => verifier.finalize({ verdict: { verdict: 'PASS' }, selection, summary: verifier.summarize(output, ['appearance'], base) }).final;
     assert.equal(finish(), 'PASS');
     fs.writeFileSync(path.join(output, `verify-appearance-${base}/result.json`), JSON.stringify({ status: 'passed', cleanup: 'owned process tree stopped' }));
-    assert.equal(finish(), 'FAIL', 'a cached master pass cannot replace a real master failure');
+    assert.equal(finish(), 'PASS', 'a reused baseline pass never turns a passing head into a failure');
   });
 
   for (const damage of ['result.json', 'doctor.json', 'after.png', 'build.json', 'cleanup', 'infrastructure', 'revision', 'embeddedRevision', 'manifest']) {
@@ -110,10 +110,9 @@ test('workflow restores before the base matrix and publishes reusable bundles on
     assert.notEqual(cache.harnessVersion('HEAD', dir, actualWorkflow), cache.harnessVersion('HEAD', dir));
   });
 
-  await t.test('the baseline matrix carries only the journeys that failed on head plus the declared repro', { skip: process.platform !== 'linux' }, t => {
+  await t.test('the baseline matrix carries only the journeys that failed on head', { skip: process.platform !== 'linux' }, t => {
     const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
-    assert.match(workflow, /REPRO_FEATURES: \$\{\{ needs\.select\.outputs\.repro_features \}\}/);
-    assert.doesNotMatch(workflow, /REPRO_FEATURES: \$\{\{ needs\.select\.outputs\.base_features \}\}/);
+    assert.doesNotMatch(workflow, /REPRO_FEATURES/);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'base-scope-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const bin = path.join(dir, 'bin');
@@ -130,10 +129,10 @@ else console.log(JSON.stringify({ artifacts: [] }));
 `, { mode: 0o755 });
     const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, REPO: repo, RUN_ID: '200', BASE_SHA: base, HARNESS_VERSION: harness };
     const pick = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'failed-head'], {
-      env: { ...env, FEATURES: '["appearance","chat-view","sessions"]', REPRO_FEATURES: '["appearance"]', GITHUB_OUTPUT: path.join(dir, 'pick.output') }, encoding: 'utf8',
+      env: { ...env, FEATURES: '["appearance","chat-view","sessions"]', GITHUB_OUTPUT: path.join(dir, 'pick.output') }, encoding: 'utf8',
     });
     assert.equal(pick.status, 0, pick.stderr);
-    assert.equal(fs.readFileSync(path.join(dir, 'pick.output'), 'utf8').trim(), 'features=["appearance","chat-view"]');
+    assert.equal(fs.readFileSync(path.join(dir, 'pick.output'), 'utf8').trim(), 'features=["chat-view"]');
     const out = path.join(dir, 'base');
     const restored = spawnSync(process.execPath, [path.join(__dirname, 'base-journey-cache.cjs'), 'restore', out], {
       env: { ...env, FEATURES: '["appearance","chat-view"]', GITHUB_OUTPUT: path.join(dir, 'restore.output') }, encoding: 'utf8',

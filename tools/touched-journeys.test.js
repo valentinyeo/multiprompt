@@ -231,7 +231,7 @@ test('mapped model and live-working journeys retain their chat-delivery driver',
   assert.doesNotMatch(shared, /CHAT_MODEL_PROOF/);
 });
 
-test('a required failing-master journey survives an empty diff selection and a picker that disables comparison', t => {
+test('an empty diff on a repair PR schedules no journey and compares no baseline', t => {
   const directory = maps(t);
   const out = path.join(directory, 'out');
   fs.mkdirSync(out);
@@ -242,9 +242,11 @@ test('a required failing-master journey survives an empty diff selection and a p
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
-  assert.deepEqual(selection.features, ['appearance']);
-  assert.equal(selection.compareBase, true);
-  assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /repro_features=\["appearance"\]/);
+  assert.deepEqual(selection.features, []);
+  assert.equal(selection.compareBase, false);
+  const outputs = fs.readFileSync(path.join(directory, 'output'), 'utf8');
+  assert.match(outputs, /features=\[\]/);
+  assert.doesNotMatch(outputs, /repro_features/);
 });
 
 test('SOFT-2762 session-actions owns its hosted driver and fixtures', () => {
