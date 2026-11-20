@@ -94,7 +94,6 @@ jobs:
       features: ${{ steps.choose.outputs.features }}
       ci_workflows: ${{ steps.choose.outputs.ci_workflows }}
       base_features: ${{ steps.choose.outputs.base_features }}
-      repro_features: ${{ steps.choose.outputs.repro_features }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -120,7 +119,7 @@ jobs:
       - name: Validate the selection
         id: choose
         env:
-          SELECTION: '{"features":[],"compare_base":true,"reason":"Changed-file feature ownership plus the declared repro journey","done_when":[]}'
+          SELECTION: '{"features":[],"compare_base":true,"reason":"Changed-file feature ownership","done_when":[]}'
           BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           FEATURES_DIR: .claude/skills/verify-multiprompt/features
         run: node verifier-tools/tools/pr-verifier.cjs select verifier-out
@@ -166,13 +165,12 @@ jobs:
         with:
           node-version: 22
       - id: pick
-        name: List selected parent comparisons and the required repro
+        name: List selected parent comparisons
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           FEATURES: ${{ needs.select.outputs.features }}
-          REPRO_FEATURES: ${{ needs.select.outputs.repro_features }}
         run: node tools/pr-verifier.cjs failed-head
       - name: Restore base evidence before scheduling Windows jobs
         id: cache
