@@ -364,7 +364,6 @@ def seed_event(handle, sid, kind, **fields):
 
 
 SEED_PARAGRAPH = "This paragraph stands in for a long assistant answer with enough words to wrap across several lines of the chat column, so every message needs real text layout work when the transcript is shown. "
-SOFT_2779_TAIL_CALLS = 160
 
 
 def fake_seed_many(rounds):
@@ -661,8 +660,9 @@ def shell():
                 identity = "history-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
-        if state().get("name") == "full-history":
-            for i in range(SOFT_2779_TAIL_CALLS):
+        tail_calls = state().get("soft2779Tail")
+        if isinstance(tail_calls, int) and tail_calls > 0:
+            for i in range(tail_calls):
                 identity = "soft-2779-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
@@ -1102,6 +1102,9 @@ def reader_namespace():
     import base64
 
     source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    published = ROOT / "app-reader.py"
+    if not published.exists():
+        published.write_text(source, encoding="utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":

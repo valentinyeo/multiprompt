@@ -11,8 +11,11 @@ try {
   const source = fs.readFileSync(path.join(root, 'full-history/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line));
   const messages = source.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text')).map(row => typeof row.message.content === 'string' ? row.message.content : row.message.content.find(part => part.type === 'text').text);
   const rounds = process.env.CHAT_LONG_PROOF === '1' ? 320 : 24;
-  const toolTail = 160;
+  const toolTail = 240;
   assert.equal(messages.length, 2 + rounds * 2);
+  const tailFrame = json('full-history/tail-frame.json');
+  assert.ok(tailFrame.frame_bytes > 0);
+  assert.ok(tailFrame.visible >= 1, `the app's own reader returned a tail frame with ${tailFrame.visible} user or assistant rows: ${tailFrame.reason || 'no reason recorded'}`);
   for (const stage of ['open', 'restart']) {
     const measured = json(`full-history/${stage}.json`);
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
@@ -58,9 +61,15 @@ try {
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.evidence_preserved, true);
   assert.equal(cleanup.scratch_removed, true);
-  result = { feature: 'chat-full-history', status: 'passed', checks: [{ name: 'IGSH-815 all messages on open and restart', passed: true, messages: messages.length }] };
+  result = { feature: 'chat-full-history', status: 'passed', checks: [
+    { name: 'IGSH-815 all messages on open and restart', passed: true, messages: messages.length },
+    { name: 'chat-tail-frame-holds-message', passed: true, visible: tailFrame.visible, frame_bytes: tailFrame.frame_bytes },
+  ] };
 } catch (error) {
-  result = { feature: 'chat-full-history', status: 'failed', error: error.message, checks: [{ name: 'IGSH-815 all messages on open and restart', passed: false, reason: error.message }] };
+  result = { feature: 'chat-full-history', status: 'failed', error: error.message, checks: [
+    { name: 'IGSH-815 all messages on open and restart', passed: false, reason: error.message },
+    { name: 'chat-tail-frame-holds-message', passed: false, reason: error.message },
+  ] };
 }
 fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2) + '\n');
 console.log(JSON.stringify(result));
