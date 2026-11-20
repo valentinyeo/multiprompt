@@ -28,7 +28,7 @@ test('source-file mapping runs only the touched journeys', t => {
   const directory = maps(t);
   assert.deepEqual(touchedJourneys(['src/themes.zig'], directory), { features: ['appearance'], unmapped: [] });
   assert.deepEqual(touchedJourneys(['src/chat_input.zig', 'tools/drive-chat.ps1', 'src/panes.zig'], directory), { features: ['chat-view', 'pane-layout'], unmapped: [] });
-  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory), { features: [], unmapped: ['src/chat_inputXzig'] });
+  assert.deepEqual(touchedJourneys(['src/chat_inputXzig'], directory), { features: ['appearance'], unmapped: ['src/chat_inputXzig'] });
 });
 
 test('formal verification owns its files without selecting an unrelated desktop journey', t => {
@@ -58,9 +58,23 @@ test('the verifier preserves CI ownership in its execution plan', t => {
   assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /ci_workflows=\["chat-delivery-formal.yml"\]/);
 });
 
-test('unknown application files select no journey and disclose the gap', t => {
+test('the verifier keeps the cap note in its execution plan', t => {
   const directory = maps(t);
-  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: [], unmapped: ['src/new_feature.zig'] });
+  const out = path.join(directory, 'out');
+  fs.mkdirSync(out);
+  fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Wide change', body: '', labels: [] }));
+  const notes = ['Over the 8-journey cap, only the most specific journeys ran; dropped: chat-view.'];
+  fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: ['appearance'], unmapped: [], notes }));
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: '{"features":[]}' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8')).journeyNotes, notes);
+});
+
+test('unknown application files run only the smoke journey and disclose the gap', t => {
+  const directory = maps(t);
+  assert.deepEqual(touchedJourneys(['src/new_feature.zig'], directory), { features: ['appearance'], unmapped: ['src/new_feature.zig'] });
   assert.deepEqual(touchedJourneys(['extension/new.js'], directory), { features: [], unmapped: ['extension/new.js'] });
   assert.deepEqual(touchedJourneys(['.claude/skills/verify-multiprompt/new-driver.ps1'], directory), { features: [], unmapped: ['.claude/skills/verify-multiprompt/new-driver.ps1'] });
   assert.deepEqual(touchedJourneys(['src/themes.zig', 'extension/new.js'], directory), { features: ['appearance'], unmapped: ['extension/new.js'] });
@@ -114,7 +128,7 @@ test('diff routing excludes only proven edits inside existing top-level Zig test
   save('themes.zig', original);
   save('new_feature.zig', 'test "new" {}\n');
   head = commit();
-  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: [], unmapped: ['src/new_feature.zig'] });
+  assert.deepEqual(await touchedJourneysForDiff(base, head, directory, root), { features: ['appearance'], unmapped: ['src/new_feature.zig'] });
   fs.unlinkSync(path.join(root, 'src/themes.zig'));
   head = commit();
   assert.ok((await touchedJourneysForDiff(base, head, directory, root)).features.includes('appearance'));
@@ -126,9 +140,45 @@ test('every runnable feature has source-file ownership in its map', () => {
   for (const name of discoverFeatures(directory).available) {
     const text = fs.readFileSync(path.join(directory, `${name}.md`), 'utf8');
     assert.match(text, /^Source files: .+$/m, name);
-    assert.ok(touchedJourneys(['src/main.zig'], directory).features.includes(name), name);
   }
   assert.deepEqual(touchedJourneys(['src/themes.zig']).features, ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card']);
+});
+
+test('a source file more than five maps list is shared core and leaves a src change to the smoke journey', () => {
+  const directory = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  for (const file of ['src/main.zig', 'src/command_palette.zig', 'src/shortcuts.zig']) {
+    assert.deepEqual(touchedJourneys([file], directory), { features: ['appearance'], unmapped: [] }, file);
+  }
+  assert.deepEqual(touchedJourneys(['src/themes.zig', 'src/command_palette.zig'], directory).features, ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card']);
+});
+
+test('over eight selected journeys the most specific stay and the verdict names the dropped ones', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'touched-journeys-cap-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const map = (name, sources) => fs.writeFileSync(path.join(directory, `${name}.md`), `# ${name}\nSource files: ${sources}\nVerify on: push, pull_request\n## Driving it with control.ps1\n`);
+  const broad = ['broad-0', 'broad-1', 'broad-2', 'broad-3'];
+  for (const name of broad) map(name, 'src/ui*.zig');
+  const exact = ['exact-a', 'exact-b', 'exact-c', 'exact-d', 'exact-e', 'exact-f', 'exact-g', 'exact-h', 'exact-i'];
+  for (const name of exact) map(name, `src/${name}.zig`);
+  const result = touchedJourneys(['src/ui_scale.zig', ...exact.map(name => `src/${name}.zig`)], directory);
+  assert.deepEqual(result.features, exact.slice(0, 8));
+  assert.deepEqual(result.notes, ['Over the 8-journey cap, only the most specific journeys ran; dropped: broad-0, broad-1, broad-2, broad-3, exact-i.']);
+});
+
+test('SOFT-2902 a wide PR runs at most eight journeys, not every feature its shared core files touch', () => {
+  const directory = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  const files = [
+    '.claude/skills/verify-multiprompt/features/sessions.md',
+    'changelog.d/SOFT-2883-ctrl-t-folder.md',
+    'src/command_palette.zig',
+    'src/vps.zig',
+    'tools/search-selection.test.js',
+    'tools/soft-2883-ctrl-t-folder.test.js',
+    'tools/ticket-titles/IGSH-2883.txt',
+  ];
+  const result = touchedJourneys(files, directory);
+  assert.ok(result.features.length <= 8, `PR #1121 selected ${result.features.length} journeys: ${result.features.join(', ')}`);
+  assert.deepEqual(result.features, ['sessions']);
 });
 
 test('the full set retains every DPI and browser-theme variant without multiplying unrelated journeys', () => {
