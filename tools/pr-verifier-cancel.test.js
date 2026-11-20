@@ -37,7 +37,7 @@ test('recovery never restarts failures, successful runs, drafts, or closed PRs',
 
 test('superseded runs stop queued report jobs while the independent cancellation observer remains enabled', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
-  for (const name of ['tests', 'failed-head', 'verdict']) {
+  for (const name of ['tests', 'verdict']) {
     const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
     assert.match(job, /if: always\(\) && !cancelled\(\)/, name);
   }
@@ -95,4 +95,13 @@ else if (route.endsWith('/runs?per_page=100')) console.log(JSON.stringify([{ id:
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('the verifier runs one head journey set and never schedules a base build', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
+  assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /head:\n    needs: \[resolve, select\]/);
+  assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache|base_cache/);
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
 });

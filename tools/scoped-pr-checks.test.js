@@ -43,8 +43,25 @@ test('the CI repair receipt is path-filtered, runs the base proof and owns its f
   for (const file of ['tools/pr-verifier.cjs', 'src/chat_perf_test.zig', 'tools/ci-receipt-summary.mjs', 'tools/strip-comments.mjs', '.github/workflows/no-comments.yml', '.github/workflows/ci-repair-receipt.yml']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
 });
 
+test('the service route receipt is path-filtered, runs the base proof and owns its files through a feature map', () => {
+  const receiptPath = path.join(root, '.github/workflows/service-route-receipt.yml');
+  const mapPath = path.join(root, '.claude/skills/verify-multiprompt/features/service-route-receipt.md');
+  assert.ok(fs.existsSync(receiptPath), 'The service route receipt workflow must be installed');
+  assert.ok(fs.existsSync(mapPath), 'The service route receipt feature map must exist');
+  const source = fs.readFileSync(receiptPath, 'utf8');
+  const map = fs.readFileSync(mapPath, 'utf8');
+  assert.match(source, /^  pull_request:\n    paths:/m);
+  assert.match(source, /name: service-route-receipt\n/);
+  assert.match(source, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(source, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(source, /windows-latest/);
+  assert.match(source, /node --test --test-reporter=tap service\/test\/secrets\.test\.js/);
+  assert.match(map, /^CI workflow: service-route-receipt\.yml$/m);
+  for (const file of ['service/worker.js', 'service/test/secrets.test.js']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
+});
+
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'verify-skill-eval.yml', 'chat-delivery-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);

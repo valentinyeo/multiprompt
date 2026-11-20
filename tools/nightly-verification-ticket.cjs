@@ -3,6 +3,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { boardApi } = require('./auto-revert-board.js');
 const { summarize, runOutcome } = require('./pr-verifier.cjs');
+const { runJobs } = require('./verification-jobs.cjs');
 
 async function reportNightly({ api, failures, runUrl, sha }) {
   if (!failures.length) return 'clean';
@@ -65,8 +66,7 @@ async function main(env = process.env) {
   const gh = args => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const repo = env.GITHUB_REPOSITORY;
   const run = env.NIGHTLY_RUN_ID || env.GITHUB_RUN_ID;
-  const pages = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/actions/runs/${run}/jobs?per_page=100`]));
-  const jobs = pages.flatMap(page => page.jobs);
+  const jobs = runJobs(repo, run);
   const failures = jobs.filter(job => ['failure', 'cancelled', 'timed_out'].includes(job.conclusion)).map(job => job.name);
   const features = JSON.parse(env.FEATURES || '[]');
   const directory = path.join(env.RUNNER_TEMP, 'nightly-evidence');
@@ -74,7 +74,7 @@ async function main(env = process.env) {
   if (features.length) {
     try { gh(['run', 'download', run, '--repo', repo, '--pattern', 'verify-*', '--dir', directory]); }
     catch { failures.push('Journey evidence could not be downloaded'); }
-    const summary = summarize(directory, features, '');
+    const summary = summarize(directory, features);
     for (const feature of features) {
       const runs = summary.head[feature];
       if (!runs.length || runs.some(item => runOutcome(item) !== 'passed')) failures.push(feature);

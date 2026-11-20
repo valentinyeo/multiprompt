@@ -36,14 +36,13 @@ test('an older verdict or a different head cannot suppress genuine recovery', ()
   assert.equal(verifier.recoveryNeeded(recovery.run, 'a'.repeat(40), recovery.checks), true);
 });
 
-test('retry collection selects one newest artifact ID per journey and revision', () => {
+test('retry collection selects one newest head artifact ID per journey', () => {
   assert.equal(typeof verifier.latestArtifacts, 'function');
-  const selected = verifier.latestArtifacts(artifacts.artifacts, artifacts.selection, artifacts.baseSha);
+  const selected = verifier.latestArtifacts(artifacts.artifacts, artifacts.selection);
   assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
-  assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection, artifacts.baseSha), selected);
-  const automaticBase = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
-  assert.deepEqual(automaticBase, selected, 'failed-head baseline evidence must survive an initial head-only selection');
+  assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection), selected);
+  assert.ok(selected.every(item => !item.name.endsWith(artifacts.baseSha)), 'a revision-suffixed artifact is never head evidence');
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {
@@ -67,7 +66,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
 }
 `, { mode: 0o755 });
     const selection = path.join(dir, 'selection.json');
-    fs.writeFileSync(selection, JSON.stringify({ ...artifacts.selection, compareBase: false }));
+    fs.writeFileSync(selection, JSON.stringify(artifacts.selection));
     const evidence = path.join(dir, 'evidence');
     const requests = path.join(dir, 'requests.jsonl');
     const env = {
@@ -80,9 +79,9 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
       GH_ARCHIVE: 'UEsDBBQAAAAAAAAAIVw/cY1iJQAAACUAAAALAAAAcmVzdWx0Lmpzb257InN0YXR1cyI6InBhc3NlZCIsInZlcnNpb24iOiJyZXRyeSJ9UEsDBBQAAAAAAAAAIVys7j7LFAAAABQAAAARAAAAYWN0aW9uLmZvY3VzLmpzb257ImNhcHR1cmUiOiJsYXRlc3QifVBLAQIUAxQAAAAAAAAAIVw/cY1iJQAAACUAAAALAAAAAAAAAAAAAACAAQAAAAByZXN1bHQuanNvblBLAQIUAxQAAAAAAAAAIVys7j7LFAAAABQAAAARAAAAAAAAAAAAAACAAU4AAABhY3Rpb24uZm9jdXMuanNvblBLBQYAAAAAAgACAHgAAACRAAAAAAA=',
     };
     for (let attempt = 0; attempt < 2; attempt++) {
-      const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'download', selection, evidence, artifacts.baseSha], { env, encoding: 'utf8' });
+      const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'download', selection, evidence], { env, encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
-      for (const name of ['verify-chat-focus', `verify-chat-focus-${artifacts.baseSha}`, 'verify-command-palette', `verify-command-palette-${artifacts.baseSha}`]) {
+      for (const name of ['verify-chat-focus', 'verify-command-palette']) {
         const proof = path.join(evidence, name, 'action.focus.json');
         assert.ok(fs.existsSync(proof), `${name} retained its evidence`);
         assert.equal(JSON.parse(fs.readFileSync(proof, 'utf8')).capture, 'latest');
@@ -159,7 +158,7 @@ else if (endpoint.includes('/test.yml/runs')) {
       assert.ok(check.includes(`output[title]=pstack-verifier: ${gate.startsWith('success') ? 'PASS+NOTES' : 'BLOCKED'}`));
       assert.equal(calls.filter(args => args.includes('graphql')).length, 1);
       assert.equal(calls.some(args => args.some(arg => /\/(?:comments|pulls\/1052|check-runs\?)/.test(arg))), false);
-      assert.equal(calls.filter(args => args.some(arg => arg.includes('/test.yml/runs'))).length, gate === 'queued' ? 0 : 1);
+      assert.equal(calls.filter(args => args.some(arg => arg.includes('/test.yml/runs?head_sha='))).length, gate === 'queued' ? 0 : 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
