@@ -979,7 +979,7 @@ public static class GroupRailProof {
             int left = clientLeft + S(8, dpi, scale);
             int right = clientLeft + S(sidebarWidth, dpi, scale) - S(8, dpi, scale) / 2;
             int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34) + S(52, dpi, scale);
-            int headerHeight = 28, rowHeight = S(58, dpi, scale);
+            int headerHeight = S(42, dpi, scale), rowHeight = S(58, dpi, scale);
             int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
             int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
             var background = image.GetPixel(clientLeft + S(2, dpi, scale), top);
@@ -1047,12 +1047,29 @@ public static class GroupRailProof {
         }
         return proof;
     }
+    static int FirstLetterHeight(System.Drawing.Bitmap image, int left, int top, int right, int height) {
+        var background = image.GetPixel(right, top + height / 2);
+        int first = int.MaxValue, last = -1;
+        bool found = false;
+        for (int x = left; x < right; x++) {
+            bool ink = false;
+            for (int y = top + 1; y < top + height - 1; y++) {
+                if (Distance(image.GetPixel(x, y), background) <= 30) continue;
+                ink = true;
+                first = Math.Min(first, y);
+                last = Math.Max(last, y);
+            }
+            if (found && !ink) break;
+            found = found || ink;
+        }
+        return found ? last - first + 1 : 0;
+    }
     public static Dictionary<string, object> Labels(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int sectionTop, int headlineX, int rowHeight, int sidebarWidth) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int clientLeft = origin.X - frame.Left;
             int right = clientLeft + S(sidebarWidth, dpi, scale) - S(8, dpi, scale);
-            int sectionHeight = 24, buttonHeight = 32;
+            int sectionHeight = S(42, dpi, scale), buttonHeight = S(32, dpi, scale);
             var muted = System.Drawing.Color.FromArgb(138, 138, 138);
             var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
             int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, inkColumns = 0;
@@ -1088,6 +1105,10 @@ public static class GroupRailProof {
             bool noArrow = present && Math.Abs(firstInk - headlineX) <= Math.Max(3, S(3, dpi, scale));
             bool capitals = present && capRatio > 0.75;
             bool mutedInk = mutedPixels >= 8;
+            int groupTop = sectionTop - 2 * (sectionHeight + 2 * rowHeight);
+            int groupLetterHeight = FirstLetterHeight(image, headlineX, groupTop, right - S(8, dpi, scale), sectionHeight);
+            int sectionLetterHeight = present ? FirstLetterHeight(image, firstInk, sectionTop, right - S(8, dpi, scale), sectionHeight) : 0;
+            bool sameLetterHeight = present && groupLetterHeight > 0 && sectionLetterHeight > 0 && Math.Abs(sectionLetterHeight - groupLetterHeight) <= Math.Max(1, S(2, dpi, scale));
             int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);
             int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1, buttonInk = 0;
@@ -1104,7 +1125,10 @@ public static class GroupRailProof {
             proof["noArrow"] = noArrow;
             proof["capitals"] = capitals;
             proof["mutedInk"] = mutedInk;
-            proof["sameStyle"] = present && capitals && mutedInk && noArrow;
+            proof["groupLetterHeight"] = groupLetterHeight;
+            proof["sectionLetterHeight"] = sectionLetterHeight;
+            proof["sameLetterHeight"] = sameLetterHeight;
+            proof["sameStyle"] = present && sameLetterHeight && mutedInk && noArrow;
             proof["formerButtonRegionEmpty"] = formerButtonRegionEmpty;
             proof["labelFirstInkX"] = firstInk;
             proof["headlineX"] = headlineX;
@@ -1124,8 +1148,10 @@ public static class GroupRailProof {
             for (int dy = 0; dy < height; dy++) {
                 var original = baseline.GetPixel(x + dx, firstY + dy);
                 var actual = image.GetPixel(x + dx, secondY + dy);
-                if (original.R > 210 && original.G > 210 && original.B > 210) ink++;
-                if (Math.Abs(original.R - actual.R) > 48 || Math.Abs(original.G - actual.G) > 48 || Math.Abs(original.B - actual.B) > 48) changed++;
+                bool originalInk = original.R > 210 && original.G > 210 && original.B > 210;
+                bool actualInk = actual.R > 210 && actual.G > 210 && actual.B > 210;
+                if (originalInk) ink++;
+                if ((originalInk || actualInk) && (Math.Abs(original.R - actual.R) > 48 || Math.Abs(original.G - actual.G) > 48 || Math.Abs(original.B - actual.B) > 48)) changed++;
             }
         }
         return ink > 5 && changed <= 4;
