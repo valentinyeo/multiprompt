@@ -1,0 +1,1 @@
+Mute Tab disappeared from Ctrl+K and tab actions

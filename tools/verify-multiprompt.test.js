@@ -137,7 +137,7 @@ test('PR verification stays unconditional while duplicate click-through drives s
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
-  assert.match(read('.github/workflows/release.yml'), /journeys:[\s\S]*?feature: all/);
+  assert.doesNotMatch(read('.github/workflows/release.yml'), /feature: all|journey-gate/, 'publication runs no journeys');
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
@@ -1651,8 +1651,9 @@ test('SOFT-2892 status-card journey proves the redesigned sidebar status icon in
   assert.match(journey, /Status icon paints outside its published bounds at/);
   assert.match(journey, /Status icon gauge track is missing/);
   assert.match(journey, /Status icon gauge shows no usage ink/);
-  assert.match(journey, /\$pillX = \$icon\.centerX/);
-  assert.match(journey, /\$pillY = \$icon\.centerY/);
+  assert.match(journey, /\$pillX = \$icon\.clientCenterX/);
+  assert.match(journey, /\$pillY = \$icon\.clientCenterY/);
+  assert.match(journey, /clientCenterX = \$iconClientX/);
   assert.match(journey, /hover on the status icon opens the usage card/);
   assert.match(journey, /The removed footer divider is back/);
   assert.match(journey, /The removed footer usage bars are back/);
@@ -2515,7 +2516,11 @@ test('release sidebar pixel oracles use the live width and approved expanded row
   const groups = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class CodeFontProof {'));
   assert.doesNotMatch(groups, /S\(220, dpi, scale\)|S\(38, dpi, scale\)/);
   const height = Number(read('src/browser_pane.zig').match(/!app_state.g_sidebar_collapsed\) (\d+)/)[1]);
-  assert.equal(Number(groups.match(/headerHeight = 28, rowHeight = S\((\d+),/)[1]), height);
+  const headerHeight = Number(read('src/sidebar.zig').match(/return if \(app_state\.g_sidebar_collapsed\) GROUP_HEADER_H else uiScaled\((\d+)\);/)[1]);
+  const heights = groups.match(/headerHeight = S\((\d+), dpi, scale\), rowHeight = S\((\d+),/);
+  assert.ok(heights, 'the proof must scale the expanded group header and member rows from the saved DPI');
+  assert.equal(Number(heights[1]), headerHeight, 'the proof header height must follow the app sidebar header');
+  assert.equal(Number(heights[2]), height, 'the proof row height must follow the app sidebar row');
   assert.match(groups, /rowBottom = rowTop \+ S\(58, dpi, scale\)/);
   for (const feature of ['group-rail', 'pane-layout']) {
     const driver = read(skill + `control-feature-${feature}.ps1`);
@@ -2767,4 +2772,48 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
   assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
   assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
+});
+
+test('SOFT-2713 bot-photo closes its tab with the id the app routes "close tab" to', () => {
+  const palette = read('src/command_palette.zig');
+  const constants = new Map([...read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)]
+    .map(match => [match[1], Number(match[2])]));
+  const route = palette.match(/action\.target == SEARCH_TABCTX_ARCHIVE and labelsMatchQuery\(&\.\{([^}]*)\}, query\)/);
+  assert.ok(route, 'the app must route the archived-chat row through its own alias list');
+  const aliases = [...route[1].matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.ok(aliases.includes('close tab'), `the archived-chat row must answer "close tab"; it answers ${aliases.join(', ')}`);
+  const archive = constants.get('SEARCH_TABCTX_ARCHIVE');
+  assert.ok(Number.isInteger(archive), 'the app must pin the archived-chat row to a routing id');
+  const drive = read('tools/verify-bot-photo/drive.ps1');
+  const query = drive.match(/Query '(close tab)' '([^']+)'/);
+  assert.ok(query, 'the driver must close its second tab through the global palette');
+  assert.ok(aliases.includes(query[1]), `the driver must type a query the archived-chat row answers; it types "${query[1]}"`);
+  assert.equal(query[2], String(archive), `the driver must expect the id the app routes "${query[1]}" to`);
+});
+
+test('SOFT-2713 group-rail selects saved sessions by name, not by tab-order digits', () => {
+  const driver = read(skill + 'control-feature-group-rail.ps1');
+  const byName = [...driver.matchAll(/Invoke-JourneyCommand (?:'(Rail [A-F])'|\('Rail ' \+ \[char\]\(65 \+ \$selected\)\))([^\r\n]*)/g)];
+  assert.equal(byName.length, 4, 'the driver must select both grouped sessions by their saved names');
+  for (const command of byName) {
+    assert.match(command[2], /^\s+-Session\b/, `selecting ${command[1] || 'a rail session'} must resolve the saved name, not a tab position`);
+  }
+  assert.doesNotMatch(driver, /Press @\(0x11, 0x3\d\)/, 'Ctrl+<n> follows manual tab order, so it cannot reach a named session');
+  assert.doesNotMatch(driver, /0x31 \+ \$selected/, 'the grouped-selection loop must not count tab positions');
+  const library = read(skill + 'control-library.ps1');
+  const session = library.slice(library.indexOf('if ($Session) {'), library.indexOf('} else {', library.indexOf('if ($Session) {')));
+  assert.match(session, /\$tabs\[\$i\]\.name -ceq \$Name/, 'the -Session switch must match the app-saved session name exactly');
+  assert.match(session, /\$matching\.Count -ne 1/, 'the -Session switch must refuse an ambiguous name instead of picking a position');
+});
+
+test('SOFT-2713 group-rail map states the heights the proof measures', () => {
+  const map = read(skill + 'features/group-rail.md');
+  const native = read(skill + 'control-native.cs');
+  const header = native.match(/int headerHeight = S\((\d+), dpi, scale\), rowHeight = S\((\d+), dpi, scale\);/);
+  assert.ok(header, 'the proof must derive the expanded header and member-row heights from the saved DPI');
+  assert.match(map, new RegExp(`Expanded group headers scale from ${header[1]} pixels and member rows scale from ${header[2]} pixels`), 'the map must state the heights the proof measures');
+  const section = native.match(/int sectionHeight = S\((\d+), dpi, scale\), buttonHeight = S\((\d+), dpi, scale\);/);
+  assert.ok(section, 'Recents must scale its height too');
+  assert.equal(section[1], header[1], 'Recents must share the expanded header height');
+  assert.match(map, /Workspace pills retain their 34-pixel height/);
 });

@@ -6,43 +6,38 @@ import { spawnSync } from 'node:child_process';
 const workflow = fs.readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
 const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
 
-test('production skips duplicate journeys but keeps build, startup, updater and signature gates', () => {
-  assert.match(jobs.journeys, /if: inputs.proof/);
-  assert.match(jobs.build, /needs: \[prepare, journeys\]/);
-  assert.match(jobs.build, /needs.journeys.result == 'skipped'/);
-  const condition = jobs.build.match(/^    if: (.+)$/m)[1];
-  const allowed = new Function('needs', 'always', 'cancelled', `return (${condition});`);
-  for (const prepare of ['success', 'failure', 'cancelled', 'skipped']) {
-    for (const journeys of ['success', 'failure', 'cancelled', 'skipped']) {
-      assert.equal(allowed({ prepare: { result: prepare }, journeys: { result: journeys } }, () => true, () => false), prepare === 'success' && ['success', 'skipped'].includes(journeys));
-    }
-  }
-  assert.equal(allowed({ prepare: { result: 'success' }, journeys: { result: 'skipped' } }, () => true, () => true), false);
-  assert.match(jobs['update-test'], /needs: \[prepare, build\]/);
-  assert.match(jobs['update-test'], /node tools\/release-update-gate.mjs/);
-  assert.match(jobs['update-test'], /WaitOne\(15000\)/);
-  assert.match(jobs['update-test'], /\$process.HasExited/);
-  assert.match(jobs['update-test'], /\$job.Stop\(\)/);
-  assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
-  for (const name of ['update-test', 'release']) {
-    const condition = jobs[name].match(/^    if: \$\{\{ (.+) \}\}$/m)[1].replaceAll('needs.update-test', "needs['update-test']");
-    assert.match(condition, /!cancelled\(\)/);
-    const allowed = new Function('needs', 'inputs', 'github', 'cancelled', `return (${condition});`);
-    for (const prepare of ['success', 'failure', 'cancelled', 'skipped']) {
-      for (const build of ['success', 'failure', 'cancelled', 'skipped']) {
-        for (const updater of ['success', 'failure', 'cancelled', 'skipped']) {
-          const needs = { prepare: { result: prepare }, build: { result: build }, 'update-test': { result: updater } };
-          const expected = prepare === 'success' && build === 'success' && (name !== 'release' || updater === 'success');
-          assert.equal(allowed(needs, { proof: false }, { event_name: 'push' }, () => false), expected);
-          assert.equal(allowed(needs, { proof: true }, { event_name: 'push' }, () => false), false);
-          assert.equal(allowed(needs, { proof: false }, { event_name: 'push' }, () => true), false);
-        }
-      }
-    }
-  }
-  assert.match(jobs.release, /run: node tools\/sign-release.mjs/);
-  assert.match(jobs.build, /Executable embedded version does not match release tag/);
-  assert.match(jobs['runner-sessions'], /needs: \[prepare, release\]/);
+function job(name) {
+  assert.ok(jobs[name], `release.yml must keep the ${name} job`);
+  return jobs[name];
+}
+
+function needsOf(name) {
+  const line = job(name).match(/^    needs: (\[[^\]]*\]|\S+)$/m);
+  assert.ok(line, `${name} must declare its needs`);
+  return line[1].replace(/[[\]]/g, '').split(',').map(entry => entry.trim()).filter(Boolean);
+}
+
+test('production publishes the build, startup proof and signature gates without a journey gate', () => {
+  assert.equal(jobs.journeys, undefined, 'release.yml must not run candidate journeys');
+  assert.equal(jobs['journey-gate'], undefined, 'release.yml must not gate publication on journeys');
+  assert.doesNotMatch(workflow, /release-journeys\.mjs|release-journey-receipt/);
+  assert.deepEqual(needsOf('build'), ['prepare']);
+  assert.doesNotMatch(job('build'), /^    if:/m);
+  assert.match(job('build'), /Executable embedded version does not match release tag/);
+  assert.deepEqual(needsOf('launch'), ['prepare', 'build']);
+  assert.match(job('launch'), /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64\.exe -Evidence release-proof/);
+  assert.match(job('launch'), /name: release-launch-proof\n          path: release-proof\/\n          if-no-files-found: error/);
+  assert.match(job('gitleaks'), /release_scan: true/);
+  assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation']);
+  assert.doesNotMatch(job('release'), /^    if:/m);
+  assert.match(job('release'), /run: node tools\/sign-release\.mjs/);
+  assert.deepEqual(needsOf('queue-newer'), ['prepare', 'release']);
+});
+
+test('a master push never cancels a release already running', () => {
+  const auto = fs.readFileSync(new URL('../.github/workflows/auto-release.yml', import.meta.url), 'utf8');
+  assert.match(auto, /^concurrency:\n  group: auto-release-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false$/m);
+  assert.match(auto, /needs\.release\.result == 'success' \|\| needs\.release\.result == 'cancelled'/);
 });
 
 test('updater receipts require both successful scenarios on the exact source', async () => {
@@ -64,9 +59,7 @@ test('updater receipts require both successful scenarios on the exact source', a
 
 
 test('Windows parses the actual release startup command before shipping', { skip: process.platform !== 'win32' }, () => {
-  const block = jobs['update-test'].match(/        run: \|\n((?:          [^\n]*\n|\n)+)/);
-  assert.ok(block, 'Startup command must be present');
-  const source = block[1].split('\n').map(line => line.slice(10)).join('\n');
+  const source = fs.readFileSync(new URL('./release-launch.ps1', import.meta.url), 'utf8');
   const parser = "$source = [Console]::In.ReadToEnd(); $tokens = $null; $problems = $null; $null = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$problems); if ($problems.Count -gt 0) { throw ($problems | Out-String) }; 'STARTUP_COMMAND_PARSED'";
   const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', parser], { input: source, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);

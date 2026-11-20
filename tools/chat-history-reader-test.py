@@ -4847,15 +4847,20 @@ class IGSH_1652_LeftoverBoxTest(unittest.TestCase):
 
     def test_igsh1590_reaction_restores_the_mirrored_composer_draft(self):
         draft = 'draft stays here'
+        forms = (
+            '{} to: Same first words [mp:6d8e353d25c5fe23]',
+            '{} to: Same first words for this example for this example for this example for this\u2026',
+        )
         for emoji in ('👍', '👎', '❤️'):
-            with self.subTest(emoji=emoji):
-                self.text = emoji + ' to: Same first words [mp:6d8e353d25c5fe23]'
-                reader.draft_note('fixture', typed=draft, sent='')
-                result, state = self.send(draft)
-                self.assertEqual(result['status'], 'sent')
-                self.assertEqual(state['sent'], [self.text])
-                self.assertEqual(state['box'], draft)
-                self.assertEqual(reader.draft_record('fixture').get('restored'), draft)
+            for form in forms:
+                with self.subTest(emoji=emoji, form=form):
+                    self.text = form.format(emoji)
+                    reader.draft_note('fixture', typed=draft, sent='')
+                    result, state = self.send(draft)
+                    self.assertEqual(result['status'], 'sent')
+                    self.assertEqual(state['sent'], [self.text])
+                    self.assertEqual(state['box'], draft)
+                    self.assertEqual(reader.draft_record('fixture').get('restored'), draft)
 
     def test_genuine_multiline_human_draft_is_restored_without_sending_it(self):
         human = 'Unfinished human draft' + self.leftover

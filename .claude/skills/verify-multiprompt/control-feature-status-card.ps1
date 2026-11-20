@@ -113,13 +113,17 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $offsetX = $origin.X - $frame.Left
             $offsetY = $origin.Y - $frame.Top
             $clientBottom = $offsetY + $client.Bottom
+            $iconClientX = [int][Math]::Round($iconGeometry.icon.centerX * $scale)
+            $iconClientY = $client.Bottom - [int][Math]::Round($iconGeometry.icon.centerYInset * $scale)
             $icon = @{
                 left = $offsetX + [int][Math]::Round($iconGeometry.icon.left * $scale)
                 right = $offsetX + [int][Math]::Round($iconGeometry.icon.right * $scale)
                 top = $clientBottom - [int][Math]::Round($iconGeometry.icon.topInset * $scale)
                 bottom = $clientBottom - [int][Math]::Round($iconGeometry.icon.bottomInset * $scale)
-                centerX = $offsetX + [int][Math]::Round($iconGeometry.icon.centerX * $scale)
+                centerX = $offsetX + $iconClientX
                 centerY = $clientBottom - [int][Math]::Round($iconGeometry.icon.centerYInset * $scale)
+                clientCenterX = $iconClientX
+                clientCenterY = $iconClientY
             }
             for ($i = 0; $i -lt 12; $i++) { [VerifyNative]::WheelClient($script:window, [uint32]$process.Id, [int](100 * $scale), [int](200 * $scale), -1200) }
             Start-Sleep -Milliseconds 500
@@ -241,8 +245,8 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
                 $closedInk = Measure-UsagePaceInk -Name 'pill-closed' -Bounds $pillBounds
                 $paceProof = [ordered]@{ expectedInks = $expected; closed = $closedInk; panel = $null; bounds = @{ closed = $pillBounds; panel = $null }; sourceTs = $usageSourceTs; replayTs = $usagePaceSnapshot.ts; sourceSha256 = (Get-FileHash $env:VERIFY_USAGE_PACE_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); normalSshReads = @(Get-Content (Join-Path $scratch 'usage-ssh-read.log')).Count }
             }
-            $pillX = $icon.centerX
-            $pillY = $icon.centerY
+            $pillX = $icon.clientCenterX
+            $pillY = $icon.clientCenterY
             $hoverFocus = [VerifyNative]::GetFocusedWindow($script:window)
             $hoverResults = @()
             $beforeHover = $null
