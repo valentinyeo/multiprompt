@@ -3,10 +3,7 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?required}" "${SHIP_SESSION_NAME:?required}" "${CRASH_BOARD_COMMAND:?required}" "${CRASH_GH_COMMAND:?required}"
 "$CRASH_BOARD_COMMAND" context --json >/dev/null
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-install -d "$HOME/.local/share/multiprompt-crash-tickets" "$HOME/.config/multiprompt" "$HOME/.config/systemd/user"
-for file in crash-report-tickets.py crash-reports.py; do
-  install -m 644 "$root/service/$file" "$HOME/.local/share/multiprompt-crash-tickets/$file"
-done
+install -d "$HOME/.config/multiprompt" "$HOME/.config/systemd/user"
 # Link the units instead of copying them, so the repo file stays the only copy.
 rm -f "$HOME/.config/systemd/user/crash-report-tickets.service" "$HOME/.config/systemd/user/crash-report-tickets.timer"
 systemctl --user link "$root/service/crash-report-tickets.service" "$root/service/crash-report-tickets.timer"
