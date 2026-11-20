@@ -4753,6 +4753,10 @@ def host_handle_request(provider, sid, tmux, session, request):
             session["settings"][key] = value
             host_settings_event(provider, sid, tmux, session)
         return dict(status="ok")
+    if operation == "send_now":
+        if provider != "claude":
+            return host_refuse("send_now_unsupported")
+        return host_claude_send_now(provider, sid, tmux, session, request)
     if operation == "recall":
         token, attempt = request.get("id"), request.get("attempt")
         if (not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{16,80}", token) is None
@@ -4909,6 +4913,9 @@ def host_claude_event(provider, sid, tmux, session, event):
     if kind == "system":
         if event.get("subtype") == "init":
             session["ready"] = True
+            capabilities = event.get("capabilities")
+            if isinstance(capabilities, list):
+                session["capabilities"] = set(item for item in capabilities if isinstance(item, str))
             if "starting_settings" in session:
                 settings = session["starting_settings"]
                 actual = host_model_name(event.get("model"))
@@ -5033,6 +5040,37 @@ def host_claude_recall(provider, sid, tmux, session, entry):
     if not isinstance(response, dict) or response.get("subtype") != "success" or not isinstance(body, dict) or body.get("cancelled") is not True:
         return host_refuse("not_waiting")
     return dict(status="ok")
+
+
+def host_claude_send_now(provider, sid, tmux, session, request):
+    capabilities = session.get("capabilities")
+    if not isinstance(capabilities, set) or "interrupt_send_now_v1" not in capabilities:
+        return host_refuse("send_now_unsupported")
+    text = request.get("text")
+    target = None
+    for entry in reversed(session.get("sends") or []):
+        if not isinstance(entry, dict) or not isinstance(entry.get("recall_uuid"), str):
+            continue
+        if isinstance(text, str) and entry.get("text") != text:
+            continue
+        target = entry["recall_uuid"]
+        break
+    if target is None:
+        return host_refuse("not_waiting")
+    outcome = None
+    for attempt in range(2):
+        response = host_control_call(provider, sid, tmux, session,
+                                     dict(subtype="interrupt", send_now=True, message_uuid=target))
+        body = response.get("response") if isinstance(response, dict) else None
+        if not isinstance(response, dict) or response.get("subtype") != "success" or not isinstance(body, dict):
+            return host_refuse("send_now_unanswered")
+        outcome = body.get("send_now")
+        if outcome != "nothing_waiting" or attempt == 1:
+            break
+    if outcome not in ("stopped", "delivering"):
+        return host_refuse("not_waiting")
+    host_log(provider, sid, "send_now", dict(id=target, outcome=outcome))
+    return dict(status="ok", send_now=outcome)
 
 
 def host_turn_end(provider, sid, tmux, session, payload, detail):
@@ -7025,6 +7063,27 @@ def cancel_queued_response(q):
     return f"@mp\t{q['id']}\tcancel_queued\t{'error' if reason else 'ok'}\t{reason or '-'}\t0\n{END}\n"
 
 
+def send_now_response(q):
+    rid = q.get("id", 0)
+    provider, sid, name = q.get("provider"), q.get("sid"), q.get("tmux")
+    text = q.get("text")
+    if not isinstance(text, str) or not text.strip() or "\x00" in text:
+        return f"@mp\t{rid}\tsend_now\terror\tinvalid_text\t0\n{END}\n"
+    if host_identity(provider, sid) and host_enabled(provider, sid) and host_owned(provider, sid):
+        reply = host_request(provider, sid, dict(op="send_now", text=text))
+        if isinstance(reply, dict) and reply.get("status") == "ok":
+            return f"@mp\t{rid}\tsend_now\tok\t-\t0\n{END}\n"
+        reason = reply.get("reason") if isinstance(reply, dict) else None
+        return f"@mp\t{rid}\tsend_now\terror\t{reason if isinstance(reason, str) and TMUX_NAME.fullmatch(reason) else 'send_now_failed'}\t0\n{END}\n"
+    if not isinstance(name, str) or TMUX_NAME.fullmatch(name) is None:
+        return f"@mp\t{rid}\tsend_now\terror\tinvalid_tmux_name\t0\n{END}\n"
+    try:
+        subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", "C-x", "C-s"], check=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return f"@mp\t{rid}\tsend_now\terror\ttmux_stop_failed\t0\n{END}\n"
+    return f"@mp\t{rid}\tsend_now\tok\t-\t0\n{END}\n"
+
+
 def held_queue_ready(tmux, path):
     shown = subprocess.run(["tmux", "capture-pane", "-p", "-e", "-J", "-t", "=" + tmux + ":"],
                            capture_output=True, text=True, timeout=5, check=True).stdout
@@ -8039,6 +8098,8 @@ def serve_request(line, source, subscriptions, lock):
             wire = draft_response(query)
         elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
             wire = stop_response(query)
+        elif query.get("op") == "send_now":
+            wire = send_now_response(query)
         elif query.get("op") == "restart_ai":
             wire = restart_ai_response(query)
         elif query.get("op") == "settle":
@@ -8231,6 +8292,20 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    sessions_source = globals().get('MP_SESSIONS_SOURCE')
+                    if isinstance(sessions_source, str) and sessions_source:
+                        try:
+                            publish_named_tool('mp-sessions', _base64.b64decode(sessions_source))
+                            _os.chmod('mp-sessions', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    layout_source = globals().get('MP_LAYOUT_SOURCE')
+                    if isinstance(layout_source, str) and layout_source:
+                        try:
+                            relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
+                            _os.chmod('mp-layout', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     zsb_source = globals().get('ZSB_SOURCE')

@@ -241,6 +241,7 @@ const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardU
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
+const chatEchoPushQueuedNowForId = @import("chat_send.zig").chatEchoPushQueuedNowForId;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const chatWorkingIndicatorText = @import("window_layout.zig").chatWorkingIndicatorText;
@@ -6373,7 +6374,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     if (chatEchoAt(GET_X(lp), GET_Y(lp))) |id| {
                         if (chatOutboxIndexById(id)) |ei| {
                             const entry = app_state.g_chat_outbox.items[ei];
-                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNow();
+                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNowForId(entry.id);
                         }
                     }
                 }

@@ -70,6 +70,12 @@ under the 108-character limit a Unix socket path has, whatever the home director
 - **deliver**: a client connects to `<key>.sock`, writes one JSON line, reads one JSON line.
   Request: `{"op":"deliver","id":<message id>,"attempt":<attempt>,"epoch":<epoch>,"text":<text>}`.
   Reply: `{"status":"sent"|"duplicate"|"busy"|"refused"|"error","reason":<reason>}`.
+- **send now**: `{"op":"send_now","text":<text>}` asks the CLI to take a waiting message now, as the
+  terminal's send-now key does. The host sends the CLI's own interrupt with `send_now: true` and the
+  uuid it wrote that message under, so only that message counts. Reply `{"status":"ok","send_now":"stopped"|"delivering"}`.
+  Only for a CLI whose `system/init` advertises `interrupt_send_now_v1`; otherwise the host answers
+  `refused` with `send_now_unsupported`, and no turn is interrupted. A message the CLI already took in,
+  or no longer holds, answers `refused` with `not_waiting`.
 - **receipt**: before the write the host claims the attempt row through the existing
   `attempt_prepare` with binding
   `{"v":1,"mode":"stream_json_user_line","host":<pid>,"session":<sid>}`. After a successful
@@ -152,6 +158,8 @@ python3 <reader> host handover <provider> <sid>
   name is still the chat identity for the store and for the shell.
 - History loads from the session id when the chat is switched on, so the transcript shows
   without a live agent in a pane.
+- The reader's `send_now` op steers a hosted chat through the host and keeps the terminal path for a
+  chat the host does not own, where it presses Ctrl+X Ctrl+S as before.
 - Not owned, switched off, or not Claude: the existing connector path runs unchanged and still
   needs the live agent in its pane.
 - A chat that is mid-turn answers `busy`: the next message stays `queued` and is retried about once

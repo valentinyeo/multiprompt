@@ -71,13 +71,13 @@ test('both formal CI gates compare against the event baseline after mutations an
   }
 });
 
-test('formal findings inherit only from byte-identical modeled source', { skip: process.platform === 'win32' }, t => {
+test('formal findings inherit only when the base source reports the same findings', { skip: process.platform === 'win32' }, t => {
   read('tools/chat-still/verify.py');
   const root = path.join(__dirname, '..');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-still-inherited-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
-  for (const variant of ['changed', 'drift']) {
+  for (const variant of ['changed', 'drift', 'unrelated']) {
     copyZig(['src/chat_session.zig', 'src/chat_history.zig'], path.join(dir, variant), root);
   }
   const session = path.join(dir, 'changed/src/chat_session.zig');
@@ -85,10 +85,13 @@ test('formal findings inherit only from byte-identical modeled source', { skip: 
     'if (old_content_h <= viewport_h) null else if (anchor_top)', 'if (old_content_h >= 0) null else if (anchor_top)'));
   const history = path.join(dir, 'drift/src/chat_history.zig');
   fs.writeFileSync(history, fs.readFileSync(history, 'utf8').replace('pub fn scrollAnchor(', 'pub fn renamedScrollAnchor('));
+  const unrelated = path.join(dir, 'unrelated/src/chat_session.zig');
+  fs.writeFileSync(unrelated, fs.readFileSync(unrelated, 'utf8') + '\npub fn chatStillProbe() void {}\n');
   for (const [name, args, expected] of [
     ['raw findings remain failures', [], 1],
     ['unchanged source is inherited', ['--inherit-from', 'HEAD'], 0],
     ['changed source is not inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'changed')], 1],
+    ['source that keeps every finding is inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'unrelated')], 0],
     ['model drift still fails', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'drift')], 2],
     ['replay errors cannot inherit', ['--inherit-from', 'HEAD', '--replay'], 2],
     ['missing baseline still fails', ['--inherit-from', 'refs/heads/nonexistent-chat-still-test'], 2],

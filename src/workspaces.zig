@@ -932,6 +932,152 @@ pub fn restoreArchivedWorkspaceByIndex(wi: u32) bool {
     return true;
 }
 
+pub const MAX_REMOVED_WORKSPACES: usize = 16;
+var removed_workspaces_loaded = false;
+var removed_workspace_names: [MAX_REMOVED_WORKSPACES][64]u8 = std.mem.zeroes([MAX_REMOVED_WORKSPACES][64]u8);
+var removed_workspace_name_len: [MAX_REMOVED_WORKSPACES]u32 = [_]u32{0} ** MAX_REMOVED_WORKSPACES;
+var removed_workspace_count: usize = 0;
+
+fn removedWorkspacesPath(buf: *[512]u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 470) return null;
+    const rest = if (IS_DEV) "\\ZigShell\\removed-workspaces-dev.json" else "\\ZigShell\\removed-workspaces.json";
+    @memcpy(buf[appdata_len .. appdata_len + rest.len], rest);
+    return buf[0 .. appdata_len + rest.len];
+}
+
+fn removedWorkspaceNameAt(i: usize) []const u8 {
+    const len: usize = @intCast(@min(removed_workspace_name_len[i], @as(u32, @intCast(removed_workspace_names[i].len))));
+    return removed_workspace_names[i][0..len];
+}
+
+fn findRemovedWorkspace(name: []const u8) ?usize {
+    if (name.len == 0 or name.len > removed_workspace_names[0].len) return null;
+    for (0..removed_workspace_count) |i| {
+        if (std.mem.eql(u8, removedWorkspaceNameAt(i), name)) return i;
+    }
+    return null;
+}
+
+fn removeRemovedWorkspaceAt(idx: usize) void {
+    var i = idx;
+    while (i + 1 < removed_workspace_count) : (i += 1) {
+        removed_workspace_names[i] = removed_workspace_names[i + 1];
+        removed_workspace_name_len[i] = removed_workspace_name_len[i + 1];
+    }
+    if (removed_workspace_count > 0) removed_workspace_count -= 1;
+    removed_workspace_names[removed_workspace_count] = std.mem.zeroes([64]u8);
+    removed_workspace_name_len[removed_workspace_count] = 0;
+}
+
+fn saveRemovedWorkspaces() void {
+    var path_buf: [512]u8 = undefined;
+    const path = removedWorkspacesPath(&path_buf) orelse return;
+    var dir_buf: [512]u8 = undefined;
+    if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
+    var json: [1400]u8 = undefined;
+    var pos: usize = 0;
+    const head = "{\"names\":[";
+    @memcpy(json[pos .. pos + head.len], head);
+    pos += head.len;
+    for (0..removed_workspace_count) |i| {
+        if (pos + 90 >= json.len) break;
+        if (i > 0) {
+            json[pos] = ',';
+            pos += 1;
+        }
+        json[pos] = '"';
+        pos += 1;
+        appendJsonEscaped(&json, &pos, removedWorkspaceNameAt(i));
+        json[pos] = '"';
+        pos += 1;
+    }
+    const tail = "]}";
+    @memcpy(json[pos .. pos + tail.len], tail);
+    pos += tail.len;
+    _ = writeFileAtomicW(path, json[0..pos]);
+}
+
+pub fn loadRemovedWorkspaces() void {
+    if (removed_workspaces_loaded) return;
+    removed_workspaces_loaded = true;
+    removed_workspace_count = 0;
+    var path_buf: [512]u8 = undefined;
+    const path = removedWorkspacesPath(&path_buf) orelse return;
+    const h = win32OpenRead(path) orelse return;
+    defer _ = CloseHandle(h);
+    var buf: [2048]u8 = undefined;
+    const n = win32ReadAll(h, &buf);
+    if (n == 0) return;
+    var parsed = json_reader.parse(std.heap.page_allocator, buf[0..n]) catch return;
+    defer parsed.deinit();
+    for (json_reader.array(json_reader.field(parsed.value, "names"))) |item| {
+        if (item != .string or removed_workspace_count >= MAX_REMOVED_WORKSPACES) continue;
+        _ = addRemovedWorkspaceName(item.string);
+    }
+}
+
+fn addRemovedWorkspaceName(name: []const u8) bool {
+    if (name.len == 0 or name.len > removed_workspace_names[0].len) return false;
+    if (findRemovedWorkspace(name) != null) return false;
+    if (removed_workspace_count >= MAX_REMOVED_WORKSPACES) removeRemovedWorkspaceAt(0);
+    const i = removed_workspace_count;
+    @memcpy(removed_workspace_names[i][0..name.len], name);
+    removed_workspace_name_len[i] = @intCast(name.len);
+    removed_workspace_count += 1;
+    return true;
+}
+
+pub fn workspaceNameRemoved(name: []const u8) bool {
+    if (name.len == 0) return false;
+    loadRemovedWorkspaces();
+    return findRemovedWorkspace(name) != null;
+}
+
+pub fn removedWorkspaceNames(storage: *[MAX_REMOVED_WORKSPACES][]const u8) []const []const u8 {
+    loadRemovedWorkspaces();
+    for (0..removed_workspace_count) |i| storage[i] = removedWorkspaceNameAt(i);
+    return storage[0..removed_workspace_count];
+}
+
+pub fn rememberRemovedWorkspace(name: []const u8) void {
+    loadRemovedWorkspaces();
+    if (addRemovedWorkspaceName(name)) saveRemovedWorkspaces();
+}
+
+fn workspaceNameInUse(name: []const u8) bool {
+    if (name.len == 0) return false;
+    for (0..app_state.g_lws_count) |slot| {
+        const len: usize = @intCast(@min(app_state.g_ws_name_len[slot], @as(u32, @intCast(app_state.g_ws_names[slot].len))));
+        if (len == name.len and std.mem.eql(u8, app_state.g_ws_names[slot][0..len], name)) return true;
+    }
+    if (app_state.g_window_display_name_u8_len == name.len and std.mem.eql(u8, app_state.g_window_display_name_u8[0..name.len], name)) return true;
+    for (0..app_state.g_workspace_count) |wi| {
+        const e = &app_state.g_workspaces[wi];
+        if (!e.archived and e.name_len == name.len and std.mem.eql(u8, e.name[0..e.name_len], name)) return true;
+    }
+    return false;
+}
+
+fn forgetRemovedWorkspacesInUse() void {
+    loadRemovedWorkspaces();
+    if (removed_workspace_count == 0) return;
+    var changed = false;
+    var wi: usize = 0;
+    while (wi < removed_workspace_count) {
+        var name_buf: [64]u8 = std.mem.zeroes([64]u8);
+        const name = removedWorkspaceNameAt(wi);
+        @memcpy(name_buf[0..name.len], name);
+        if (!workspaceNameInUse(name_buf[0..name.len])) {
+            wi += 1;
+            continue;
+        }
+        removeRemovedWorkspaceAt(wi);
+        changed = true;
+    }
+    if (changed) saveRemovedWorkspaces();
+}
+
 fn workspaceDeleteFailed(reason: []const u8) bool {
     debugLog2("workspace-delete result=refused reason=", reason);
     var text: [256:0]u16 = @splat(0);
@@ -952,7 +1098,9 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
         if (std.mem.eql(u8, identity, getInstanceName())) return workspaceDeleteFailed("This workspace owns the current window. Close its window before deleting it.");
         if (identity.len == 0) return workspaceDeleteFailed("This workspace has no saved identity. Close and reopen the workspace list.");
         if (app_state.g_single_window and findMyWorkspaceSlot(identity) != null and app_state.g_lws_count <= 1) return workspaceDeleteFailed("At least one workspace must stay open.");
-        return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+        if (entry.host_len != 0) return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+        if (!entry.archived) return workspaceDeleteFailed("Archive this workspace before deleting it.");
+        return workspaceDeleteFailed("The workspace list is still busy. Open Delete workspace again.");
     }
     const e = &app_state.g_workspaces[wi];
     var id_copy: [64]u8 = std.mem.zeroes([64]u8);
@@ -960,6 +1108,9 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     if (id_len == 0) return workspaceDeleteFailed("This workspace has no saved identity.");
     @memcpy(id_copy[0..id_len], e.id[0..id_len]);
     const id = id_copy[0..id_len];
+    var name_copy: [64]u8 = std.mem.zeroes([64]u8);
+    const name_len = @min(e.name_len, name_copy.len - 1);
+    @memcpy(name_copy[0..name_len], e.name[0..name_len]);
     debugLog2("workspace-delete target=", id);
 
     var local = false;
@@ -995,6 +1146,7 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     mergeWorkspaceRegistryFromDisk();
     if (findWorkspace(id)) |cur| removeWorkspaceEntryAt(cur);
     writeWorkspaceRegistryFile();
+    rememberRemovedWorkspace(name_copy[0..name_len]);
     debugLog2("workspace-delete result=deleted id=", id);
     return true;
 }
@@ -1092,6 +1244,7 @@ fn upsertMySlotEntries() void {
         }
         wi += 1;
     }
+    forgetRemovedWorkspacesInUse();
     if (!app_state.g_single_window) return;
     var ws: u8 = 0;
     while (ws < app_state.g_lws_count) : (ws += 1) {
@@ -1291,7 +1444,7 @@ pub fn migrateWorkspacesFromSessionFiles() void {
                         var name_buf: [64]u8 = std.mem.zeroes([64]u8);
                         const name_len = inferWorkspaceNameFromSessionFile(id_buf[0..id_len], &name_buf);
                         const name = if (name_len > 0) name_buf[0..name_len] else defaultWorkspaceName(id_buf[0..id_len]);
-                        addOrUpdateWorkspace(id_buf[0..id_len], name, false);
+                        if (!workspaceNameRemoved(name)) addOrUpdateWorkspace(id_buf[0..id_len], name, false);
                     }
                 }
             }
