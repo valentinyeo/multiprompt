@@ -116,7 +116,7 @@ test('terminal suite state is confirmed against the actual workflow, not verifie
     assert.equal(result.status, expected === 'PASS' ? 0 : 1, result.stderr);
     const output = fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8');
     assert.match(output, new RegExp(`result=${expected}`));
-    assert.equal(f.requests().length, 2);
+    assert.equal(f.requests().length, expected === 'PASS' ? 2 : 3);
     assert.ok(f.requests().some(args => args.some(arg => arg.includes(`head_sha=${head}`))));
   }
 });

@@ -74,7 +74,7 @@ async function main(env = process.env) {
   if (features.length) {
     try { gh(['run', 'download', run, '--repo', repo, '--pattern', 'verify-*', '--dir', directory]); }
     catch { failures.push('Journey evidence could not be downloaded'); }
-    const summary = summarize(directory, features, '');
+    const summary = summarize(directory, features);
     for (const feature of features) {
       const runs = summary.head[feature];
       if (!runs.length || runs.some(item => runOutcome(item) !== 'passed')) failures.push(feature);

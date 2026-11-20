@@ -77,7 +77,7 @@ else if (url.endsWith('/actions/artifacts/77/zip')) process.stdout.write(fs.read
 else process.exit(3);
 `, { mode: 0o755 });
   const requests = path.join(dir, 'requests');
-  const result = spawnSync(process.execPath, [path.join(root, 'tools/pr-verifier.cjs'), 'download', path.join(dir, 'selection.json'), evidence, 'b'.repeat(40)], {
+  const result = spawnSync(process.execPath, [path.join(root, 'tools/pr-verifier.cjs'), 'download', path.join(dir, 'selection.json'), evidence], {
     encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, REQUESTS: requests, ARCHIVE: archive, HEAD_SHA: head, RUN_ID: '999', REPO: 'owner/repo' },
   });
   assert.equal(result.status, 0, result.stderr);
@@ -111,8 +111,8 @@ test('an intentional empty plan is distinguished from missing selected journey r
   fs.writeFileSync(path.join(dir, 'diff.patch'), 'actual patch');
   assert.match(workflow, /Read verifier-out\/judge-inputs\.md/);
   for (const features of [[], ['appearance']]) {
-    fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features, compareBase: false }));
-    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), 'b'.repeat(40), dir], { encoding: 'utf8' });
+    fs.writeFileSync(path.join(dir, 'selection.json'), JSON.stringify({ features }));
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), dir], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const evidence = fs.readFileSync(path.join(dir, 'evidence.md'), 'utf8');
     if (!features.length) {
@@ -129,7 +129,7 @@ test('an intentional empty plan is distinguished from missing selected journey r
   fs.writeFileSync(path.join(dir, 'selection.json'), '{"features":[]}');
   fs.writeFileSync(path.join(dir, 'ci.json'), JSON.stringify({ checks: [{ head_sha: 'b'.repeat(40) }] }));
   fs.rmSync(path.join(dir, 'judge-inputs.md'));
-  const invalid = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), 'b'.repeat(40), dir], { encoding: 'utf8' });
+  const invalid = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'summarize', path.join(dir, 'evidence'), path.join(dir, 'selection.json'), dir], { encoding: 'utf8' });
   assert.notEqual(invalid.status, 0);
   assert.equal(fs.existsSync(path.join(dir, 'judge-inputs.md')), false);
 });
@@ -140,7 +140,7 @@ test('CI-only review never promotes FAIL, BLOCKED or failed Tests to a passing v
     ['BLOCKED', {}, 'BLOCKED'],
     ['PASS+NOTES', { tests: { result: 'failure', outputs: { result: 'FAIL' } } }, 'FAIL'],
   ]) {
-    const result = verifier.finalize({ verdict: { verdict }, headSha: head, summary: { head: {}, base: {} }, selection: { features: [], compareBase: false }, jobs });
+    const result = verifier.finalize({ verdict: { verdict }, headSha: head, summary: { head: {} }, selection: { features: [] }, jobs });
     assert.equal(result.final, expected);
   }
 });
