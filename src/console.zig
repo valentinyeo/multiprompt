@@ -421,6 +421,21 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
     return true;
 }
 
+pub fn killSavedOrphanIfStale(pid: DWORD, kind: ShellKind) void {
+    if (pid == 0) return;
+    if (pid == @import("win32.zig").GetCurrentProcessId()) return;
+    const proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE, 0, pid) orelse return;
+    defer _ = CloseHandle(proc);
+    var exit_code: DWORD = 0;
+    if (GetExitCodeProcess(proc, &exit_code) == 0 or exit_code != STILL_ACTIVE) return;
+    const still_a_shell = if (kind == .gitbash)
+        findWindowByClassAndPid(pid, "mintty") != null
+    else
+        findConsoleWindowByPid(pid) != null;
+    if (!still_a_shell) return;
+    killProcessTree(pid);
+}
+
 pub const BundledConsoleFonts = struct {
     paths: [2][520]u16 = std.mem.zeroes([2][520]u16),
     registered: [2]bool = @splat(false),
@@ -1097,6 +1112,10 @@ fn sshCandidate(index: usize, override: []const u8, local: []const u8, path_resu
         4 => path_result,
         else => "",
     };
+}
+
+test "saved orphan cleanup ignores the app process id" {
+    killSavedOrphanIfStale(@import("win32.zig").GetCurrentProcessId(), .cmd);
 }
 
 test "ssh candidates prefer override then local then system then PATH" {
