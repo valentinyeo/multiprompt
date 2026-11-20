@@ -112,11 +112,15 @@ test('a repair PR with a touched journey is judged on that journey alone', () =>
 });
 
 test('a repair PR whose files no journey owns still needs a CI workflow receipt', () => {
-  for (const extra of [{ unmapped: ['src/main.zig'] }, { nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }]) {
-    const result = ciFinish(ciSelection(extra), { head: {}, base: {}, ciRepro: [] });
-    assert.equal(result.final, 'FAIL', JSON.stringify(extra));
-    assert.match(result.body, /CI workflow receipt.*base.*failed.*head.*passed/i);
-  }
+  const result = ciFinish(ciSelection({ unmapped: ['src/main.zig'] }), { head: {}, base: {}, ciRepro: [] });
+  assert.equal(result.final, 'FAIL');
+  assert.match(result.body, /CI workflow receipt.*base.*failed.*head.*passed/i);
+});
+
+test('a leftover nearest field never turns a proven CI receipt into a missing journey', () => {
+  const result = ciFinish(ciSelection({ nearest: [{ file: 'src/main.zig', feature: 'appearance' }] }), ciReceipt());
+  assert.notEqual(result.final, 'FAIL');
+  assert.doesNotMatch(result.body, /Nearest mapped feature/);
 });
 
 test('a PR that is not a repair never needs the CI receipt', () => {
