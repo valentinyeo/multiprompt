@@ -193,7 +193,9 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
                 if (std.fmt.hexToBytes(&tab.avatar_local_id, value)) |_| {} else |_| { tab.avatar_local_id = @splat(0); }
             }
         }
-        if (tab.kind == .tmux and tab.tmux_session_len == 0) continue;
+        if (tab.kind == .tmux and tab.tmux_session_len == 0) {
+            tab.kind = if (tab.tmux_host == 1) .vps2 else .vps;
+        }
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
         tab.favicon_path_len = copyString(obj, "favicon_path", &tab.favicon_path);
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
@@ -339,6 +341,16 @@ test "visits cache distinguishes unknown and empty and rejects invalid arrays" {
     const empty = try parse(std.testing.allocator, "{\"visits\":[]}");
     defer empty.deinit();
     try std.testing.expectEqual(@as(u8, 1), visits(empty.value).known);
+}
+
+test "SOFT-3002 tmux tabs without a session name restore as plain VPS ssh tabs" {
+    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"VPS\",\"tmux_host\":0},{\"kind\":\"tmux\",\"name\":\"UK\",\"tmux_host\":1,\"tmux_session\":\"live\"}]}");
+    defer parsed.deinit();
+    var tabs: [3]@import("app_state.zig").SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), sessionTabs(parsed.value, &tabs, 9));
+    try std.testing.expectEqual(@import("app_state.zig").ShellKind.vps, tabs[0].kind);
+    try std.testing.expectEqual(@import("app_state.zig").ShellKind.tmux, tabs[1].kind);
+    try std.testing.expectEqualStrings("live", tabs[1].tmux_session[0..tabs[1].tmux_session_len]);
 }
 
 test "IGSH-1533 saved colors distinguish white missing and invalid" {

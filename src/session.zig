@@ -231,7 +231,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             .cmd => "cmd",
             .pwsh => "pwsh",
             .vps => "vps",
-            .tmux => "tmux",
+            .tmux => if (app_state.shells[i].tmux_session_len == 0)
+                if (app_state.shells[i].tmux_host == 1) "vps2" else "vps"
+            else
+                "tmux",
             .vps2 => "vps2",
             .bash => "bash",
             .gitbash => "gitbash",

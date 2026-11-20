@@ -54,6 +54,7 @@ const WM_APP_SHORTCUTS_OPEN = @import("win32.zig").WM_APP_SHORTCUTS_OPEN;
 const WM_APP_SHORTCUTS_CLOSE = @import("win32.zig").WM_APP_SHORTCUTS_CLOSE;
 const WM_APP_SHORTCUTS_SCROLL = @import("win32.zig").WM_APP_SHORTCUTS_SCROLL;
 const WM_APP_RECONNECT = @import("win32.zig").WM_APP_RECONNECT;
+const WM_APP_REOPEN_SERVER_SHELL_OPEN = @import("win32.zig").WM_APP_REOPEN_SERVER_SHELL_OPEN;
 const WM_APP_TOGGLE_INBOX = @import("win32.zig").WM_APP_TOGGLE_INBOX;
 const WM_APP_INBOX_KEY = @import("win32.zig").WM_APP_INBOX_KEY;
 const WM_APP_SWITCH_WORKSPACE = @import("win32.zig").WM_APP_SWITCH_WORKSPACE;
@@ -295,6 +296,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
+    .{ .a = "Ctrl+Shift+`", .b = "Reopen server shell (detached tmux sessions on this tab's host)", .header = false },
+    .{ .a = "Ctrl+K -> Reopen server shell", .b = "List detached tmux sessions on this tab's host and attach one in a new tab", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
@@ -1940,6 +1943,10 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (kb.vkCode == 0x52 and shift) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_RECONNECT, 0, 0);
+                    return 1;
+                }
+                if (kb.vkCode == 0xC0 and shift and (kb.flags & 0x20) == 0) {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_REOPEN_SERVER_SHELL_OPEN, 0, 0);
                     return 1;
                 }
                 if (kb.vkCode == 0x48 and (kb.flags & 0x20) == 0) {

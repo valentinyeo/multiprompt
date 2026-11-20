@@ -1029,6 +1029,28 @@ test "tmux status: stock format adopts, a bracket inside Claude's status line do
     try std.testing.expect(!extractTmuxSessionFromStatusLine(std.unicode.utf8ToUtf16LeStringLiteral("[Concise] waiting for input"), &out, &n));
 }
 
+fn extractTmuxSessionFromBottomRow(pid: DWORD, out: *[64]u8, out_len: *u32) bool {
+    _ = FreeConsole();
+    if (AttachConsole(pid) == 0) return false;
+    defer _ = FreeConsole();
+
+    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == null) return false;
+
+    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return false;
+
+    const win = info.srWindow;
+    const width: u32 = @intCast(win.right - win.left + 1);
+    var line_buf: [256]u16 = undefined;
+    const read_len: u32 = @min(width, 256);
+    var chars_read: DWORD = 0;
+    const coord = COORD{ .x = win.left, .y = win.bottom };
+    if (ReadConsoleOutputCharacterW(handle, &line_buf, read_len, coord, &chars_read) == 0) return false;
+    if (chars_read == 0) return false;
+    return extractTmuxSessionFromStatusLine(line_buf[0..@intCast(chars_read)], out, out_len);
+}
+
 pub fn extractTmuxSessionFromStatus(pid: DWORD, out: *[64]u8, out_len: *u32) bool {
     _ = FreeConsole();
     if (AttachConsole(pid) == 0) {
@@ -1864,7 +1886,9 @@ pub fn pollShellNames() void {
         {
             var adopt_sess: [64]u8 = undefined;
             var adopt_sess_len: u32 = 0;
-            if (extractTmuxSessionFromStatus(det_pid, &adopt_sess, &adopt_sess_len)) {
+            const extracted = extractTmuxSessionFromStatus(det_pid, &adopt_sess, &adopt_sess_len) or
+                extractTmuxSessionFromBottomRow(det_pid, &adopt_sess, &adopt_sess_len);
+            if (extracted) {
                 app_state.shells[i].adopt_streak += 1;
                 if (app_state.shells[i].adopt_streak >= 2) {
                     if (!adoptRemoteTmuxSessionForShell(@intCast(i), adopt_sess[0..adopt_sess_len], "pollShellNames: tmux adopted, session=")) {
@@ -1878,10 +1902,19 @@ pub fn pollShellNames() void {
             } else {
                 app_state.shells[i].adopt_streak = 0;
             }
-        } else if (app_state.shells[i].kind != .tmux and det_pid != 0) {
+        } else if (!isRemoteShellKind(app_state.shells[i].kind) and app_state.shells[i].kind != .tmux and det_pid != 0) {
             if (isTmuxRunningInConsole(det_pid)) {
                 app_state.shells[i].tmux_detect_streak += 1;
                 if (app_state.shells[i].tmux_detect_streak >= 3) {
+                    var adopt_sess: [64]u8 = undefined;
+                    var adopt_sess_len: u32 = 0;
+                    if (extractTmuxSessionFromStatus(det_pid, &adopt_sess, &adopt_sess_len) or
+                        extractTmuxSessionFromBottomRow(det_pid, &adopt_sess, &adopt_sess_len))
+                    {
+                        const copy_len: u32 = @intCast(@min(adopt_sess_len, @as(usize, 63)));
+                        @memcpy(app_state.shells[i].tmux_session[0..copy_len], adopt_sess[0..copy_len]);
+                        app_state.shells[i].tmux_session_len = copy_len;
+                    }
                     app_state.shells[i].kind = .tmux;
                     app_state.shells[i].tmux_detect_streak = 0;
                     debugLog("pollShellNames: auto-converted tab to TMUX");

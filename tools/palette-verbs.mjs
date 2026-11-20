@@ -190,6 +190,7 @@ export const screen = {
   "SEARCH_REMOVE_SERVER_2_OFFSET": "account",
   "SEARCH_REMOVE_SERVER_3_OFFSET": "account",
   "SEARCH_REOPEN_OFFSET": "local",
+  "SEARCH_REOPEN_SERVER_SHELL_OFFSET": "menu",
   "SEARCH_RESTART_OFFSET": "local",
   "SEARCH_ROOM_ROW_OFFSET": "focus",
   "SEARCH_SERVERS_OFFSET": "account",

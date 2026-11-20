@@ -201,6 +201,7 @@ const WM_APP_VOICE_UTTERANCE_READY = @import("win32.zig").WM_APP_VOICE_UTTERANCE
 const WM_APP_VOICE_MIC_STATUS = @import("win32.zig").WM_APP_VOICE_MIC_STATUS;
 const WM_APP_VOICE_TTS_AUDIO_STARTED = @import("win32.zig").WM_APP_VOICE_TTS_AUDIO_STARTED;
 const WM_APP_WS_SNOOZE_OPEN = @import("win32.zig").WM_APP_WS_SNOOZE_OPEN;
+const WM_APP_REOPEN_SERVER_SHELL_OPEN = @import("win32.zig").WM_APP_REOPEN_SERVER_SHELL_OPEN;
 const WM_APP_VOICE_STEP = @import("win32.zig").WM_APP_VOICE_STEP;
 const WM_APP_CHAT_FILE_READY = @import("win32.zig").WM_APP_CHAT_FILE_READY;
 const WM_APP_CHAT_COPY_CODE = @import("win32.zig").WM_APP_CHAT_COPY_CODE;
@@ -602,6 +603,7 @@ const SEARCH_CUSTOMCMD_EDIT_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_E
 const SEARCH_CUSTOMCMD_RELOAD_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_RELOAD_OFFSET;
 const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
+const SEARCH_REOPEN_SERVER_SHELL_OFFSET = @import("app_state.zig").SEARCH_REOPEN_SERVER_SHELL_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
 const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
@@ -4506,6 +4508,30 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
+        WM_APP_REOPEN_SERVER_SHELL_OPEN => {
+            if (app_state.active_shell >= app_state.shell_count) return 0;
+            const host = @import("capacity.zig").remoteHostForShell(&app_state.shells[app_state.active_shell]) orelse {
+                showHeaderNoticeAscii("Reopen server shell needs a server ssh or tmux tab", 3500, true);
+                return 0;
+            };
+            if (@import("vps.zig").inactiveTmuxCountForHost(host) == 0) {
+                showHeaderNoticeAscii("No detached tmux sessions on this host", 3500, true);
+                return 0;
+            }
+            if (app_state.g_inbox_active) closeInbox(hwnd);
+            _ = SendMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
+            @import("command_palette.zig").enterReopenServerShellMode(host);
+            app_state.g_search_len = 0;
+            app_state.g_search_sel = if (app_state.g_search_result_count > 1) 1 else 0;
+            app_state.g_search_scroll = 0;
+            updateSearchResults();
+            if (app_state.g_search_result_count > 1) {
+                app_state.g_search_sel = 1;
+                keepSearchSelectionVisible();
+            }
+            _ = InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
         WM_APP_WS_SNOOZE_OPEN => {
             if (!app_state.g_single_window) {
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
@@ -4783,6 +4809,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_openall_host_mode) {
                 app_state.g_search_openall_host_mode = false;
+                app_state.g_search_sel = 0;
+                app_state.g_search_scroll = 0;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
+            } else if (app_state.g_search_reopen_server_shell_mode) {
+                app_state.g_search_reopen_server_shell_mode = false;
+                app_state.g_search_len = 0;
                 app_state.g_search_sel = 0;
                 app_state.g_search_scroll = 0;
                 updateSearchResults();
@@ -5715,6 +5748,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_SNIPPET_BACK_OFFSET) {
+                    if (app_state.g_search_reopen_server_shell_mode) {
+                        app_state.g_search_reopen_server_shell_mode = false;
+                        app_state.g_search_len = 0;
+                        app_state.g_search_sel = 0;
+                        app_state.g_search_scroll = 0;
+                        updateSearchResults();
+                        _ = InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    }
                     app_state.g_search_snippet_mode = false;
                     app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_snippet_delete_confirm = null;
@@ -6322,9 +6364,32 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, if (spawned_terminal) 200 else 50, null);
                     return 0;
                 }
+                if (target == SEARCH_REOPEN_SERVER_SHELL_OFFSET) {
+                    if (app_state.active_shell >= app_state.shell_count) return 0;
+                    const host = @import("capacity.zig").remoteHostForShell(&app_state.shells[app_state.active_shell]) orelse {
+                        showHeaderNoticeAscii("Reopen server shell needs a server ssh or tmux tab", 3500, true);
+                        return 0;
+                    };
+                    if (@import("vps.zig").inactiveTmuxCountForHost(host) == 0) {
+                        showHeaderNoticeAscii("No detached tmux sessions on this host", 3500, true);
+                        return 0;
+                    }
+                    @import("command_palette.zig").enterReopenServerShellMode(host);
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    if (app_state.g_search_result_count > 1) {
+                        app_state.g_search_sel = 1;
+                        keepSearchSelectionVisible();
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) {
                     const open_session = target == SEARCH_OPEN_SESSION_MENU_OFFSET;
                     app_state.g_search_open_session_mode = open_session;
+                    app_state.g_search_reopen_server_shell_mode = false;
                     app_state.g_search_shells_mode = !open_session;
                     app_state.g_search_snippet_mode = false;
                     app_state.g_search_snippet_manage_mode = false;
