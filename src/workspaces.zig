@@ -997,7 +997,11 @@ pub fn restoreArchivedWorkspaceByIndex(wi: u32) bool {
     const id = entry.id[0..entry.id_len];
     const name = entry.name[0..entry.name_len];
     if (app_state.g_single_window) {
-        if (findMyWorkspaceSlot(id) == null and (app_state.g_lws_count >= MAX_LWS or (!absorbWorkspaceIntoSlots(id, name) and !openSyncedWorkspaceSlot(id, name)))) return false;
+        if (findMyWorkspaceSlot(id) == null) {
+            if (workspaceSessionFileExists(id)) {
+                if (app_state.g_lws_count >= MAX_LWS or !absorbWorkspaceIntoSlots(id, name)) return false;
+            } else if (!openSyncedWorkspaceSlot(id, name)) return false;
+        }
     } else if (spawnWorkspaceWindowAndWait(id) == null) return false;
     const registry_lock = lockWorkspaceRegistry() orelse return false;
     defer unlockWorkspaceRegistry(registry_lock);
