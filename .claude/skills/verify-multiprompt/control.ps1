@@ -346,6 +346,11 @@ try {
         $env:MP_VERIFY_STATE = $remoteState
         $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        if ($Feature -eq 'fresh-start') {
+            $socketTemp = Join-Path ([IO.Path]::GetPathRoot($scratch)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+            New-Item -ItemType Directory -Force $socketTemp, (Join-Path $scratch 'profile/home/.local/state/multiprompt/agent-host'), (Join-Path $socketTemp 'mp-agent-host-0') | Out-Null
+            $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
+        }
         if ($shapeProof) {
             $shapeFile = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1040/chat-shapes.json')).Path
             & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-shapes $shapeFile
@@ -377,6 +382,8 @@ try {
             $remoteDocument.sid = $remoteSids['verify-fresh-start']
             $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY bootstrap-fresh-start
+            if ($LASTEXITCODE -ne 0) { throw 'Fresh start host bootstrap failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         if ($Feature -eq 'chat-slash') {

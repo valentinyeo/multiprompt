@@ -1215,6 +1215,8 @@ def reader_namespace():
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
         fixture.install(namespace, ROOT, record)
+        install_reaction_worker(namespace)
+        record("fresh-start-boundary.jsonl", worker="in-process production dispatch and connector polling")
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1556,6 +1558,28 @@ def transport_reader():
             close(cid)
 
 
+def bootstrap_fresh_start_host():
+  namespace = reader_namespace()
+  value = state()
+  if value.get("name") != "fresh-start":
+      raise ValueError("bootstrap-fresh-start requires fresh-start state")
+  tmux = "verify-fresh-start"
+  sid = value["sids"][tmux]
+  index = value["sessions"].index(tmux)
+  cwd = value.get("cwds", {}).get(tmux, f"C:/verify/work{index}")
+  paths = namespace["host_paths"]("claude", sid)
+  if not paths["config"].exists():
+      namespace["host_write"](paths["config"], dict(
+          enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
+          command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
+  started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+  record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
+  if started.get("status") not in ("started", "already"):
+      raise RuntimeError("Production host failed to start: " + str(started))
+  namespace["start_message_worker"](dict(message_protocol=1, tmux=tmux, provider="claude", sid=sid), None)
+  record("fresh-start-host.jsonl", stage="bootstrapped", sid=sid, tmux=tmux)
+
+
 def serve_reader():
     namespace = reader_namespace()
     if state().get("name") == "fresh-start":
@@ -1746,4 +1770,4 @@ def ssh():
 
 
 if __name__ == "__main__":
-    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else run_message_worker() if MODE == "message-worker" else ssh())
+    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else run_message_worker() if MODE == "message-worker" else bootstrap_fresh_start_host() if MODE == "bootstrap-fresh-start" else ssh())

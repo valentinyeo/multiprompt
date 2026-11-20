@@ -56,12 +56,18 @@ try {
         $script:transcript.Count -eq 1
     } 'Chat View transcript visible' 45
     Wait-ChatFocus 'Edit' 'fresh-start-ready'
+    $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
+    Wait-Until {
+        (Get-Content $log -Raw) -match '\[chat\] transcript load shell=\d+ ok'
+    } 'seeded transcript painted before send' 45
     for ($n = 1; $n -le 2; $n++) {
         $text = "fresh-start probe $n"
         Type-Text $text
         Press @(0x0D) "Enter: send composer message $n"
-        Wait-Until { (Get-Content $log -Raw) -match [regex]::Escape($text) } "composer message $n recorded" 30
-        Wait-Until { (Get-Content $log -Raw) -match 'Fresh-start probe|fresh-start probe' -or (Get-Content (Join-Path $remoteState 'fresh-start-host.jsonl') -ErrorAction SilentlyContinue | Select-String '"stage": "replied"').Count -ge $n } "hosted reply $n" 45
+        Wait-Until {
+            if (-not (Test-Path $hostJsonl)) { return $false }
+            @((Get-Content $hostJsonl -Raw) -split "`n" | Where-Object { $_ -match '"stage": "replied"' }).Count -ge $n
+        } "hosted reply $n" 90
     }
     $before = Capture-Identity 'before'
     Save-Json $before 'fresh-start-before.json'
