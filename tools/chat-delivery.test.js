@@ -431,7 +431,6 @@ fn chatSendNowRoute(_: ShellKind, _: u8) ChatSendNowRoute { return .terminal_key
 fn chatQueuedSendNowTarget(_: u32) ?u64 { return null; }
 fn chatHostSendNowStart(_: u32, _: ?[]const u16, _: bool) bool { return false; }
 fn chatSendNowDispatched() void {}
-fn chatSendNowFinish() void {}
 fn chatSendForceBracketed(_: u32) bool { return true; }
 fn chatSendEnterDelayMs(_: ShellKind) u32 { return 0; }
 var g_chat_message_sync_job: ?*anyopaque = null;

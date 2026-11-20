@@ -2324,7 +2324,7 @@ fn chatHostSendNowThread(key: @import("chat_transcript.zig").Identity, text: []u
     reply = chatSendNowResult(wire.items);
 }
 
-fn chatSendNowFinish() void {
+pub fn chatSendNowFinish() void {
     const result = app_state.g_chat_send_now_result.swap(SEND_NOW_NONE, .acq_rel);
     switch (result) {
         SEND_NOW_OK => showHeaderNoticeAscii("Asked this chat to take the queued message now", 2500, false),
@@ -3001,7 +3001,6 @@ pub fn chatOutboxTick() void {
         chatOutboxChanged();
     }
     chatCancelFinish();
-    chatSendNowFinish();
     chatTmuxSendFinish();
     chatMessageSyncFinish();
     if (app_state.g_chat_pending_reset != null and app_state.g_chat_tmux_send_job == null and GetTickCount64() >= app_state.g_chat_reset_next) {
