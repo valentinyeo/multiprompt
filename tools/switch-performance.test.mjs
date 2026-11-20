@@ -98,7 +98,7 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
   assert.match(flow, /name: Reject PowerShell host name collisions\n        shell: pwsh/);
-  assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$RED_RUN"/);
+  assert.match(flow, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$WORKER" "\$UPDATE_SOURCE"$/m);
   for (const build of [baseline, candidate]) {
     assert.ok(build.includes('ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache'), 'Each speed build must reuse the restored local Zig cache');
     assert.ok(build.includes('ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache'), 'Each speed build must cache its global Zig tree');

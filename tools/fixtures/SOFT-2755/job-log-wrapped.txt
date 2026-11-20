@@ -1,0 +1,8 @@
+2026-11-19T05:13:29.9612244Z ##[group]Launch Doctor Drive Evidence Cleanup
+2026-11-19T05:13:29.9630233Z Waited 20 s for palette contains named command Mute Tab. 
+2026-11-19T05:13:29.9643611Z Verification failed: {"feature":"inbox","status":"failed","version":"0.28.1762","sha256":"e86a8ab","checks":{"name":"inbox-toggle-read"},"cleanup":"owned process
+2026-11-19T05:13:29.9645508Z tree stopped; scratch copied to evidence/data then removed","error":"Waited 20 s for palette contains named command Mute Tab. ","scratchRemoved":true}
+2026-11-19T05:13:29.9648139Z     + CategoryInfo          : OperationStopped: (Verification fa...hRemoved":true}:String) [], RuntimeException
+2026-11-19T05:13:29.9648659Z     + FullyQualifiedErrorId : Verification failed: {"feature":"inbox","status":"failed"}
+2026-11-19T05:13:29.9650000Z     $failure = @{ feature = $env:FEATURE; error = 'Workflow failed before the harness produced a result; inspect the job log' }
+2026-11-19T05:13:29.9651000Z ##[error]Process completed with exit code 1.

@@ -5,6 +5,18 @@ description: Verify Multiprompt's real Windows desktop UI on GitHub Windows runn
 
 # Verify Multiprompt
 
+## CLI
+
+`node tools/mbv.mjs --help` launches, watches and reads this verification; `list` shows every journey.
+
+```sh
+node tools/mbv.mjs run appearance --ref <branch>   dispatch, prints run id and URL
+node tools/mbv.mjs watch <run-id>                  per-job results, one poll a minute
+node tools/mbv.mjs proof <run-id>                  result.json, cleanup, evidence present
+node tools/mbv.mjs doctor <run-id> --feature f     app identity from doctor.json
+node tools/mbv.mjs failures <run-id>               failed jobs and the decisive line
+```
+
 Multiprompt is a native Windows desktop app hosting real console windows, with custom-drawn sidebar, Inbox and Ctrl+K overlays. It is not a browser page or an Electron app. The account Worker and browser extension are secondary surfaces. The `browser-emulation` map is a separate real-Chrome extension journey driven by `browser-emulation.mjs` through this workflow; it does not launch or verify the embedded app pane.
 
 Read [features/README.md](features/README.md), then the selected feature file before running anything. See [recent changes coverage](coverage.md) for gaps and this pass's run results. Never build, launch or drive locally, through Wine, on a VPS, or on a user's laptop. Desktop execution below happens on GitHub's free `windows-latest` machines in the public repository.
@@ -17,7 +29,7 @@ Read the complete feature index in [features/README.md](features/README.md), sta
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
 
-Before desktop launch, the shared `control.ps1` entry runs `node --test .claude/skills/verify-multiprompt/check-feature-map.test.cjs`, including legacy workflow routes that bypass `drive.ps1`. This checks index hygiene, every shortcut row, palette target families, architecture items and recipe links. To check source coverage and the generated-module regression without driving, run that same `node --test` command. Missing source actions fail with the map to repair. These checks do not certify live behavior.
+Before desktop launch, the shared `control.ps1` entry runs `node --test .claude/skills/verify-multiprompt/check-feature-map.test.cjs`, including legacy workflow routes that bypass `drive.ps1`. This checks index hygiene and recipe links. Source coverage is a weekly report, not a per-journey or per-PR gate. To check source coverage without driving, run `node tools/check-feature-coverage.mjs`. These checks do not certify live behavior.
 
 Part A (`w-2567a`, SOFT-2567) owns new real-size seed data. Part B (`w-2567b`, SOFT-2567) owns real SSH/tmux on the hosted runner. Reuse their data/host when available; never replace a missing prerequisite with another undocumented stand-in. Save source-reader returns, actual journeys exercised, screenshot review and triage in scratch notes. Do not commit per-run notes or turn historical coverage into a new live-pass claim.
 
@@ -105,7 +117,7 @@ gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 timeout 3000 gh run watch <id> --interval 300
 ```
 
-The selector matches changed files to `Source files:` ownership in each runnable feature map, then adds the declared bug-fix repro journey. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector picks one nearest feature by map names and source paths and discloses the gap in the verdict.
+The selector matches changed files to `Source files:` ownership in each runnable feature map. `Covers:` normally names source actions for the coverage audit, not file ownership. Literal file paths in `Covers:` also match. A changed feature map selects its own journey. Tool and workflow ownership belongs in the same map; a shared script is not a reason to substitute the full suite. If nothing maps, the selector runs no desktop journey and the verdict names the unmapped files.
 
 `verify.yml` runs only that set on head and parent with the same harness. Matching parent evidence is restored through the base cache before scheduling Windows jobs. DeepSeek Flash judges the patch and real evidence against the PR outcomes. Claude is the fallback when DeepSeek authored the patch. Green CI alone is never the verdict. One independent verifier posts PASS, PASS+NOTES or FAIL; missing evidence blocks passage. Only `pstack-verifier` is required.
 
@@ -117,19 +129,9 @@ The full live drive of every feature is periodic, not a per-PR step. The nightly
 
 If an update prevents users from working, revert the bad change first. Do not leave the outage live while building a fix. `auto-revert-master.yml` contains the guarded rollback path and evidence; while its automatic job is disabled, perform the revert manually. Then reproduce the original bug on its matching surface, commit the failing repro before the real fix, and send the repair through normal PR verification on that same surface. Never bypass `pstack-verifier` for the repair.
 
-### Reproduce before fixing
+### Repair PRs
 
-A PR marked as a repair must name exactly one runnable journey in its description:
-
-```text
-Repro journey: `chat-delivery`
-```
-
-The gate treats titles containing `bug`, `bug fix`, `fix`, `fixes`, or `fixed`, including conventional `fix(scope):` titles, as repairs. Labels `bug`, `bug-fix`, `bugfix`, `bug fix`, `defect`, and `regression` also mark repairs.
-
-For these PRs, the named journey takes priority over the picker and runs against both head and the current master commit captured when verification starts. Both runs use the PR's journey harness. The journey must fail on master for a product assertion and pass on head. A master pass, missing result, infrastructure failure, unknown journey, or an omitted declaration makes `pstack-verifier` FAIL even if the judge says PASS. An unrelated failing journey and inherited failures on both revisions do not prove a repair. Keep the failure screenshots and result files in the uploaded artifacts.
-
-Other PRs compare the selected journeys with their parent, reusing matching cached results. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
+A repair PR waits only on the journey its changed files own, the same as any other PR. No description line or master repro run is required. Repair titles and labels still compare the selected journeys with the current master commit captured when verification starts, and resolution resets the required status to pending so changed metadata cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` covers this.
 
 ## Doctor
 

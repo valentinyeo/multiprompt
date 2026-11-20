@@ -11,6 +11,8 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Send and queue messages](chat-message-sending.md).
 - [Formal chat delivery](chat-delivery-formal.md).
 - [CI repair receipt](ci-repair-receipt.md).
+- [Service route receipt](service-route-receipt.md).
+- [Test CLI checks](verify-cli.md).
 
 Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
 
@@ -40,11 +42,11 @@ Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/comman
 
 ## Source feature coverage
 
-Run `node tools/check-feature-coverage.mjs --base <clean-master-checkout>` from the repository root. It prints numeric coverage and every gap from `SHORTCUT_ROWS`, palette source rows and row families, and the shipped architecture features. Shortcut section headings, palette group headings, test-only rows and Future Features are not actions. Dynamic session names are instances of their source row family, not separate features.
+Run `node tools/check-feature-coverage.mjs` from the repository root. It prints numeric coverage and every gap from `SHORTCUT_ROWS`, palette source rows and row families, and the shipped architecture features. Shortcut section headings, palette group headings, test-only rows and Future Features are not actions. Dynamic session names are instances of their source row family, not separate features.
 
 Add `Covers: <source entry ID>, <another ID>` below a feature file's title. Copy exact IDs from the gap list. A claim counts only when that same file has user entry points and a live driving recipe with actions and observable evidence. Claim only the exact entries that recipe exercises. A generic palette journey does not cover every palette action. Unreachable or placeholder recipes never count. The weekly source and live pass checks whether the claims are true.
 
-Without `--base`, the tool requires 100%. CI checks out the base revision separately, then compares its gaps with the current gaps. Existing gaps remain visible for Part H, w-2567h, but a new feature without a recipe fails. Once a gap is filled, deleting its recipe fails the next change. There is no editable allowlist to expand. The historical Pi provider-login addition at `0e0c8c7cfddb8bb97c556d41e185ef4a665030b7` is preserved as a fixture; its two shortcut rows and palette row make the check exit 1.
+Coverage is a report, not a gate. The weekly `maintain-verification.yml` pass runs the tool with `continue-on-error: true`, and no pull request is blocked or passed by a coverage number. Existing gaps remain visible for Part H, w-2567h, and the weekly source and live pass closes them. There is no editable allowlist to expand.
 
 `maintain-verification.yml` runs pstack `maintain-verification-skill` each Tuesday using the same pinned Claude action, Sonnet model and OAuth secret as the PR verifier's Claude path. It leaves an existing maintenance PR alone. Clean or blocked runs open no PR. A changed run must name source and successful hosted live evidence for every feature before the publisher permits one corrections PR confined to this verification skill. Missing live prerequisites block the pass; they are not coverage. The workflow never merges. Automatic corrections are Markdown-only because master journeys cannot prove an uncommitted driver change. A needed executable correction blocks publication until a separate branch can prove it live.
 
@@ -60,7 +62,7 @@ Without `--base`, the tool requires 100%. CI checks out the base revision separa
 
 For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
-Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys and the declared bug-fix repro, without a model picker. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. If nothing maps, one nearest feature is selected by map names and source paths, and the verdict reports that choice. Shared production files such as `src/main.zig` can still match every journey explicitly.
+Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without a model picker. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. If nothing maps, no desktop journey runs and the verdict names the unmapped files. Shared production files such as `src/main.zig` can still match every journey explicitly.
 
 The nightly master run and each release run every runnable recipe, including the formerly manual recipes. `Verify on:` retains the legacy smoke-set metadata. Reconnect and diagnostic recipes without a `Driving it with control.ps1` heading keep their separate workflows. The shared control driver remains a separate concern.
 

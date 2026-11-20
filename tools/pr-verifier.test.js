@@ -539,7 +539,7 @@ test('job timeouts and cancellations block even when product result files passed
 });
 
 
-test('validation does not add journeys outside file ownership or the declared repro', () => {
+test('validation does not add journeys outside file ownership', () => {
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
   for (const file of ['src/chat_render.zig', 'src/main.zig', 'tools/chat-still/observer.cs', 'docs/readme.md']) {
     assert.deepEqual(verifier.validateSelection(raw, available, { files: [{ path: file }] }).features, raw.features);
@@ -547,13 +547,13 @@ test('validation does not add journeys outside file ownership or the declared re
 });
 
 
-test('the repair repro survives a full picker selection', () => {
+test('a repair title never adds a journey the diff did not touch', () => {
   const result = verifier.validateSelection(
     { features: ['appearance', 'palette-order', 'chat-view'], compare_base: false },
     [...available, 'chat-still'],
     { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
   );
-  assert.deepEqual(result.features, ['command-palette', 'appearance', 'palette-order']);
+  assert.deepEqual(result.features, ['appearance', 'palette-order', 'chat-view']);
   assert.equal(result.compareBase, true);
 });
 

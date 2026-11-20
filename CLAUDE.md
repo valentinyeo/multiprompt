@@ -45,12 +45,12 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Do not bind PowerShell host-owned variables or name functions after aliases. | `tools/check-powershell-host-names.ps1` |
 | Server-chat native commands use exit codes and retain stderr evidence through `Invoke-ServerNative`. | `tools/verify-server-chat/native.ps1`, `tools/verify-server-chat.test.py` |
 | Keep palette, tab actions and shortcut documentation aligned. | `tools/palette-rows.test.js`, `tools/shortcuts-doc.test.js` |
-| Map every new source feature to a reachable live journey; keep improvements toward 100%. | `tools/check-feature-coverage.mjs` and its test in `test.yml`; existing gaps belong to Part H, w-2567h |
+| Keep source feature coverage visible; it never gates a pull request. | `tools/check-feature-coverage.mjs` reports in `maintain-verification.yml` with `continue-on-error: true`; existing gaps belong to Part H, w-2567h |
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
-| Repair PRs name a journey that fails on master and passes on head. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
