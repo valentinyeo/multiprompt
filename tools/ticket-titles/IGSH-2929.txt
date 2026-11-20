@@ -1,0 +1,1 @@
+Long message vanishes while the chat is busy, comes back later

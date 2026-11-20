@@ -6,6 +6,10 @@ assert.equal(typeof readControlSource, 'function', 'Control readers must follow 
 const fs = require('node:fs');
 const path = require('node:path');
 
+const geometryFile = path.join(__dirname, 'usage-icon-geometry.js');
+const statusIcon = fs.existsSync(geometryFile) ? require(geometryFile) : null;
+if (statusIcon) assert.equal(typeof statusIcon.usageIconGeometry, 'function', 'Status icon geometry must come from one reader');
+
 function featureMatrix(source) {
   assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
@@ -133,7 +137,7 @@ test('PR verification stays unconditional while duplicate click-through drives s
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
-  assert.match(read('.github/workflows/release.yml'), /journeys:[\s\S]*?feature: all/);
+  assert.doesNotMatch(read('.github/workflows/release.yml'), /feature: all|journey-gate/, 'publication runs no journeys');
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
@@ -1610,13 +1614,11 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.ok(featureMatrix(workflow).full.includes('status-card'));
   const journey = control.slice(control.indexOf("        'status-card' {"), control.indexOf("        'command-palette' {"));
   assert.ok(journey.length > 0);
-  assert.match(journey, /Footer divider is missing/);
   assert.match(journey, /Selected last row is not fully visible/);
   assert.match(journey, /Sidebar moved after bottom scroll/);
-  assert.match(journey, /Usage bar \$i color mismatch/);
   assert.match(journey, /Usage hover changed keyboard focus/);
   assert.match(journey, /Usage hover closed crossing the popup bridge/);
-  assert.match(journey, /signed staged update pill visible/);
+  assert.match(journey, /signed staged update card shows its Restart button/);
   for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
   assert.match(journey, /Assert-UsageCardPixels 'pill-open'/);
   assert.match(journey, /MultiPromptUsageCard/);
@@ -1637,6 +1639,57 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(read(skill + 'features/README.md'), /\[Status card\]\(status-card.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`status-card`/);
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-673 |'));
+});
+
+test('SOFT-2892 status-card journey proves the redesigned sidebar status icon instead of the removed footer', () => {
+  const journey = control.slice(control.indexOf("        'status-card' {"), control.indexOf("        'command-palette' {"));
+  assert.ok(journey.length > 0);
+  for (const removed of [/Footer divider/, /Usage bar \$i color mismatch/, /expectedFooterTop/, /\$footerTop/, /\$footerBars/]) assert.doesNotMatch(journey, removed);
+  assert.match(journey, /\$iconGeometry = & node \(Join-Path \$PSScriptRoot '\.\.\/\.\.\/\.\.\/tools\/usage-icon-geometry\.js'\)/);
+  assert.match(journey, /Status icon geometry unavailable from the app source/);
+  assert.match(journey, /Status icon is missing at/);
+  assert.match(journey, /Status icon paints outside its published bounds at/);
+  assert.match(journey, /Status icon gauge track is missing/);
+  assert.match(journey, /Status icon gauge shows no usage ink/);
+  assert.match(journey, /\$pillX = \$icon\.clientCenterX/);
+  assert.match(journey, /\$pillY = \$icon\.clientCenterY/);
+  assert.match(journey, /clientCenterX = \$iconClientX/);
+  assert.match(journey, /hover on the status icon opens the usage card/);
+  assert.match(journey, /The removed footer divider is back/);
+  assert.match(journey, /The removed footer usage bars are back/);
+  assert.doesNotMatch(journey, /target=6218/);
+  assert.doesNotMatch(journey, /AI usage this week/);
+  assert.match(journey, /'MultiPromptUsageCard', \$iconGeometry\.card\.title/);
+  assert.match(journey, /session\.json\.launch\.json/);
+  assert.match(journey, /\(Get-Content \$launchPath -Raw \| ConvertFrom-Json\)\.sort_auto/);
+  assert.match(journey, /Assert-UsageCardPixels 'pill-open' \$cardBounds \$iconGeometry\.card/);
+  assert.match(journey, /\$iconGeometry\.card\.maxWidth/);
+  assert.match(journey, /\$iconGeometry\.card\.gap/);
+  assert.match(journey, /App frame did not reach the foreground for the real click/);
+  if (statusIcon) {
+    const geometry = statusIcon.usageIconGeometry();
+    const capacity = fs.readFileSync(path.join(root, 'src/capacity.zig'), 'utf8');
+    const card = fs.readFileSync(path.join(root, 'src/usage_card.zig'), 'utf8');
+    assert.equal(geometry.icon.height, geometry.icon.topInset - geometry.icon.bottomInset);
+    assert.equal(geometry.icon.centerX, geometry.icon.left + geometry.icon.width / 2);
+    assert.equal(geometry.icon.centerYInset, (geometry.icon.topInset + geometry.icon.bottomInset) / 2);
+    assert.ok(capacity.includes(`.top = @max(0, client.bottom - uiScaled(${geometry.icon.topInset}))`));
+    assert.ok(capacity.includes(`.bottom = client.bottom - uiScaled(${geometry.icon.bottomInset})`));
+    assert.ok(card.includes(`smooth.fillEllipse(dc, rect, RGB(${geometry.paint.fill.join(', ')}))`));
+    assert.ok(card.includes(`smooth.fillRoundRect(dc, bar, px(3), RGB(${geometry.card.track.join(', ')}))`));
+    assert.ok(card.includes(`RGB(${geometry.card.panel.join(', ')})`));
+    assert.ok(card.includes(`AI SUBSCRIPTIONS`));
+    assert.ok(card.includes(`RGB(${geometry.card.label.join(', ')})`));
+    assert.ok(card.includes(`L("${geometry.card.title}")`));
+    assert.ok(card.includes(`px(${geometry.card.maxWidth})`));
+    assert.ok(card.includes(`pill.top - px(${geometry.card.gap})`));
+    assert.throws(() => statusIcon.usageIconGeometry({ 'capacity.zig': 'pub fn sidebarStickyCardRect() RECT { return .{}; }' }), /changed in the app source/);
+  }
+  const map = read(skill + 'features/status-card.md');
+  assert.match(map, /usage-icon-geometry\.js/);
+  assert.match(map, /IGSH-1303/);
+  assert.doesNotMatch(map, /stays visible above the pill/);
+  assert.doesNotMatch(map, /closed pill must show expected pace colors/);
 });
 
 test('ISSUE-569 grouped restore journey splits a real home group before every targeted restart', () => {
@@ -2463,7 +2516,11 @@ test('release sidebar pixel oracles use the live width and approved expanded row
   const groups = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class CodeFontProof {'));
   assert.doesNotMatch(groups, /S\(220, dpi, scale\)|S\(38, dpi, scale\)/);
   const height = Number(read('src/browser_pane.zig').match(/!app_state.g_sidebar_collapsed\) (\d+)/)[1]);
-  assert.equal(Number(groups.match(/headerHeight = 28, rowHeight = S\((\d+),/)[1]), height);
+  const headerHeight = Number(read('src/sidebar.zig').match(/return if \(app_state\.g_sidebar_collapsed\) GROUP_HEADER_H else uiScaled\((\d+)\);/)[1]);
+  const heights = groups.match(/headerHeight = S\((\d+), dpi, scale\), rowHeight = S\((\d+),/);
+  assert.ok(heights, 'the proof must scale the expanded group header and member rows from the saved DPI');
+  assert.equal(Number(heights[1]), headerHeight, 'the proof header height must follow the app sidebar header');
+  assert.equal(Number(heights[2]), height, 'the proof row height must follow the app sidebar row');
   assert.match(groups, /rowBottom = rowTop \+ S\(58, dpi, scale\)/);
   for (const feature of ['group-rail', 'pane-layout']) {
     const driver = read(skill + `control-feature-${feature}.ps1`);
@@ -2524,6 +2581,14 @@ Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
   assert.match(green.stdout, /OWNED_SLOW_BROWSER_TRANSITION_OK/);
 });
 
+
+test('SOFT-2897 desktop driver clears a leaked child exit code after a passed result', () => {
+  const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
+  const verdict = driver.indexOf("if (-not (Test-Path evidence/result.json)) { throw 'Desktop journey produced no result.json' }");
+  const reset = driver.indexOf('$global:LASTEXITCODE = 0', verdict);
+  assert.ok(verdict >= 0 && reset > verdict, 'driver step must validate result.json before clearing LASTEXITCODE');
+  assert.match(driver.slice(verdict, reset + 1), /\$verdict\.status -ne 'passed'/);
+});
 
 test('IGSH-1176 browser warning times out before its job cancellation boundary', () => {
   const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
@@ -2715,4 +2780,48 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
   assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
   assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
+});
+
+test('SOFT-2713 bot-photo closes its tab with the id the app routes "close tab" to', () => {
+  const palette = read('src/command_palette.zig');
+  const constants = new Map([...read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)]
+    .map(match => [match[1], Number(match[2])]));
+  const route = palette.match(/action\.target == SEARCH_TABCTX_ARCHIVE and labelsMatchQuery\(&\.\{([^}]*)\}, query\)/);
+  assert.ok(route, 'the app must route the archived-chat row through its own alias list');
+  const aliases = [...route[1].matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.ok(aliases.includes('close tab'), `the archived-chat row must answer "close tab"; it answers ${aliases.join(', ')}`);
+  const archive = constants.get('SEARCH_TABCTX_ARCHIVE');
+  assert.ok(Number.isInteger(archive), 'the app must pin the archived-chat row to a routing id');
+  const drive = read('tools/verify-bot-photo/drive.ps1');
+  const query = drive.match(/Query '(close tab)' '([^']+)'/);
+  assert.ok(query, 'the driver must close its second tab through the global palette');
+  assert.ok(aliases.includes(query[1]), `the driver must type a query the archived-chat row answers; it types "${query[1]}"`);
+  assert.equal(query[2], String(archive), `the driver must expect the id the app routes "${query[1]}" to`);
+});
+
+test('SOFT-2713 group-rail selects saved sessions by name, not by tab-order digits', () => {
+  const driver = read(skill + 'control-feature-group-rail.ps1');
+  const byName = [...driver.matchAll(/Invoke-JourneyCommand (?:'(Rail [A-F])'|\('Rail ' \+ \[char\]\(65 \+ \$selected\)\))([^\r\n]*)/g)];
+  assert.equal(byName.length, 4, 'the driver must select both grouped sessions by their saved names');
+  for (const command of byName) {
+    assert.match(command[2], /^\s+-Session\b/, `selecting ${command[1] || 'a rail session'} must resolve the saved name, not a tab position`);
+  }
+  assert.doesNotMatch(driver, /Press @\(0x11, 0x3\d\)/, 'Ctrl+<n> follows manual tab order, so it cannot reach a named session');
+  assert.doesNotMatch(driver, /0x31 \+ \$selected/, 'the grouped-selection loop must not count tab positions');
+  const library = read(skill + 'control-library.ps1');
+  const session = library.slice(library.indexOf('if ($Session) {'), library.indexOf('} else {', library.indexOf('if ($Session) {')));
+  assert.match(session, /\$tabs\[\$i\]\.name -ceq \$Name/, 'the -Session switch must match the app-saved session name exactly');
+  assert.match(session, /\$matching\.Count -ne 1/, 'the -Session switch must refuse an ambiguous name instead of picking a position');
+});
+
+test('SOFT-2713 group-rail map states the heights the proof measures', () => {
+  const map = read(skill + 'features/group-rail.md');
+  const native = read(skill + 'control-native.cs');
+  const header = native.match(/int headerHeight = S\((\d+), dpi, scale\), rowHeight = S\((\d+), dpi, scale\);/);
+  assert.ok(header, 'the proof must derive the expanded header and member-row heights from the saved DPI');
+  assert.match(map, new RegExp(`Expanded group headers scale from ${header[1]} pixels and member rows scale from ${header[2]} pixels`), 'the map must state the heights the proof measures');
+  const section = native.match(/int sectionHeight = S\((\d+), dpi, scale\), buttonHeight = S\((\d+), dpi, scale\);/);
+  assert.ok(section, 'Recents must scale its height too');
+  assert.equal(section[1], header[1], 'Recents must share the expanded header height');
+  assert.match(map, /Workspace pills retain their 34-pixel height/);
 });

@@ -1,0 +1,19 @@
+{
+  "feature": "chat-still",
+  "verdict": "pass",
+  "version": "0.28.1762",
+  "cases": [
+    {
+      "name": "steady",
+      "ok": true
+    },
+    {
+      "name": "scrolling",
+      "ok": false,
+      "message": "pixels moved"
+    }
+  ],
+  "errors": [
+    "nothing"
+  ]
+}

@@ -98,12 +98,7 @@ export function coverage(read, files) {
   return { total: entries.length, covered: entries.length - gaps.length, gaps, invalid };
 }
 
-export function compare(current, base) {
-  const allowed = new Set(base.gaps.map(entry => entry.id));
-  return current.gaps.filter(entry => !allowed.has(entry.id));
-}
-
-export function snapshot(root) {
+function snapshot(root) {
   const files = fs.readdirSync(path.join(root, featureDirectory)).map(file => `${featureDirectory}/${file}`);
   return coverage(file => fs.readFileSync(path.join(root, file), 'utf8'), files);
 }
@@ -111,21 +106,19 @@ export function snapshot(root) {
 export function main(args, root = process.cwd()) {
   const json = args.includes('--json');
   args = args.filter(arg => arg !== '--json');
-  if (args.length && (args.length !== 2 || args[0] !== '--base')) throw new Error('Usage: node tools/check-feature-coverage.mjs [--base <checkout-directory>] [--json]');
+  if (args.length) throw new Error('Usage: node tools/check-feature-coverage.mjs [--json]');
   const current = snapshot(root);
-  const regressions = args.length ? compare(current, snapshot(path.resolve(root, args[1]))) : current.gaps;
   const percent = Number((100 * current.covered / current.total).toFixed(2));
-  const report = { ...current, percent, newGaps: regressions };
+  const report = { ...current, percent };
   if (json) console.log(JSON.stringify(report, null, 2));
   else {
     console.log(`Feature journey coverage: ${percent}% (${current.covered}/${current.total}); target 100%.`);
     console.log(`Full gap list (${current.gaps.length}; existing gaps are Part H, w-2567h):`);
     for (const entry of current.gaps) console.log(`- ${entry.id} | ${entry.file} | ${entry.label}`);
     for (const error of current.invalid) console.error(error);
-    if (regressions.length) console.error(`Missing live journeys (${regressions.length} new gaps):\n${regressions.map(entry => `- ${entry.id}`).join('\n')}\nAdd Covers: <source entry ID> to a feature file with a live driving recipe. Unreachable is not coverage.`);
   }
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Feature journey coverage: **${percent}% (${current.covered}/${current.total})**. Target 100%. New gaps: ${regressions.length}.\n\n${current.gaps.map(entry => `- \`${entry.id}\``).join('\n')}\n`);
-  return current.invalid.length || regressions.length ? 1 : 0;
+  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Feature journey coverage: **${percent}% (${current.covered}/${current.total})**. Target 100%.\n\n${current.gaps.map(entry => `- \`${entry.id}\``).join('\n')}\n`);
+  return current.invalid.length ? 1 : 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,22 +1,20 @@
 # CI repair receipt
 
-Source files: tools/pr-verifier.cjs, tools/ci-receipt-summary.mjs, tools/strip-comments.mjs, .github/workflows/no-comments.yml, src/chat_echo.zig, src/chat_perf_test.zig, .claude/skills/verify-multiprompt/features/README.md, .github/workflows/ci-repair-receipt.yml, .github/workflows/pr-verifier.yml, openwiki/operations/base-journey-reuse.md, tools/base-journey-cache.test.js, .github/workflows/auto-release.yml, tools/reusable-workflow-permissions.test.js, tools/release-journeys.mjs
+Source files: tools/ci-receipt-summary.mjs, tools/strip-comments.mjs, .claude/skills/verify-multiprompt/features/README.md, .github/workflows/ci-repair-receipt.yml, .github/workflows/auto-release.yml, tools/reusable-workflow-permissions.test.js
 CI workflow: ci-repair-receipt.yml
 
 ## Sub-features
 
-Repairs to CI itself have no desktop journey. This map gives them a receipt. The PR verifier's recovery step must read a GitHub run list larger than Node's 1 MB pipe limit without failing with ENOBUFS. The no-comments check on a pull request fails only on comments that change adds or edits, so master's existing comments do not block every PR; the nightly run still checks the whole repository. The echo-assign budget (50 ms) is judged on the median of five trials per case, because the Windows thread CPU clock ticks in about 15.6 ms steps.
+Repairs to CI itself have no desktop journey. This map documents the path-filtered receipt workflow. The PR verifier recovery step must read a GitHub run list larger than Node's 1 MB pipe limit without failing with ENOBUFS.
 
 ## How to get to it (user POV)
 
-Nobody opens this from the app. A change to the files above runs the `CI repair receipt` workflow on GitHub, and the verifier reads its result.
+Nobody opens this from the app. A change to the files above runs the `CI repair receipt` workflow on GitHub as its own check. The verifier does not wait for that workflow or download its artifact.
 
 ## Driving it with GitHub CI
 
-The `CI repair receipt` workflow has two jobs. The Linux job runs `tools/pr-verifier-cancel.test.js`, `tools/strip-comments.test.js`, `tools/base-journey-cache.test.js`, `tools/reusable-workflow-permissions.test.js` and `tools/release-journeys.test.mjs` on the PR head. It then runs the same five files against the base source and records both exit codes, so `summary.json` shows the 2 MB runs payload test, the added-comments-only test, the base-journey scope test, the reusable-workflow permission test and the release-journey gate test failing on base and passing on head. The base-journey scope test reads `.github/workflows/pr-verifier.yml`, so it is red on a base that still reads `base_features` and green on head. The Windows job builds `src/chat_perf_test.zig` with Zig 0.16.0 at ReleaseSmall, runs only the `IGSH-991` tests and adds every `CPU961` trial line and the `CPU991` median line. One artifact named `ci-repair-receipt` holds both parts.
-
-The PR selector owns these files through `CI workflow:`, not a nearest desktop name. The verifier requires this workflow to pass on the exact PR head, downloads the artifact and gives the independent judge its raw summary and run receipt. When every file in a fix PR is owned by such a workflow and its summary shows the repro test red on base and green on head, that receipt is the repro. Missing, pending, failed or stale evidence cannot pass.
+The `CI repair receipt` workflow runs `tools/pr-verifier-cancel.test.js`, `tools/pr-verifier-download-retry.test.js`, `tools/strip-comments.test.js` and `tools/reusable-workflow-permissions.test.js` on the PR head. It then runs the same four files against the base source and records both exit codes, so `summary.json` shows the 2 MB runs payload test, the retried artifact download test, the added-comments-only test, the single head journey set and the reusable-workflow permission test failing on base and passing on head. The single-journey-set test reads `.github/workflows/pr-verifier.yml`, so it is red on a base that still runs a base build and green on head. One artifact named `ci-repair-receipt` holds the receipt.
 
 ## Gotchas
 
-The CPU991 part is a timing flake, so base cannot be made to fail on demand. Its receipt shows the head median and every trial, not a base failure. A product fix, or a fix PR with any file outside a workflow map, still needs a `Repro journey:` line. A PR that changes `tools/pr-verifier.cjs` without changing `tools/pr-verifier-cancel.test.js` shows base green, so it needs its own repro. The base-journey scope test is the only part of this receipt that fails on base for a `.github/workflows/pr-verifier.yml` change.
+A PR that changes `tools/pr-verifier.cjs` without changing `tools/pr-verifier-cancel.test.js` shows base green, so it needs its own red-on-base test in that list. The single-journey-set test is the only part of this receipt that fails on base for a `.github/workflows/pr-verifier.yml` change.

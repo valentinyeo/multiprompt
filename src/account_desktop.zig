@@ -127,6 +127,7 @@ const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const CreateMutexW = @import("win32.zig").CreateMutexW;
 const ensureWorkspaceSlotId = @import("workspaces.zig").ensureWorkspaceSlotId;
 const syncInProcessWorkspacesToRegistry = @import("workspaces.zig").syncInProcessWorkspacesToRegistry;
+const removedWorkspaceNames = @import("workspaces.zig").removedWorkspaceNames;
 const debugLog = @import("diagnostics.zig").debugLog;
 const debugLog2 = @import("diagnostics.zig").debugLog2;
 const syncLog = @import("diagnostics.zig").syncLog;
@@ -1684,6 +1685,8 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
         }
     }
     restored = try appearance_intent.overlay(a, restored, g_appearance orelse &.{});
+    var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    restored = try account_layout.withoutRemovedWorkspaces(a, restored, removedWorkspaceNames(&removed_storage));
     const cache = try account_layout.restoreCache(a, valid, restored) orelse return error.LayoutCapacity;
     const normalized = try session_layout.encode(out, restored);
     errdefer out.free(normalized);
@@ -1773,6 +1776,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     var owned: [MAX_SHELLS]bool = undefined;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
     var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
     for (desired.tabs) |tab| {
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);

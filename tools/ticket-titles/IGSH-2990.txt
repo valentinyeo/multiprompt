@@ -1,0 +1,1 @@
+Saved browser pane does not return if Shortcuts is open at startup

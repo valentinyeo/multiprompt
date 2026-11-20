@@ -2,11 +2,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { discoverFeatures } = require('./verify-features.cjs');
 
+const SHARED_CORE_MAPS = 5;
+const MAX_JOURNEYS = 8;
+const SMOKE_JOURNEY = 'appearance';
+const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml']);
+
+function patternFor(source) {
+  return new RegExp(`^${source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+}
+
 function touchedJourneys(files, directory = path.join(__dirname, '../.claude/skills/verify-multiprompt/features')) {
   const { available } = discoverFeatures(directory);
-  const selected = new Set();
   const ciWorkflows = new Set();
   const unmapped = [];
+  let sourceChange = false;
   const maps = fs.readdirSync(directory).filter(file => file.endsWith('.md')).flatMap(file => {
     const feature = path.basename(file, '.md');
     const text = fs.readFileSync(path.join(directory, file), 'utf8');
@@ -16,33 +25,43 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
     const covers = text.match(/^Covers: (.+)$/m)?.[1].split(', ').filter(entry => /^(?:src|tools|extension|\.github|\.claude)\//.test(entry)) || [];
     return [{ feature, ciWorkflow, sources: [...sources, ...covers] }];
   });
+  const ownership = new Map();
+  for (const map of maps) for (const source of map.sources) ownership.set(source, (ownership.get(source) || 0) + 1);
+  const specificityOf = new Map();
   for (const file of files) {
     if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) continue;
-    const matches = maps.filter(map => file === `.claude/skills/verify-multiprompt/features/${map.feature}.md` || map.sources.some(source => {
-      const pattern = source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
-      return new RegExp(`^${pattern}$`).test(file);
-    }));
-    for (const map of matches) {
-      if (map.ciWorkflow) ciWorkflows.add(map.ciWorkflow);
-      else selected.add(map.feature);
+    if (file.startsWith('src/')) sourceChange = true;
+    const matched = [];
+    let owned = false;
+    for (const map of maps) {
+      const patterns = map.sources.filter(source => patternFor(source).test(file));
+      const changedMap = file === `.claude/skills/verify-multiprompt/features/${map.feature}.md`;
+      if (!patterns.length && !changedMap) continue;
+      owned = true;
+      if (map.ciWorkflow) {
+        if (!VERIFIER_OWN_CI_WORKFLOWS.has(map.ciWorkflow)) ciWorkflows.add(map.ciWorkflow);
+        continue;
+      }
+      const specificity = changedMap ? 0 : Math.min(...patterns.map(source => ownership.get(source)));
+      matched.push({ feature: map.feature, specificity });
     }
-    if (!matches.length) unmapped.push(file);
+    for (const { feature, specificity } of matched) {
+      if (specificity > SHARED_CORE_MAPS) continue;
+      if (!specificityOf.has(feature) || specificity < specificityOf.get(feature)) specificityOf.set(feature, specificity);
+    }
+    if (!owned) unmapped.push(file);
   }
-  const nearest = [];
-  if (!selected.size && !ciWorkflows.size && files.length) {
-    const tokens = value => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2 && !['src', 'tools', 'github', 'workflows', 'claude', 'skill', 'skills', 'verify', 'multiprompt', 'feature', 'features', 'control', 'test', 'readme', 'zig', 'ps1', 'cjs', 'mjs', 'yml'].includes(word)));
-    const ranked = maps.filter(map => !map.ciWorkflow).flatMap(map => {
-      const names = tokens(map.feature);
-      const sources = tokens(map.sources.join(' '));
-      return (unmapped.length ? unmapped : files).map(file => {
-        const score = [...tokens(file)].reduce((sum, word) => sum + (names.has(word) ? 10 : 0) + (sources.has(word) ? 1 : 0), 0);
-        return { feature: map.feature, file, score };
-      });
-    }).sort((a, b) => b.score - a.score || Number(b.feature === 'appearance') - Number(a.feature === 'appearance') || a.feature.localeCompare(b.feature) || a.file.localeCompare(b.file));
-    selected.add(ranked[0].feature);
-    nearest.push({ file: ranked[0].file, feature: ranked[0].feature });
+  let features = [];
+  const notes = [];
+  if (specificityOf.size) {
+    const ranked = [...specificityOf].sort(([left, a], [right, b]) => a - b || left.localeCompare(right));
+    features = ranked.slice(0, MAX_JOURNEYS).map(([feature]) => feature).sort();
+    const dropped = ranked.slice(MAX_JOURNEYS).map(([feature]) => feature).sort();
+    if (dropped.length) notes.push(`Over the ${MAX_JOURNEYS}-journey cap, only the most specific journeys ran; dropped: ${dropped.join(', ')}.`);
+  } else if (sourceChange && available.includes(SMOKE_JOURNEY)) {
+    features = [SMOKE_JOURNEY];
   }
-  return { features: [...selected].sort(), unmapped, ...(nearest.length ? { nearest } : {}), ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
+  return { features, unmapped, ...(notes.length ? { notes } : {}), ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
 }
 
 async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {

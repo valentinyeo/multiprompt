@@ -203,7 +203,7 @@ test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () =>
     assert.doesNotMatch(hit, /chatEchoActionRect/);
     const up = source.slice(source.indexOf('        WM_LBUTTONUP => {'), source.indexOf('        WM_LBUTTONDBLCLK => {'));
     assert.match(up, /if \(app_state.g_chat_sel_dragging\) \{[^]*const selected = chatSelRange\(\);/);
-    assert.match(up, /if \(selected == null and app_state.g_chat_sel_click_count == 1\) \{\s*if \(chatEchoAt\(GET_X\(lp\), GET_Y\(lp\)\)\) \|id\| \{\s*if \(chatOutboxIndexById\(id\)\) \|ei\| \{\s*const entry = app_state.g_chat_outbox.items\[ei\];\s*if \(entry.state == .delivered and !entry.channel_sent\) chatEchoPushQueuedNow\(\);/);
+    assert.match(up, /if \(selected == null and app_state.g_chat_sel_click_count == 1\) \{\s*if \(chatEchoAt\(GET_X\(lp\), GET_Y\(lp\)\)\) \|id\| \{\s*if \(chatOutboxIndexById\(id\)\) \|ei\| \{\s*const entry = app_state.g_chat_outbox.items\[ei\];\s*if \(entry.state == .delivered and !entry.channel_sent\) chatEchoPushQueuedNowForId\(entry.id\);/);
     assert.doesNotMatch(up, /chatEchoRetryAt\(|chatEchoRetryHover\(|chatEchoActionRect\(|chatEchoSendAgain\(|chatEchoRemove\(/);
     assert.match(up, /\[chat\] selection chars=\{d\}/);
     assert.match(up, /if \(!app_state.g_chat_sel_active\) \{\s*app_state.g_chat_sel_transcript_focus = false/);
