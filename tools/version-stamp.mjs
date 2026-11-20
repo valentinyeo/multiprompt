@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +32,7 @@ const reviewedReleases = {
   'v0.28.1339': ['1f91520248bd00bf99308dcec5717b3199574fdf', { 'IGSH-1266': 'A failed move to the terminal keeps your chat open.' }],
 };
 
-const reviewedCommits = {
+export const reviewedCommits = {
   'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83a': 'HYCI-158',
   'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1': 'HYCI-168',
   '31797d916a1d68082901de71966c2e4a02036e80': 'HYCI-147',
@@ -48,13 +47,14 @@ const reviewedCommits = {
   '17ff55175dfff3ceffd45d41d8517d149c6be787': 'SOFT-2718',
   '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
   '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
+  '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9': 'SOFT-2902',
 };
 
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
-export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
+export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the automatic release stamps the version after merge';
 
 export function autoRevertBranch(env = process.env) {
   return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
@@ -312,29 +312,6 @@ function check(baseRev, headRev) {
   return kind === 'HAND_EDIT' ? 1 : 0;
 }
 
-async function release() {
-  const root = git(['rev-parse', '--show-toplevel']).trim();
-  git(['fetch', 'origin', 'master'], root);
-  const sha = git(['rev-parse', 'origin/master'], root).trim();
-  const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: 45 * 60 * 1000, stdio: ['ignore', 'pipe', 'inherit'] }).trim();
-  const runs = JSON.parse(gh(['run', 'list', '--workflow', 'auto-release.yml', '--event', 'push', '--commit', sha, '--json', 'databaseId,headSha,url', '--limit', '10']));
-  const run = runs.filter(run => run.headSha === sha).sort((a, b) => b.databaseId - a.databaseId)[0];
-  if (!run) throw new Error('No automatic release run for origin/master; publication starts only from the normal master push');
-  console.log(run.url);
-  gh(['run', 'watch', String(run.databaseId), '--exit-status', '--interval', '60']);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-receipt-'));
-  try {
-    gh(['run', 'download', String(run.databaseId), '--name', 'release-journey-receipt', '--dir', directory]);
-    const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'release-journeys.json'), 'utf8'));
-    if (receipt.status !== 'passed' || receipt.sha !== sha || receipt.run !== run.url || !Array.isArray(receipt.features) || receipt.features.some(feature => !feature.video?.startsWith(`${run.url}/artifacts/`))) {
-      throw new Error('Automatic release lacks passing candidate journeys with video');
-    }
-    console.log(`RELEASE_VERIFIED ${sha} ${run.url}`);
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, base, head, ...extra] = process.argv.slice(2);
@@ -353,8 +330,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const unresolved = buildUnresolvedChangelog(files, base, history, commits);
       const titles = await resolveTicketTitles(changelogTicketIds(unresolved), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
       fs.writeFileSync(changelogPath, applyTicketTitles(unresolved, titles));
-    } else if (command === 'release' && !base) await release();
-    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json] | release');
+    } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

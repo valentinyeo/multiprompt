@@ -83,9 +83,9 @@ test('pane follows without requesting browser focus and debug timings sample act
   assert.match(body('switchToShell'), /armSshReconnectTimerIfNeeded\(\)/);
   assert.doesNotMatch(body('switchToShell'), /respawnShellInPlace\(/);
   assert.doesNotMatch(body('openChatView'), /shells\[active_shell\]\.hwnd == null/);
-  assert.match(body('updateBrowserVisibility'), /passiveBrowserLaunchAllowed\(active_shell\)/);
-  assert.match(body('updateBrowserVisibility'), /if \(shells\[active_shell\]\.browser_pending_intent == \.select_preserve_focus\) launchBrowserForShellFromRequest/);
-  assert.doesNotMatch(body('updateBrowserVisibility'), /if \(g_chat_active or shells\[active_shell\]\.browser_pending_intent/);
+  assert.match(body('tryLaunchActiveBrowserIfNeeded'), /passiveBrowserLaunchAllowed\(active_shell\)/);
+  assert.match(body('tryLaunchActiveBrowserIfNeeded'), /if \(sh\.browser_pending_intent == \.select_preserve_focus\) launchBrowserForShellFromRequest/);
+  assert.doesNotMatch(body('tryLaunchActiveBrowserIfNeeded'), /if \(g_chat_active or sh\.browser_pending_intent/);
   assert.doesNotMatch(body('chatSwitchBrowserTick'), /requestNativeBrowserFocus|focusActiveBrowserPane/);
   const log = body('chatSwitchLogBrowserShown');
   assert.match(log, /verboseLoggingEnabled\(\)/);

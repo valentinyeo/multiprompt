@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint } from './version-stamp.mjs';
+import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint, reviewedCommits } from './version-stamp.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
@@ -173,7 +173,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       if (cache.includes('.zig-cache') && cache.includes('uses: actions/cache@')) assert.match(cache, /github.sha|inputs.revision|inputs.app_revision/);
     }
     if (file !== 'test.yml') continue;
-    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate', 'idle-budget']) {
+    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate']) {
       const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
       const caches = job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache@/.test(step));
       assert.equal(caches.length, 2, name);
@@ -184,8 +184,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
       assert.match(compile, /restore-keys:/);
       assert.match(toolchain, /zig-toolchain-0.16.0/);
-      if (name === 'idle-budget') assert.match(job, /if: github\.event_name != 'pull_request'/);
-      if (name === 'build-windows' || name === 'idle-budget') continue;
+      if (name === 'build-windows') continue;
       const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
       assert.ok(trim, name);
       assert.match(trim, /python3 tools\/trim-zig-cache.py --cap-mib 1600/);
@@ -247,7 +246,6 @@ test('build, CI, installer and documentation use the stamp contract', () => {
   assert.ok(fs.readFileSync(path.join(root, 'tools/gates/no-version-bump.mjs'), 'utf8').includes(fixHint));
   const readme = fs.readFileSync(path.join(root, 'changelog.d/README.md'), 'utf8');
   assert.match(readme, /Never edit APP_VERSION or \.ver lines by hand/);
-  assert.match(readme, /Automatic releases replace manual `node tools\/version-stamp\.mjs release`/);
   assert.match(readme, /Release notes use the ticket number and its authoritative board title/);
   assert.match(readme, /Releases without ticketed lines cannot publish/);
 });
@@ -637,49 +635,6 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
 });
 
-for (const outcome of ['passed', 'failed', 'missing', 'wrong-source', 'missing-video']) {
-  test(`release command observes normal publication only: ${outcome}`, { skip: process.platform === 'win32' }, t => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-command-test-'));
-    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' }).trim();
-    git('init', '-b', 'master');
-    git('config', 'user.name', 'Release Test');
-    git('config', 'user.email', 'release@example.invalid');
-    git('config', 'commit.gpgsign', 'false');
-    git('commit', '--allow-empty', '-m', 'source');
-    const sha = git('rev-parse', 'HEAD');
-    const remote = path.join(dir, 'origin.git');
-    git('clone', '--bare', dir, remote);
-    git('remote', 'add', 'origin', remote);
-    const bin = path.join(dir, 'bin');
-    fs.mkdirSync(bin);
-    const log = path.join(dir, 'calls');
-    fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}
-const fs = require('node:fs');
-const path = require('node:path');
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.CALLS, JSON.stringify(args) + '\\n');
-const run = { databaseId: 123, headSha: process.env.SOURCE, url: 'https://github.com/example/multiprompt/actions/runs/123' };
-if (args[0] !== 'run') process.exit(99);
-if (args[1] === 'list') console.log(JSON.stringify(process.env.OUTCOME === 'missing' ? [] : [run]));
-else if (args[1] === 'watch') { if (process.env.OUTCOME === 'failed') process.exit(1); }
-else if (args[1] === 'download') {
-  const target = args[args.indexOf('--dir') + 1];
-  fs.writeFileSync(path.join(target, 'release-journeys.json'), JSON.stringify({ status: 'passed', sha: process.env.OUTCOME === 'wrong-source' ? 'old' : run.headSha, run: run.url, features: [{ feature: 'chat', video: process.env.OUTCOME === 'missing-video' ? null : run.url + '/artifacts/100' }] }));
-} else process.exit(98);
-`, { mode: 0o755 });
-    const result = spawnSync(process.execPath, [tool, 'release'], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALLS: log, SOURCE: sha, OUTCOME: outcome } });
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, outcome === 'passed' ? 0 : 1, result.stderr);
-    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    assert.ok(calls.every(args => args[0] === 'run' && ['list', 'watch', 'download'].includes(args[1])));
-    assert.equal(git('rev-parse', 'HEAD'), sha);
-    assert.equal(git('branch', '--list', 'release/*'), '');
-    if (outcome === 'passed') assert.match(result.stdout, /RELEASE_VERIFIED/);
-    else assert.doesNotMatch(result.stdout, /RELEASE_VERIFIED/);
-  });
-}
-
 test('SOFT-2803 attributes the untagged master commits since v0.28.1762', () => {
   const reviewed = {
     'ee394be0c178378919a6d4d3499329f5d3636691': ['docs(verify): complete the desktop feature map (SOFT-2567 Part H) (#1074)', '2567'],
@@ -691,4 +646,28 @@ test('SOFT-2803 attributes the untagged master commits since v0.28.1762', () => 
     assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1781', [], [{ sha, subject }], ticketTitles); });
     assert.match(generated, new RegExp(`\\.ticket = "[A-Z]+-${number}"`));
   }
+});
+
+test('SOFT-2958 builds release notes for the ticketless verifier merge on master', () => {
+  const commit = { sha: '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9', subject: 'ci(verifier): never block a PR on a journey or check already red on master (#1129)' };
+  const ticketTitles = { ...titles, 'IGSH-2902': 'Publish master without a release journey gate', 'SOFT-2902': 'Publish master without a release journey gate' };
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1800', [], [commit], ticketTitles); });
+  assert.match(generated, /\.ticket = "IGSH-2902"/);
+  assert.match(generated, /\.text = "IGSH-2902 Publish master without a release journey gate"/);
+  assert.match(generated, /\.ver = "0\.28\.1800"/);
+});
+
+test('SOFT-2958 gives every master commit since v0.28.1762 a ticket or reviewed attribution', t => {
+  const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/;
+  const history = ['origin/master', 'refs/remotes/origin/master', 'master', 'HEAD']
+    .map(ref => spawnSync('git', ['log', '--format=%H%x09%s', `v0.28.1762..${ref}`], { cwd: root, encoding: 'utf8' }))
+    .find(result => result.status === 0 && result.stdout.trim());
+  if (!history) return t.skip('this checkout has no history from v0.28.1762 to master');
+  const commits = history.stdout.split('\n').filter(Boolean).map(line => {
+    const at = line.indexOf('\t');
+    return { sha: line.slice(0, at), subject: line.slice(at + 1) };
+  });
+  const untagged = commits.filter(commit => !lead.test(commit.subject) && !reviewedCommits[commit.sha]);
+  assert.deepEqual(untagged, [], 'add every ticketless commit to reviewedCommits before the release');
 });

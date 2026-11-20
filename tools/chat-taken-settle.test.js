@@ -16,6 +16,7 @@ test('IGSH-1831 a confirmed receipt settles after a reply or bounded age, not id
   assert.match(settle, /state != \.delivered/);
   assert.match(settle, /phaseTaken\(phase\)/);
   assert.doesNotMatch(settle, /if \(busy\) return false;/);
+  assert.match(settle, /!phaseTaken\(phase\) or !landed/);
   assert.match(settle, /if \(replied\) return true;/);
   assert.match(settle, /TAKEN_MAX_AGE_MS/);
   const taken = body('phaseTaken', echoSource);
@@ -32,7 +33,8 @@ test('IGSH-1766 chatEchoMatchActive forces a pass and retires settled host messa
   assert.match(match, /chatEchoTakenSettledIn\([^)]*true\)\) changed = true/);
   const helper = body('chatEchoTakenSettledIn');
   assert.match(helper, /!e\.message_v1/);
-  assert.match(helper, /chat_echo\.takenSettled\(&e\.delivery_watch, e\.state, std\.mem\.sliceTo\(&e\.message_phase, 0\)/);
+  assert.match(helper, /chat_echo\.takenSettled\(&e\.delivery_watch, e\.state, std\.mem\.sliceTo\(&e\.message_phase, 0\), row_known/);
+  assert.match(helper, /chatEchoRowKnown\(e\.\*, force\)/);
   assert.match(helper, /reply_ms > e\.anchor\.sent_ms/);
   assert.match(helper, /now_ms, e\.sent_tick_ms/);
   assert.match(helper, /chatOutboxRemoveAtIn\(list, allocator, i\)/);

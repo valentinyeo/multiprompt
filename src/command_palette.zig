@@ -5119,6 +5119,13 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
+    if (app_state.shell_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{ "Mute Tab", "Unmute Tab", "Mute Activity", "Unmute Activity", "silence", "notifications" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MUTETAB_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
     if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Favorite: Toggle", "unfavorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])))
     {
@@ -5601,6 +5608,15 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
         if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
+        const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
+        const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
             app_state.g_search_result_count += 1;
         }
     }
