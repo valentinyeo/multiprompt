@@ -48,13 +48,13 @@ test('the verifier preserves CI ownership in its execution plan', t => {
   fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Formal chat check', body: '', labels: [] }));
   fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: [], unmapped: [], ciWorkflows: ['chat-delivery-formal.yml'] }));
   const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
-    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: '{"features":[],"compare_base":true}' },
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: '{"features":[]}' },
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
   assert.deepEqual(selection.features, []);
   assert.deepEqual(selection.ciWorkflows, ['chat-delivery-formal.yml']);
-  assert.equal(selection.compareBase, false);
+  assert.doesNotMatch(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /base_features/);
   assert.match(fs.readFileSync(path.join(directory, 'output'), 'utf8'), /ci_workflows=\["chat-delivery-formal.yml"\]/);
 });
 
@@ -151,12 +151,11 @@ test('the verifier runs every mapped journey, even when its picker proposes fewe
   const features = ['appearance', 'chat-view', 'pane-layout', 'command-palette', 'title-bar'];
   fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features, unmapped: [] }));
   const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
-    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: ['pane-layout'], compare_base: true }) },
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: ['pane-layout'] }) },
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
   assert.deepEqual(selection.features, [...features].sort());
-  assert.equal(selection.compareBase, true);
 });
 
 test('the mapper owns the plan and picker-only journeys cannot broaden it', t => {
@@ -167,7 +166,7 @@ test('the mapper owns the plan and picker-only journeys cannot broaden it', t =>
   fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Chat update', body: '', labels: [], files: [{ path: 'src/chat_render.zig' }] }));
   fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: [], unmapped: [] }));
   const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
-    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: [], compare_base: false }) },
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: [] }) },
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
@@ -232,19 +231,18 @@ test('mapped model and live-working journeys retain their chat-delivery driver',
   assert.doesNotMatch(shared, /CHAT_MODEL_PROOF/);
 });
 
-test('an empty diff on a repair PR schedules no journey and compares no baseline', t => {
+test('an empty diff on a repair PR schedules no journey', t => {
   const directory = maps(t);
   const out = path.join(directory, 'out');
   fs.mkdirSync(out);
   fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Fix appearance', body: 'Repro journey: appearance', labels: [] }));
   fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: [], unmapped: [] }));
   const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
-    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: [], compare_base: false }) },
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: [] }) },
   });
   assert.equal(result.status, 0, result.stderr);
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
   assert.deepEqual(selection.features, []);
-  assert.equal(selection.compareBase, false);
   const outputs = fs.readFileSync(path.join(directory, 'output'), 'utf8');
   assert.match(outputs, /features=\[\]/);
   assert.doesNotMatch(outputs, /repro_features/);
