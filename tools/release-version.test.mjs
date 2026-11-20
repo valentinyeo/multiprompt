@@ -217,23 +217,24 @@ test('release builds both architectures independently of the report-only Tests w
   const tests = readWorkflow('test.yml');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[test, test-vps, build-windows, test-worker, test-update-source, check-red-run\]/);
+  assert.match(tests, /needs: \[test, test-vps, build-windows, test-worker, test-update-source\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
 test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
   const tests = readWorkflow('test.yml');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-worker, test-update-source, check-red-run\]/);
-  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run' })) {
+  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-worker, test-update-source\]/);
+  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source' })) {
     assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`));
   }
   assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$WORKER" "\$UPDATE_SOURCE" "\$RED_RUN"/);
+  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$WORKER" "\$UPDATE_SOURCE"/);
+  assert.doesNotMatch(aggregate, /check-red-run|RED_RUN/);
   assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success' };
+  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', WORKER: 'success', UPDATE_SOURCE: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, EVENT: 'pull_request', ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
