@@ -69,7 +69,7 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
     $target = Get-WorkspaceCardRow $Workspace
-    $visibleRows = Get-VisibleWorkspaceCardRows()
+    $visibleRows = Get-VisibleWorkspaceCardRows
     $rect = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetClientRect($card, [ref]$rect)) { throw 'Card rectangle unavailable' }
     if ($rect.Bottom -lt (19 + ($visibleRows + 2) * 28)) { throw 'Fixture requires all workspace rows visible' }
@@ -148,7 +148,7 @@ Select-WorkspaceCard $created 'workspace-keyboard-return'
 $result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphite 2'; reason = 'Not a shipped theme; Edge Grey is separate' }
 
 $card = Open-WorkspaceCard 'workspace-new-open'
-$newRow = Get-VisibleWorkspaceCardRows() + 1
+$newRow = Get-VisibleWorkspaceCardRows + 1
 $count = (Read-Session).workspace_count
 Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card new row click'
 Record 'Click New workspace in workspace card'
