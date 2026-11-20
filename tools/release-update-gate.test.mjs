@@ -17,37 +17,27 @@ function needsOf(name) {
   return line[1].replace(/[[\]]/g, '').split(',').map(entry => entry.trim()).filter(Boolean);
 }
 
-test('production skips duplicate journeys but keeps build, startup, journey receipt and signature gates', () => {
-  assert.deepEqual(needsOf('journeys'), ['prepare', 'build']);
-  assert.match(job('journeys'), /^    if: needs\.prepare\.outputs\.features != '\[\]'$/m);
-  assert.doesNotMatch(job('journeys'), /inputs\.proof/);
-  assert.match(job('journeys'), /uses: \.\/\.github\/workflows\/verify\.yml/);
+test('production publishes the build, startup proof and signature gates without a journey gate', () => {
+  assert.equal(jobs.journeys, undefined, 'release.yml must not run candidate journeys');
+  assert.equal(jobs['journey-gate'], undefined, 'release.yml must not gate publication on journeys');
+  assert.doesNotMatch(workflow, /release-journeys\.mjs|release-journey-receipt/);
   assert.deepEqual(needsOf('build'), ['prepare']);
   assert.doesNotMatch(job('build'), /^    if:/m);
   assert.match(job('build'), /Executable embedded version does not match release tag/);
-  assert.deepEqual(needsOf('journey-gate'), ['prepare', 'build', 'journeys']);
-  const gate = job('journey-gate').match(/^    if: (.+)$/m)[1];
-  const allowed = new Function('needs', 'always', 'cancelled', `return (${gate});`);
-  for (const prepare of ['success', 'failure', 'cancelled']) {
-    for (const build of ['success', 'failure', 'cancelled']) {
-      for (const journeys of ['success', 'failure', 'cancelled', 'skipped']) {
-        assert.equal(allowed({ prepare: { result: prepare }, build: { result: build }, journeys: { result: journeys } }, () => true, () => false), prepare === 'success' && build === 'success');
-      }
-    }
-  }
-  assert.equal(allowed({ prepare: { result: 'success' }, build: { result: 'success' }, journeys: { result: 'skipped' } }, () => true, () => true), false);
-  assert.match(job('journey-gate'), /node tools\/release-journeys\.mjs check/);
-  assert.match(job('journey-gate'), /name: release-journey-receipt/);
   assert.deepEqual(needsOf('launch'), ['prepare', 'build']);
   assert.match(job('launch'), /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64\.exe -Evidence release-proof/);
   assert.match(job('launch'), /name: release-launch-proof\n          path: release-proof\/\n          if-no-files-found: error/);
   assert.match(job('gitleaks'), /release_scan: true/);
-  assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation', 'journey-gate']);
+  assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation']);
   assert.doesNotMatch(job('release'), /^    if:/m);
-  assert.match(job('release'), /name: release-journey-receipt/);
-  assert.match(job('release'), /cp release-journeys\.json dist\/release-journeys\.json/);
   assert.match(job('release'), /run: node tools\/sign-release\.mjs/);
   assert.deepEqual(needsOf('queue-newer'), ['prepare', 'release']);
+});
+
+test('a master push never cancels a release already running', () => {
+  const auto = fs.readFileSync(new URL('../.github/workflows/auto-release.yml', import.meta.url), 'utf8');
+  assert.match(auto, /^concurrency:\n  group: auto-release-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false$/m);
+  assert.match(auto, /needs\.release\.result == 'success' \|\| needs\.release\.result == 'cancelled'/);
 });
 
 test('updater receipts require both successful scenarios on the exact source', async () => {

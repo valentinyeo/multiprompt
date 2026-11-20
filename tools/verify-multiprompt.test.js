@@ -133,7 +133,7 @@ test('PR verification stays unconditional while duplicate click-through drives s
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
-  assert.match(read('.github/workflows/release.yml'), /journeys:[\s\S]*?feature: all/);
+  assert.doesNotMatch(read('.github/workflows/release.yml'), /feature: all|journey-gate/, 'publication runs no journeys');
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
