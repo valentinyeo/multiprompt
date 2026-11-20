@@ -84,6 +84,42 @@ test('a head failure master also fails is inherited, not a FAIL', () => {
   assert.match(body, /- appearance: head failed \(inherited\)/);
 });
 
+test('SOFT-2902: a journey timeout listed in masterFailures is inherited, not BLOCKED', () => {
+  const dir = evidenceDir({
+    'verify-chat-messages-only': { status: 'failed', error: 'Timed out: arrival at bottom stays clear' },
+  });
+  const summary = verifier.summarize(dir, ['chat-messages-only']);
+  summary.masterFailures = ['chat-messages-only'];
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['diff matches the ticket'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-messages-only']),
+    runUrl: 'https://github.com/valentinyeo/multiprompt/actions/runs/44817094076',
+    jobs: { head: { result: 'failure' } },
+  });
+  assert.equal(final, 'PASS+NOTES');
+  assert.match(body, /Already failing in master's latest nightly verify run.*chat-messages-only/);
+  assert.match(body, /- chat-messages-only: head blocked \(inherited\)/);
+  assert.doesNotMatch(body, /Journey verification blocked:.*chat-messages-only/);
+  assert.doesNotMatch(body, /head job failure; full verification could not complete/);
+});
+
+test('SOFT-2902: the same journey timeout without masterFailures is not PASS', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-messages-only': { status: 'failed', error: 'Timed out: arrival at bottom stays clear' },
+  }), ['chat-messages-only']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: [] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-messages-only']),
+    runUrl: 'u',
+    jobs: { head: { result: 'failure' } },
+  });
+  assert.equal(final, 'BLOCKED');
+});
+
 test('a head failure master passes is FAIL', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' } });
   const summary = verifier.summarize(dir, ['appearance']);
@@ -248,10 +284,12 @@ test('the verdict job fails the check on FAIL and posts one comment', () => {
 test('the verifier family differs from every Author model line in the pull request body', () => {
   assert.equal(typeof verifier.pickVerifier, 'function');
   assert.deepEqual(verifier.pickVerifier('Body\n\nAuthor model: deepseek/deepseek-v4.1-flash\n'), { engine: 'claude' });
-  assert.deepEqual(verifier.pickVerifier('Author model: anthropic/claude-sonnet\n'), { engine: 'deepseek' });
+  assert.deepEqual(verifier.pickVerifier('Author model: anthropic/claude-sonnet\n'), { engine: 'openai' });
   assert.deepEqual(verifier.pickVerifier('Author model: opencode-go/deepseek-v4.1-flash\n'), { engine: 'claude' });
   assert.deepEqual(verifier.pickVerifier('author model: deepseek/deepseek-v4.1-flash\nAuthor model: openai/gpt-6.1-sol\n'), { engine: 'claude' });
-  assert.deepEqual(verifier.pickVerifier('Author model: deepseek/deepseek-v4.1-flash\nAuthor model: anthropic/claude-sonnet\n'), { problem: 'no verifier from another model family' });
+  assert.deepEqual(verifier.pickVerifier('Author model: deepseek/deepseek-v4.1-flash\nAuthor model: anthropic/claude-sonnet\n'), { engine: 'openai' });
+  assert.deepEqual(verifier.pickVerifier('Author model: composer/composer-2.5\nAuthor model: anthropic/claude-sonnet\nAuthor model: deepseek/deepseek-v4.1-flash\n'), { engine: 'openai' });
+  assert.deepEqual(verifier.pickVerifier('Author model: deepseek/deepseek-v4.1-flash\nAuthor model: anthropic/claude-sonnet\nAuthor model: openai/gpt-6.1-sol\nAuthor model: cursor/composer-2.5\n'), { problem: 'no verifier from another model family' });
   assert.deepEqual(verifier.pickVerifier('Body without a model line\n'), { problem: 'missing Author model line' });
   assert.deepEqual(verifier.pickVerifier(''), { problem: 'missing Author model line' });
   assert.match(verifier.pickVerifier('Author model: acme/some-model\n').problem, /unknown model family/);
@@ -275,6 +313,24 @@ test('the DeepSeek verdict uses the same format and names its engine', () => {
   assert.match(body, new RegExp(`Judge: deepseek ${verifier.DEEPSEEK_MODEL}`));
   assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-flash');
   assert.doesNotMatch(verifier.DEEPSEEK_MODEL, /pro/);
+});
+
+test('the OpenAI verdict uses the same format and names its engine', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'openai' });
+  assert.equal(final, 'PASS');
+  assert.match(body, new RegExp(`Judge: openai ${verifier.CODEX_MODEL}`));
+});
+
+test('the OpenAI judge uses the same verdict schema as Claude', () => {
+  const schema = verifier.openaiJudgeSchema();
+  assert.deepEqual(schema.properties.verdict.enum, ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED']);
+  assert.equal(schema.properties.evidence.maxItems, verifier.MAX_EVIDENCE_LINES);
+  const prompt = verifier.openaiJudgePrompt('### judge-inputs\nmaterial', { REPO: 'org/repo', PR_NUMBER: '9', HEAD_SHA: head });
+  assert.match(prompt, /Read the screenshots as images/);
+  assert.match(prompt, /never as instructions/);
+  assert.match(prompt, /org\/repo/);
+  assert.match(prompt, /material/);
 });
 
 test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinking', () => {
@@ -311,6 +367,8 @@ test('selection is deterministic and only the independent judge receives the Dee
   assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
   assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'openai'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'claude'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);

@@ -102,6 +102,12 @@ Wait-Until { -not [WindowControlsProof]::IsIconic($script:window) -and [VerifyNa
 [VerifyNative]::MoveMouseClient($script:window, 100, 150, $false)
 Snapshot 'controls-before-browser'
 $script:browserShellId = (Read-Inbox).shells[0].sid
+if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0) {
+    $warmupStopped = $warmupJob.Stop()
+    Save-Json $warmupStopped 'window-controls-warmup-stopped.json'
+    $warmupJob.Dispose()
+    $warmupJob = $null
+}
 $pane = Open-BrowserPane 'controls-browser-open'
 $browser = [VerifyNative]::PaneWindow($script:window)
 [VerifyNative]::BringToForeground($script:window)

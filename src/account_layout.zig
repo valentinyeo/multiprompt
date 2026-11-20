@@ -109,6 +109,24 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .group_order = remote.group_order, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
+pub fn withoutRemovedWorkspaces(a: Allocator, target: Layout, removed: []const []const u8) !Layout {
+    if (removed.len == 0) return target;
+    var ws: std.ArrayList(layout.Workspace) = .empty;
+    for (target.workspaces) |workspace| {
+        if (containsName(removed, workspace.name)) continue;
+        try ws.append(a, workspace);
+    }
+    var tabs: std.ArrayList(Tab) = .empty;
+    for (target.tabs) |tab| {
+        if (containsName(removed, tab.workspace)) continue;
+        try tabs.append(a, tab);
+    }
+    var result = target;
+    result.workspaces = try ws.toOwnedSlice(a);
+    result.tabs = try tabs.toOwnedSlice(a);
+    return result;
+}
+
 pub fn colorsFrom(a: Allocator, target: Layout, source: Layout) !Layout {
     var result = target;
     const workspaces = try a.dupe(layout.Workspace, target.workspaces);

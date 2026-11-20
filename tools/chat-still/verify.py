@@ -1,6 +1,8 @@
 import argparse
 import ast
+import contextlib
 import hashlib
+import io
 import json
 import pathlib
 import re
@@ -151,6 +153,18 @@ def check(root, replay_code=False):
     return {"tool": "z3-solver==4.13.4.0", "failures": failures, "counterexamples": witnesses, "sync_commit": recorded["sync_commit"]}
 
 
+def baseline_report(baseline, files):
+    with tempfile.TemporaryDirectory(prefix="chat-still-baseline-") as directory:
+        root = pathlib.Path(directory)
+        for file in files:
+            target = root / file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(subprocess.check_output(
+                ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10))
+        with contextlib.redirect_stdout(io.StringIO()):
+            return check(root)
+
+
 def self_test(root, replay_code=False):
     with tempfile.TemporaryDirectory(prefix="chat-still-mutation-") as directory:
         scratch = pathlib.Path(directory)
@@ -185,10 +199,12 @@ if __name__ == "__main__":
             baseline = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--verify", args.inherit_from + "^{commit}"], stderr=subprocess.PIPE, timeout=10).decode().strip()
             coverage = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
             files = sorted({record["file"] for section in ("functions", "types") for record in coverage[section].values()})
-            if all((args.source_root / file).read_bytes() == subprocess.check_output(
-                    ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10) for file in files):
+            inherited = baseline_report(baseline, files)
+            if inherited["failures"] == result["failures"] and inherited["counterexamples"] == result["counterexamples"]:
                 result["inherited_from"] = baseline
-                print("INHERITED:", len(result["failures"]), "findings; every modeled source file is byte-identical to", baseline)
+                print("INHERITED:", len(result["failures"]), "findings; the modeled source at", baseline, "gives the same findings")
+            else:
+                print("BASELINE FINDINGS DIFFER:", baseline, "gives", len(inherited["failures"]), "findings, this head gives", len(result["failures"]), file=sys.stderr)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2) + "\n")
