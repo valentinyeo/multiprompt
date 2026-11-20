@@ -34,7 +34,6 @@
                 @{ text = 'mobile latency mode'; id = 8000 },
                 @{ text = 'restore disconnected workspace sessions'; id = 6295 },
                 @{ text = 'auto-suspend idle panes'; id = 6240 },
-                @{ text = 'use agent or terminal session name'; id = 6248 },
                 @{ text = 'insert agent instructions'; id = 6237 }
             )
             $found = @()
