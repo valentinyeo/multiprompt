@@ -125,8 +125,7 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $expectedHeight = 19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28
     if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
-    Record 'Escape closes workspace card without switching'
-    [VerifyNative]::Chord(@(0x1B))
+    Press @(0x1B) 'Escape closes workspace card without switching'
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'workspace card dismissed'
     if ((Read-Session).active_workspace -ne $created) { throw 'Dismissing card changed workspace' }
     $result.checks += @{ name = 'workspace-card-theme'; theme = $theme; fill = $look.fill; screenshot = "workspace-$theme-card.png" }
@@ -365,8 +364,7 @@ $relaunchRegistry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.js
 $relaunchRows = @($relaunchRegistry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
 if ($relaunchLook.height -ne (19 + ($relaunchRows.Count + 2) * 28)) { throw 'Relaunched workspace card does not match the stored workspaces' }
 Snapshot 'workspace-delete-relaunch-card'
-Record 'Escape closes the relaunched workspace card'
-[VerifyNative]::Chord(@(0x1B))
+Press @(0x1B) 'Escape closes the relaunched workspace card'
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'relaunched workspace card dismissed'
 $result.checks += @{ name = 'workspace-delete-relaunch'; deleted = $deletedNames; restoredWorkspaceKept = $archiveId }
 Snapshot 'workspace-delete-relaunch-complete'
