@@ -286,7 +286,7 @@ test('double-click proof rejects a retained badge, a second send, a changed draf
   f.fill(28, 120, 68, 142, 0x444444);
   const empty = inspect(f.image, area);
   const frames = { before: empty, added, removed: empty, delivered: empty };
-  const content = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]\n[mp:7536833c3252b72c]`;
+  const content = `👍 to: Same first words for this example for this example for this example for this…\n[mp:7536833c3252b72c]`;
   const events = [{ type: 'queue-operation', operation: 'enqueue', content }, { type: 'attachment', attachment: { prompt: content } }];
   const observation = { error: null, 'double-click-added': { queueCount: 1, composerText: 'draft stays here' }, 'double-click-removed': { queueCount: 1, composerText: 'draft stays here' }, doubleClickDelivered: true };
   const cleanup = { remaining_owned_processes: 0, scratch_removed: true };

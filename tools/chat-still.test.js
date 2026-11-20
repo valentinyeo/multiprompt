@@ -71,7 +71,7 @@ test('both formal CI gates compare against the event baseline after mutations an
   }
 });
 
-test('formal findings inherit only from identical modeled functions and types', { skip: process.platform === 'win32' }, t => {
+test('formal findings inherit only when the base source reports the same findings', { skip: process.platform === 'win32' }, t => {
   read('tools/chat-still/verify.py');
   const root = path.join(__dirname, '..');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-still-inherited-'));
@@ -85,13 +85,13 @@ test('formal findings inherit only from identical modeled functions and types', 
     'if (old_content_h <= viewport_h) null else if (anchor_top)', 'if (old_content_h >= 0) null else if (anchor_top)'));
   const history = path.join(dir, 'drift/src/chat_history.zig');
   fs.writeFileSync(history, fs.readFileSync(history, 'utf8').replace('pub fn scrollAnchor(', 'pub fn renamedScrollAnchor('));
-  const unrelated = path.join(dir, 'unrelated/src/chat_history.zig');
-  fs.appendFileSync(unrelated, '\npub fn unrelatedAddition() void {}\n');
+  const unrelated = path.join(dir, 'unrelated/src/chat_session.zig');
+  fs.writeFileSync(unrelated, fs.readFileSync(unrelated, 'utf8') + '\npub fn chatStillProbe() void {}\n');
   for (const [name, args, expected] of [
     ['raw findings remain failures', [], 1],
     ['unchanged source is inherited', ['--inherit-from', 'HEAD'], 0],
-    ['an unmodeled edit in a modeled file is inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'unrelated')], 0],
     ['changed source is not inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'changed')], 1],
+    ['source that keeps every finding is inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'unrelated')], 0],
     ['model drift still fails', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'drift')], 2],
     ['replay errors cannot inherit', ['--inherit-from', 'HEAD', '--replay'], 2],
     ['missing baseline still fails', ['--inherit-from', 'refs/heads/nonexistent-chat-still-test'], 2],
