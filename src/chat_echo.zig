@@ -463,40 +463,50 @@ test "SOFT-2418 an accepted message keeps working until the reply starts or the 
 
 pub const TAKEN_MAX_AGE_MS: i64 = 60_000;
 
-pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {
-    if (state != .delivered or !phaseTaken(phase)) return false;
+pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, landed: bool, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {
+    if (state != .delivered or !phaseTaken(phase) or !landed) return false;
     if (replied) return true;
     if (watch.taken_since_ms == 0) watch.taken_since_ms = if (sent_tick_ms != 0) sent_tick_ms else now_ms;
     return now_ms >= watch.taken_since_ms and now_ms - watch.taken_since_ms >= TAKEN_MAX_AGE_MS;
 }
 
-test "IGSH-1831 normal slash and mid-turn receipts settle after a reply without idle" {
+test "IGSH-1831 normal slash and mid-turn receipts settle after a reply once their row is drawn" {
     for ([_][]const u8{ "accepted", "started" }) |phase| {
         var watch = DeliveryWatch{};
         watch.observe(true, 2000);
-        try std.testing.expect(takenSettled(&watch, .delivered, phase, true, 2000, 1000));
+        try std.testing.expect(takenSettled(&watch, .delivered, phase, true, true, 2000, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, true, 2000, 1000));
     }
 }
 
-test "IGSH-1831 confirmed messages age out without history and across a fresh boot" {
+test "SOFT-2929 a message queued behind a busy turn waits for its own row, not the current reply" {
+    for ([_][]const u8{ "accepted", "started" }) |phase| {
+        var watch = DeliveryWatch{};
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, true, 2000, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, false, 1000 + TAKEN_MAX_AGE_MS, 1000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, false, 1000 + TAKEN_MAX_AGE_MS * 60, 1000));
+    }
+}
+
+test "IGSH-1831 a drawn confirmed row ages out without history and across a fresh boot" {
     for ([_]i64{ 1000, 1000 - TAKEN_MAX_AGE_MS }) |sent| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS - 1, sent));
-        try std.testing.expect(takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS, sent));
+        try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", true, false, sent + TAKEN_MAX_AGE_MS - 1, sent));
+        try std.testing.expect(takenSettled(&watch, .delivered, "accepted", true, false, sent + TAKEN_MAX_AGE_MS, sent));
     }
     var unknown = DeliveryWatch{};
-    try std.testing.expect(!takenSettled(&unknown, .delivered, "started", false, 5000, 0));
-    try std.testing.expect(takenSettled(&unknown, .delivered, "started", false, 5000 + TAKEN_MAX_AGE_MS, 0));
+    try std.testing.expect(!takenSettled(&unknown, .delivered, "started", true, false, 5000, 0));
+    try std.testing.expect(takenSettled(&unknown, .delivered, "started", true, false, 5000 + TAKEN_MAX_AGE_MS, 0));
 }
 
 test "IGSH-1831 unconfirmed phases and unsent states never settle by reply or age" {
     for ([_][]const u8{ "", "queued", "sent", "failed", "cancelled" }) |phase| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, .delivered, phase, true, TAKEN_MAX_AGE_MS * 10, 1));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, true, true, TAKEN_MAX_AGE_MS * 10, 1));
     }
     for ([_]OutboxState{ .queued, .sending, .not_sent, .cancelled }) |state| {
         var watch = DeliveryWatch{};
-        try std.testing.expect(!takenSettled(&watch, state, "accepted", true, TAKEN_MAX_AGE_MS * 10, 1));
+        try std.testing.expect(!takenSettled(&watch, state, "accepted", true, true, TAKEN_MAX_AGE_MS * 10, 1));
     }
 }
 
@@ -618,6 +628,39 @@ pub fn newBlockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (blockMatches(block_text, prefix)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     return pastePlaceholderMatches(normalize(block_text, &buf), prefix);
+}
+
+pub const PASTE_COLLAPSE_MIN: usize = 128;
+
+pub fn queueTextMatches(pending: []const u16, item: []const u16) bool {
+    if (sameText(pending, item)) return true;
+    var pending_buf: [BLOCK_NORM_CAP]u16 = undefined;
+    var item_buf: [BLOCK_NORM_CAP]u16 = undefined;
+    const want = normalize(pending, &pending_buf);
+    const got = normalize(item, &item_buf);
+    if (want.len == 0 or got.len == 0) return false;
+    if (pastePlaceholderMatches(got, want)) return want.len >= PASTE_COLLAPSE_MIN;
+    if (got.len >= MIN_PARTIAL and want.len >= got.len and std.mem.startsWith(u16, want, got)) return true;
+    if (want.len >= MIN_PARTIAL and got.len >= want.len and std.mem.startsWith(u16, got, want)) return true;
+    return false;
+}
+
+test "SOFT-2929 a cut-short or collapsed queue copy is the waiting message, not a second row" {
+    const long = w("please refactor the whole settings page and add tests for every branch of the paste path");
+    const short = w("please refactor the whole");
+    const placeholder = w("[Pasted text #1 +40 lines]");
+    var huge: [600]u16 = undefined;
+    for (&huge, 0..) |*c, i| c.* = if (i % 7 == 6) ' ' else 'a' + @as(u16, @intCast(i % 26));
+    try std.testing.expect(queueTextMatches(&long, &long));
+    try std.testing.expect(queueTextMatches(&long, &short));
+    try std.testing.expect(queueTextMatches(&short, &long));
+    try std.testing.expect(queueTextMatches(&huge, &placeholder));
+    try std.testing.expect(queueTextMatches(&huge, huge[0..256]));
+    try std.testing.expect(!queueTextMatches(&long, &placeholder));
+    try std.testing.expect(!queueTextMatches(&short, &placeholder));
+    try std.testing.expect(!queueTextMatches(&w("deploy the staging build"), &w("deploy the production build")));
+    try std.testing.expect(!queueTextMatches(&w("yes"), &w("no")));
+    try std.testing.expect(!queueTextMatches(&huge, &w("look at this [Pasted text #2 +12 lines]")));
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {

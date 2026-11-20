@@ -1266,7 +1266,7 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - (600_000 - remaining_ms);
                         if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and chat_echo.phaseTaken(std.mem.sliceTo(&entry.message_phase, 0))) {
                             entry.state = .delivered;
-                            if (chat_echo.takenSettled(&entry.delivery_watch, entry.state, std.mem.sliceTo(&entry.message_phase, 0), saved_ms == 0, @intCast(GetTickCount64()), entry.sent_tick_ms)) {
+                            if (chat_echo.takenSettled(&entry.delivery_watch, entry.state, std.mem.sliceTo(&entry.message_phase, 0), true, saved_ms == 0, @intCast(GetTickCount64()), entry.sent_tick_ms)) {
                                 if (list == &app_state.g_chat_outbox) chatConfirmedAddReceipt(entry.*);
                                 chatOutboxRemoveAtIn(list, allocator, list.items.len - 1);
                             }
@@ -1926,6 +1926,21 @@ pub fn chatEchoRowLanded(e: ChatOutboxEntry) bool {
     return false;
 }
 
+fn chatEchoTranscriptHasRow(e: ChatOutboxEntry) bool {
+    const wire = std.mem.sliceTo(&e.message_wire_id, 0);
+    if (wire.len == 0) return false;
+    const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
+    if (shell >= app_state.shell_count) return false;
+    const shell_id = app_state.shells[shell].shell_id;
+    var keys: [@import("chat_live.zig").SENT_KEYS]u64 = @splat(0);
+    if (@import("chat_live.zig").sentRowKeys(shell_id, wire, &keys) == 0) return false;
+    return !@import("chat_live.zig").running(shell_id);
+}
+
+pub fn chatEchoRowKnown(e: ChatOutboxEntry, force: bool) bool {
+    return force or chatEchoRowLanded(e) or chatEchoTranscriptHasRow(e);
+}
+
 pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     if (app_state.active_shell >= app_state.shell_count or app_state.g_chat_confirmed.items.len == 0) return false;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -2090,8 +2105,9 @@ fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.
     var i: usize = 0;
     while (i < list.items.len) {
         const e = &list.items[i];
+        const row_known = chatEchoRowKnown(e.*, force);
         if (!e.message_v1 or e.reset_pending or (key.len > 0 and !std.mem.eql(u8, e.key[0..e.key_len], key)) or
-            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0),
+            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0), row_known,
                 force or (e.anchor.sent_ms > 0 and reply_ms > e.anchor.sent_ms), now_ms, e.sent_tick_ms))
         {
             i += 1;
@@ -3642,7 +3658,7 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
 }
 
-test "IGSH-1766 a message the host accepted stops floating even when its transcript row is out of view" {
+test "SOFT-2929 a message the host accepted keeps waiting until its transcript row is known" {
     const allocator = std.testing.allocator;
     const saved = app_state.g_chat_outbox;
     const saved_confirmed = app_state.g_chat_confirmed;
@@ -3678,7 +3694,9 @@ test "IGSH-1766 a message the host accepted stops floating even when its transcr
     }
     try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 1000, 2000, false, true));
     try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
-    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, false, true));
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, false, true));
+    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
+    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, true, true));
     try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_outbox.items.len);
     try std.testing.expectEqualStrings("sent", std.mem.sliceTo(&app_state.g_chat_outbox.items[0].message_phase, 0));
     try std.testing.expectEqualStrings("queued", std.mem.sliceTo(&app_state.g_chat_outbox.items[1].message_phase, 0));

@@ -8,10 +8,13 @@ still used by older terminal-backed chats.
 ## Confirmed host echoes
 
 Claude protocol-1 echoes remain pending until the server reports `accepted` or
-`started`. A later assistant reply retires that confirmed echo even while the
-chat stays busy. Reply events and cached history apply this to background chats
-too. Confirmed echoes have a one-minute fallback independent of history loading;
-unconfirmed messages never expire through this path.
+`started`. A confirmed echo retires only once its own transcript row is known: a
+drawn row, or its turn's rows bound after Claude took the message. A message
+accepted while an earlier turn is still replying is not that turn's message, so
+the running reply and the one-minute fallback never retire it; it keeps its
+waiting bubble until Claude starts on it. Reply events and cached history apply
+this to background chats too. Unconfirmed messages never expire through this
+path.
 
 The persisted send time survives restart. Missing times are recovered from the
 server's message creation time. Startup removes old confirmed echoes, including
@@ -147,7 +150,7 @@ settlement. A visibly held prompt retains the bounded Enter retry behavior.
 
 Claude Code is the single source of truth for a tmux Claude tab. The history reader replays the transcript's `queue-operation` events in order (enqueue adds, dequeue takes the front, remove takes the named message, popAll clears) and returns the shell queue plus the messages Claude just took as `queue` and `sent` on the status row, only when the app asks with `live`. It also reads the prompt box with `tmux capture-pane -p -e -J` and drops dim or grey runs so Claude's suggestion is never treated as a draft.
 
-Chat View lists the shell queue in order after the transcript and merges its own outbox entries into it: an outbox message whose text matches a shell queue item is that item, never a second row. Every change of that list writes one `CHAT_QUEUE items=[{"text":...,"state":"queued"|"sent"}]` line to the debug log.
+Chat View lists the shell queue in order after the transcript and merges its own outbox entries into it: an outbox message whose text matches a shell queue item is that item, never a second row. A queue copy the reader cut short still belongs to the waiting message, and so does one Claude collapsed to a paste placeholder when the waiting text is long. The long message never shows twice. Every change of that list writes one `CHAT_QUEUE items=[{"text":...,"state":"queued"|"sent"}]` line to the debug log.
 
 The draft follows the focused side. Edits in the Chat View box are pushed 500 ms after the last keystroke with the reader's `draft` op (clear the box, type the text, no Enter), never while a send is in flight. The shell box text fills the Chat View box only for ten seconds after Ctrl+K "Chat View: Edit Queued Messages" (IGSH-930); text another agent types or pastes into the shell box never shows in the Chat View box, so the box holds only what the human typed. Unsent text is not erased by a shell clear. Ctrl+K "Chat View: Edit Queued Messages" sends Claude's Up key through the `edit_queued` op so Claude moves its queue into the box, and the draft sync shows it. The chat-delivery verify journey case `queue-draft-sync` proves all of this. The case `send-stays-gone` (IGSH-960) proves that after each of 20 sends, including long wrapped ones, the sent text never returns to the Chat View box and no draft file holds text for 10 seconds.
 
