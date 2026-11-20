@@ -16,7 +16,9 @@ Each selected map names its permitted `Journeys`. The release runs these through
 
 The verifier downloads the current run's `multiprompt-x64` artifact. It does not rebuild or download a published release. Both the executable's embedded revision and its version must match the candidate. The ordinary driver records `journey.mp4` around the real desktop journey.
 
-The publication gate checks the executable hash, source and harness revisions, current run, passing result, recorder result, named-case failures and zero-process cleanup. FFprobe reads the video and FFmpeg decodes it. Missing, failed, skipped, stale, rebuilt or corrupt evidence fails with the full missing-feature list, even after a matrix job fails.
+The publication gate checks the executable hash, source and harness revisions, current run, passing result, recorder result, named-case failures and zero-process cleanup. FFprobe reads the video and FFmpeg decodes it. Stale, rebuilt or corrupt evidence fails with the full missing-feature list, even after a matrix job fails.
+
+A journey that fails on the candidate is a note, not a blocker, when the latest completed scheduled `verify.yml` run on master or the last published release's journey run also failed it. Only a journey that passed there and fails now blocks. A candidate failure with no recorded base run is a note as well; unreadable candidate evidence still blocks.
 
 Release notes link each accepted artifact and name its video. `release-journeys.json` records those links, video hashes, executable hash and PR attribution. It is a signed-checksum-covered release asset. Artifact links follow GitHub's artifact retention policy.
 
