@@ -153,13 +153,38 @@ try {
     $observation.frames = $frames.ToArray()
     Save $observation "$caseDir/timing.json"
 }
-Press @(0x11, 0x4B) 'Ctrl+K: select live conversation'
-$paletteStart = (Read-Shared "$settings/debug.log").Length
-$query = 'chat view select all'
-foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-[void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
-Press @(0x0D) 'Enter: select live conversation'
-Press @(0x11, 0x43) 'Ctrl+C: copy live conversation'
-$observation.copied = [Windows.Forms.Clipboard]::GetText()
-Press @(0x1B) 'Esc: clear live selection'
-[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+function Copy-WorkingConversation {
+    Press @(0x11, 0x4B) 'Ctrl+K: select live conversation'
+    $paletteStart = (Read-Shared "$settings/debug.log").Length
+    $query = 'chat view select all'
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
+    Press @(0x0D) 'Enter: select live conversation'
+    [Windows.Forms.Clipboard]::Clear()
+    Press @(0x11, 0x43) 'Ctrl+C: copy live conversation'
+    $copied = [Windows.Forms.Clipboard]::GetText()
+    Press @(0x1B) 'Esc: clear live selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    return $copied
+}
+$observation.copied = Copy-WorkingConversation
+if (-not $steady) {
+    $reply = 'The hosted stand-in reply is visible.'
+    foreach ($stage in @(@{marker='working-final'; count=1}, @{marker='working-second'; count=2})) {
+        [IO.File]::WriteAllText("$state/$($stage.marker)", '')
+        [void](Wait-For 'provider saved the final reply' { (Read-Shared "$state/working-host.jsonl").Contains('"stage": "' + $stage.marker + '"') } 30)
+        [void](Wait-For 'final reply reached the app history cache' {
+            @(Get-ChildItem "$settings/chatcache" -Filter '*.jsonl' -ErrorAction SilentlyContinue | Where-Object {
+                $content = Read-Shared $_.FullName
+                $content.Contains('pstack: verified') -and ([regex]::Matches($content, [regex]::Escape($reply))).Count -eq $stage.count
+            }).Count -gt 0
+        } 60)
+        $copied = Wait-For 'final reply is visible in the conversation' {
+            $value = Copy-WorkingConversation
+            if ($value.Contains('pstack: verified')) { return $value }
+        } 30
+        if (([regex]::Matches($copied, [regex]::Escape($reply))).Count -ne $stage.count -or ([regex]::Matches($copied, 'pstack: verified')).Count -ne $stage.count) { throw 'Live and history copies must merge by identity without hiding identical real replies' }
+        $observation[$stage.marker] = $copied
+        Shot $stage.marker
+    }
+}

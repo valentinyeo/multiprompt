@@ -1564,6 +1564,41 @@ test "IGSH-1415 a reply the transcript already carries is drawn once while the t
     try std.testing.expectEqual(@as(usize, 1), tailFor(94, &text, 0, &blocks, &.{}).blocks);
 }
 
+test "SOFT-2555 partial final and archived reply draw once without hiding identical replies" {
+    const a = std.testing.allocator;
+    var live: Live = .{};
+    defer live.deinit(a);
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var history: @import("chat_history.zig").History = .{};
+    defer history.deinit(a);
+    const key = @import("chat_transcript.zig").Identity.init(2555, 1, false, "sid", "");
+    var text: [128]u16 = undefined;
+    var blocks: [8]chat_markdown.Block = undefined;
+    _ = try applyValue(&live, a, 1, try parse(scratch, "{\"kind\":\"text.delta\",\"item\":\"reply-one:text:0\",\"payload\":{\"text\":\"Growing reply\"}}"));
+    var tail = tailInto(&live, &text, 0, &blocks, history.blocks.items);
+    try std.testing.expectEqual(@as(usize, 1), tail.blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Growing reply"), text[0..tail.text_len]);
+    _ = try applyValue(&live, a, 2, try parse(scratch, "{\"kind\":\"text.done\",\"item\":\"reply-one:text:0\",\"payload\":{\"text\":\"Growing reply\\npstack: verified\"}}"));
+    tail = tailInto(&live, &text, 0, &blocks, history.blocks.items);
+    try std.testing.expectEqual(@as(usize, 1), tail.blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Growing reply\npstack: verified"), text[0..tail.text_len]);
+    try history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\t-\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply-one:text:0\",\"text\":\"Growing reply\\npstack: verified\"}\n@@MP_END@@\n", 1, key);
+    tail = tailInto(&live, &text, 0, &blocks, history.blocks.items);
+    try std.testing.expectEqual(@as(usize, 0), tail.blocks);
+    try std.testing.expectEqual(@as(usize, 1), history.blocks.items.len);
+    _ = try applyValue(&live, a, 3, try parse(scratch, "{\"kind\":\"text.done\",\"item\":\"reply-two:text:0\",\"payload\":{\"text\":\"Growing reply\\npstack: verified\"}}"));
+    tail = tailInto(&live, &text, 0, &blocks, history.blocks.items);
+    try std.testing.expectEqual(@as(usize, 2), history.blocks.items.len + tail.blocks);
+    try history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\t-\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply-two:text:0\",\"text\":\"Growing reply\\npstack: verified\"}\n@@MP_END@@\n", 2, key);
+    tail = tailInto(&live, &text, 0, &blocks, history.blocks.items);
+    try std.testing.expectEqual(@as(usize, 0), tail.blocks);
+    try std.testing.expectEqual(@as(usize, 2), history.blocks.items.len);
+}
+
 test "IGSH-1415 a live step the transcript has not carried yet stays on screen" {
     const sid = "11111111-2222-3333-4444-666666666666";
     _ = begin(93, 0, sid);

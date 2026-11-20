@@ -19,6 +19,66 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+test('SOFT-2555 Doctor reads saved tabs after a concurrent session write releases its lock', () => {
+  const sessionRead = drive.match(/    \$session = [\s\S]*?(?=    \$expectedTmux)/)?.[0];
+  assert.ok(sessionRead, 'exercise the actual Doctor session read');
+  assert.match(sessionRead, /Wait-For 'saved session is readable'/);
+  assert.match(sessionRead, /catch \[IO\.IOException\]/);
+  if (process.platform !== 'win32') return;
+  const wait = drive.slice(drive.indexOf('function Wait-For('), drive.indexOf('function Shot('));
+  const readShared = drive.slice(drive.indexOf('function Read-Shared('), drive.indexOf('function Step(')).replace('function Read-Shared(', 'function Read-SharedFile(');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-session-lock-'));
+  try {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$settings = $env:DOCTOR_SESSION_FIXTURE
+${wait}
+${readShared}
+function Read-Shared([string]$Path) {
+    $script:reads++
+    try { Read-SharedFile $Path } catch [IO.IOException] {
+        $script:contentions++
+        if ($script:release) { $script:lock.Dispose(); $script:lock = $null }
+        throw
+    }
+}
+$file = Join-Path $settings 'session.json'
+[IO.File]::WriteAllText($file, '{"tabs":[{"kind":"tmux","tmux_session":"verify-agent"}]}')
+$script:release = $true
+$script:contentions = 0
+$script:reads = 0
+$script:lock = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try {
+    ${sessionRead}
+    if ($script:contentions -ne 1 -or $script:reads -ne 2 -or $session.tabs[0].tmux_session -cne 'verify-agent') { throw 'Doctor did not recover the actual saved tabs after sharing contention' }
+} finally { if ($script:lock) { $script:lock.Dispose() } }
+$script:release = $false
+$script:lock = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try {
+    try { ${sessionRead}; throw 'Doctor accepted a permanently locked session' } catch {
+        if ($_.Exception.Message -cne 'Timed out: saved session is readable') { throw }
+    }
+} finally { $script:lock.Dispose(); $script:lock = $null }
+[IO.File]::WriteAllText($file, '{broken')
+$script:reads = 0
+$invalidRejected = $false
+try { ${sessionRead} } catch {
+    if ($_.Exception.Message -like 'Timed out:*' -or $script:reads -ne 1) { throw 'Doctor hid invalid JSON behind retries' }
+    $invalidRejected = $true
+}
+if (-not $invalidRejected) { throw 'Doctor accepted invalid saved tabs' }
+'DOCTOR_SESSION_LOCK_OK'
+`;
+    const file = path.join(dir, 'doctor-session-lock.ps1');
+    fs.writeFileSync(file, script);
+    assert.match(execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], {
+      env: { ...process.env, DOCTOR_SESSION_FIXTURE: dir }, encoding: 'utf8', timeout: 30000,
+    }), /DOCTOR_SESSION_LOCK_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('IGSH-1181 startup subscriptions do not count as interrupted live replies, but new readers do', () => {
   const source = read('tools/verify-chat-delivery/live-delivery.ps1');
   const start = source.match(/^\$readerStart = .+$/m)?.[0];
@@ -616,7 +676,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /actions\/setup-python@[a-f0-9]{40}/);
   assert.match(workflow, /gh release download \$env:RELEASE_TAG/);
   assert.match(workflow, /Release checksum mismatch/);
-  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix\.feature \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
   assert.ok(read('.github/workflows/click-through.yml').includes('touchedJourneys'));
 });
@@ -1407,7 +1467,7 @@ test('held cancellation evidence rejects terminal delivery and unrelated removal
 
 test('Doctor checks owned tabs through saved session state, not a delayed inbox index', () => {
   const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
-  assert.match(doctor, /Get-Content "\$settings\/session\.json"/);
+  assert.match(doctor, /Read-Shared "\$settings\/session\.json"/);
   assert.doesNotMatch(doctor, /inbox-default|\$published/);
   assert.match(doctor, /\$session\.tabs\)\.Count -ne \$expectedShells/);
   assert.match(doctor, /\$_.kind -eq 'tmux'/);

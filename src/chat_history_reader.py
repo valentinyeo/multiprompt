@@ -4245,7 +4245,7 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
     if not isolated and kind == "text.done" and isinstance(payload, dict) and payload.get("text"):
         if isinstance(fresh, dict) and fresh.get("phase") == "handover":
             fresh["text"][item or "reply"] = payload["text"]
-        host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"]))
+        host_history_append(provider, sid, session, dict(role="assistant", id=item, text=payload["text"]))
     elif not isolated and kind == "item.started" and isinstance(payload, dict) and payload.get("type") == "tool_call":
         host_history_append(provider, sid, session,
                             dict(role="tool", id=item, text=tool_summary(payload.get("tool") or "Tool", payload.get("input") or {}),
@@ -8231,7 +8231,11 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
+<<<<<<< HEAD
+RUNTIME_GENERATION = 130
+=======
 RUNTIME_GENERATION = 132
+>>>>>>> origin/master
 
 if __name__ == '__main__':
     import base64 as _base64

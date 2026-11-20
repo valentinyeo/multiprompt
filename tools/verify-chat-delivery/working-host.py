@@ -81,8 +81,10 @@ def install(namespace, root, record, steady=False):
         if not matches(provider, sid):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
-        session = {'turn': 'standin-turn', 'state': {},
+        session = {'turn': 'standin-turn', 'state': {'display_history': True},
                    'sends': [dict(id=token, attempt=attempt, accepted=False)]}
+        namespace['host_write'](namespace['host_paths'](provider, sid)['config'], dict(enabled=True, cwd=str(root)))
+        namespace['host_state_write'](provider, sid, session['state'])
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
         record('working-host.jsonl', stage='turn.started', sid=sid, id=token)
@@ -102,26 +104,41 @@ def install(namespace, root, record, steady=False):
             namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
                                     dict(text=REPLY, done=False), 'standin-reply')
             record('working-host.jsonl', stage='text.delta', sid=sid, text=REPLY)
-            text = REPLY
-            for index in range(1, 8):
-                time.sleep(0.4)
-                text += f' Streaming segment {index}.'
-                namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
-                                        dict(text=text, done=False), 'standin-reply')
-                record('working-host.jsonl', stage='streaming-delta', sid=sid, segment=index)
-            if steady:
-                deadline = time.monotonic() + 60
-                while not (root / 'working-steady-stream').exists() and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                if (root / 'working-steady-stream').exists():
-                    for index in range(8, 16):
-                        text += f' Reading-time stream segment {index}.'
-                        namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
-                                                dict(text=text, done=False), 'standin-reply')
-                        record('working-host.jsonl', stage='reading-stream-delta', sid=sid, segment=index)
-                        time.sleep(0.4)
-            if session.get('db') is not None:
-                session['db'].close()
+            try:
+                text = REPLY
+                for index in range(1, 8):
+                    time.sleep(0.4)
+                    text += f' Streaming segment {index}.'
+                    namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                            dict(text=text, done=False), 'standin-reply')
+                    record('working-host.jsonl', stage='streaming-delta', sid=sid, segment=index)
+                if steady:
+                    deadline = time.monotonic() + 60
+                    while not (root / 'working-steady-stream').exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if (root / 'working-steady-stream').exists():
+                        for index in range(8, 16):
+                            text += f' Reading-time stream segment {index}.'
+                            namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                                    dict(text=text, done=False), 'standin-reply')
+                            record('working-host.jsonl', stage='reading-stream-delta', sid=sid, segment=index)
+                            time.sleep(0.4)
+                if not steady:
+                    for marker, item in (('working-final', 'standin-reply'), ('working-second', 'standin-reply-two')):
+                        deadline = time.monotonic() + 90
+                        while not (root / marker).exists() and time.monotonic() < deadline:
+                            time.sleep(0.05)
+                        if not (root / marker).exists():
+                            record('working-host.jsonl', stage='reply-timeout', sid=sid)
+                            return
+                        namespace['host_event'](provider, sid, 'verify-agent', session, 'text.done',
+                                                dict(text=REPLY + '\npstack: verified'), item)
+                        history = namespace['host_paths'](provider, sid)['history']
+                        rows = [json.loads(line)['row'] for line in history.read_text().splitlines()]
+                        record('working-host.jsonl', stage=marker, sid=sid, rows=rows)
+            finally:
+                if session.get('db') is not None:
+                    session['db'].close()
 
         threading.Thread(target=reply, daemon=True).start()
         return {'status': 'sent'}

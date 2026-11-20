@@ -6668,6 +6668,23 @@ class HostEventStreamFixture:
 
 
 class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
+    def test_soft2555_archived_reply_keeps_its_live_identity_and_final_text(self):
+        self.session['state']['display_history'] = True
+        reader.host_paths(self.provider, self.sid)
+        self.feed(self.frame(dict(type='message_start', message=dict(id='reply-one'))),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='text_delta', text='Growing reply'))))
+        self.flush()
+        self.feed(dict(type='assistant', message=dict(id='reply-one', content=[dict(type='text', text='Growing reply\npstack: verified')])),
+                  dict(type='assistant', message=dict(id='reply-two', content=[dict(type='text', text='Growing reply\npstack: verified')])))
+        history = reader.host_paths(self.provider, self.sid)['history']
+        rows = [reader.conversation_rows(json.loads(line), self.provider)[0] for line in history.read_text().splitlines()]
+        live = self.events('text.done')
+        self.assertEqual([row['id'] for row in rows], [event['item'] for event in live])
+        self.assertEqual([row['text'] for row in rows], ['Growing reply\npstack: verified'] * 2)
+        self.assertNotEqual(rows[0]['id'], rows[1]['id'], 'identical real replies keep separate identities')
+        self.assertEqual(self.events('text.delta')[0]['item'], rows[0]['id'])
+
     def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
