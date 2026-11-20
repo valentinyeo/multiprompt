@@ -7,6 +7,7 @@ const crash_recorder = @import("crash_recorder.zig");
 const DWORD = @import("win32.zig").DWORD;
 const LPCWSTR = @import("win32.zig").LPCWSTR;
 const WM_APP_DICTATION_READY = @import("win32.zig").WM_APP_DICTATION_READY;
+const WM_APP_DICTATION_LIVE = @import("win32.zig").WM_APP_DICTATION_LIVE;
 const WM_APP_VOICE_TTS_FALLBACK = @import("win32.zig").WM_APP_VOICE_TTS_FALLBACK;
 const WM_APP_VOICE_UTTERANCE_READY = @import("win32.zig").WM_APP_VOICE_UTTERANCE_READY;
 const WM_APP_VOICE_MIC_STATUS = @import("win32.zig").WM_APP_VOICE_MIC_STATUS;
@@ -153,6 +154,7 @@ const DICTATION_SAMPLE_RATE = @import("app_state.zig").DICTATION_SAMPLE_RATE;
 const DICTATION_CHUNK_BYTES = @import("app_state.zig").DICTATION_CHUNK_BYTES;
 const DICTATION_BUFFER_COUNT = @import("app_state.zig").DICTATION_BUFFER_COUNT;
 const dictation_audio = @import("dictation_audio.zig");
+const dictation_live = @import("dictation_live.zig");
 const pcmFrameRms = @import("app_state.zig").pcmFrameRms;
 const vadStep = @import("app_state.zig").vadStep;
 const DictationHttpResult = @import("app_state.zig").DictationHttpResult;
@@ -1945,6 +1947,7 @@ fn captureDictationPcm(audio: *dictation_audio.Audio) void {
             if (n > 0 and headers[i].lpData != null) {
                 const src = headers[i].lpData.?[0..n];
                 if (!audio.append(std.heap.page_allocator, src)) app_state.g_dictation_recording.store(false, .release);
+                dictation_live_feed.append(std.heap.page_allocator, src);
                 if (n >= 2) app_state.g_dictation_level.store(@intFromFloat(pcmFrameRms(std.mem.bytesAsSlice(i16, src[0 .. n - (n % 2)]))), .release);
                 if (app_state.g_voice_listening_active.load(.acquire) and n >= 2) {
                     const samples = std.mem.bytesAsSlice(i16, src[0 .. n - (n % 2)]);
@@ -2055,8 +2058,10 @@ fn dictationWorkerThread() void {
     };
     defer audio.deinit(std.heap.page_allocator);
 
+    const live_epoch = dictationLiveBegin();
     app_state.g_dictation_capturing.store(true, .release);
     captureDictationPcm(&audio);
+    dictationLiveEnd(live_epoch);
     const audio_len = audio.len;
     app_state.g_dictation_capturing.store(false, .release);
     dictationAudit("audio-bytes", audio_len);
@@ -2074,7 +2079,7 @@ fn dictationWorkerThread() void {
     const result = deepgramTranscribePcm(audio.slice(), &transcript_utf8);
     dictationAudit("transcript-utf8-bytes", result.transcript_len);
     dictationAudit("http-status", @intCast(result.status));
-    if (result.transcript_len == 0 or !dictationSetTranscriptUtf8(transcript_utf8[0..result.transcript_len])) {
+    if ((result.transcript_len == 0 or !dictationSetTranscriptUtf8(transcript_utf8[0..result.transcript_len])) and !dictationLiveFallback(result.status)) {
         if (result.status == 0) {
             dictationSetErrorAscii("Dictation failed: could not reach Deepgram");
         } else if (result.status == 401 or result.status == 403) {
@@ -2243,6 +2248,7 @@ pub fn cancelDictation() void {
     if (!app_state.g_dictation_running.load(.acquire) or !app_state.g_dictation_cancelled.load(.acquire)) return;
     app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_recording.store(false, .release);
+    @import("chat_composer.zig").chatDictationLiveDiscard();
     app_state.g_dictation_draft_owner_len = 0;
     @import("chat_composer.zig").chatDictationSync();
     dictationAudit("cancel", 0);
@@ -2276,6 +2282,7 @@ pub fn handleDictationReady() void {
     const discard_legacy = app_state.g_voice_legacy_discard;
     app_state.g_voice_legacy_discard = false;
     if (app_state.g_dictation_cancelled.load(.acquire) or (dictation_private_capture and dictation_capture_epoch != dictation_private_epoch)) {
+        @import("chat_composer.zig").chatDictationLiveDiscard();
         if (was_voice_listening) {
             app_state.g_voice_state = .idle;
             invalidateChatHeader();
@@ -2290,6 +2297,7 @@ pub fn handleDictationReady() void {
     if (was_voice_listening) app_state.g_voice_last_activity_tick = GetTickCount64();
     const transcript = trimDictationText(text_copy[0..text_len]);
     if (transcript.len == 0) {
+        @import("chat_composer.zig").chatDictationLiveDiscard();
         @import("chat_composer.zig").chatDictationSendFlush(send_queued);
         if (was_voice_listening) {
             app_state.g_voice_state = .idle;
@@ -2313,7 +2321,8 @@ pub fn handleDictationReady() void {
     }
 
     if (app_state.g_dictation_draft_owner_len > 0) {
-        @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
+        const owner = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+        if (!@import("chat_composer.zig").chatDictationLiveFinish(owner, transcript)) @import("chat_composer.zig").chatDraftAppend(owner, transcript);
         dictationAudit("target-chat-composer", transcript.len);
         @import("chat_composer.zig").chatDictationSendFlush(send_queued);
         return;
@@ -2453,6 +2462,155 @@ pub fn toggleDictation() void {
     };
     t.detach();
     showDictationStatus("Dictation recording - Ctrl+Shift+Space to stop", 60000);
+}
+
+var dictation_live_feed = dictation_live.Feed{};
+var dictation_live_epoch = std.atomic.Value(u32).init(0);
+var dictation_live_mutex: app_state.SpinMutex = .{};
+var dictation_live_slot: [dictation_live.text_cap]u16 = undefined;
+var dictation_live_slot_len: usize = 0;
+var dictation_live_pending = std.atomic.Value(bool).init(false);
+var dictation_live_text: [dictation_live.text_cap]u8 = undefined;
+var dictation_live_text_len: usize = 0;
+
+fn dictationLiveWanted() bool {
+    if (dictationFixtureEnabled()) return false;
+    if (app_state.g_voice_listening_active.load(.acquire)) return false;
+    return app_state.g_dictation_draft_owner_len > 0;
+}
+
+fn dictationLiveBegin() u32 {
+    if (!dictationLiveWanted()) return 0;
+    while (!dictation_live_mutex.tryLock()) Sleep(0);
+    dictation_live_text_len = 0;
+    dictation_live_slot_len = 0;
+    const epoch = dictation_live_epoch.fetchAdd(1, .acq_rel) + 1;
+    dictation_live_mutex.unlock();
+    dictation_live_pending.store(false, .release);
+    dictation_live_feed.begin(std.heap.page_allocator, epoch);
+    const t = std.Thread.spawn(.{}, dictationLiveThread, .{epoch}) catch {
+        dictation_live_feed.end(std.heap.page_allocator, epoch);
+        return 0;
+    };
+    t.detach();
+    return epoch;
+}
+
+fn dictationLiveEnd(epoch: u32) void {
+    if (epoch == 0) return;
+    dictation_live_feed.end(std.heap.page_allocator, epoch);
+    while (!dictation_live_mutex.tryLock()) Sleep(0);
+    _ = dictation_live_epoch.fetchAdd(1, .acq_rel);
+    dictation_live_mutex.unlock();
+}
+
+fn dictationLiveAlive(epoch: u32) bool {
+    if (!app_state.g_dictation_recording.load(.acquire) or app_state.g_dictation_cancelled.load(.acquire)) return false;
+    return dictation_live_epoch.load(.acquire) == epoch;
+}
+
+fn dictationLiveTranscribe(pcm: []const u8, out: []u8) ?usize {
+    const result = deepgramTranscribePcm(pcm, out);
+    if (result.status != 200) return null;
+    return result.transcript_len;
+}
+
+fn dictationLivePost(epoch: u32, text: []const u8) void {
+    while (!dictation_live_mutex.tryLock()) Sleep(0);
+    if (dictation_live_epoch.load(.acquire) != epoch) {
+        dictation_live_mutex.unlock();
+        return;
+    }
+    @memcpy(dictation_live_text[0..text.len], text);
+    dictation_live_text_len = text.len;
+    const converted = MultiByteToWideChar(CP_UTF8, 0, text.ptr, @intCast(text.len), @ptrCast(&dictation_live_slot), @intCast(dictation_live_slot.len));
+    dictation_live_slot_len = if (converted > 0) @intCast(converted) else 0;
+    const posted = dictation_live_slot_len > 0;
+    dictation_live_mutex.unlock();
+    if (!posted or app_state.g_main_hwnd == null) return;
+    if (dictation_live_pending.swap(true, .acq_rel)) return;
+    if (PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_LIVE, 0, 0) == 0) dictation_live_pending.store(false, .release);
+}
+
+fn dictationLiveThread(epoch: u32) void {
+    crash_recorder.guardThread();
+    const allocator = std.heap.page_allocator;
+    const tail_cap: usize = dictation_live.bytes_per_second * 24;
+    const tail_buf = allocator.alloc(u8, tail_cap) catch return;
+    defer allocator.free(tail_buf);
+    var committed: [dictation_live.text_cap]u8 = undefined;
+    var committed_len: usize = 0;
+    var display: [dictation_live.text_cap]u8 = undefined;
+    var posted: [dictation_live.text_cap]u8 = undefined;
+    var posted_len: usize = 0;
+    var piece: [4096]u8 = undefined;
+    var seg_start: usize = 0;
+    var last_total: usize = 0;
+    var failures: u32 = 0;
+    while (dictationLiveAlive(epoch)) {
+        Sleep(@intCast(dictation_live.tick_ms));
+        if (!dictationLiveAlive(epoch)) break;
+        const total = dictation_live_feed.total(epoch);
+        if (total < last_total + dictation_live.min_new_bytes) continue;
+        last_total = total;
+        if (total - seg_start > tail_cap) seg_start = total - tail_cap;
+        var tail_len = total - seg_start;
+        if (tail_len < dictation_live.min_tail_bytes) continue;
+        if (!dictation_live_feed.copyInto(epoch, seg_start, tail_buf[0..tail_len])) break;
+        if (!dictation_live.hasSpeech(tail_buf[0..tail_len])) {
+            if (tail_len > dictation_live.bytes_per_second * 2) seg_start = total - dictation_live.bytes_per_second;
+            continue;
+        }
+        if (dictation_live.findCut(tail_buf[0..tail_len])) |cut| {
+            const n = dictationLiveTranscribe(tail_buf[0..cut], &piece) orelse {
+                failures += 1;
+                if (failures >= dictation_live.max_failures) break;
+                continue;
+            };
+            committed_len = dictation_live.joinText(&committed, committed_len, piece[0..n]);
+            seg_start += cut;
+            tail_len -= cut;
+            std.mem.copyForwards(u8, tail_buf[0..tail_len], tail_buf[cut..][0..tail_len]);
+        }
+        @memcpy(display[0..committed_len], committed[0..committed_len]);
+        var display_len = committed_len;
+        if (tail_len >= dictation_live.min_tail_bytes and dictation_live.hasSpeech(tail_buf[0..tail_len])) {
+            const n = dictationLiveTranscribe(tail_buf[0..tail_len], &piece) orelse {
+                failures += 1;
+                if (failures >= dictation_live.max_failures) break;
+                continue;
+            };
+            display_len = dictation_live.joinText(&display, display_len, piece[0..n]);
+        }
+        failures = 0;
+        if (display_len == 0 or std.mem.eql(u8, display[0..display_len], posted[0..posted_len])) continue;
+        @memcpy(posted[0..display_len], display[0..display_len]);
+        posted_len = display_len;
+        dictationLivePost(epoch, display[0..display_len]);
+    }
+}
+
+pub fn handleDictationLive() void {
+    var words: [dictation_live.text_cap]u16 = undefined;
+    while (!dictation_live_mutex.tryLock()) Sleep(0);
+    dictation_live_pending.store(false, .release);
+    const n = @min(dictation_live_slot_len, words.len);
+    @memcpy(words[0..n], dictation_live_slot[0..n]);
+    dictation_live_mutex.unlock();
+    if (n == 0 or app_state.g_dictation_draft_owner_len == 0) return;
+    if (!app_state.g_dictation_recording.load(.acquire) or app_state.g_dictation_cancelled.load(.acquire)) return;
+    @import("chat_composer.zig").chatDictationLiveApply(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], words[0..n]);
+}
+
+fn dictationLiveFallback(status: DWORD) bool {
+    if (status == 200) return false;
+    var text: [dictation_live.text_cap]u8 = undefined;
+    while (!dictation_live_mutex.tryLock()) Sleep(0);
+    const n = dictation_live_text_len;
+    @memcpy(text[0..n], dictation_live_text[0..n]);
+    dictation_live_mutex.unlock();
+    if (n == 0) return false;
+    return dictationSetTranscriptUtf8(text[0..n]);
 }
 
 test "IGSH-888 Chat View header shows no dictation status text" {
