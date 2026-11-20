@@ -2153,7 +2153,7 @@ function runHarness(control = false) {
       functions = functions.replace('    chatEchoPushQueuedForShell(idx, g_chat_outbox.items[ei].id, true);', '    _ = idx;');
     }
     if (control === 'steer-empty-before') {
-      functions = functions.replace('fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {', 'fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {\n    _ = outbox_id;\n    _ = quiet;\n    if (chatEchoCountDeliveredForShell(idx) == 0) return;');
+      functions = functions.replace('fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {', 'fn chatEchoPushQueuedForShell(idx: u32, outbox_id: ?u64, quiet: bool) void {\n    if (chatEchoCountDeliveredForShell(idx) == 0) return;');
     }
     if (control === 'settlement') {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
