@@ -212,10 +212,16 @@ function Delete-WorkspaceFixture([string]$Name, [bool]$Mouse) {
     $marker = 'delete-visible '
     $paintedNames = @(($paintedText.Substring($paintedText.LastIndexOf($marker) + $marker.Length).Trim()) -split '\|' | ForEach-Object { $_.Trim() })
     if ($paintedNames -contains $Name) { throw "Deleted workspace is still painted in the delete list: $Name" }
+    $removedPath = Join-Path $scratch 'roaming/ZigShell/removed-workspaces.json'
+    Wait-Until {
+        if (-not (Test-Path $removedPath)) { return $false }
+        $recorded = @((Get-Content $removedPath -Raw | ConvertFrom-Json).names)
+        $recorded -contains $Name
+    } 'deleted workspace name recorded so a stored layout cannot recreate it'
     Snapshot ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '-after')
     Save-Json (Read-Session) ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '.session.json')
     Press @(0x1B) 'Escape: close delete list'
-    $result.checks += @{ name = 'workspace-delete'; workspace = $Name; identity = $identity; mouse = $Mouse; closedPids = $ownedPids }
+    $result.checks += @{ name = 'workspace-delete'; workspace = $Name; identity = $identity; mouse = $Mouse; closedPids = $ownedPids; removalRecorded = $true }
 }
 
 Rename-DeleteFixture 'Workspace 9'
@@ -324,3 +330,25 @@ for ($i = 0; $i -lt $archiveTabs.Count; $i++) {
 Save-Json $restored 'archive-restored.session.json'
 $result.checks += @{ name = 'workspace-archive-restore'; id = $archiveId; workspace = $archiveName; sessions = $restoredTabs.Count; hiddenFromStrip = $true; hiddenFromCard = $true; hiddenFromOpenPalette = $true; hiddenFromInbox = $true; serverBoundary = 'local CMD only; remote preservation covered by hibernate path tests' }
 Snapshot 'archive-restored'
+
+$deletedNames = @('Workspace 9', 'CEO Runners')
+Restart-SessionRestore 'workspace-delete-relaunch' $false
+Wait-Until {
+    $state = Read-Session
+    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+    $null -ne $state -and @($state.workspaces | Where-Object { $_.name -in $deletedNames }).Count -eq 0 -and
+        @($registry.windows | Where-Object { $_.name -in $deletedNames }).Count -eq 0 -and
+        @($state.workspaces | Where-Object { $_.wid -ceq $archiveId }).Count -eq 1
+} 'deleted workspaces stay gone after a relaunch and keep the restored workspace'
+Save-Json (Read-Session) 'workspace-delete-relaunch.session.json'
+$relaunchCard = Open-WorkspaceCard 'workspace-delete-relaunch-card'
+$relaunchLook = [VerifyNative]::MenuLook($relaunchCard)
+$relaunchRegistry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+$relaunchRows = @($relaunchRegistry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
+if ($relaunchLook.height -ne (19 + ($relaunchRows.Count + 2) * 28)) { throw 'Relaunched workspace card does not match the stored workspaces' }
+Snapshot 'workspace-delete-relaunch-card'
+Record 'Escape closes the relaunched workspace card'
+[VerifyNative]::Chord(@(0x1B))
+Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'relaunched workspace card dismissed'
+$result.checks += @{ name = 'workspace-delete-relaunch'; deleted = $deletedNames; restoredWorkspaceKept = $archiveId }
+Snapshot 'workspace-delete-relaunch-complete'

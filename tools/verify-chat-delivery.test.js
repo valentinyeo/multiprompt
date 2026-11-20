@@ -1044,6 +1044,55 @@ test('fake shell history succeeds with all fifty messages and paired tools while
   }
 });
 
+test('the tool-heavy tail seed appends only the documented tool calls', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-history-tail-'));
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  try {
+    const transcript = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'full-history', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-history', cwd: 'C:/verify/work', panePid: 4242, soft2779Tail: 3,
+      transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const shell = (...args) => execFileSync('python3', ['-I', '-X', 'utf8', boundary, 'shell', ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8', timeout: 60000 });
+    shell('init');
+    assert.equal(shell('history'), '');
+    const rows = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(rows.length, 98 + 6);
+    assert.equal(rows.at(-2).message.content[0].id, 'soft-2779-tail-2');
+    assert.equal(rows.at(-1).message.content[0].tool_use_id, 'soft-2779-tail-2');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the app-supplied reader proves whether the tail frame holds a message row', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tail-frame-'));
+  try {
+    const tool = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tail-1', content: 'completed tool work '.repeat(400), is_error: false }] } });
+    const answer = JSON.stringify({ type: 'assistant', message: { role: 'assistant', id: 'm1', content: [{ type: 'text', text: 'the newest reply' }] } });
+    const read = (name, lines) => {
+      const transcript = path.join(dir, `${name}.jsonl`);
+      const result = path.join(dir, `${name}.json`);
+      fs.writeFileSync(transcript, lines.map(line => `${line}\n`).join(''));
+      let status = 0;
+      try {
+        execFileSync('python3', [path.join(root, 'tools/verify-chat-delivery/tail-frame.py'), path.join(root, 'src/chat_history_reader.py'), transcript, result], { encoding: 'utf8', timeout: 60000 });
+      } catch (error) { status = error.status; }
+      return { status, frame: JSON.parse(fs.readFileSync(result, 'utf8')) };
+    };
+    const toolOnly = read('tool-only', Array.from({ length: 6 }, () => tool));
+    assert.equal(toolOnly.status, 1);
+    assert.equal(toolOnly.frame.visible, 0);
+    assert.match(toolOnly.frame.reason, /holds no user or assistant row/);
+    const withAnswer = read('with-answer', [answer, ...Array.from({ length: 6 }, () => tool)]);
+    assert.equal(withAnswer.status, 0);
+    assert.equal(withAnswer.frame.visible, 1);
+    assert.deepEqual(withAnswer.frame.newest, ['the newest reply']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('queue-draft-sync is wired into the journey, the workflow fallback and the feature map', () => {
   assert.ok(drive.includes("name='queue-draft-sync'"));
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
@@ -1453,8 +1502,9 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
   json('full-history/observation.json', { error: null });
   json('build.json', { tag: '', sha256: 'fixturehash', version: '1.0.0' });
   json('full-history/doctor.json', { sha256: 'fixturehash', version: '1.0.0', chat: true, tmux: true, pid: 1, hwnd: 20, composer: 21, focus: [20, 21] });
+  json('full-history/tail-frame.json', { frame_bytes: 1300000, rows: 300, visible: 2, newest: ['IGSH815 user 319', 'IGSH815 assistant 319'] });
   for (const stage of ['open', 'restart']) {
-    json(`full-history/${stage}.json`, { messages: 642, blocks: 1262, polled: true });
+    json(`full-history/${stage}.json`, { messages: 642, blocks: 1502, polled: true });
     json(`full-history/${stage}-latest.json`, { latest: 'IGSH815 assistant 319', visibleMs: 500 });
     fs.writeFileSync(path.join(dir, `full-history/${stage}-copied.txt`), messages.join('\n\n'));
     for (const edge of ['', '-first', '-last']) {
@@ -1476,6 +1526,9 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
     return JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
   };
   assert.equal(evaluate().status, 'passed');
+  json('full-history/tail-frame.json', { frame_bytes: 523110, rows: 188, visible: 0, reason: 'the tail frame holds no user or assistant row, so the chat can open on tool output alone' });
+  assert.equal(evaluate().status, 'failed');
+  json('full-history/tail-frame.json', { frame_bytes: 1300000, rows: 300, visible: 2 });
   for (const actual of [messages.slice(1), [...messages, messages[22]], [messages[1], messages[0], ...messages.slice(2)]]) {
     fs.writeFileSync(path.join(dir, 'full-history/open-copied.txt'), actual.join('\n\n'));
     assert.equal(evaluate().status, 'failed');

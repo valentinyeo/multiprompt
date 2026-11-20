@@ -46,7 +46,7 @@ pub fn build(view: *View, status: *const chat_transcript.Status, pending: []cons
             @memcpy(row.text[0..item.len], item.text[0..item.len]);
             for (pending, 0..) |entry, i| {
                 if (item.injected or i >= MAX_ROWS or used[i]) continue;
-                if (!chat_echo.sameText(clipped(entry.text), item.text[0..item.len]) and !chat_echo.sameSkillText(clipped(entry.text), item.text[0..item.len])) continue;
+                if (!chat_echo.queueTextMatches(entry.text, item.text[0..item.len])) continue;
                 used[i] = true;
                 row.local = true;
                 row.outbox_id = entry.id;
@@ -322,6 +322,29 @@ test "an outbox entry whose text is in the shell queue is that item and never a 
     try std.testing.expect(!view.rows[0].local);
     try std.testing.expect(view.rows[1].local);
     try std.testing.expectEqual(@as(u64, 7), view.rows[1].outbox_id);
+}
+
+test "SOFT-2929 a long waiting message is one row when the shell copy is cut short or collapsed" {
+    var long: [TEXT_CAP + 200]u16 = undefined;
+    for (&long, 0..) |*c, i| c.* = if (i % 9 == 8) ' ' else 'a' + @as(u16, @intCast(i % 26));
+    var cut_status: chat_transcript.Status = .{ .live_known = true };
+    @memcpy(cut_status.queue[0].text[0..200], long[0..200]);
+    cut_status.queue[0].len = 200;
+    cut_status.queue_len = 1;
+    const collapsed = "[Pasted text #1 +40 lines]";
+    var view: View = .{};
+    build(&view, &cut_status, &.{.{ .id = 9, .text = &long }});
+    try std.testing.expectEqual(@as(usize, 1), view.count);
+    try std.testing.expect(view.rows[0].local);
+    try std.testing.expectEqual(@as(u64, 9), view.rows[0].outbox_id);
+    build(&view, &statusWith(&.{collapsed}, &.{}), &.{.{ .id = 9, .text = &long }});
+    try std.testing.expectEqual(@as(usize, 1), view.count);
+    try std.testing.expect(view.rows[0].local);
+    try std.testing.expectEqual(@as(u64, 9), view.rows[0].outbox_id);
+    build(&view, &statusWith(&.{collapsed}, &.{}), &.{.{ .id = 9, .text = w("yes") }});
+    try std.testing.expectEqual(@as(usize, 2), view.count);
+    try std.testing.expect(!view.rows[0].local);
+    try std.testing.expect(view.rows[1].local);
 }
 
 test "IGSH-722 incoming queued and sent notes never consume matching local pending" {

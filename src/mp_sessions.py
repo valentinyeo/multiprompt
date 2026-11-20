@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib.machinery
 import importlib.util
 import json
 import sys
@@ -7,8 +8,12 @@ from pathlib import Path
 
 
 def load_send():
-    source = Path(__file__).resolve().with_name("mp_send.py")
-    spec = importlib.util.spec_from_file_location("mp_send", source)
+    here = Path(__file__).resolve()
+    source = here.with_name("mp_send.py")
+    if not source.is_file():
+        source = here.with_name("mp-send")
+    loader = importlib.machinery.SourceFileLoader("mp_send", str(source))
+    spec = importlib.util.spec_from_loader("mp_send", loader)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

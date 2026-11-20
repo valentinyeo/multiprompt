@@ -328,7 +328,8 @@ function Clear-Composer {
 }
 function Assert-FullHistory([string]$Stage) {
     $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
-    $blocks = 2 + 3 * $rounds + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
+    $toolTail = if ($Feature -eq 'chat-full-history') { 240 } else { 0 }
+    $blocks = 2 + 3 * $rounds + $toolTail + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
     if ($Stage -in @('open', 'restart')) {
         $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
         [Windows.Forms.Clipboard]::Clear()
@@ -628,6 +629,8 @@ foreach ($plan in $plans) {
             $standIn.home = "$profile/home"
             $standIn.cwd = 'C:/verify/shared-runners'
         }
+        $tailTools = if ($isHistory -and $Feature -eq 'chat-full-history') { 240 } else { 0 }
+        if ($tailTools -gt 0) { $standIn.soft2779Tail = $tailTools }
         Save $standIn "$state/state.json"
         if ($env:CHAT_SKILLS_PROOF -eq '1') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
@@ -893,6 +896,15 @@ foreach ($plan in $plans) {
         } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
             Assert-Retention
         } elseif ($isHistory) {
+            if ($Feature -eq 'chat-full-history') {
+                [void](Wait-For 'the app published the reader it runs' { Test-Path "$state/app-reader.py" } 30)
+                & $env:MP_VERIFY_PYTHON "$PSScriptRoot/tail-frame.py" "$state/app-reader.py" $transcript "$caseDir/tail-frame.json" | Out-Null
+                $tailFrameStatus = $LASTEXITCODE
+                $tailFrame = Get-Content "$caseDir/tail-frame.json" -Raw | ConvertFrom-Json
+                if ($tailFrameStatus -ne 0 -or $tailFrame.visible -lt 1) {
+                    throw ("SOFT-2779 the tail frame of the long chat holds no message row: " + $tailFrame.reason)
+                }
+            }
             Assert-FullHistory 'open'
             Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
             $actions.Add(@{case=$plan.name; input='close and restart the owned app with the same profile'})

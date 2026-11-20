@@ -19,7 +19,7 @@ function settle() {
     .replace('if (sent_tick_ms != 0) sent_tick_ms else now_ms', '(sent_tick_ms != 0 ? sent_tick_ms : now_ms)');
   const max = Number((echo.match(/TAKEN_MAX_AGE_MS: i64 = ([\d_]+)/)?.[1] || '60000').replaceAll('_', ''));
   const run = new Function(...names, 'phaseTaken', 'TAKEN_MAX_AGE_MS', code);
-  return {max, run: (watch, state, phase, replied, now, sent) => run(watch, state, phase, replied, now, sent,
+  return {max, run: (watch, state, phase, landed, replied, now, sent) => run(watch, state, phase, landed, replied, now, sent,
     phase => phase === 'accepted' || phase === 'started', max)};
 }
 
@@ -30,32 +30,46 @@ function watch() {
 }
 
 for (const kind of ['normal', 'slash command', 'mid-turn', 'reordered skills']) {
-  test(`${kind}: a confirmed message retires after a later reply, without idle`, () => {
+  test(`${kind}: a confirmed message retires after a later reply once its row is known`, () => {
     const {run} = settle();
-    for (const phase of ['accepted', 'started']) assert.equal(run(watch(), 'delivered', phase, true, 2000, 1000), true);
+    for (const phase of ['accepted', 'started']) {
+      assert.equal(run(watch(), 'delivered', phase, true, true, 2000, 1000), true);
+      assert.equal(run(watch(), 'delivered', phase, false, true, 2000, 1000), false);
+    }
   });
 }
+
+test('a message queued behind a busy turn never retires on the running reply or on age', () => {
+  const {run, max} = settle();
+  for (const phase of ['accepted', 'started']) {
+    assert.equal(run(watch(), 'delivered', phase, false, true, 2000, 1000), false);
+    assert.equal(run(watch(), 'delivered', phase, false, false, 1000 + max, 1000), false);
+    assert.equal(run(watch(), 'delivered', phase, false, false, 1000 + max * 60, 1000), false);
+  }
+});
 
 test('confirmed age is bounded without an active history, including after boot', () => {
   const {run, max} = settle();
   for (const sent of [1000, -max + 1000]) {
     const receipt = watch();
-    assert.equal(run(receipt, 'delivered', 'accepted', false, sent + max - 1, sent), false);
-    assert.equal(run(receipt, 'delivered', 'accepted', false, sent + max, sent), true);
+    assert.equal(run(receipt, 'delivered', 'accepted', true, false, sent + max - 1, sent), false);
+    assert.equal(run(receipt, 'delivered', 'accepted', true, false, sent + max, sent), true);
   }
 });
 
 test('no reply, age or Resync can retire an unconfirmed phase', () => {
   const {run, max} = settle();
   for (const phase of ['', 'queued', 'sent', 'failed', 'cancelled']) {
-    assert.equal(run(watch(), 'delivered', phase, true, max * 100, 1), false);
+    assert.equal(run(watch(), 'delivered', phase, true, true, max * 100, 1), false);
   }
   for (const state of ['queued', 'sending', 'not_sent', 'cancelled']) {
-    assert.equal(run(watch(), state, 'accepted', true, max * 100, 1), false);
+    assert.equal(run(watch(), state, 'accepted', true, true, max * 100, 1), false);
   }
 });
 
 test('load, background tick and Resync all apply receipt-gated retirement', () => {
+  assert.match(body(send, 'chatEchoRowKnown'), /chatEchoRowLanded/);
+  assert.match(body(send, 'chatEchoRowKnown'), /chatEchoTranscriptHasRow/);
   assert.match(body(send, 'chatOutboxParseJson'), /chat_echo\.takenSettled/);
   assert.match(body(send, 'chatOutboxTick'), /chatEchoTakenSettledIn/);
   assert.match(body(send, 'chatMessageSyncFinish'), /"text\.done"/);
