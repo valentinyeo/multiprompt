@@ -76,7 +76,7 @@ Journey: favorites-groups, group-rail, session-tabs. UNREACHABLE for full multi-
 | `SEARCH_GROUPMOVE_NEW_OFFSET` | Ctrl+K, search for **new group**. Follow `organize` above. |
 | `SEARCH_GROUPMOVE_NONE_OFFSET` | Ctrl+K, search for **no group**. Follow `organize` above. |
 | `SEARCH_KEEPALIVE_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
-| `SEARCH_MUTETAB_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
+| `SEARCH_MUTETAB_OFFSET` | Ctrl+K, type **mute tab** or **unmute tab**, then select the matching action with Up/Down and Enter. Follow `organize` above. |
 | `SEARCH_SHOW_FAVORITES_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_BOT_COLOR` | Right-click the intended tab, then choose **Bot color**. Follow `organize` above. |
 | `SEARCH_TABCTX_BOT_FACE` | Right-click the intended tab, then choose **Bot face**. Follow `organize` above. |
@@ -87,7 +87,7 @@ Journey: favorites-groups, group-rail, session-tabs. UNREACHABLE for full multi-
 | `SEARCH_TABCTX_GROUP_NEW_TAB_IN` | Right-click the intended tab, then choose **new chat in this group**. Follow `organize` above. |
 | `SEARCH_TABCTX_GROUP_REMOVE` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_KEEPALIVE` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
-| `SEARCH_TABCTX_MUTE` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
+| `SEARCH_TABCTX_MUTE` | Right-click the intended tab, then choose **Mute Tab / Unmute Tab**. Follow `organize` above. |
 | `SEARCH_TABCTX_PIN_TOP` | Right-click the intended tab, then choose **Pin to Top / Unpin from Top**. Follow `organize` above. |
 | `SEARCH_TABSORT_INBOX_OFFSET` | Ctrl+K, search for **tab order**. Follow `organize` above. |
 | `SEARCH_TABSORT_MANUAL_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
