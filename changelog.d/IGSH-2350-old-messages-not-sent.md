@@ -1,2 +1,0 @@
-- Old chat messages no longer come back as Not sent under newer replies.
-- A message that already reached the chat keeps its place and never asks to be sent again.
