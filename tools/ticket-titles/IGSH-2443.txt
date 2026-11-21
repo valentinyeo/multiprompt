@@ -1,1 +1,0 @@
-Renaming a Multibot chat renames its Hypertask agent
