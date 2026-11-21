@@ -1102,6 +1102,8 @@ def reader_namespace():
     import base64
 
     if os.name == "nt" and os.environ.get("MP_VERIFY_STATE"):
+        verify_dir = str(Path(__file__).resolve().parent)
+        os.environ["PYTHONPATH"] = verify_dir + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
         spec = importlib.util.spec_from_file_location("sitecustomize", Path(__file__).with_name("sitecustomize.py"))
         site = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(site)
@@ -1234,6 +1236,21 @@ def reader_namespace():
         fixture.install(namespace, ROOT, record)
         install_reaction_worker(namespace)
         record("fresh-start-boundary.jsonl", worker="in-process production dispatch and connector polling")
+        if os.name == "nt":
+            verify_dir = str(Path(__file__).resolve().parent)
+            original_subprocess = namespace["subprocess"]
+
+            class FreshStartHostSpawn:
+                def __getattr__(self, name):
+                    return getattr(original_subprocess, name)
+
+                def Popen(self, args, *positional, **options):
+                    env = dict(options.get("env") or os.environ)
+                    env["PYTHONPATH"] = verify_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+                    options["env"] = env
+                    return original_subprocess.Popen(args, *positional, **options)
+
+            namespace["subprocess"] = FreshStartHostSpawn()
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1591,6 +1608,12 @@ def bootstrap_fresh_start_host():
         namespace["host_write"](paths["config"], dict(
             enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
             command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
+    if not namespace["host_alive"]("claude", sid):
+        for stale in ("lock", "owner", "socket"):
+            try:
+                paths[stale].unlink()
+            except OSError:
+                pass
     started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
     record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
     if started.get("status") not in ("started", "already"):
