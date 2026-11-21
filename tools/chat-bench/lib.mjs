@@ -230,7 +230,7 @@ export function evaluate(run, config) {
       if (!Number.isFinite(shot.foreignBrowsersOnScreen)) failures.push(`${shot.phase} tab ${shot.index}: browser panes on screen not counted`);
       if (!shot.geometryInside || !shot.headerInk || !shot.composerInk) failures.push(`${shot.phase} tab ${shot.index}: header/composer outside chat pane or missing screenshot ink`);
       if (shot.phase === 'warm' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && (!Number.isFinite(shot.contentPaintMs) || shot.contentPaintMs >= rules.cachedPaintP95Ms || !shot.earlyContent)) failures.push(`warm tab ${shot.index}: cached rows delayed behind remote fetch`);
-      if (shot.phase === 'cold' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && !shot.earlyContent && !shot.loadingInk) failures.push(`cold tab ${shot.index}: blank loading state`);
+      if (shot.phase === 'cold' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && !(Number.isFinite(shot.contentPaintMs) && shot.contentPaintMs < config.switchSeconds * 1000)) failures.push(`cold tab ${shot.index}: transcript did not paint inside the switch window`);
     }
   }
   if (!run.restarted) failures.push('missing restart');

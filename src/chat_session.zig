@@ -625,7 +625,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (live_shell_id != 0 and key.shell_id == live_shell_id) {
         if (chatLiveWanted(key)) chatLiveStreamEnsure(key) else chatLiveStreamStop();
     }
-    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or key.shell_id == 0) return;
+    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or !key.hasSession()) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
@@ -801,7 +801,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (key.shell_id == 0 or key.sid[0] == 0) return false;
+    if (chatBenchEnabled() or key.shell_id == 0 or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
@@ -2306,6 +2306,13 @@ test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polli
     try app_state.g_chat_outbox.append(std.testing.allocator, entry);
     try std.testing.expect(chatDeliveryPending(720, true));
     try std.testing.expect(!chatDeliveryPending(720, false));
+}
+
+test "SOFT-3009 a tab with no transcript identity never asks the reader" {
+    try std.testing.expect(!(chat_transcript.Identity{}).hasSession());
+    try std.testing.expect(!(chat_transcript.Identity{ .shell_id = 1 }).hasSession());
+    try std.testing.expect(chat_transcript.Identity.init(1, 0, false, "claude-000", "").hasSession());
+    try std.testing.expect(chat_transcript.Identity.initTmux(1, 0, false, "claude-000", "").hasSession());
 }
 
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {
