@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_perf_test.zig'), 'utf8');
+const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
 
 const calibWork = 2800 * 600;
 const slack = 1.35;
@@ -20,6 +21,16 @@ function budgetMs(baselineMedianMs) {
 function wouldPass(slowestMedianMs, baselineMedianMs) {
   return slowestMedianMs <= budgetMs(baselineMedianMs);
 }
+
+test('IGSH-991 echo budgets run only under stable optimize', () => {
+  const start = build.indexOf('const chat_perf_tests = b.addTest');
+  const end = build.indexOf('const run_chat_perf_tests =', start);
+  assert.ok(start >= 0 && end > start);
+  assert.match(build.slice(start, end), /\.filters = &\.\{ "CPU707", "ISSUE-421" \}/);
+  const echoStart = build.indexOf('const chat_echo_budget_tests = b.addTest');
+  const echoEnd = build.indexOf('const run_chat_echo_budget_tests =', echoStart);
+  assert.match(build.slice(echoStart, echoEnd), /\.filters = &\.{"IGSH-991"}/);
+});
 
 test('CPU991 measures a same-run baseline before enforcing scaled budgets', () => {
   assert.match(source, /CPU960 calibrate/);

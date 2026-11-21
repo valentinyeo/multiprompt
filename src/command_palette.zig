@@ -93,6 +93,7 @@ const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
+const SEARCH_REOPEN_SERVER_SHELL_OFFSET = @import("app_state.zig").SEARCH_REOPEN_SERVER_SHELL_OFFSET;
 const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
@@ -948,6 +949,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
         SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
         SEARCH_OPEN_SESSION_MENU_OFFSET => "open session attach tmux list pick",
+        SEARCH_REOPEN_SERVER_SHELL_OFFSET => "reopen server shell detached tmux attach orphaned",
         SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
         SEARCH_URLPICK_OFFSET => "open url from screen",
         SEARCH_CLOSETAB_OFFSET => "close tab",
@@ -1485,7 +1487,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
     if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET or target == SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
     return switch (target) {
-        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
+        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_REOPEN_SERVER_SHELL_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
         SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
         SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
@@ -5035,6 +5037,19 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
+    if (app_state.active_shell < app_state.shell_count) {
+        if (@import("capacity.zig").remoteHostForShell(&app_state.shells[app_state.active_shell])) |host| {
+            buildFilteredTmux();
+            if (@import("vps.zig").inactiveTmuxCountForHost(host) > 0 and
+                app_state.g_search_result_count < app_state.g_search_results.len and
+                labelsMatchQuery(&.{ "reopen server shell", "server shell", "detached session", "detached tmux" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REOPEN_SERVER_SHELL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
     if (app_state.shell_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&.{ "Mute Tab", "Unmute Tab", "Mute Activity", "Unmute Activity", "silence", "notifications" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -5876,6 +5891,8 @@ fn appendTmuxCacheRows() void {
         const cache_idx = app_state.g_inactive_filtered[ti];
         const sess = app_state.g_tmux_cache[cache_idx];
         const sname = sess.name[0..sess.name_len];
+
+        if (app_state.g_search_session_host_filter != app_state.SESSION_HOST_FILTER_OFF and sess.host != app_state.g_search_session_host_filter) continue;
 
         if (app_state.g_search_len > 0) {
             const query = app_state.g_search_buf[0..app_state.g_search_len];
