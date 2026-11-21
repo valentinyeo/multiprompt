@@ -6,9 +6,11 @@ const APP_VERSION = @import("main.zig").APP_VERSION;
 
 pub const IGSH_246 = true;
 const interval_ms = 5 * 60 * 1000;
+const check_timeout_ms = 6 * 60 * 1000;
 pub const WM_RESPONSIVE = 0x85F4;
 var launch_args: []const []const u8 = &.{};
 var last_check: u64 = 0;
+var check_started: u64 = 0;
 var checker: win.HANDLE = null;
 var exe: [520:0]u16 = @splat(0);
 var exe_len: usize = 0;
@@ -127,7 +129,7 @@ pub fn startup(args: []const []const u8) bool {
 pub fn beginCheck() void {
     if (!enabled() or checker != null) return;
     last_check = win.GetTickCount64();
-    checker = spawn("Check", &.{}, "");
+    if (!startChecker()) last_check = 0;
 }
 
 pub fn checking() bool {
@@ -137,23 +139,89 @@ pub fn checking() bool {
 
 pub fn poll() ?[]const u8 {
     if (!enabled() or !initialize()) return null;
+    const now = win.GetTickCount64();
     if (checker) |process| {
         if (win.WaitForSingleObject(process, 0) == 0) {
-            var code: u32 = 0;
-            _ = win.GetExitCodeProcess(process, &code);
-            var line: [48]u8 = undefined;
-            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&line, "[update] check exit {d}", .{code}) catch "[update] check exit");
-            _ = win.CloseHandle(process);
-            checker = null;
+            finishChecker(process);
+        } else if (check_started != 0 and now -| check_started >= check_timeout_ms) {
+            recoverStuckChecker();
         }
     }
-    const now = win.GetTickCount64();
     if (checker == null and now -| last_check >= interval_ms) {
         last_check = now;
-        checker = spawn("Check", &.{}, "");
+        if (!startChecker()) last_check = 0;
     }
     const version = update_check.scanFileForVersion(&staged, &version_buf) orelse return null;
     return if (update_check.versionNewer(APP_VERSION, version)) version else null;
+}
+
+fn setCheckNotice(comptime fmt: []const u8, args: anytype) void {
+    const app_state = @import("app_state.zig");
+    const written = std.fmt.bufPrint(&app_state.g_update_check_notice, fmt, args) catch &[_]u8{};
+    app_state.g_update_check_notice_len = written.len;
+}
+
+fn setCheckDetail(comptime fmt: []const u8, args: anytype) void {
+    const app_state = @import("app_state.zig");
+    const written = std.fmt.bufPrint(&app_state.g_update_check_detail, fmt, args) catch &[_]u8{};
+    app_state.g_update_check_detail_len = written.len;
+}
+
+fn clearCheckDetail() void {
+    @import("app_state.zig").g_update_check_detail_len = 0;
+}
+
+fn startChecker() bool {
+    const process = spawn("Check", &.{}, "");
+    if (process == null) {
+        setCheckNotice("Update check could not start. Will retry.", .{});
+        setCheckDetail("spawn failed", .{});
+        return false;
+    }
+    checker = process;
+    check_started = win.GetTickCount64();
+    @import("app_state.zig").g_update_checking = true;
+    return true;
+}
+
+fn finishChecker(process: win.HANDLE) void {
+    var code: u32 = 0;
+    _ = win.GetExitCodeProcess(process, &code);
+    var line: [48]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&line, "[update] check exit {d}", .{code}) catch "[update] check exit");
+    _ = win.CloseHandle(process);
+    checker = null;
+    check_started = 0;
+    @import("app_state.zig").g_update_checking = false;
+    if (code == 1) {
+        setCheckNotice("Update check failed. Retrying on the next check.", .{});
+        setCheckDetail("exit {d}", .{code});
+    } else if (code != 42 and code != 0) {
+        setCheckNotice("Update check stopped unexpectedly. Retrying.", .{});
+        setCheckDetail("exit {d}", .{code});
+    } else {
+        clearCheckDetail();
+    }
+}
+
+fn recoverStuckChecker() void {
+    if (checker) |process| {
+        _ = win.TerminateProcess(process, 1);
+        _ = win.WaitForSingleObject(process, 5000);
+        _ = win.CloseHandle(process);
+        checker = null;
+        check_started = 0;
+        last_check = 0;
+        @import("app_state.zig").g_update_checking = false;
+        setCheckNotice("Update check timed out and was restarted.", .{});
+        setCheckDetail("timed out", .{});
+        @import("diagnostics.zig").debugLog("[update] check timed out");
+    }
+}
+
+pub fn checkDetail() []const u8 {
+    const app_state = @import("app_state.zig");
+    return app_state.g_update_check_detail[0..app_state.g_update_check_detail_len];
 }
 
 var version_buf: [update_check.MAX_VERSION_LEN]u8 = undefined;

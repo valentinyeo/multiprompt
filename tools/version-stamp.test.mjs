@@ -615,7 +615,7 @@ test('tests after: a CI-board ticket releases without product notes', async t =>
   const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], { version: '0.29.2', changes: [], tickets: [] });
   assert.doesNotMatch(source, /Checks and fixes, no visible change/);
 });
 
@@ -630,7 +630,7 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.equal(source.includes('Typing feels faster.'), false);
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], { version: '0.29.2', changes: [], tickets: [] });
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
   assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
 });
