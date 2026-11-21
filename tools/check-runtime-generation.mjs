@@ -9,6 +9,19 @@ export function generationOf(source) {
   return found ? Number(found[1]) : null;
 }
 
+const DIRECT_HOST_GENERATION = /(?:generation=RUNTIME_GENERATION|dict\(generation=RUNTIME_GENERATION)/;
+
+export function hostGenerationGuard(source) {
+  if (typeof source !== 'string') return { ok: false, reason: `${READER_PATH} is missing` };
+  if (!source.includes('def host_generation(')) {
+    return { ok: false, reason: `${READER_PATH} must define host_generation()` };
+  }
+  if (DIRECT_HOST_GENERATION.test(source)) {
+    return { ok: false, reason: 'host rotate and host version must use host_generation(), not RUNTIME_GENERATION' };
+  }
+  return { ok: true, reason: 'host generation guard ok' };
+}
+
 export function verdict(baseSource, headSource) {
   if (typeof headSource !== 'string') return { ok: false, reason: `${READER_PATH} is missing from the head revision` };
   const head = generationOf(headSource);
@@ -52,6 +65,12 @@ export function run(baseArg, headArg) {
   const base = resolveBase(baseArg);
   const headSource = exists(head) ? git('show', `${head}:${READER_PATH}`) : null;
   const baseSource = base && exists(base) ? git('show', `${base}:${READER_PATH}`) : null;
+  const host = hostGenerationGuard(headSource);
+  if (!host.ok) {
+    console.error(`runtime generation guard: ${host.reason}`);
+    process.exitCode = 1;
+    return host;
+  }
   const result = verdict(baseSource, headSource);
   if (!result.ok) {
     console.error(`runtime generation guard: ${result.reason}`);

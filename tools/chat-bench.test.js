@@ -212,6 +212,22 @@ test('paint logs distinguish first paint from real content and preserve producti
   assert.equal(parsed.chat.length, 1);
 });
 
+test('main window discovery matches Multi Bot and legacy multiprompt titles', async () => {
+  const { mainWindowNamePatterns, searchMainWindows } = await lib;
+  assert.deepEqual(mainWindowNamePatterns, ['Multi Bot', 'multiprompt v', 'Multibot DEV']);
+  const calls = [];
+  const ids = await searchMainWindows(async (cmd, args) => {
+    calls.push([cmd, args]);
+    if (args[2] === 'Multi Bot') return { stdout: '10485761 10485762\n' };
+    return { stdout: '' };
+  });
+  assert.deepEqual(ids, ['10485761', '10485762']);
+  assert.ok(calls.some(([, args]) => args[2] === 'Multi Bot'));
+  const runSource = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  assert.match(runSource, /searchMainWindows/);
+  assert.doesNotMatch(runSource, /search', '--name', 'multiprompt v'\]/);
+});
+
 test('proc discovery counts only Wine app/collector processes in this prefix, not Node or other runs', async () => {
   const { procSnapshot } = await lib;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-proc-test-'));

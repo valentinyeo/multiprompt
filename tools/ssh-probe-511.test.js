@@ -263,14 +263,16 @@ test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survi
 test('ISSUE-511 active respawn sizes its console before show without touching any other window', () => {
   const console = read('console.zig');
   const complete = body('finishStartupShell', console);
-  assert.match(complete, /if \(job\.reconnect\) \{\s*if \(idx == app_state\.active_shell and @import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*if \(positionReconnectedConsole\(idx\)\) showReconnectedConsole\(idx\)/);
+  assert.match(complete, /if \(job\.reconnect\) \{\s*if \(idx == app_state\.active_shell and layoutReconnectedConsole\(idx\) and/);
   const reconnectComplete = complete.slice(complete.indexOf('    if (job.reconnect) {'), complete.indexOf('    if (idx == app_state.active_shell) {'));
   assert.doesNotMatch(reconnectComplete, /repositionActive|InvalidateRect|SetFocus|SetForegroundWindow/);
   assert.match(reconnectComplete, /sshRequestSessionProbe\(\)/);
   const position = body('positionReconnectedConsole', console);
-  assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return false/);
+  assert.doesNotMatch(position, /reconnectTabVisible/);
+  assert.match(body('layoutReconnectedConsole', console), /reconnectConsoleLayoutAllowed/);
+  assert.match(position, /finalizeReconnectedConsoleLayout/);
   assert.match(position, /rc = @import\("window_layout\.zig"\)\.activePaneContentRect\(rc\)/);
-  assert.match(position, /rc\.top \+= pane\.threadTitleHeight\(\)/);
+  assert.match(position, /const con_top = rc\.top \+ pane\.threadTitleHeight\(\)/);
   assert.match(position, /pane\.centeredConsoleColumn\(/);
   assert.match(position, /SetWindowPos\(shell\.hwnd,[^\n]*SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW/);
   assert.equal((position.match(/SetWindowPos\(/g) || []).length, 1);
