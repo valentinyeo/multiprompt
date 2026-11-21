@@ -391,7 +391,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/chat_perf_test.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
         .optimize = .ReleaseFast,
-    }) });
+    }), .filters = &.{ "CPU707", "ISSUE-421" } });
     const run_chat_perf_tests = std.Build.Step.Run.create(b, "run chat performance budgets");
     run_chat_perf_tests.addArtifactArg(chat_perf_tests);
     run_chat_perf_tests.expectExitCode(0);

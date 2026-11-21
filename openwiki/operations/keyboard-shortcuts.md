@@ -176,6 +176,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
+| Ctrl+K -&gt; Reopen server shell | List the detached sessions on this tab's server and attach the one you pick |
 | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |

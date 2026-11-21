@@ -295,6 +295,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
+    .{ .a = "Ctrl+K -> Reopen server shell", .b = "List the detached sessions on this tab's server and attach the one you pick", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
