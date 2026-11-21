@@ -171,17 +171,17 @@ test "local avatar identity survives session parsing without using tab names" {
     try std.testing.expect(std.mem.allEqual(u8, &tabs[1].avatar_local_id, 0));
 }
 
-test "SOFT-3002 tmux tab without a session name restores instead of vanishing" {
-    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"server work\",\"tmux_host\":1,\"shell_id\":7}]}");
+test "SOFT-3002 saved tmux tab without a session name restores instead of vanishing" {
+    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"server work\",\"tmux_host\":1,\"shell_id\":7,\"used\":1700000000}]}");
     defer parsed.deinit();
     var tabs: [2]@import("app_state.zig").SavedTab = undefined;
     try std.testing.expectEqual(@as(u32, 1), sessionTabs(parsed.value, &tabs, 9));
     try std.testing.expectEqual(@import("app_state.zig").ShellKind.tmux, tabs[0].kind);
     try std.testing.expectEqual(@as(u8, 1), tabs[0].tmux_host);
-    try std.testing.expectEqual(@as(usize, 0), tabs[0].tmux_session_len);
+    try std.testing.expectEqual(@as(u32, 0), tabs[0].tmux_session_len);
 }
 
-test "SOFT-3002 nameless tmux row mirroring an open session stays an alias" {
+test "SOFT-3002 cached ghost rows still never become tabs" {
     const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"live\",\"tmux_session\":\"live\",\"shell_id\":9},{\"kind\":\"tmux\",\"name\":\"live\",\"shell_id\":9,\"group_id\":4}]}");
     defer parsed.deinit();
     var tabs: [2]@import("app_state.zig").SavedTab = undefined;
@@ -211,7 +211,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
                 if (std.fmt.hexToBytes(&tab.avatar_local_id, value)) |_| {} else |_| { tab.avatar_local_id = @splat(0); }
             }
         }
-        if (tab.kind == .tmux and tab.tmux_session_len == 0 and restoredSessionTab(root, tabs[0..count], uint(obj, "shell_id")) != null) continue;
+        if (tab.kind == .tmux and tab.tmux_session_len == 0 and (uint(obj, "used") == 0 or restoredSessionTab(root, tabs[0..count], uint(obj, "shell_id")) != null)) continue;
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
         tab.favicon_path_len = copyString(obj, "favicon_path", &tab.favicon_path);
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
