@@ -85,7 +85,7 @@ test("Alt+T and shell Ctrl+T open workspace tabs while browser Ctrl+T passes thr
   const isolationStart = hook.indexOf("if (ctrl and (kb.flags & 0x20) == 0 and kb.vkCode != 0x09");
   const isolationEnd = hook.indexOf("if (ctrl and kb.vkCode == 0x56) {", isolationStart);
   const isolation = hook.slice(isolationStart, isolationEnd);
-  assert.match(isolation, /activeBrowserHasForegroundFocus\(\)\) \{\s+return CallNextHookEx/,
+  assert.match(isolation, /activeBrowserHasForegroundFocus\(\)\)\s*\{\s+return CallNextHookEx/,
     "browser-owned Ctrl shortcuts must pass to the native browser");
   assert.doesNotMatch(isolation, /kb\.vkCode == 0x54/,
     "Ctrl+T must not be exempted from browser passthrough");
