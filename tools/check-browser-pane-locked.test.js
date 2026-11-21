@@ -110,7 +110,7 @@ test('dock guard is installed and removed with the app lifetime and dispatched o
 
 test('browser-focused Aero Snap cannot maximize the owner frame while normal frame commands still work', () => {
   function contract(source) {
-    assert.match(source, /WM_SYSCOMMAND => \{\s*if \(\(wp & 0xFFF0\) == @import\("win32.zig"\).SC_MAXIMIZE and activeBrowserHasForegroundFocus\(\)\) return 0;\s*return DefWindowProcW\(hwnd, msg, wp, lp\);\s*\}/);
+    assert.match(source, /WM_SYSCOMMAND => \{\s*if \(\(wp & 0xFFF0\) == @import\("win32.zig"\)\.SC_MAXIMIZE and activeBrowserHasForegroundFocus\(\)\) return 0;\s*if \(\(wp & 0xFFF0\) == @import\("win32.zig"\)\.SC_KEYMENU and activeShellHasForegroundFocus\(\)\) return 0;\s*return DefWindowProcW\(hwnd, msg, wp, lp\);\s*\}/);
   }
   contract(main);
   assert.match(win, /pub const SC_MAXIMIZE: usize = 0xF030;/);

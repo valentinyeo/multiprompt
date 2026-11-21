@@ -6394,8 +6394,24 @@ def host_restart_clear(provider, sid):
         pass
 
 
+def host_generation():
+    info = globals().get("ENGINE_INFO")
+    if isinstance(info, dict) and type(info.get("generation")) is int:
+        return info["generation"]
+    value = globals().get("RUNTIME_GENERATION")
+    if type(value) is int:
+        return value
+    try:
+        active = json.loads((HOME / ".multiprompt-runtime" / "active.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        active = None
+    if isinstance(active, dict) and type(active.get("generation")) is int:
+        return active["generation"]
+    return 0
+
+
 def host_version():
-    return dict(generation=RUNTIME_GENERATION, version=globals().get("MULTIBOT_APP_VERSION", ""))
+    return dict(generation=host_generation(), version=globals().get("MULTIBOT_APP_VERSION", ""))
 
 
 def host_published_runtime():
@@ -6421,7 +6437,7 @@ def host_rotate(provider, sid, session, agent):
     host_flush(provider, sid, host_chat_name(provider, sid), session)
     host_agent_stop(agent)
     session["agent"] = None
-    host_log(provider, sid, "rotate", dict(runtime=runtime, generation=RUNTIME_GENERATION))
+    host_log(provider, sid, "rotate", dict(runtime=runtime, generation=host_generation()))
     try:
         os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
     except OSError:
@@ -8563,7 +8579,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 134
+RUNTIME_GENERATION = 135
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8742,7 +8758,8 @@ if __name__ == '__main__':
     try:
         _selected, _info = _select_runtime(READER_SOURCE.encode('utf-8'))
         _worker_source = ('ENGINE_INFO = ' + repr(_info) + '\nMULTIBOT_APP_VERSION = ' +
-                          repr(globals().get('MULTIBOT_APP_VERSION', '')) + '\n' + _selected.decode('utf-8'))
+                          repr(globals().get('MULTIBOT_APP_VERSION', '')) + '\nRUNTIME_GENERATION = ' +
+                          str(RUNTIME_GENERATION) + '\n' + _selected.decode('utf-8'))
         READER_SOURCE = 'READER_SOURCE = ' + repr(_worker_source) + '\n' + _worker_source
     except (OSError, ValueError, UnicodeError):
         def _error(line):
