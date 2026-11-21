@@ -82,15 +82,17 @@ try {
     Invoke-JourneyCommand 'Chat View: Fresh start' -Confirm {
         Press @(0x0D) 'Enter: confirm Chat View: Fresh start'
     }
-    $start = ((Get-Content $log -Raw) -join '').Length
+    $start = if (Test-Path $log) { (Get-Content $log -Raw).Length } else { 0 }
     Wait-Until {
         $identity = Read-HostIdentity $before.csid
         if ($null -eq $identity) { return $false }
         $statePath = Join-Path $hostRoot ($identity.configFile -replace '\.config\.json$', '.state.json')
         $hostState = Get-Content $statePath -Raw | ConvertFrom-Json
-        $hostReady = -not ($hostState.PSObject.Properties['fresh_start'])
+        $hostReady = -not ($hostState.PSObject.Properties.Name -contains 'fresh_start')
         $rotated = $identity.native_session -and $identity.native_session -cne $before.native_session
-        $trace = if (Test-Path $log) { (Get-Content $log -Raw).Substring([Math]::Min($start, ((Get-Content $log -Raw) -join '').Length)) } else { '' }
+        $raw = if (Test-Path $log) { (Get-Content $log -Raw) } else { '' }
+        $traceStart = [Math]::Min($start, $raw.Length)
+        $trace = if ($raw.Length -gt $traceStart) { $raw.Substring($traceStart) } else { '' }
         $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
         $handover = $trace -match 'Finish the saved draft' -or
             ((Test-Path $hostJsonl) -and ((Get-Content $hostJsonl -Raw) -match 'handover_visible|handover_saved'))
