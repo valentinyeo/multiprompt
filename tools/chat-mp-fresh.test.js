@@ -65,6 +65,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert fresh['phase'] == 'reset'
     saved = r['host_read'](paths['root'] / fresh['file'])
     assert saved['text'] == 'Finish the saved draft from the agent file.'
+    if session.get('db') is not None:
+        session['db'].close()
 print('MP_FRESH_PASS')
 `);
 });
@@ -95,6 +97,8 @@ with tempfile.TemporaryDirectory() as directory:
         r['host_fresh_drain_queued'](provider, sid, tmux, session)
         assert state['fresh_start']['phase'] == 'handover'
         assert 'Prepare a fresh start' in session['agent'].stdin.getvalue().decode()
+    if session.get('db') is not None:
+        session['db'].close()
 print('MP_FRESH_PASS')
 `);
 });
@@ -127,6 +131,8 @@ with tempfile.TemporaryDirectory() as directory:
     prompt = sent['message']['content'][0]['text']
     assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
     assert '/board-drain' in prompt and 'saved.json' in prompt
+    if session.get('db') is not None:
+        session['db'].close()
 print('MP_FRESH_PASS')
 `);
 });
@@ -162,6 +168,8 @@ with tempfile.TemporaryDirectory() as directory:
     sent = json.loads(session['agent'].stdin.getvalue().decode())
     prompt = sent['message']['content'][0]['text']
     assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
+    if session.get('db') is not None:
+        session['db'].close()
 print('MP_FRESH_PASS')
 `);
 });
@@ -193,6 +201,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert prompt.startswith('You are the same chat after a fresh start.')
     assert 'Continue the ordinary task.' in prompt
     assert not prompt.startswith('/valentin-mode')
+    if session.get('db') is not None:
+        session['db'].close()
 print('MP_FRESH_PASS')
 `);
 });
