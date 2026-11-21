@@ -1,1 +1,1 @@
-Update card hides app fixes behind test-only tickets
+Relaunch card shows user-facing changes first
