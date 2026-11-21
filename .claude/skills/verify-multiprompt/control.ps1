@@ -154,13 +154,11 @@ try {
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
-    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
-    $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -eq 'fresh-start') {
         New-Item -ItemType Directory -Force (Join-Path $scratch 'profile/home') | Out-Null
-        $env:USERPROFILE = Join-Path $scratch 'profile/home'
-        $env:HOME = $env:USERPROFILE
     }
+    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch $(if ($Feature -eq 'fresh-start') { 'profile/home' } else { 'profile' }) }
+    $env:HOME = if ($Feature -eq 'fresh-start') { $env:USERPROFILE } else { Join-Path $scratch 'profile' }
     if ($Feature -eq 'status-card') {
         $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetry')
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
@@ -343,7 +341,7 @@ try {
             $remotePanes[$remoteNames[$i]] = 4300 + $i
             $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
         }
-        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { Join-Path $scratch 'profile' }
+        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { $env:HOME }
         $remoteDocument = [ordered]@{ name = $(if ($Feature -eq 'chat-still') { 'chat-still' } elseif ($Feature -eq 'fresh-start') { 'fresh-start' } else { 'chat-switch-speed' }); fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = $verifyHome; procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
         if ($Feature -eq 'chat-slash') { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
         [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
@@ -388,6 +386,8 @@ try {
             $remoteDocument.sid = $remoteSids['verify-fresh-start']
             $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY bootstrap-fresh-start
+            if ($LASTEXITCODE -ne 0) { throw 'Fresh start host bootstrap failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         if ($Feature -eq 'chat-slash') {

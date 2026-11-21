@@ -30,16 +30,61 @@ pub const Notes = struct {
     }
 };
 
+fn titlePrefix(title: []const u8, prefix: []const u8) bool {
+    return title.len >= prefix.len and std.ascii.eqlIgnoreCase(title[0..prefix.len], prefix);
+}
+
+fn hasWord(title: []const u8, word: []const u8) bool {
+    var at: usize = 0;
+    while (at + word.len <= title.len) {
+        if (std.ascii.eqlIgnoreCase(title[at .. at + word.len], word)) {
+            const before_ok = at == 0 or !std.ascii.isAlphanumeric(title[at - 1]);
+            const after = at + word.len;
+            const after_ok = after >= title.len or !std.ascii.isAlphanumeric(title[after]);
+            if (before_ok and after_ok) return true;
+        }
+        at += 1;
+    }
+    return false;
+}
+
+fn productTitle(title: []const u8) bool {
+    if (title.len == 0) return false;
+    if (std.ascii.indexOfIgnoreCase(title, "behind the scenes") != null) return false;
+    if (std.ascii.indexOfIgnoreCase(title, "latest improvements") != null) return false;
+    const trimmed = std.mem.trim(u8, title, " \t\r\n");
+    if (std.ascii.eqlIgnoreCase(trimmed, "various improvements") or
+        std.ascii.eqlIgnoreCase(trimmed, "bug fixes") or
+        std.ascii.eqlIgnoreCase(trimmed, "maintenance") or
+        std.ascii.eqlIgnoreCase(trimmed, "improvements") or
+        std.ascii.eqlIgnoreCase(trimmed, "fixes"))
+        return false;
+    const words = [_][]const u8{ "test", "tests", "proof", "proofs", "pipeline", "pipelines", "workflow", "workflows" };
+    for (words) |word| if (hasWord(title, word)) return false;
+    return true;
+}
+
+fn userFacingTitle(title: []const u8) bool {
+    if (std.ascii.indexOfIgnoreCase(title, "Checks and fixes, no visible change") != null) return false;
+    if (titlePrefix(title, "[INFRA] ") or
+        titlePrefix(title, "Multiprompt verify: ") or
+        titlePrefix(title, "Multiprompt verification playbook: ") or
+        titlePrefix(title, "Release gate: ") or
+        titlePrefix(title, "CI: "))
+        return false;
+    return productTitle(title);
+}
+
 pub fn plain(text: []const u8) bool {
     if (text.len == 0 or text.len > 512 or !std.unicode.utf8ValidateSlice(text)) return false;
-    const prefix: usize = if (std.mem.startsWith(u8, text, "IGSH-")) 5 else if (std.mem.startsWith(u8, text, "HYCI-")) 5 else return false;
+    if (!std.mem.startsWith(u8, text, "IGSH-")) return false;
+    const prefix: usize = 5;
     if (text.len <= prefix or text[prefix] < '1' or text[prefix] > '9') return false;
     var i = prefix;
     while (i < text.len and std.ascii.isDigit(text[i])) : (i += 1) {}
     if (i + 1 >= text.len or text[i] != ' ' or text[i + 1] == ' ' or text[text.len - 1] == ' ') return false;
     for (text) |c| if (c < 32 or c == 127) return false;
-    if (std.ascii.indexOfIgnoreCase(text[i + 1 ..], "Checks and fixes, no visible change") != null) return false;
-    return true;
+    return userFacingTitle(text[i + 1 ..]);
 }
 
 pub fn pick(releases: []const Release, installed: []const u8, offered: []const u8) Notes {
@@ -77,10 +122,9 @@ test "ticket titles and skipped releases retain newest-first order" {
         .{ .version = "1.11.0", .changes = &.{ "IGSH-4 Newest change", "HYCI-5 Another change" } },
     };
     const notes = pick(&releases, "1.9.0", "1.11.0");
-    try std.testing.expectEqual(@as(usize, 3), notes.count);
+    try std.testing.expectEqual(@as(usize, 2), notes.count);
     try std.testing.expectEqualStrings("IGSH-4 Newest change", notes.line(0));
-    try std.testing.expectEqualStrings("HYCI-5 Another change", notes.line(1));
-    try std.testing.expectEqualStrings("IGSH-2 Older change", notes.line(2));
+    try std.testing.expectEqualStrings("IGSH-2 Older change", notes.line(1));
     try std.testing.expectEqual(@as(usize, 0), pick(&releases, "1.11.0", "1.9.0").count);
 }
 
@@ -99,6 +143,19 @@ test "capacity counts notes beyond the first sixteen" {
     var buf: [32]u8 = undefined;
     try std.testing.expectEqualStrings("and 15 more", notes.more(&buf, false));
     try std.testing.expectEqualStrings("and 2 more", notes.more(&buf, true));
+}
+
+test "engineering ticket titles never reach the card" {
+    const releases = [_]Release{.{ .version = "1.2.0", .changes = &.{
+        "IGSH-900 Release gate: 3 launches on saved sessions must pass before every release",
+        "IGSH-893 Multiprompt verify: chat-dictation journey hangs with no output for 25 minutes and has never run green 17/30",
+        "HYCI-101 share one Windows app build cache",
+        "IGSH-895 Chat View: pasting text adds an extra line break",
+    } }};
+    const notes = pick(&releases, "1.0.0", "1.2.0");
+    try std.testing.expectEqual(@as(usize, 1), notes.count);
+    try std.testing.expectEqualStrings("IGSH-895 Chat View: pasting text adds an extra line break", notes.line(0));
+    try std.testing.expectEqual(@as(usize, 1), notes.total);
 }
 
 test "collapsed and expanded counts retain omitted items" {

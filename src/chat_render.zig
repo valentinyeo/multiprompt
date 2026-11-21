@@ -265,6 +265,13 @@ fn ensureChatCodeFont() HANDLE {
     return app_state.g_chat_code_font;
 }
 
+fn ensureChatEmojiFont() HANDLE {
+    if (app_state.g_chat_emoji_font == null) {
+        app_state.g_chat_emoji_font = @import("fonts.zig").emoji(-uiScaled(app_state.g_chat_font_pt));
+    }
+    return app_state.g_chat_emoji_font;
+}
+
 fn logChatCodeFont(font: HANDLE) void {
     if (font == null or !verboseLoggingEnabled()) return;
     const dc = CreateCompatibleDC(null) orelse return;
@@ -2589,7 +2596,12 @@ pub fn chatRelayout(client_width: i32) void {
         var block_imgs = ChatImgLayout{};
         const projection = g_reaction_view.projected(i);
         var rc = chatMeasureProjectedBlockRect(hdc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], width, y, if (i >= first_img_block and (projection != null or !app_state.g_chat_blocks_from_file or app_state.g_chat_blocks[i].image_count > 0)) &block_imgs else null, projection);
-        if (g_reaction_view.mask(i) != 0) rc.bottom += uiScaled(28);
+        const reaction_run = chat_style.runBounds(app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count], i);
+        if (i == reaction_run.last) {
+            var reaction_mask: u8 = 0;
+            for (reaction_run.first..reaction_run.last + 1) |j| reaction_mask |= g_reaction_view.mask(j);
+            if (reaction_mask != 0) rc.bottom += uiScaled(app_state.g_chat_font_pt) + uiScaled(16);
+        }
         app_state.g_chat_layout_rects[i] = rc;
         chatImgStoreLayout(i, block_imgs);
         y = rc.bottom;
@@ -4355,13 +4367,13 @@ fn chatDoubleClickThumbs(hwnd: HANDLE, x: i32, y: i32) bool {
 
 fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     if (mask == 0) return;
-    if (app_state.g_chat_rich_fonts[11] == null) {
-        app_state.g_chat_rich_fonts[11] = @import("fonts.zig").emoji(-uiScaled(17));
-    }
-    const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
+    const old = SelectObject(hdc, ensureChatEmojiFont());
     defer _ = SelectObject(hdc, old);
+    const glyph = uiScaled(app_state.g_chat_font_pt);
+    const inset = uiScaled(12);
     const count: i32 = @intCast(@popCount(mask));
-    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(34), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(12) };
+    const pill_h = glyph + inset;
+    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(8) - pill_h, .right = rc.left + uiScaled(16 + count * (glyph + uiScaled(8))), .bottom = rc.bottom - uiScaled(8) };
     const reader = @import("themes.zig").themeReaderDark();
     if (reader) {
         const edge = @max(1, uiScaled(1));
@@ -4374,10 +4386,10 @@ fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     for (std.enums.values(chat_reaction.Emoji)) |emoji| {
         if ((mask & emoji.bit()) == 0) continue;
         var glyph_rc = pill;
-        glyph_rc.right = glyph_rc.left + uiScaled(24);
+        glyph_rc.right = glyph_rc.left + glyph;
         const text = emoji.text();
         _ = chatDrawText(hdc, text.ptr, @intCast(text.len), &glyph_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        pill.left += uiScaled(24);
+        pill.left += glyph + uiScaled(8);
     }
 }
 
@@ -5586,7 +5598,19 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintProjectedBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], body_rc, g_reaction_view.projected(i));
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
-            chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
+            const run = chat_style.runBounds(app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count], i);
+            if (i == run.last) {
+                var reaction_mask: u8 = 0;
+                for (run.first..run.last + 1) |j| reaction_mask |= g_reaction_view.mask(j);
+                if (reaction_mask != 0) {
+                    var reaction_rc = app_state.g_chat_layout_rects[run.last];
+                    reaction_rc.left += app_state.g_chat_content_left;
+                    reaction_rc.right += app_state.g_chat_content_left;
+                    reaction_rc.top -= app_state.g_chat_scroll_y;
+                    reaction_rc.bottom -= app_state.g_chat_scroll_y;
+                    chatPaintReactions(mem_dc, reaction_mask, reaction_rc);
+                }
+            }
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
                 i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)

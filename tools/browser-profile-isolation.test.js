@@ -125,11 +125,16 @@ test("branded stable Chrome journey opens a cold own-profile pane and binds its 
 
 test("only the own-profile journey keeps USERPROFILE real while browser data and HOME stay disposable", () => {
   const control = readControlSource();
-  const redirects = /\$env:APPDATA = Join-Path \$scratch 'roaming'\s+\$env:LOCALAPPDATA = Join-Path \$scratch 'local'\s+if \(\$Feature -ne 'browser-own-profile'\) \{ \$env:USERPROFILE = Join-Path \$scratch 'profile' \}\s+\$env:HOME = Join-Path \$scratch 'profile'/;
+  const redirects = /\$env:APPDATA = Join-Path \$scratch 'roaming'\s+\$env:LOCALAPPDATA = Join-Path \$scratch 'local'\s+if \(\$Feature -eq 'fresh-start'\) \{\s+New-Item -ItemType Directory -Force \(Join-Path \$scratch 'profile\/home'\) \| Out-Null\s+\}\s+if \(\$Feature -ne 'browser-own-profile'\) \{ \$env:USERPROFILE = Join-Path \$scratch \$\(if \(\$Feature -eq 'fresh-start'\) \{ 'profile\/home' \} else \{ 'profile' \}\) \}\s+\$env:HOME = if \(\$Feature -eq 'fresh-start'\) \{ \$env:USERPROFILE \} else \{ Join-Path \$scratch 'profile' \}/;
   assert.match(control, redirects);
-  assert.equal(control.match(/\$env:USERPROFILE\s*=/g).length, 1);
-  assert.doesNotMatch(control.replace("if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }", "$env:USERPROFILE = Join-Path $scratch 'profile'"), redirects);
-  assert.doesNotMatch(control.replace("$env:HOME = Join-Path $scratch 'profile'", '$env:HOME = $env:USERPROFILE'), redirects);
+  assert.equal(control.match(/if \(\$Feature -ne 'browser-own-profile'\) \{ \$env:USERPROFILE =/g).length, 1);
+  const relaxed = control.replace(
+    "if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch $(if ($Feature -eq 'fresh-start') { 'profile/home' } else { 'profile' }) }",
+    "$env:USERPROFILE = Join-Path $scratch 'profile'");
+  assert.ok(!relaxed.includes("if ($Feature -ne 'browser-own-profile')"), 'USERPROFILE must stay gated off browser-own-profile');
+  assert.ok(!control.replace(
+    "$env:HOME = if ($Feature -eq 'fresh-start') { $env:USERPROFILE } else { Join-Path $scratch 'profile' }",
+    '$env:HOME = $env:USERPROFILE').includes("Join-Path $scratch 'profile'"), 'fresh-start must not inherit disposable HOME for all journeys');
   assert.match(control, /\$ownBase = \[IO.Path\]::GetFullPath\(\(Join-Path \$env:LOCALAPPDATA 'ZigShell\/BrowserWorkspaces'\)\)/);
 });
 
