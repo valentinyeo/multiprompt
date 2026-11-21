@@ -220,10 +220,6 @@ int mp_terminal_window_copy(HWND hwnd) {
         CloseClipboard();
     }
     if (memory) GlobalFree(memory);
-    if (copied) {
-        t->selected = t->selecting = 0;
-        InvalidateRect(hwnd, NULL, FALSE);
-    }
     return copied;
 }
 
