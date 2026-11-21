@@ -415,7 +415,7 @@ const SOURCE_CHANGELOG = [_]ChangelogEntry{
         .{ .text = "IGSH-2823 Every server gets the same Multibot tools", .ticket = "IGSH-2823" },
         .{ .text = "IGSH-2838 The desktop runtime bundle never publishes mp-sessions or mp-layout", .ticket = "IGSH-2838" },
         .{ .text = "IGSH-2880 Chat View freezes after an inline rename", .ticket = "IGSH-2880" },
-        .{ .text = "IGSH-2881 Detect server sessions when app output is redirected", .ticket = "IGSH-2881" },
+        .{ .text = "IGSH-2881 Server sessions not recognised when output is redirected", .ticket = "IGSH-2881" },
         .{ .text = "IGSH-2882 Mute Tab disappeared from Ctrl+K and tab actions", .ticket = "IGSH-2882" },
         .{ .text = "IGSH-2929 Long message vanishes while the chat is busy, comes back later", .ticket = "IGSH-2929" },
         .{ .text = "IGSH-2936 Workspace \"ceo runners\" cannot be deleted", .ticket = "IGSH-2936" },
