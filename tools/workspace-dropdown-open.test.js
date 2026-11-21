@@ -4,27 +4,36 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-const switcher = fs.readFileSync(path.join(root, 'src/workspace_switcher.zig'), 'utf8');
-const registry = fs.readFileSync(path.join(root, 'src/workspaces.zig'), 'utf8');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const switcher = read('src/workspace_switcher.zig');
+const registry = read('src/workspaces.zig');
 
-function sliceBetween(source, start, end) {
-  const at = source.indexOf(start);
-  assert.ok(at >= 0, `missing ${start}`);
-  const stop = source.indexOf(end, at + start.length);
-  assert.ok(stop > at, `missing ${end}`);
-  return source.slice(at, stop);
+function body(source, name) {
+  const at = source.indexOf(`fn ${name}(`);
+  assert.ok(at >= 0, `missing ${name}`);
+  const stop = source.indexOf('\n}', at);
+  assert.ok(stop > at, `missing end of ${name}`);
+  return source.slice(at, stop + 2);
 }
 
-test('SOFT-2374 opening the workspace menu does not wait on the registry lock', () => {
-  const click = sliceBetween(switcher, 'pub fn headerClick', 'fn step(');
+test('SOFT-2374 opening the workspace menu never performs registry IO on the window thread', () => {
+  const click = body(switcher, 'headerClick');
   assert.match(click, /loadEntries\(\)/);
   assert.match(click, /refreshMenuEntries\(\)/);
-  assert.doesNotMatch(click, /syncInProcessWorkspacesToRegistry/);
-  assert.doesNotMatch(click, /mergeWorkspaceRegistryFromDisk/);
-  const refresh = sliceBetween(registry, 'pub fn refreshMenuEntries', 'pub fn syncInProcessWorkspacesToRegistry');
-  assert.match(refresh, /lockWorkspaceRegistryWithTimeout\(menu_registry_wait_ms\)/);
-  assert.match(registry, /const menu_registry_wait_ms: u32 = 0;/);
-  assert.match(refresh, /menuKeepsMemory\(/);
-  assert.doesNotMatch(refresh, /publishIfChanged/);
-  assert.match(registry, /test "SOFT-2374 the workspace menu keeps memory when the registry is unchanged and never waits"/);
+  assert.doesNotMatch(click, /syncInProcessWorkspacesToRegistry|mergeWorkspaceRegistryFromDisk/);
+  const refresh = body(registry, 'refreshMenuEntries');
+  assert.doesNotMatch(refresh, /lockWorkspaceRegistry|readWorkspaceRegistryBytes|writeWorkspaceRegistryFile|getWorkspaceRegistryPath/);
+  assert.match(refresh, /std\.Thread\.spawn/);
+  assert.match(refresh, /\.load\(\.acquire\)/);
+  assert.match(refresh, /upsertMySlotEntries\(\)/);
+  const worker = body(registry, 'readMenuRegistry');
+  assert.match(worker, /lockWorkspaceRegistryWithTimeout\(5000\)/);
+  assert.match(worker, /readWorkspaceRegistryBytes/);
+  assert.match(worker, /\.store\(true, \.release\)/);
+  assert.doesNotMatch(worker, /app_state\.|parseWorkspaceRegistryJson|writeWorkspaceRegistryFile/);
+});
+
+test('SOFT-2374 a completed read cannot overwrite a newer local registry save', () => {
+  assert.match(body(registry, 'writeWorkspaceRegistryFile'), /registry_revision \+%= 1/);
+  assert.match(body(registry, 'refreshMenuEntries'), /menu_registry_revision == registry_revision/);
 });

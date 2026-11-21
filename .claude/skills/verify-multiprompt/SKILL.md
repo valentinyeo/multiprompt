@@ -74,6 +74,20 @@ The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
 
+The focused [workspace menu](features/workspace-menu.md) journey (`feature=workspace-menu`) holds the production registry mutex on a separate native thread, requires first painted selection pixels and window responses within 200 ms, checks mouse and arrow-key highlight pixels, and switches between two real local CMD workspaces. It also opens the menu with an exclusively held registry file and requires unchanged registry write time. It injects no workspace data. The worker serves completed registry snapshots on later menu opens, with newer local saves taking precedence.
+
+## PR verifier
+
+Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:
+
+```sh
+gh workflow run pr-verifier.yml --ref master -f pr=<number>
+gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
+timeout 3000 gh run watch <id> --interval 300
+```
+
+DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
+
 ## Doctor
 
 For ordinary desktop journeys, `control.ps1` runs `Doctor` after launch, before each input, and after the journey. Doctor is read-only and cheap: the original Process object must be alive, its path and SHA256 must match the selected executable, its HWND must belong to that PID and class `ZigShell`, its title must be `Multi Bot` or carry the expected legacy version, UI Automation must see that window, and its published Inbox state must contain a usable initial shell. It writes only evidence (`doctor.json`), never app state; it does not build, seed, authenticate, invoke actions or repair preconditions.
