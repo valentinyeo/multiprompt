@@ -246,33 +246,25 @@ pub const View = struct {
         return quote;
     }
 
-    fn resolveQuote(a: std.mem.Allocator, quote: []const u16, targets: *const std.AutoHashMap(u64, Target), blocks: []const md.Block, text: []const u16, before: usize) !?usize {
+    fn resolveQuote(a: std.mem.Allocator, quote: []const u16, blocks: []const md.Block, text: []const u16, before: usize) !?usize {
         const needle = quoteNeedle(quote);
         if (needle.len == 0) return null;
         var found: ?usize = null;
-        var seen = std.AutoHashMap(u64, void).init(a);
-        defer seen.deinit();
-        const limit = @min(before, blocks.len);
-        for (blocks[0..limit], 0..) |block, i| {
+        for (blocks[0..@min(before, blocks.len)], 0..) |block, i| {
             if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) continue;
-            const target = targets.get(block.reaction_reference) orelse continue;
-            if (i != target.first) continue;
-            if ((try seen.getOrPut(block.reaction_reference)).found_existing) continue;
-            if (target.ambiguous or target.last >= before) continue;
-            const from = blocks[target.first].start;
-            const last = blocks[target.last];
-            const body = text[from .. last.start + last.len];
+            const body = text[block.start..][0..block.len];
             const buffer = try a.alloc(u16, body.len);
-            defer a.free(buffer);
-            if (std.mem.indexOf(u16, normalized(body, buffer), needle) == null) continue;
+            const matches = std.mem.startsWith(u16, normalized(body, buffer), needle);
+            a.free(buffer);
+            if (!matches) continue;
             if (found != null) return null;
-            found = target.last;
+            found = i;
         }
         return found;
     }
 
     fn resolve(a: std.mem.Allocator, reaction: Reaction, targets: *const std.AutoHashMap(u64, Target), blocks: []const md.Block, text: []const u16, before: usize) !?usize {
-        if (reaction.reference == 0) return try resolveQuote(a, reaction.quote, targets, blocks, text, before);
+        if (reaction.reference == 0) return try resolveQuote(a, reaction.quote, blocks, text, before);
         const target = targets.get(reaction.reference) orelse return null;
         if (target.ambiguous or target.last >= before) return null;
         const from = blocks[target.first].start;
@@ -426,17 +418,6 @@ pub const View = struct {
         }
     }
 
-    fn anchorBadges(self: *View, blocks: []const md.Block, targets: *const std.AutoHashMap(u64, Target)) void {
-        for (blocks, 0..) |block, i| {
-            const badge = self.badges.items[i];
-            if (badge == 0 or block.reaction_reference == 0) continue;
-            const target = targets.get(block.reaction_reference) orelse continue;
-            if (target.ambiguous or i == target.last) continue;
-            self.badges.items[target.last] |= badge;
-            self.badges.items[i] = 0;
-        }
-    }
-
     pub fn projected(self: *const View, index: usize) ?*const Projection {
         for (self.projections.items) |*item| if (item.index == index) return &item.projection;
         return null;
@@ -553,7 +534,6 @@ pub const View = struct {
             };
         }
         self.foldLikes(blocks);
-        self.anchorBadges(blocks, &targets);
         var hash = std.hash.Wyhash.init(0);
         for (self.hidden.items, 0..) |hidden, index| {
             if (hidden) hash.update(std.mem.asBytes(&index));
@@ -907,38 +887,4 @@ test "SOFT-2448 a long thumbs-up quote ends on a whole word and both replies mat
     try std.testing.expect(view.hides(2));
     try std.testing.expect(view.hidesPending(1));
     try std.testing.expect(view.hidesPending(2));
-}
-
-test "SOFT-2441 a code-free reaction anchors on the last paragraph block" {
-    const a = std.testing.allocator;
-    const p1 = std.unicode.utf8ToUtf16LeStringLiteral("First paragraph.\r\n\r\n");
-    const p2 = std.unicode.utf8ToUtf16LeStringLiteral("Second paragraph.\r\n\r\n");
-    const p3 = std.unicode.utf8ToUtf16LeStringLiteral("Third paragraph.");
-    const capture = try std.mem.concat(a, u16, &.{ p1, p2, p3 });
-    defer a.free(capture);
-    const id = reference("msg_target");
-    const blocks = [_]md.Block{
-        .{ .start = 0, .len = p1.len, .role = .prose, .first = true, .message_id = 1, .reaction_reference = id },
-        .{ .start = p1.len, .len = p2.len, .role = .prose, .message_id = 1, .reaction_reference = id },
-        .{ .start = p1.len + p2.len, .len = p3.len, .role = .prose, .message_id = 1, .reaction_reference = id },
-    };
-    var line: [256]u16 = undefined;
-    const reaction = spoken(.like, p1, &line).?;
-    const react: md.Block = .{ .start = capture.len, .len = reaction.len, .role = .user, .first = true };
-    var body = try a.alloc(u16, capture.len + reaction.len);
-    defer a.free(body);
-    @memcpy(body[0..capture.len], capture);
-    @memcpy(body[capture.len..], reaction);
-    var view: View = .{};
-    defer view.deinit(a);
-    _ = try view.build(a, &blocks, body, &.{.{ .id = 1, .text = reaction }});
-    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
-    try std.testing.expectEqual(@as(u8, 0), view.mask(1));
-    try std.testing.expectEqual(Emoji.like.bit(), view.mask(2));
-    const with_reply = [_]md.Block{ blocks[0], blocks[1], blocks[2], react };
-    _ = try view.build(a, &with_reply, body, &.{});
-    try std.testing.expect(view.hides(3));
-    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
-    try std.testing.expectEqual(@as(u8, 0), view.mask(1));
-    try std.testing.expectEqual(Emoji.like.bit(), view.mask(2));
 }

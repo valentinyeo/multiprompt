@@ -48,26 +48,6 @@
 - Runtime errors return history error frames.
 - They never execute older code instead.
 
-## Saved live state (SOFT-1872)
-
-- Generation 134 adds opt-in `events_subscribe` with `snapshot: true`.
-- A cold cursor receives `result.live_snapshot` with `seq`, `events`, and `requests`.
-- `events` holds the current turn, up to 96 live items, and host settings and status.
-- `requests` holds only open approvals, questions, and plans.
-- `plan.snapshot` supplies plan text without reopening its card.
-- The client replaces live state atomically, then resumes events after `seq`.
-- Legacy subscriptions keep their existing response shape.
-- Older servers ignore the opt-in field and keep replaying events.
-- Saved state and event cursors commit with each event.
-- An upgraded store reconstructs only the latest turn and request decisions, not every past turn.
-
-Each reader checks maintenance every minute.
-A transaction keeps the last 2,000 events per chat once per UTC day, after saving current state.
-Canonical messages, connector facts, and transcripts remain intact.
-A pruned live cursor receives a fresh snapshot.
-A pruned queue cursor receives `resync_required: true`; clients must discard the replica and fetch `message_snapshot`.
-Reverting the reader generation stops future cleanup but cannot restore deleted events.
-
 ## Hosted chats and other tools
 
 - New live chats have no parking terminal or idle sleep process.

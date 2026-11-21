@@ -289,7 +289,6 @@
     "startLadderMode: showHeaderNoticeAscii(\"Token Ladder: still working on the last change\",3000,false)"
   ],
   "update_card.zig": [
-    "showUpdateCheckNotice: @import(\"console.zig\").showHeaderNoticeAscii(app_state.g_update_check_notice[0..app_state.g_update_check_notice_len],8000,true)",
     "updateCardPoll: @import(\"console.zig\").showHeaderNoticeAscii(\"No verified update available. Please try again later.\",6000,false)",
     "updateCardRelaunch: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not start update. Please try again.\",6000,true)",
     "updateCardRelaunch: @import(\"console.zig\").showHeaderNoticeAscii(\"Update still downloading. Will restart when ready.\",6000,false)"
