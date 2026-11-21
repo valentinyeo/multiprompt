@@ -1,0 +1,1 @@
+Let server chats open a VPS shell tab on the desktop.
