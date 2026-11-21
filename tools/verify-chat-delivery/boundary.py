@@ -1101,7 +1101,7 @@ def install_reaction_worker(namespace):
 def reader_namespace():
     import base64
 
-    if MODE == "bootstrap-fresh-start":
+    if globals().get("MODE") == "bootstrap-fresh-start":
         source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
     else:
         source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
