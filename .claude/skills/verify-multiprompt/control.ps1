@@ -388,6 +388,8 @@ try {
             $remoteDocument.sid = $remoteSids['verify-fresh-start']
             $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY bootstrap-fresh-start
+            if ($LASTEXITCODE -ne 0) { throw 'Fresh start host bootstrap failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         if ($Feature -eq 'chat-slash') {
