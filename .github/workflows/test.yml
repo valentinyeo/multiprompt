@@ -319,6 +319,9 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test a cleared server chat keeps only its new messages
+        if: steps.paths.outputs.heavy == 'true'
+        run: node --test tools/chat-clear-server-chat.test.js
       - name: Reject placeholder release signing key
         if: steps.paths.outputs.heavy == 'true'
         run: |

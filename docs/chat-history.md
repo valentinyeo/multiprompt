@@ -49,7 +49,14 @@ named tmux pane's live agent descendant and Claude's
 remains for harnesses without that map. No unscoped active tmux session is used.
 A hosted live chat keeps its own sid on the wire but reads the host's native
 session when Claude's `/clear` starts a new one (SOFT-2272), so the chat shows
-its new replies instead of freezing on the cleared conversation.
+its new replies instead of freezing on the cleared conversation. A server
+chat's transcript is replaced by a different file when that happens, and the
+previous file's messages share nothing with it, so the app keeps only the new
+messages: a cleared chat no longer shows the cleared conversation above the new
+replies, including after a restart from the disk snapshot. A replaced server
+transcript that still carries the retained messages keeps them, so a fresh
+start on a server chat keeps its earlier messages. A local chat keeps its
+retained rows when its transcript file is replaced.
 
 Cold loads seek to the last 512 KiB and align to complete JSONL records.
 Subsequent reads seek to the cached offset and parse only the changed suffix,
