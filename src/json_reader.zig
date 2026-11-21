@@ -171,6 +171,17 @@ test "local avatar identity survives session parsing without using tab names" {
     try std.testing.expect(std.mem.allEqual(u8, &tabs[1].avatar_local_id, 0));
 }
 
+fn tmuxSessionCacheRow(root: std.json.Value, obj: std.json.Value) bool {
+    const name = string(field(obj, "name")) orelse return false;
+    for (array(field(root, "tabs"))) |other| {
+        if (!std.mem.eql(u8, string(field(other, "kind")) orelse "", "tmux")) continue;
+        if ((string(field(other, "tmux_session")) orelse "").len == 0) continue;
+        const other_name = string(field(other, "name")) orelse continue;
+        if (std.mem.eql(u8, name, other_name)) return true;
+    }
+    return false;
+}
+
 pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 {
     const Tab = @TypeOf(tabs[0]);
     var count: u32 = 0;
@@ -193,7 +204,9 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
                 if (std.fmt.hexToBytes(&tab.avatar_local_id, value)) |_| {} else |_| { tab.avatar_local_id = @splat(0); }
             }
         }
+        tab.tmux_host = @truncate(uint(obj, "tmux_host"));
         if (tab.kind == .tmux and tab.tmux_session_len == 0) {
+            if (tmuxSessionCacheRow(root, obj)) continue;
             tab.kind = if (tab.tmux_host == 1) .vps2 else .vps;
         }
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
@@ -222,7 +235,6 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.pid = @truncate(uint(obj, "pid"));
         tab.group_id = @truncate(uint(obj, "group_id"));
         tab.starred_group_id = @truncate(uint(obj, "starred_group_id"));
-        tab.tmux_host = @truncate(uint(obj, "tmux_host"));
         const workspace = uint(obj, "workspace");
         tab.workspace = if (workspace < max_workspaces) @intCast(workspace) else 0;
         tab.last_used = uint(obj, "used");
