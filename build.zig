@@ -815,7 +815,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&system_theme_follow_tests.step);
     const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js", "tools/list-input.test.js", "tools/palette-dialog-design.test.js" });
     test_step.dependOn(&search_selection_tests.step);
-    const ctrl_t_palette_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ctrl-t-palette-usage.test.js" });
+    const ctrl_t_palette_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ctrl-t-palette-usage.test.js", "tools/shell-ctrlc-copy.test.js" });
     test_step.dependOn(&ctrl_t_palette_tests.step);
     const sidebar_drag_pin_tests = b.addSystemCommand(&.{ "node", "--test", "tools/sidebar-drag-pin.test.js" });
     test_step.dependOn(&sidebar_drag_pin_tests.step);

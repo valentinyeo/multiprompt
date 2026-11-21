@@ -714,6 +714,22 @@ test "SOFT-2355 Ctrl+Shift+W deletes the session and Ctrl+W is left for the brow
     try std.testing.expect(sessionCloseShortcut(0x58, false, false, true, false) == null);
 }
 
+pub fn shellCopyOrInterruptKey(wp: WPARAM, vkCode: DWORD, ctrl: bool, shift: bool, flags: DWORD) bool {
+    return wp == WM_KEYDOWN and ctrl and !shift and vkCode == 0x43 and (flags & 0x20) == 0 and
+        activeShellHasForegroundFocus() and !chatViewOwnsInput() and
+        !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+        !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null and
+        app_state.active_shell < app_state.shell_count;
+}
+
+test "SOFT-3001 shell Ctrl+C copy-or-interrupt chord rejects chat and browser variants" {
+    try std.testing.expect(!shellCopyOrInterruptKey(WM_SYSKEYDOWN, 0x43, true, false, 0));
+    try std.testing.expect(!shellCopyOrInterruptKey(WM_KEYDOWN, 0x43, true, true, 0));
+    try std.testing.expect(!shellCopyOrInterruptKey(WM_KEYDOWN, 0x43, true, false, 0x20));
+    try std.testing.expect(!shellCopyOrInterruptKey(WM_KEYDOWN, 0x56, true, false, 0));
+    try std.testing.expect(!shellCopyOrInterruptKey(WM_KEYDOWN, 0x43, false, false, 0));
+}
+
 fn noteJumpBadgeKey(wp: WPARAM, lp: LPARAM) void {
     const down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
     if (!down and wp != WM_KEYUP and wp != WM_SYSKEYUP) return;
@@ -1304,6 +1320,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 1;
                 }
             }
+            const browser_shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            if (shellCopyOrInterruptKey(wp, kb.vkCode, isCtrlDown(), browser_shift, kb.flags)) {
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COPY_OR_INTERRUPT, app_state.active_shell, 0);
+                return 1;
+            }
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
         if (wp == WM_SYSKEYDOWN and !isCtrlDown() and activeBrowserSurfaceHasForegroundFocus()) {
@@ -1347,6 +1368,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         if (wp == WM_SYSKEYDOWN) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (wp != WM_KEYDOWN) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+
+        const shell_shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+        if (shellCopyOrInterruptKey(wp, kb.vkCode, isCtrlDown(), shell_shift, kb.flags)) {
+            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COPY_OR_INTERRUPT, app_state.active_shell, 0);
+            return 1;
+        }
 
         const fg = GetForegroundWindow();
         var is_ours = (fg == app_state.g_main_hwnd);
@@ -1419,7 +1446,9 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 1;
             }
 
-            if (ctrl and (kb.flags & 0x20) == 0 and kb.vkCode != 0x09 and !(!shift and kb.vkCode == 0xC0) and !(shift and kb.vkCode == 0x53 and activeShellHasShotUrlPane()) and activeBrowserHasForegroundFocus()) {
+            if (ctrl and (kb.flags & 0x20) == 0 and kb.vkCode != 0x09 and !(!shift and kb.vkCode == 0xC0) and !(shift and kb.vkCode == 0x53 and activeShellHasShotUrlPane()) and
+                !(shellCopyOrInterruptKey(wp, kb.vkCode, ctrl, shift, kb.flags)) and activeBrowserHasForegroundFocus())
+            {
                 return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
             }
 
@@ -1434,10 +1463,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_PASTE, app_state.active_shell, 0);
                     return 1;
                 }
-            }
-            if (ctrl and !shift and kb.vkCode == 0x43 and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null and app_state.active_shell < app_state.shell_count) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COPY_OR_INTERRUPT, app_state.active_shell, 0);
-                return 1;
             }
             if (ctrl and shift and kb.vkCode == 0x43 and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null and app_state.active_shell < app_state.shell_count) {
                 _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COPY, app_state.active_shell, 0);
