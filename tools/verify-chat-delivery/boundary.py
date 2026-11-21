@@ -1606,7 +1606,7 @@ def bootstrap_fresh_start_host():
     paths = namespace["host_paths"]("claude", sid)
     if not paths["config"].exists():
         namespace["host_write"](paths["config"], dict(
-            enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
+            enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
             command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
     if not namespace["host_alive"]("claude", sid):
         for stale in ("lock", "owner", "socket"):
@@ -1633,7 +1633,7 @@ def serve_reader():
         paths = namespace["host_paths"]("claude", sid)
         if not paths["config"].exists():
             namespace["host_write"](paths["config"], dict(
-                enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
+                enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
                 command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
         started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
         record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
