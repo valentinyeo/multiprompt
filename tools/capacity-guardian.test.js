@@ -94,9 +94,9 @@ test("All Sessions exposes per-session RAM and deduplicated workspace totals", (
   assert.match(totals, /duplicate = true/);
 
   const paint = functionBody("paintAllSessions", "openAllSessions");
-  assert.match(paint, /sessionViewLiveRamMb\(rows, row\.host\)/);
-  assert.match(paint, /asFormatRam\(mem, &mem_buf\)/);
-  assert.match(paint, /if \(archived or row\.ram_mb == 0\) "-" else asFormatRam\(row\.ram_mb/);
+  assert.match(paint, /allSessionsTabRamMb\(tabid\)/);
+  assert.match(paint, /"\{d\} MB"/);
+  assert.match(paint, /row\.kind == \.archived[\s\S]*"0 MB"/);
 });
 
 test("sidebar VPS card explains pressure as percentages with explicit Critical boundaries", () => {

@@ -78,33 +78,6 @@ try {
         if ($app.HasExited) { throw 'App exited while settling' }
         Start-Sleep -Seconds 1
     }
-    Write-Host "Waiting until deep idle so the measured window excludes the transition"
-    [void](Wait-For 'deep idle' {
-        $text = Read-Counters
-        if ($null -eq $text) { return $false }
-        $value = $text | ConvertFrom-Json
-        $value.deep_idle -eq 1
-    } 360)
-    $script:settledSig = $null
-    $script:settledTick = 0
-    [void](Wait-For 'deep idle counters settled' {
-        if ($app.HasExited) { throw 'App exited while deep idle settled' }
-        $text = Read-Counters
-        if ($null -eq $text) { return $false }
-        $value = $text | ConvertFrom-Json
-        if ($value.deep_idle -ne 1) {
-            $script:settledSig = $null
-            $script:settledTick = 0
-            return $false
-        }
-        $sig = '{0}|{1}|{2}|{3}' -f $value.thread_spawn, $value.invalidate, $value.server_fetch, $value.process_spawn
-        if ($script:settledSig -eq $sig -and ($value.tick_ms - $script:settledTick) -ge 10000) { return $true }
-        if ($script:settledSig -ne $sig) {
-            $script:settledSig = $sig
-            $script:settledTick = [long]$value.tick_ms
-        }
-        return $false
-    } 180 2000)
     $beforeText = Wait-For 'counter dump before the idle window' { Read-Counters } 60
     $before = $beforeText | ConvertFrom-Json
     $invocationsBefore = Count-Invocations
