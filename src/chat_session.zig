@@ -1031,7 +1031,7 @@ fn chatLiveSyncWorking() void {
     if (!live.attached(shell.shell_id)) return;
     const working = live.running(shell.shell_id);
     app_state.g_chat_screen_working = working;
-    if (working) shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, GetTickCount64());
+    shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, GetTickCount64());
 }
 
 fn chatLiveSyncCard() void {
@@ -1872,8 +1872,6 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_window_full = false;
     app_state.g_chat_screen_status_len = 0;
     app_state.g_chat_screen_working = false;
-    app_state.g_chat_working_hold_until = 0;
-    app_state.g_chat_working_was_shown = false;
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_cache_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     if (cached) |entry| {
