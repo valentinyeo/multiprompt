@@ -1101,6 +1101,11 @@ def install_reaction_worker(namespace):
 def reader_namespace():
     import base64
 
+    if os.name == "nt" and os.environ.get("MP_VERIFY_STATE"):
+        spec = importlib.util.spec_from_file_location("sitecustomize", Path(__file__).with_name("sitecustomize.py"))
+        site = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(site)
+
     if globals().get("MODE") == "bootstrap-fresh-start":
         source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
     else:
