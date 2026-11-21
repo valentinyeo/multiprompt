@@ -10,11 +10,18 @@ function Read-HostIdentity([string]$Sid) {
         $statePath = $configPath.FullName -replace '\.config\.json$', '.state.json'
         if (-not (Test-Path $statePath)) { return $null }
         $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        $native = ''
+        if ($state.PSObject.Properties.Name -contains 'native_session' -and $state.native_session) {
+            $native = [string]$state.native_session
+        } elseif ($state.PSObject.Properties.Name -contains 'context_session' -and $state.context_session) {
+            $native = [string]$state.context_session
+        }
+        $provider = if ($config.PSObject.Properties.Name -contains 'provider') { [string]$config.provider } else { 'claude' }
         return @{
             sid = [string]$config.sid
             tmux = [string]$config.tmux
-            provider = [string]$config.provider
-            native_session = [string]$state.native_session
+            provider = $provider
+            native_session = $native
             configFile = $configPath.Name
             stateFile = [IO.Path]::GetFileName($statePath)
         }
