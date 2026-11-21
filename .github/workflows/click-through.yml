@@ -23,6 +23,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Diff click-through features from tools maps
       - id: diff
         env:
           EVENT: ${{ github.event_name }}

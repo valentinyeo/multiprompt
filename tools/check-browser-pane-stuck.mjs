@@ -55,7 +55,8 @@ const desktopFeatures = featureFiles.filter(file => {
   const desktop = text.includes('## Driving it with control.ps1');
   const reconnect = text.includes('## Driving it with the Windows reconnect harness');
   const aggregate = text.includes('## Driving it with drive.ps1');
-  assert.equal(Number(desktop) + Number(reconnect) + Number(aggregate), 1, `${file} names exactly one driver`);
+  const ci = text.includes('## Driving it with GitHub CI');
+  assert.equal(Number(desktop) + Number(reconnect) + Number(aggregate) + Number(ci), 1, `${file} names exactly one driver`);
   if (aggregate) {
     const journeys = text.match(/^Journeys: (.+)$/m);
     assert.ok(journeys, `${file} names its runnable journeys`);
