@@ -4,6 +4,16 @@ import crypto from 'node:crypto';
 
 export const defaults = JSON.parse(fs.readFileSync(new URL('./config.json', import.meta.url)));
 export const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+export const mainWindowNamePatterns = ['Multi Bot', 'multiprompt v', 'Multibot DEV'];
+
+export async function searchMainWindows(execute) {
+  const ids = new Set();
+  for (const pattern of mainWindowNamePatterns) {
+    const stdout = (await execute('xdotool', ['search', '--name', pattern]).catch(() => ({ stdout: '' }))).stdout.trim();
+    for (const id of stdout.split(/\s+/).filter(Boolean)) ids.add(id);
+  }
+  return [...ids];
+}
 export const atomic = (file, data) => { fs.writeFileSync(`${file}.tmp`, data); fs.renameSync(`${file}.tmp`, file); };
 export const winPath = file => `Z:${path.resolve(file).replaceAll('/', '\\')}`;
 export const percentile = (values, p) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
