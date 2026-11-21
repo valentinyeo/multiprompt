@@ -175,7 +175,8 @@ fn tmuxSessionCacheRow(root: std.json.Value, obj: std.json.Value) bool {
     const name = string(field(obj, "name")) orelse return false;
     for (array(field(root, "tabs"))) |other| {
         if (!std.mem.eql(u8, string(field(other, "kind")) orelse "", "tmux")) continue;
-        if ((string(field(other, "tmux_session")) orelse "").len == 0) continue;
+        const session = string(field(other, "tmux_session")) orelse "";
+        if (session.len == 0) continue;
         const other_name = string(field(other, "name")) orelse continue;
         if (std.mem.eql(u8, name, other_name)) return true;
     }
