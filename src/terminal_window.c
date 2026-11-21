@@ -298,6 +298,9 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
         case WM_SETFOCUS: caret(t); return 0;
         case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); return 0;
+        case WM_SYSCOMMAND:
+            if ((wp & 0xfff0) == 0xf100) return 0;
+            break;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int mod = modifiers();
             if ((mod & (VTERM_MOD_CTRL | VTERM_MOD_SHIFT)) == (VTERM_MOD_CTRL | VTERM_MOD_SHIFT) && (wp == 'C' || wp == 'V')) {
