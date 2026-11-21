@@ -721,7 +721,7 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'server-chat' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane' || env.FEATURE == 'fresh-start'
+        if: env.FEATURE == 'server-chat' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
       - name: Check the deterministic provider boundary
@@ -758,7 +758,7 @@ jobs:
         if: env.FEATURE == 'chat-newest'
         run: node --test tools/chat-newest-proof.test.mjs
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'fresh-start'
+        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
