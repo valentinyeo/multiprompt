@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generationOf, verdict } from './check-runtime-generation.mjs';
+import { generationOf, hostGenerationGuard, verdict } from './check-runtime-generation.mjs';
 
 const reader = (generation, body = 'print(1)\n') => `RUNTIME_GENERATION = ${generation}\n${body}`;
 
@@ -34,6 +34,14 @@ test('IGSH-1266 a missing generation line or missing file fails', () => {
 
 test('IGSH-1266 a new reader with a generation passes', () => {
   assert.equal(verdict(null, reader(1)).ok, true);
+});
+
+test('SOFT-3010 host rotate must not reference RUNTIME_GENERATION directly', () => {
+  const ok = "def host_generation():\n  return 1\nhost_log('rotate', dict(generation=host_generation()))\n";
+  const bad = "def host_generation():\n  return 1\nhost_log('rotate', dict(generation=RUNTIME_GENERATION))\n";
+  assert.equal(hostGenerationGuard(ok).ok, true);
+  assert.equal(hostGenerationGuard(bad).ok, false);
+  assert.equal(hostGenerationGuard('print(1)\n').ok, false);
 });
 
 test('IGSH-1266 the generation line is read exactly', () => {

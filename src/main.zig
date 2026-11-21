@@ -1712,7 +1712,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_UPDATE_CHANGED => {
-            if (wp != 0) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
+            _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
             @import("usage_card.zig").refresh();
             return 0;
@@ -9333,6 +9333,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_chat_input_brush = null;
             if (app_state.g_chat_code_font != null) _ = DeleteObject(app_state.g_chat_code_font);
             app_state.g_chat_code_font = null;
+            if (app_state.g_chat_emoji_font != null) _ = DeleteObject(app_state.g_chat_emoji_font);
+            app_state.g_chat_emoji_font = null;
             uninstallHook();
             uninstallForegroundHook();
             @import("browser_pane.zig").uninstallBrowserDockHooks();
