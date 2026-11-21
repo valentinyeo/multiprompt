@@ -341,7 +341,7 @@ try {
             $remotePanes[$remoteNames[$i]] = 4300 + $i
             $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
         }
-        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { Join-Path $scratch 'profile' }
+        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { $env:HOME }
         $remoteDocument = [ordered]@{ name = $(if ($Feature -eq 'chat-still') { 'chat-still' } elseif ($Feature -eq 'fresh-start') { 'fresh-start' } else { 'chat-switch-speed' }); fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = $verifyHome; procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
         if ($Feature -eq 'chat-slash') { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
         [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
