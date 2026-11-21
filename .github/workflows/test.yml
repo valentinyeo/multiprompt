@@ -77,6 +77,11 @@ jobs:
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes
         run: node tools/check-timer-ratchet.mjs
+      - name: Run isolated chat helper regressions
+        run: |
+          python3 tools/chat-transcript-reconcile.test.py
+          python3 tools/multibot-feedback-test.py
+          python3 tools/room-routing.test.py
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup

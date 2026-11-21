@@ -83,10 +83,6 @@ if (args[0] === 'api') {
   process.exit(0);
 }
 const sha = args[args.indexOf('--commit') + 1];
-if (args[args.indexOf('-w') + 1] === 'release-gate.yml') {
-  console.log(JSON.stringify(JSON.parse(process.env.GATE_RUNS || '{}')[sha] || []));
-  process.exit(0);
-}
 if (args[args.indexOf('-w') + 1] === 'verify.yml') {
   const verify = JSON.parse(process.env.VERIFY_RUNS || '{}')[sha];
   console.log(JSON.stringify(verify || [{ databaseId: 700, event: 'push', status: 'completed', conclusion: 'failure' }]));
@@ -150,7 +146,6 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
     ['api', 'repos/example/multiprompt/releases/latest', '--jq', '.tag_name'],
     list('test.yml', f.tip),
     list('test.yml', f.green),
-    list('release-gate.yml', f.green),
     list('verify.yml', f.green),
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
     ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v0.0.2', '-f', `sha=${f.green}`],
@@ -319,45 +314,15 @@ test('the legacy admit journey remains available without gating automatic releas
   assert.doesNotMatch(autoRelease, /workflow_run|auto-release-admit/);
 });
 
-const gateJourney = 'journey / verify (relaunch-saved-sessions)';
-
-function gateEnv(gateRuns, jobs, verifyRuns = {}) {
-  return { GATE_RUNS: JSON.stringify(gateRuns), VERIFY_RUNS: JSON.stringify(verifyRuns), VERIFY_JOBS: JSON.stringify(jobs) };
-}
-
-test('a green release gate run releases the commit although its verify run was cancelled', t => {
-  const f = fixture(t);
-  selected(f.admit(['--dry-run'], gateEnv({ [f.green]: verifyPush(901) },
-    { 901: { jobs: [{ name: gateJourney, conclusion: 'success' }] }, 700: { jobs: [] } })), f.green);
-});
-
-test('a red release gate run wins over a green journey in the full verify run', t => {
-  const f = fixture(t);
-  selected(f.admit(['--dry-run'], gateEnv({ [f.green]: verifyPush(901), [f.older]: verifyPush(902) },
-    { 901: { jobs: [{ name: gateJourney, conclusion: 'failure' }] }, 902: { jobs: [{ name: gateJourney, conclusion: 'success' }] }, 801: { jobs: [{ name: journey, conclusion: 'success' }] } },
-    { [f.green]: verifyPush(801) })), f.older);
-});
-
-for (const [label, conclusion] of [['cancelled', 'cancelled'], ['unfinished', null], ['skipped', 'skipped']]) {
-  test(`a ${label} release gate journey blocks the release`, t => {
-    const f = fixture(t);
-    const result = skipped(f, gateEnv({ [f.green]: verifyPush(901), [f.older]: verifyPush(901) }, { 901: { jobs: [{ name: gateJourney, conclusion }] } }));
-    assert.match(result.stderr, /relaunch-saved-sessions/);
-  });
-}
-
-test('the release journey runs manually and nightly without blocking releases', () => {
-  const gate = fs.readFileSync(path.join(root, '.github/workflows/release-gate.yml'), 'utf8');
+test('the release journey stays on verify nightly without a separate release gate workflow', () => {
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
-  assert.match(gate, /^name: Release gate$/m);
-  assert.match(gate, /^  workflow_dispatch:/m);
-  assert.match(gate, /^  schedule:/m);
-  assert.doesNotMatch(gate, /^  (?:push|pull_request|workflow_run):/m);
-  assert.match(gate, /cancel-in-progress: true/);
-  assert.match(gate, /uses: \.\/\.github\/workflows\/verify\.yml/);
-  assert.match(gate, /feature: relaunch-saved-sessions/);
+  assert.match(verify, /^  workflow_dispatch:/m);
+  assert.match(verify, /^  schedule:/m);
+  assert.doesNotMatch(verify, /^  pull_request:/m);
   assert.match(verify, /workflow_call:/);
   assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  assert.ok(featureMatrix(verify).full.includes('relaunch-saved-sessions'));
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8'), /release-gate\.yml/);
 });
 
 test('the release tag is created through the git refs API and never pushed with git, so workflow-file commits cannot block it', () => {
@@ -383,49 +348,45 @@ test('IGSH-1131 failed tags do not consume unpublished product notes', t => {
   assert.equal(result.stdout, `tag=v0.0.3\nsha=${quiet}\n`);
 });
 
-for (const workflow of ['release-gate.yml', 'verify.yml']) {
-  test(`IGSH-1155 ${workflow} accepts the newest master dispatch, ignoring a newer PR run`, t => {
+test('IGSH-1155 verify.yml accepts the newest master dispatch, ignoring a newer PR run', t => {
+  const f = fixture(t);
+  const runs = [
+    { databaseId: 903, event: 'pull_request', status: 'completed', conclusion: 'failure' },
+    { databaseId: 902, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' },
+    { databaseId: 901, event: 'push', status: 'completed', conclusion: 'failure' },
+  ];
+  selected(f.admit(['--dry-run'], {
+    VERIFY_RUNS: JSON.stringify({ [f.green]: runs }),
+    VERIFY_JOBS: JSON.stringify({
+      901: { jobs: [{ name: journey, conclusion: 'failure' }] },
+      902: { jobs: [{ name: journey, conclusion: 'success' }] },
+      903: { jobs: [{ name: journey, conclusion: 'failure' }] },
+    }),
+  }), f.green);
+});
+
+for (const [label, latest, older, conclusion] of [
+  ['failed dispatch overrides green push', 'workflow_dispatch', 'push', 'failure'],
+  ['failed push overrides green dispatch', 'push', 'workflow_dispatch', 'failure'],
+  ['cancelled dispatch overrides green push', 'workflow_dispatch', 'push', 'cancelled'],
+  ['unfinished dispatch overrides green push', 'workflow_dispatch', 'push', null],
+  ['skipped dispatch overrides green push', 'workflow_dispatch', 'push', 'skipped'],
+]) {
+  test(`IGSH-1155 verify.yml: ${label}`, t => {
     const f = fixture(t);
     const runs = [
-      { databaseId: 903, event: 'pull_request', status: 'completed', conclusion: 'failure' },
-      { databaseId: 902, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' },
-      { databaseId: 901, event: 'push', status: 'completed', conclusion: 'failure' },
+      { databaseId: 902, event: latest, status: conclusion === null ? 'in_progress' : 'completed', conclusion },
+      { databaseId: 901, event: older, status: 'completed', conclusion: 'success' },
     ];
-    selected(f.admit(['--dry-run'], {
-      GATE_RUNS: JSON.stringify(workflow === 'release-gate.yml' ? { [f.green]: runs } : {}),
-      VERIFY_RUNS: JSON.stringify(workflow === 'verify.yml' ? { [f.green]: runs } : {}),
+    const candidates = { [f.green]: runs, [f.older]: runs };
+    skipped(f, {
+      VERIFY_RUNS: JSON.stringify(candidates),
       VERIFY_JOBS: JSON.stringify({
-        901: { jobs: [{ name: gateJourney, conclusion: 'failure' }] },
-        902: { jobs: [{ name: gateJourney, conclusion: 'success' }] },
-        903: { jobs: [{ name: gateJourney, conclusion: 'failure' }] },
+        901: { jobs: [{ name: journey, conclusion: 'success' }] },
+        902: { jobs: [{ name: journey, conclusion }] },
       }),
-    }), f.green);
-  });
-
-  for (const [label, latest, older, conclusion] of [
-    ['failed dispatch overrides green push', 'workflow_dispatch', 'push', 'failure'],
-    ['failed push overrides green dispatch', 'push', 'workflow_dispatch', 'failure'],
-    ['cancelled dispatch overrides green push', 'workflow_dispatch', 'push', 'cancelled'],
-    ['unfinished dispatch overrides green push', 'workflow_dispatch', 'push', null],
-    ['skipped dispatch overrides green push', 'workflow_dispatch', 'push', 'skipped'],
-  ]) {
-    test(`IGSH-1155 ${workflow}: ${label}`, t => {
-      const f = fixture(t);
-      const runs = [
-        { databaseId: 902, event: latest, status: conclusion === null ? 'in_progress' : 'completed', conclusion },
-        { databaseId: 901, event: older, status: 'completed', conclusion: 'success' },
-      ];
-      const candidates = { [f.green]: runs, [f.older]: runs };
-      skipped(f, {
-        GATE_RUNS: JSON.stringify(workflow === 'release-gate.yml' ? candidates : {}),
-        VERIFY_RUNS: JSON.stringify(workflow === 'verify.yml' ? candidates : {}),
-        VERIFY_JOBS: JSON.stringify({
-          901: { jobs: [{ name: gateJourney, conclusion: 'success' }] },
-          902: { jobs: [{ name: gateJourney, conclusion }] },
-        }),
-      });
     });
-  }
+  });
 }
 
 for (const annotated of [false, true]) {
@@ -462,7 +423,7 @@ for (const conclusion of ['failure', 'cancelled', null]) {
   test(`IGSH-1159 a reserved commit with a non-green journey (${conclusion}) cannot retry`, t => {
     const f = fixture(t);
     f.git('tag', 'v0.0.2', f.green);
-    const result = skipped(f, gateEnv({ [f.green]: verifyPush(901) }, { 901: { jobs: [{ name: gateJourney, conclusion }] } }));
+    const result = skipped(f, releaseEnv(f, { [f.green]: verifyPush(901) }, { 901: { jobs: [{ name: journey, conclusion }] } }));
     assert.match(result.stderr, /no green relaunch-saved-sessions/);
   });
 }

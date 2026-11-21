@@ -1,0 +1,26 @@
+ASKED pstack recipe: 0.15.46
+ASKED verify-skill: verify-multiprompt
+ASKED CI workflow: .github/workflows/chat-delivery-formal.yml job formal
+ASKED CI workflow: .github/workflows/chat-delivery-formal.yml job comment-review
+ASKED CI workflow: .github/workflows/ci-repair-receipt.yml job tools
+ASKED CI workflow: .github/workflows/gitleaks.yml job secret-scan
+ASKED CI workflow: .github/workflows/no-comments.yml job no-comments
+ASKED CI workflow: .github/workflows/no-comments.yml job extension-version
+ASKED CI workflow: .github/workflows/pr-verifier.yml job tests
+ASKED CI workflow: .github/workflows/pr-verifier.yml job resolve
+ASKED CI workflow: .github/workflows/pr-verifier.yml job select
+ASKED CI workflow: .github/workflows/pr-verifier.yml job head
+ASKED CI workflow: .github/workflows/service-route-receipt.yml job secrets
+ASKED CI workflow: .github/workflows/test.yml job reader-tests
+ASKED CI workflow: .github/workflows/test.yml job test
+ASKED CI workflow: .github/workflows/test.yml job test-update-source
+ASKED CI workflow: .github/workflows/test.yml job test-windows-update
+ASKED CI workflow: .github/workflows/test.yml job test-vps
+ASKED CI workflow: .github/workflows/test.yml job test-worker
+ASKED CI workflow: .github/workflows/test.yml job build-windows
+ASKED CI workflow: .github/workflows/test.yml job speed-baseline
+ASKED CI workflow: .github/workflows/test.yml job speed-candidate
+ASKED CI workflow: .github/workflows/test.yml job switch-performance
+ASKED CI workflow: .github/workflows/test.yml job test-result
+ASKED CI workflow: .github/workflows/verify-cli.yml job cli
+ASKED verifier workflow: .github/workflows/pr-verifier.yml job verdict

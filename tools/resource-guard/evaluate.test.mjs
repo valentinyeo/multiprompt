@@ -11,11 +11,11 @@ const file = { inputPath: 'input', stagedPath: 'staged', inputSha256: 'a'.repeat
 const staging = { exe: file, bridge: file, config: file, helper: file };
 const normal = { establishedTcpConnections: 0, rawTcpConnections: [], staging, workload: 'fixture', sessionCount: 30, readySessions: 30, cleaned: true, appAlive: true, processes: 2, jobActiveProcesses: 2, rawProcesses: [{ id: 10 }, { id: 20 }], associatedExternalConsoles: [], syntheticSshProcesses: 1, syntheticSshReaders: 1, jobConsoleProcesses: 0, workingSetBytes: 100, idleCpuPercent: 1 };
 test('resource workflows pass versions safely to PowerShell', () => {
-  const pr = fs.readFileSync(new URL('../../.github/workflows/resource-observation.yml', import.meta.url), 'utf8');
   const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(pr, /\$tag = node tools\/release-version\.mjs\s+if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}\s+"CANDIDATE_VERSION=\$\(\$tag\.Substring\(1\)\)" \| Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
-  assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=\$env:CANDIDATE_VERSION"/);
-  assert.match(release, /node tools\/resource-warning-ticket\.mjs/);
+  const job = release.split('\n  resource-observation:\n')[1].split(/\n  [a-z-]+:\n/)[0];
+  assert.match(job, /node tools\/resource-guard\/evaluate\.mjs/);
+  assert.match(job, /node tools\/resource-warning-ticket\.mjs/);
+  assert.match(release, /-Dversion=/);
 });
 test('comparison fails closed and blocks regressions', () => {
   assert.deepEqual(evaluateResources(limits, normal, normal), []);

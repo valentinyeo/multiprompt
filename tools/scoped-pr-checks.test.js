@@ -71,12 +71,10 @@ test('heavy workflows run nightly and manually, not on pull requests', () => {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
   }
-  assert.doesNotMatch(fs.readFileSync(path.join(root, '.github/workflows/verify-skill-eval.yml'), 'utf8'), /^  pull_request:/m, 'the skill eval runs nightly and on request only');
-  for (const name of ['chat-still', 'click-through', 'verify-chat-steady', 'resource-observation', 'room-checks', 'rooms-preview-build', 'legacy-update-feed', 'ssh-detached', 'computer-focus-probe', 'chat-history-reader-proof', 'verify-skill-eval']) {
-    const source = fs.readFileSync(path.join(root, `.github/workflows/${name}.yml`), 'utf8');
-    assert.match(source, /^  workflow_dispatch:/m, name);
-    assert.match(source, /^  schedule:\n    - cron: '[^']+ \* \* \*'/m, name);
-  }
+  const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(verify, /^  workflow_dispatch:/m, 'nightly desktop verification stays manual');
+  assert.match(verify, /^  schedule:\n    - cron: '[^']+ \* \* \*'/m, 'nightly desktop verification stays scheduled');
+  assert.doesNotMatch(verify, /^  pull_request:/m, 'desktop verification no longer runs on every pull request');
 });
 
 test('formal delivery PR checks stay bounded, source-filtered and Linux-only', () => {
