@@ -26,7 +26,7 @@ timeout 1800 gh run watch <id> --interval 300
 gh run download <id>
 ```
 
-If GitHub refuses a branch workflow, open or update the branch PR; its path-filtered `pull_request` trigger runs `appearance`, `chat-dictation`, `session-restore`, `workspace-focus`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-view-everywhere`, `chat-focus`, `status-card`, `palette-order`, `browser-own-profile`, and `remind-me` against the merge revision. Identify that event and head SHA with `gh run list`, then watch and download the PR run — never substitute a default-branch run for the proposed change.
+If GitHub refuses a branch workflow, open or update the branch PR. Two things answer a pull request: the path-filtered `pull_request` trigger of `verify.yml`, which runs only the maps that declare `Verify on: pull_request` (`appearance`, `chat-still`, `server-chat`), and `pr-verifier.yml`, which picks journeys from each map's `Source files:` against the changed files and runs them on the head. Identify that event and head SHA with `gh run list`, then watch and download the PR run, and never substitute a default-branch run for the proposed change.
 
 `tag` must be `v<major>.<minor>.<patch>`. The workflow downloads the x64 release and SHA256SUMS, verifies checksum and embedded version, and records the tag. Empty `tag` builds the branch. Tag verification checks the release artifact, not branch app code.
 
@@ -55,7 +55,7 @@ Changed files match `Source files:` ownership in feature maps. A changed map sel
 
 Every PR body needs `Author model: <family>/<model>` from a family the verifier can contrast. Green Tests alone is not a verdict; `pstack-verifier` is required.
 
-Outages: revert the bad change before repair. `auto-revert-master.yml` documents rollback; while automatic revert is disabled, revert manually, then ship the fix through normal PR verification.
+Outages: revert the bad change before repair, then ship the fix through normal PR verification. There is no automatic-revert workflow at this revision: `tools/auto-revert-master.js` and its test still exist, but `.github/workflows/auto-revert-master.yml` does not, so the revert is manual.
 
 ## SSH reconnect workflow
 

@@ -1,6 +1,6 @@
 # Servers
 
-Source files: src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-servers.ps1
+Source files: src/session*, src/ssh_reconnect.zig, src/launch_plan.zig, src/ssh*, src/tmux*, src/launch_cache.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/servers.ps1
 
 Open the Servers screen, add a disposable server, test it, then remove it. The servers journey proves that Multibot signs in with its own key and that removal cuts access. IGSH-1928: Settings and Ctrl+K both expose Servers. Adding a name, address, user and optional port produces one setup line. Test explains failures. Removal revokes the app key.
 
