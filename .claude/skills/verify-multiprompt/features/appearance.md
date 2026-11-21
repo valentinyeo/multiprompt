@@ -1,6 +1,6 @@
 # Appearance
 
-Source files: src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-appearance.ps1, .claude/skills/verify-multiprompt/drive.ps1, src/design_tokens.zig
+Source files: src/settings*, src/themes.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-appearance.ps1, .claude/skills/verify-multiprompt/drive.ps1, src/design_tokens.zig
 
 Verify on: push, pull_request
 
