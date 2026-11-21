@@ -20,6 +20,7 @@ const prelude = `
 const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 fn chatCancelFinish() void {}
+fn chatRestartAi(_: u32) bool { return true; }
 fn chatLivePlanReply(_: []const u16) bool { return false; }
 var test_settings_pending = false;
 fn chatSettingsPending(_: u32) bool { return test_settings_pending; }
@@ -55,7 +56,7 @@ const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 const ChatPendingReset = struct { key: chat_transcript.Identity = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
 var g_chat_pending_reset: ?ChatPendingReset = null;
 var g_chat_reset_next: u64 = 0;
-const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, name: [64]u16 = @splat(0), name_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{}, ai_stopped: bool = false, ai_restart_tick: u64 = 0 };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
@@ -149,6 +150,10 @@ const ChatTmuxSendJob = struct {
     written: bool = true,
     rejected: bool = false,
     box_not_clear: bool = false,
+    clear_chat: bool = false,
+    needs_restart: bool = false,
+    clear_notice: [96]u8 = @splat(0),
+    clear_notice_len: u8 = 0,
     finished: std.atomic.Value(bool) = .init(false),
 };
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
@@ -2079,7 +2084,7 @@ test "delivery: IGSH-1633 old sent messages cannot bury a live reply" {
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts + enters);
 }
 `;
-const names = ['chatMessageSentMs', 'chatConfirmedAddReceipt', 'chatEchoLatestReplyMs', 'chatMessageReduce', 'chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatMessageSyncRetryDelayMs', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxSendBlockedIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoTakenSettledIn', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatOutboxSyncCountForShell', 'chatOutboxWorkingForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
+const names = ['chatMessageSentMs', 'chatConfirmedAddReceipt', 'chatEchoLatestReplyMs', 'chatMessageReduce', 'chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'deliverMentions', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatMessageSyncRetryDelayMs', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxSendBlockedIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoTakenSettledIn', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatOutboxSyncCountForShell', 'chatOutboxWorkingForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
 const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across chats but keeps unconfirmed messages', 'Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
@@ -2087,6 +2092,9 @@ const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across cha
 }).join('\n');
 test('IGSH-1811 a sent mention keeps the live session for the bot', () => {
   assert.match(body('sendChatPrompt'), /chat_mention\.zig"\)\.apply/);
+});
+test('SOFT-2420 a finished clear clears a stale stopped badge', () => {
+  assert.match(body('chatTmuxSendFinish'), /ai_stopped = false/);
 });
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
