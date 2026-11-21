@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: release-publication
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   gitleaks:
