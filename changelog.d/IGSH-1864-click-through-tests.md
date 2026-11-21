@@ -1,1 +1,0 @@
-Alt+A opens the browser from a chat tab, the plus menu marks your chosen model, effort and permission, and a stuck unsent message can be removed. Delete with an empty composer removes a not-sent message waiting in the outbox for that chat.

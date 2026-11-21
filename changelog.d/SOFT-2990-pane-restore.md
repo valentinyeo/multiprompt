@@ -1,1 +1,0 @@
-A saved browser pane comes back after restart even when Keyboard Shortcuts is open.
