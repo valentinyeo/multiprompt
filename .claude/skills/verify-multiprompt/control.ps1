@@ -154,13 +154,11 @@ try {
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
-    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
-    $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -eq 'fresh-start') {
         New-Item -ItemType Directory -Force (Join-Path $scratch 'profile/home') | Out-Null
-        $env:USERPROFILE = Join-Path $scratch 'profile/home'
-        $env:HOME = $env:USERPROFILE
     }
+    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch $(if ($Feature -eq 'fresh-start') { 'profile/home' } else { 'profile' }) }
+    $env:HOME = if ($Feature -eq 'fresh-start') { $env:USERPROFILE } else { Join-Path $scratch 'profile' }
     if ($Feature -eq 'status-card') {
         $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetry')
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
