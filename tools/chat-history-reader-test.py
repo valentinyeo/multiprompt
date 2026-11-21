@@ -5983,7 +5983,7 @@ class MoveToTerminalTest(unittest.TestCase):
 
 
 RESTART_NAMES = ('host_restart', 'host_restart_idle', 'host_restart_requested', 'host_restart_write',
-                 'host_rotate', 'host_nightly_due', 'host_nightly_mark', 'host_nightly_day',
+                 'host_rotate', 'host_generation', 'host_nightly_due', 'host_nightly_mark', 'host_nightly_day',
                  'host_published_runtime', 'HOST_RESTART_STALE')
 
 
@@ -6210,6 +6210,19 @@ class NightlyChatRestartTest(unittest.TestCase):
             self.assertFalse(reader.host_rotate('claude', self.sid, session, session['agent']))
         execv.assert_not_called()
         self.assertIsNotNone(session['agent'])
+
+    def test_host_generation_reads_active_json_without_runtime_generation_global(self):
+        self.need_restart()
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir(parents=True)
+        (runtime / 'active.json').write_text(json.dumps(dict(protocol=1, generation=77, sha256='a' * 64)))
+        saved = reader.__dict__.pop('RUNTIME_GENERATION', None)
+        reader.__dict__['ENGINE_INFO'] = None
+        try:
+            self.assertEqual(reader.host_generation(), 77)
+        finally:
+            if saved is not None:
+                reader.RUNTIME_GENERATION = saved
 
 
 class HostPaneMarkTest(unittest.TestCase):
