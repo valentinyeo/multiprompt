@@ -1095,7 +1095,10 @@ def install_reaction_worker(namespace):
 def reader_namespace():
     import base64
 
-    source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    if MODE == "bootstrap-fresh-start":
+        source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
+    else:
+        source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
@@ -1559,25 +1562,27 @@ def transport_reader():
 
 
 def bootstrap_fresh_start_host():
-  namespace = reader_namespace()
-  value = state()
-  if value.get("name") != "fresh-start":
-      raise ValueError("bootstrap-fresh-start requires fresh-start state")
-  tmux = "verify-fresh-start"
-  sid = value["sids"][tmux]
-  index = value["sessions"].index(tmux)
-  cwd = value.get("cwds", {}).get(tmux, f"C:/verify/work{index}")
-  paths = namespace["host_paths"]("claude", sid)
-  if not paths["config"].exists():
-      namespace["host_write"](paths["config"], dict(
-          enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
-          command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
-  started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
-  record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
-  if started.get("status") not in ("started", "already"):
-      raise RuntimeError("Production host failed to start: " + str(started))
-  namespace["start_message_worker"](dict(message_protocol=1, tmux=tmux, provider="claude", sid=sid), None)
-  record("fresh-start-host.jsonl", stage="bootstrapped", sid=sid, tmux=tmux)
+    value = state()
+    os.environ["HOME"] = value["home"]
+    os.environ["USERPROFILE"] = value["home"]
+    namespace = reader_namespace()
+    if value.get("name") != "fresh-start":
+        raise ValueError("bootstrap-fresh-start requires fresh-start state")
+    tmux = "verify-fresh-start"
+    sid = value["sids"][tmux]
+    index = value["sessions"].index(tmux)
+    cwd = value.get("cwds", {}).get(tmux, f"C:/verify/work{index}")
+    paths = namespace["host_paths"]("claude", sid)
+    if not paths["config"].exists():
+        namespace["host_write"](paths["config"], dict(
+            enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
+            command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
+    started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+    record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
+    if started.get("status") not in ("started", "already"):
+        raise RuntimeError("Production host failed to start: " + str(started))
+    namespace["start_message_worker"](dict(message_protocol=1, tmux=tmux, provider="claude", sid=sid), None)
+    record("fresh-start-host.jsonl", stage="bootstrapped", sid=sid, tmux=tmux)
 
 
 def serve_reader():
