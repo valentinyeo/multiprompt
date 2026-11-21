@@ -1,1 +1,0 @@
-Server sessions not recognised when output is redirected

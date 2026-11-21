@@ -660,12 +660,6 @@ def shell():
                 identity = "history-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
-        tail_calls = state().get("soft2779Tail")
-        if isinstance(tail_calls, int) and tail_calls > 0:
-            for i in range(tail_calls):
-                identity = "soft-2779-tail-" + str(i)
-                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
-                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
@@ -1101,20 +1095,10 @@ def install_reaction_worker(namespace):
 def reader_namespace():
     import base64
 
-    if os.name == "nt" and os.environ.get("MP_VERIFY_STATE"):
-        verify_dir = str(Path(__file__).resolve().parent)
-        os.environ["PYTHONPATH"] = verify_dir + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
-        spec = importlib.util.spec_from_file_location("sitecustomize", Path(__file__).with_name("sitecustomize.py"))
-        site = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(site)
-
-    if globals().get("MODE") == "bootstrap-fresh-start":
+    if MODE == "bootstrap-fresh-start":
         source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
     else:
         source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
-    published = ROOT / "app-reader.py"
-    if not published.exists():
-        published.write_text(source, encoding="utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
@@ -1236,21 +1220,6 @@ def reader_namespace():
         fixture.install(namespace, ROOT, record)
         install_reaction_worker(namespace)
         record("fresh-start-boundary.jsonl", worker="in-process production dispatch and connector polling")
-        if os.name == "nt":
-            verify_dir = str(Path(__file__).resolve().parent)
-            original_subprocess = namespace["subprocess"]
-
-            class FreshStartHostSpawn:
-                def __getattr__(self, name):
-                    return getattr(original_subprocess, name)
-
-                def Popen(self, args, *positional, **options):
-                    env = dict(options.get("env") or os.environ)
-                    env["PYTHONPATH"] = verify_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-                    options["env"] = env
-                    return original_subprocess.Popen(args, *positional, **options)
-
-            namespace["subprocess"] = FreshStartHostSpawn()
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1606,14 +1575,8 @@ def bootstrap_fresh_start_host():
     paths = namespace["host_paths"]("claude", sid)
     if not paths["config"].exists():
         namespace["host_write"](paths["config"], dict(
-            enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
+            enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
             command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
-    if not namespace["host_alive"]("claude", sid):
-        for stale in ("lock", "owner", "socket"):
-            try:
-                paths[stale].unlink()
-            except OSError:
-                pass
     started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
     record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
     if started.get("status") not in ("started", "already"):
@@ -1633,7 +1596,7 @@ def serve_reader():
         paths = namespace["host_paths"]("claude", sid)
         if not paths["config"].exists():
             namespace["host_write"](paths["config"], dict(
-                enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
+                enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
                 command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
         started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
         record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)

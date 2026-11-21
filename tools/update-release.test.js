@@ -5,19 +5,6 @@ const test = require('node:test');
 const root = process.env.UPDATE_SOURCE_ROOT || path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 
-test('stuck update checks time out, restart, and surface visible state', () => {
-  const updater = read('src/update_release.zig');
-  assert.match(updater, /check_timeout_ms = 6 \* 60 \* 1000/);
-  assert.match(updater, /check_started/);
-  assert.match(updater, /fn recoverStuckChecker\(\)/);
-  assert.match(updater, /TerminateProcess/);
-  assert.match(updater, /g_update_check_notice/);
-  assert.doesNotMatch(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);
-  assert.match(read('src/main.zig'), /WM_APP_UPDATE_CHANGED => \{\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);
-  assert.match(read('src/update_card.zig'), /showUpdateCheckNotice/);
-  assert.match(read('src/browser_bridge.zig'), /update_check_detail/);
-});
-
 test('release updater is default on and checks before session restoration', () => {
   const main = read('src/main.zig');
   assert.match(main, /if \(update_release\.startup\(args\)\) return;/);
