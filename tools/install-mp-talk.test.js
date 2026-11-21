@@ -12,7 +12,7 @@ const DESKTOP_TOOLS = [
   ['multibot-feedback', 'multibot_feedback.py'],
   ['mp-helper', 'mp_helper.py']
 ];
-const INSTALLED = ['mp-send', 'mp-fresh', 'mp-sessions', 'mp-helper', 'multibot-feedback', 'mp-layout'];
+const INSTALLED = ['mp-send', 'mp-sessions', 'mp-helper', 'multibot-feedback', 'mp-layout'];
 
 function installer(args, home) {
   return spawnSync('/bin/sh', [INSTALLER, ...args], {

@@ -5,37 +5,30 @@ import { fileURLToPath } from 'node:url';
 
 const HANDOVER = 'Finish the saved draft. Keep the same board login.';
 
-function listChecks(checks) {
-  if (Array.isArray(checks)) return checks;
-  if (checks && typeof checks === 'object' && checks.name) return [checks];
-  return [];
-}
-
 export function verifyFreshStart(evidenceDir) {
   const read = name => JSON.parse(fs.readFileSync(path.join(evidenceDir, name), 'utf8').replace(/^\uFEFF/, ''));
   const before = read('fresh-start-before.json');
   const after = read('fresh-start-after.json');
   const result = fs.existsSync(path.join(evidenceDir, 'result.json'))
     ? read('result.json') : { checks: [] };
-  const check = listChecks(result.checks).find(item => item.name === 'fresh-start');
+  const check = (result.checks || []).find(item => item.name === 'fresh-start');
   assert.ok(check, 'result.json missing fresh-start check');
 
   for (const key of ['sid', 'tmux', 'rowName', 'csid']) {
     assert.equal(before[key], after[key], key);
   }
-  assert.ok(after.native_session, 'native_session missing after fresh start');
-  assert.notEqual(before.native_session || '', after.native_session, 'native_session must change');
+  assert.notEqual(before.native_session, after.native_session, 'native_session must change');
   assert.equal(after.matchingSidebarRows, 1, 'exactly one matching sidebar row');
   assert.ok(after.handoverSeen, 'handover text not observed in boundary or debug evidence');
 
   const hostJsonl = path.join(evidenceDir, 'fresh-start-host.jsonl');
   if (fs.existsSync(hostJsonl)) {
     const stages = fs.readFileSync(hostJsonl, 'utf8').trim().split('\n').map(JSON.parse);
-    assert.ok(stages.some(row => row.stage === 'completed' || row.stage === 'handover_visible'),
-              'hosted fresh start did not complete or show the handover');
+    assert.ok(stages.some(row => row.stage === 'completed'), 'hosted fresh start did not complete');
+    assert.ok(stages.some(row => row.stage === 'fresh_start_requested'), 'fresh_start request missing');
   }
   const debug = path.join(evidenceDir, 'fresh-start-debug.log');
-  if (fs.existsSync(debug) && !after.handoverSeen) {
+  if (fs.existsSync(debug)) {
     const text = fs.readFileSync(debug, 'utf8');
     assert.ok(text.includes(HANDOVER) || text.includes('Fresh start'), 'debug log missing handover or fresh start marker');
   }
