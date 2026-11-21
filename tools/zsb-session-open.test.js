@@ -244,6 +244,7 @@ test('the production source map exposes the new commands and unchanged hand-made
   assert.match(source, /fn handleZsbWorkspaceRequest\(/);
   assert.match(source, /fn spawnShellWithSession\([^\n]+\) bool \{\s*if \(g_account_locked\) return false/);
   assert.match(source, /fn zsbSessionOpen\(/);
+  assert.match(source, /fn zsbShellOpen\(/);
 });
 
 test('app dispatch precedes browser routing and uses the UI-thread workspace mailbox', () => {
@@ -263,9 +264,11 @@ test('background spawning reuses the hand-made path without switching or refocus
   const source = fs.readFileSync(path.join(root, 'src/console.zig'), 'utf8');
   const start = source.indexOf('pub fn spawnShellWithSession(');
   const spawning = source.slice(start, source.indexOf('pub fn respawnShellInPlace(', start));
-  const background = source.slice(source.indexOf('pub fn spawnBackgroundTmuxSession('), start);
-  assert.match(background, /return spawnShellWithSession\(\.tmux, session, null, null\)/);
-  assert.match(background, /g_pending_background_workspace = workspace/);
+  const remote = source.slice(source.indexOf('pub fn spawnBackgroundRemoteShell('), start);
+  const background = source.slice(source.indexOf('pub fn spawnBackgroundTmuxSession('), source.indexOf('pub fn spawnBackgroundRemoteShell('));
+  assert.match(background, /spawnBackgroundRemoteShell\(host, workspace, \.tmux, session\)/);
+  assert.match(remote, /return spawnShellWithSession\(kind, tmux_session, null, null\)/);
+  assert.match(remote, /g_pending_background_workspace = workspace/);
   assert.match(spawning, /const background_workspace = app_state.g_pending_background_workspace/);
   assert.match(spawning, /background_workspace != null\) @import\("win32.zig"\)\.SWP_NOACTIVATE/);
   assert.match(spawning, /if \(!app_state.g_restoring and background_workspace == null\) \{\s*if \(app_state.g_focus_user_action_tick != 0\) switchToShellByUser\(idx\) else switchToShell\(idx\);\s*requestShellRefocus/);
