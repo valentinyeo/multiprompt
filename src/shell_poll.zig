@@ -1870,6 +1870,7 @@ pub fn pollShellNames() void {
                         app_state.shells[i].adopt_streak = 0;
                         continue;
                     }
+                    if (i == app_state.active_shell) repositionActive();
                     publishInboxState();
                     saveSession();
                     changed = true;
