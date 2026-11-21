@@ -660,6 +660,12 @@ def shell():
                 identity = "history-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
+        tail_calls = state().get("soft2779Tail")
+        if isinstance(tail_calls, int) and tail_calls > 0:
+            for i in range(tail_calls):
+                identity = "soft-2779-tail-" + str(i)
+                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
+                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
@@ -1099,6 +1105,9 @@ def reader_namespace():
         source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
     else:
         source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    published = ROOT / "app-reader.py"
+    if not published.exists():
+        published.write_text(source, encoding="utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
