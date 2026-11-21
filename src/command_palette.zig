@@ -886,7 +886,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CLOSEWIN_OFFSET => "archive workspace",
         SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET => "archived workspaces",
         SEARCH_RECONNECT_OFFSET => "reattach tab",
-        SEARCH_REOPEN_SERVER_SHELL_OFFSET => "Reopen server shell",
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",

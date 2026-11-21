@@ -1,0 +1,1 @@
+Server shell tabs vanish after a restart

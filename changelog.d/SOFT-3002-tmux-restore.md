@@ -1,1 +1,1 @@
-A server tab that started tmux now survives restart, and detached tmux sessions can be reopened from the palette or Ctrl+Shift+`.
+A server tab that started tmux now survives restart, and detached tmux sessions can be reopened from the palette or the keyboard shortcut.
