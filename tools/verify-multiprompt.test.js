@@ -2216,7 +2216,7 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   for (const required of ['seeded-state', 'occupied-ports', 'selection-kept', 'IGSH-890', 'auto-release-admit.sh']) assert.ok(map.includes(required), required);
   assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
-  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions', ", ''), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
 });
 
 test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked browser and rejects any moved chat rectangle', () => {
@@ -2289,6 +2289,19 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
   assert.match(helper, /\[IO\.FileShare\]::ReadWrite/);
   assert.ok(control.split('(Read-SharedText $log)').length - 1 >= 6);
   assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
+});
+
+test('SOFT-2999 fresh-start journey is registered with control and the feature matrix', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'fresh-start'/);
+  assert.ok(featureMatrix(workflow).available.includes('fresh-start'));
+  assert.ok(featureMatrix(workflow).full.includes('fresh-start'));
+  const controlFile = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
+  assert.match(controlFile, /control-feature-fresh-start\.ps1/);
+  const route = control.slice(control.indexOf("        'fresh-start' {"), control.indexOf("        'chat-still' {"));
+  assert.match(route, /chat-fresh-start-proof\.mjs/);
+  assert.match(read(skill + 'features/fresh-start.md'), /SEARCH_CHAT_FRESH_START_OFFSET/);
+  assert.match(read(skill + 'features/README.md'), /\[Fresh start\]\(fresh-start.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`fresh-start`/);
 });
 
 test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that takes over 100 ms to draw', () => {

@@ -124,7 +124,6 @@ UNREACHABLE until Part B supplies real host lifecycle receipts, at least two aut
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
-| `SEARCH_CHAT_FRESH_START_OFFSET` | Ctrl+K, type **fresh start**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_CHAT_RESET_OFFSET` | Ctrl+K, type **reset this chat**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_CHAT_RESTART_ALL_OFFSET` | Ctrl+K, type **restart every idle live chat**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_CHAT_RESTART_OFFSET` | Ctrl+K, type **restart this chat**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
