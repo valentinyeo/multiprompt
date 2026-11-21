@@ -187,6 +187,13 @@ def fake_queue_event(operation, content=None, **extra):
 
 
 def fake_submit(claude, text):
+    if state().get("name") in ("skill-echo", "plain-echo"):
+        original = state()["echoOriginal"]
+        if text != original and not text.startswith(original + "\n[mp:"):
+            raise ValueError("Echo source received unexpected text")
+        sent = state()["echoText"] + text[len(original):]
+        record("echo-input.jsonl", original=text, sent=sent)
+        text = sent
     if claude["mode"] == "busy":
         claude["queue"].append(text)
         fake_queue_event("enqueue", text)
@@ -1176,7 +1183,7 @@ def reader_namespace():
                     return child
 
             namespace["subprocess"] = WorkerDiagnostics()
-        if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone"):
+        if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone", "skill-echo", "plain-echo"):
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):

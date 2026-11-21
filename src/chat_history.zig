@@ -259,7 +259,7 @@ pub const History = struct {
             var normalized: [32768]u16 = undefined;
             const norm = echo.normalize(content, &normalized);
             const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm));
-            const matches = fresh and echo.sameText(content, pending.text);
+            const matches = fresh and (echo.sameText(content, pending.text) or echo.sameSkillText(content, pending.text));
             if (std.mem.eql(u8, fact.operation, "enqueue")) {
                 try queue.append(a, .{ .hash = hash, .matches = matches });
                 if (matches) result.removed_ms = 0;

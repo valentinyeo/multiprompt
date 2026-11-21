@@ -624,7 +624,7 @@ fn skillToken(token: []const u16) bool {
     return true;
 }
 
-fn sameSkillText(left: []const u16, right: []const u16) bool {
+pub fn sameSkillText(left: []const u16, right: []const u16) bool {
     const spaces = &[_]u16{ ' ', '\t', '\r', '\n', 0xA0 };
     var l = std.mem.tokenizeAny(u16, left, spaces);
     var r = std.mem.tokenizeAny(u16, right, spaces);
@@ -670,7 +670,7 @@ fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (sameText(block, p.text)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
-    if (p.confirmed and sameSkillText(body, norm)) return true;
+    if (sameSkillText(body, norm)) return true;
     if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
@@ -797,7 +797,7 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
         } else false);
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
         const sent_after = p.anchor.sent_ms > 0 and isNewBlock(p.anchor, b.stamp_ms, bi, window_full);
-        if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !(p.confirmed and sameSkillText(b.text, norm))))) continue;
+        if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !sameSkillText(b.text, norm)))) continue;
         const already_claimed = for (claimed) |claim| {
             if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
             if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
@@ -1409,7 +1409,7 @@ test "IGSH-1605 a send that failed when the link dropped is requeued by its clie
 }
 
 
-test "IGSH-1831 reordered skills match only confirmed messages and preserve words and multiplicity" {
+test "IGSH-1831 reordered skills match a pending send and preserve words and multiplicity" {
     const original = w("guess why /deeper /pstack:poteto-mode");
     const reordered = w("/pstack:poteto-mode guess why /deeper");
     var pending = [_]Pending{.{ .prefix = &original, .text = &original, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
@@ -1419,9 +1419,25 @@ test "IGSH-1831 reordered skills match only confirmed messages and preserve word
     try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
     pending[0].confirmed = false;
     assign(&pending, &blocks, false, &.{}, &chosen);
-    try std.testing.expect(chosen[0] == null);
+    try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
     try std.testing.expect(!sameSkillText(&original, &w("/deeper why guess /pstack:poteto-mode")));
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /deeper")));
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /pstack:poteto-mode /extra")));
     try std.testing.expect(!sameSkillText(&w("ordinary words"), &w("words ordinary")));
+}
+
+test "SOFT-2384 a skill command moved to the front confirms once, and a plain message confirms once" {
+    const pending_text = w("lets make it simpler right?\n\n/pstack:poteto-mode confirm that");
+    const sent_text = w("/pstack:poteto-mode lets make it simpler right?\n\nconfirm that");
+    var pending = [_]Pending{.{ .prefix = &pending_text, .text = &pending_text, .anchor = .{ .sent_ms = 1000 } }};
+    var chosen: [1]?usize = undefined;
+    assign(&pending, &.{.{ .text = &sent_text, .stamp_ms = 2000 }}, false, &.{}, &chosen);
+    try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
+    const plain = w("hello there");
+    var plain_pending = [_]Pending{.{ .prefix = &plain, .text = &plain, .anchor = .{ .sent_ms = 1000 } }};
+    assign(&plain_pending, &.{.{ .text = &plain, .stamp_ms = 2000 }, .{ .text = &plain, .stamp_ms = 3000 }}, false, &.{}, &chosen);
+    try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
+    const other = w("/other:skill lets make it simpler right?\n\nconfirm that");
+    assign(&pending, &.{.{ .text = &other, .stamp_ms = 2000 }}, false, &.{}, &chosen);
+    try std.testing.expect(chosen[0] == null);
 }

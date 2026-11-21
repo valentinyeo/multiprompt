@@ -781,6 +781,24 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     for (const suffix of ['before', 'action', 'after', 'final']) files.set(path.join(base, `${name}-${suffix}.png`), png);
     for (const input of ['Ctrl+1: select saved tmux tab', 'Alt+C: open Chat View', 'type composer text', ...(name === 'steer-chord' ? ['Ctrl+X: steer prefix', 'Ctrl+S: steer send'] : ['Enter: send composer'])]) actions.push({ case: name, input, text: observation.text });
   }
+  for (const name of ['skill-echo', 'plain-echo']) {
+    const text = name === 'skill-echo' ? 'make it simpler /pstack:poteto-mode confirm that' : 'plain message confirms once';
+    const sentText = name === 'skill-echo' ? '/pstack:poteto-mode make it simpler confirm that' : text;
+    put(`${name}/observation.json`, { error: null, text, sentText, composerText: '' });
+    const message = { id: 'desktop-echo', attempt: 'echo-attempt', epoch: 0, text };
+    const token = require('node:crypto').createHash('sha256').update(`${message.id}\n${message.attempt}\n${message.epoch}`).digest('hex').slice(0, 16);
+    log(`${name}/stand-in/message-dispatch.jsonl`, [{ result: { message } }]);
+    log(`${name}/stand-in/echo-input.jsonl`, [{ original: `${text}\n[mp:${token}]`, sent: `${sentText}\n[mp:${token}]` }]);
+    log(`${name}/transcript.jsonl`, [
+      { type: 'queue-operation', operation: 'enqueue', content: `${sentText}\n[mp:${token}]` },
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: `${sentText}\n[mp:${token}]` } },
+    ]);
+    put(`${name}/outbox-final.json`, { queues: [] });
+    files.set(path.join(base, name, 'copied.txt'), sentText);
+    put(`${name}/doctor.json`, { version: '0.0.1', sha256: 'a'.repeat(64), chat: true, pid: 1, hwnd: 2 });
+    put(`${name}/cleanup.json`, { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+    for (const stage of ['action', 'queued', 'after', 'final']) files.set(path.join(base, `${name}-${stage}.png`), png);
+  }
   const queue = queueFiles(base);
   for (const [file, value] of queue.files) files.set(file, value);
   const send = sendFiles(base);
@@ -804,6 +822,13 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   }
   for (const [file, value] of positive) files.set(file, value);
   const mutations = [
+    () => files.delete(path.join(base, 'skill-echo/copied.txt')),
+    () => files.set(path.join(base, 'skill-echo/copied.txt'), '/pstack:poteto-mode make it simpler confirm that\nmake it simpler /pstack:poteto-mode confirm that'),
+    () => put('skill-echo/outbox-final.json', { queues: [{ messages: [{ t: 'make it simpler /pstack:poteto-mode confirm that' }] }] }),
+    () => log('skill-echo/stand-in/echo-input.jsonl', []),
+    () => log('skill-echo/transcript.jsonl', []),
+    () => log('skill-echo/stand-in/message-dispatch.jsonl', []),
+    () => log('skill-echo/stand-in/echo-input.jsonl', [{ original: 'make it simpler /pstack:poteto-mode confirm that\n[mp:0000000000000000]', sent: '/pstack:poteto-mode make it simpler confirm that' }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('asking', 'answering') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace(saved.suggestion, '') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('\u001b[2m', '\u001b[2K') }]),
@@ -1535,4 +1560,37 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(retention, /WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$historyView, 30000\)/);
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
+});
+
+
+test('SOFT-2384 the simulated source reorders the skill without losing its native delivery marker', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-echo-boundary-'));
+  try {
+    const original = 'make it simpler /pstack:poteto-mode confirm that';
+    const sent = '/pstack:poteto-mode make it simpler confirm that';
+    const marker = '\n[mp:0123456789abcdef]';
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/echo-session.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'skill-echo', mode: 'busy', suggestion: 'Try the next step', fake: true,
+      sid: 'echo-session', cwd: 'C:/verify/work', panePid: 4242, transcript,
+      meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+      echoOriginal: original, echoText: sent,
+    }));
+    const run = (mode, ...args) => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], {
+      env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8', timeout: 10000,
+    });
+    run('shell', 'init');
+    run('tmux', 'send-keys', '-t', '=verify-agent:', '-l', '--', original + marker);
+    run('tmux', 'send-keys', '-t', '=verify-agent:', 'Enter');
+    assert.deepEqual(JSON.parse(run('shell', 'show')).queue, [sent + marker]);
+    run('shell', 'idle');
+    const events = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(events.filter(row => row.type === 'queue-operation' && row.operation === 'enqueue' && row.content === sent + marker).length, 1);
+    assert.equal(events.filter(row => row.type === 'attachment' && row.attachment?.prompt === sent + marker).length, 1);
+    const input = JSON.parse(fs.readFileSync(path.join(dir, 'echo-input.jsonl'), 'utf8'));
+    assert.equal(input.original, original + marker);
+    assert.equal(input.sent, sent + marker);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -303,6 +303,16 @@ test "shell queue rows come first in order and keep their sent state" {
     try std.testing.expect(chat_echo.sameText(view.rows[1].slice(), w("second")));
 }
 
+test "SOFT-2384 a queued skill command moved to the front is the pending row" {
+    const status = statusWith(&.{"/pstack:poteto-mode lets make it simpler right? confirm that"}, &.{});
+    var view: View = .{};
+    const pending = [_]Pending{.{ .id = 9, .text = w("lets make it simpler right?\n\n/pstack:poteto-mode confirm that") }};
+    build(&view, &status, &pending);
+    try std.testing.expectEqual(@as(usize, 1), view.count);
+    try std.testing.expect(view.rows[0].local);
+    try std.testing.expectEqual(@as(u64, 9), view.rows[0].outbox_id);
+}
+
 test "an outbox entry whose text is in the shell queue is that item and never a double" {
     const status = statusWith(&.{ "alpha", "beta" }, &.{});
     var view: View = .{};
