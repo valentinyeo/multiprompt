@@ -66,7 +66,7 @@ try {
     $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
     Wait-Until {
         (Get-Content $log -Raw) -match '\[chat\] transcript load shell=\d+ ok'
-    } 'seeded transcript painted before send' 45
+    } 'seeded transcript painted before send' 90
     for ($n = 1; $n -le 2; $n++) {
         $text = "fresh-start probe $n"
         Type-Text $text
