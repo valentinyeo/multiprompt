@@ -49,7 +49,7 @@ jobs:
         with:
           node-version: 22
       - name: Test benchmark contracts
-        working-directory: candidate
+        working-directory: tooling
         run: node --test tools/chat-bench-ab-summary.test.js tools/chat-bench-ab-extra.test.js tools/chat-bench-reader.test.mjs tools/chat-bench.test.js tools/chat-bench/receipt.test.mjs
       - name: Download and verify release executables
         env:
