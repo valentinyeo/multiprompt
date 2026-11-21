@@ -801,7 +801,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (key.shell_id == 0 or key.sid[0] == 0) return false;
+    if (chatBenchEnabled() or key.shell_id == 0 or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
