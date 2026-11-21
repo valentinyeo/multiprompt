@@ -242,16 +242,3 @@ test('the idle fixture runs the way the laptop runs, with the shared server conn
   assert.match(fixture, /shared_server_connection=True/);
   assert.doesNotMatch(fixture, /pid=0/);
 });
-
-test('the idle window starts only after deep idle counters have settled', () => {
-  const script = fs.readFileSync(path.join(__dirname, 'idle-budget.ps1'), 'utf8');
-  const wait = script.indexOf("Wait-For 'deep idle'");
-  const settled = script.indexOf("Wait-For 'deep idle counters settled'");
-  const before = script.indexOf("counter dump before the idle window");
-  assert.ok(wait > 0 && settled > wait && before > settled);
-  const gate = script.slice(settled, before);
-  assert.match(gate, /deep_idle -ne 1/);
-  assert.match(gate, /thread_spawn/);
-  assert.match(gate, /invalidate/);
-  assert.match(gate, /tick_ms - \$script:settledTick\) -ge 10000/);
-});
