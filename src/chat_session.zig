@@ -2315,6 +2315,27 @@ test "SOFT-3009 a tab with no transcript identity never asks the reader" {
     try std.testing.expect(chat_transcript.Identity.initTmux(1, 0, false, "claude-000", "").hasSession());
 }
 
+test "SOFT-3009 the offline chat bench never opens a live history stream" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_bench_dir_len = app_state.g_chat_bench_dir_len;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.g_chat_bench_dir_len = saved_bench_dir_len;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = 91;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].ai_agent = 1;
+    app_state.shell_count = 1;
+    const key = chat_transcript.Identity.init(91, 0, false, "claude-091", "");
+    app_state.g_chat_bench_dir_len = 0;
+    try std.testing.expect(chatLiveWanted(key));
+    app_state.g_chat_bench_dir_len = 1;
+    try std.testing.expect(!chatLiveWanted(key));
+}
+
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {
     const md = @import("chat_markdown.zig");
     const saved_tables = app_state.g_chat_tables;
