@@ -126,14 +126,45 @@ pub fn startup(args: []const []const u8) bool {
     return hasStaged() and restart(&.{win.GetCurrentProcessId()});
 }
 
+pub fn beginCheck() void {
+    if (!enabled() or checker != null) return;
+    last_check = win.GetTickCount64();
+    if (!startChecker()) last_check = 0;
+}
+
+pub fn checking() bool {
+    const process = checker orelse return false;
+    return win.WaitForSingleObject(process, 0) == 0x102;
+}
+
+pub fn poll() ?[]const u8 {
+    if (!enabled() or !initialize()) return null;
+    const now = win.GetTickCount64();
+    if (checker) |process| {
+        if (win.WaitForSingleObject(process, 0) == 0) {
+            finishChecker(process);
+        } else if (check_started != 0 and now -| check_started >= check_timeout_ms) {
+            recoverStuckChecker();
+        }
+    }
+    if (checker == null and now -| last_check >= interval_ms) {
+        last_check = now;
+        if (!startChecker()) last_check = 0;
+    }
+    const version = update_check.scanFileForVersion(&staged, &version_buf) orelse return null;
+    return if (update_check.versionNewer(APP_VERSION, version)) version else null;
+}
+
 fn setCheckNotice(comptime fmt: []const u8, args: anytype) void {
     const app_state = @import("app_state.zig");
-    app_state.g_update_check_notice_len = (std.fmt.bufPrint(&app_state.g_update_check_notice, fmt, args) catch "").len;
+    const written = std.fmt.bufPrint(&app_state.g_update_check_notice, fmt, args) catch &[_]u8{};
+    app_state.g_update_check_notice_len = written.len;
 }
 
 fn setCheckDetail(comptime fmt: []const u8, args: anytype) void {
     const app_state = @import("app_state.zig");
-    app_state.g_update_check_detail_len = (std.fmt.bufPrint(&app_state.g_update_check_detail, fmt, args) catch "").len;
+    const written = std.fmt.bufPrint(&app_state.g_update_check_detail, fmt, args) catch &[_]u8{};
+    app_state.g_update_check_detail_len = written.len;
 }
 
 fn clearCheckDetail() void {
@@ -191,35 +222,6 @@ fn recoverStuckChecker() void {
 pub fn checkDetail() []const u8 {
     const app_state = @import("app_state.zig");
     return app_state.g_update_check_detail[0..app_state.g_update_check_detail_len];
-}
-
-pub fn beginCheck() void {
-    if (!enabled() or checker != null) return;
-    last_check = win.GetTickCount64();
-    if (!startChecker()) last_check = 0;
-}
-
-pub fn checking() bool {
-    const process = checker orelse return false;
-    return win.WaitForSingleObject(process, 0) == 0x102;
-}
-
-pub fn poll() ?[]const u8 {
-    if (!enabled() or !initialize()) return null;
-    const now = win.GetTickCount64();
-    if (checker) |process| {
-        if (win.WaitForSingleObject(process, 0) == 0) {
-            finishChecker(process);
-        } else if (check_started != 0 and now -| check_started >= check_timeout_ms) {
-            recoverStuckChecker();
-        }
-    }
-    if (checker == null and now -| last_check >= interval_ms) {
-        last_check = now;
-        if (!startChecker()) last_check = 0;
-    }
-    const version = update_check.scanFileForVersion(&staged, &version_buf) orelse return null;
-    return if (update_check.versionNewer(APP_VERSION, version)) version else null;
 }
 
 var version_buf: [update_check.MAX_VERSION_LEN]u8 = undefined;

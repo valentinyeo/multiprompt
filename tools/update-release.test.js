@@ -12,7 +12,7 @@ test('stuck update checks time out, restart, and surface visible state', () => {
   assert.match(updater, /fn recoverStuckChecker\(\)/);
   assert.match(updater, /TerminateProcess/);
   assert.match(updater, /g_update_check_notice/);
-  assert.match(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);
+  assert.doesNotMatch(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);
   assert.match(read('src/main.zig'), /WM_APP_UPDATE_CHANGED => \{\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);
   assert.match(read('src/update_card.zig'), /showUpdateCheckNotice/);
   assert.match(read('src/browser_bridge.zig'), /update_check_detail/);

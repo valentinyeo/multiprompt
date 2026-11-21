@@ -8349,7 +8349,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_UPDATE_CHECK) {
-                _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
                 updateCardPoll();
                 @import("ssh_identity.zig").retry();
                 @import("usage_card.zig").refresh();
