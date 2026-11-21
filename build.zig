@@ -347,7 +347,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&mp_talk_tests.step);
     const mp_helper_tests = b.addSystemCommand(&.{ "python3", "tools/mp-helper-test.py" });
     vps_test_step.dependOn(&mp_helper_tests.step);
-    const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js" });
+    const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
     const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js" });
@@ -416,6 +416,9 @@ pub fn build(b: *std.Build) void {
     const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
     test_step.dependOn(&chat_perf_clock_tests.step);
     vps_test_step.dependOn(&chat_perf_clock_tests.step);
+    const chat_perf_echo_scaling_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-echo-scaling.test.js" });
+    test_step.dependOn(&chat_perf_echo_scaling_tests.step);
+    vps_test_step.dependOn(&chat_perf_echo_scaling_tests.step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);

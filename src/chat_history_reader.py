@@ -38,6 +38,7 @@ END = "@@MP_END@@"
 PAGE_BYTES = 350000
 SCAN_BYTES = 512 * 1024
 TAIL_BYTES = 512 * 1024
+TAIL_VISIBLE_BYTES = 4 * TAIL_BYTES
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
 STATUS_CACHE = {}
 QUEUE_CACHE = {}
@@ -1129,14 +1130,39 @@ def asks_question(raw, agent):
     return message is not None and message.get("role") == "user"
 
 
+def tail_visible_start(agent, start, older, base, end, data):
+    offset = base
+    visible_at = None
+    for raw in reversed(older.splitlines(keepends=True)):
+        offset -= len(raw)
+        if end - offset > TAIL_VISIBLE_BYTES:
+            break
+        messages = conversation_rows(load_line(raw), agent, offset)
+        if any(row["role"] == "user" for row in messages):
+            return offset, end, older[offset - start:] + data
+        if visible_at is None and any(row["role"] == "assistant" for row in messages):
+            visible_at = offset
+    if visible_at is not None:
+        return visible_at, end, older[visible_at - start:] + data
+    return base, end, data
+
+
 def read_tail(source, size, agent, captured=None, fill=True):
+    tail_page = fill
     fill = fill and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET
     base, end, data = read_window(source, size, captured=captured)
     if (not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or (not data and not fill) or
             (not fill and any(asks_question(raw, agent) for raw in data.splitlines()))):
         return base, end, data
     start, _, older = read_window(source, base, QUESTION_SCAN_BYTES - TAIL_BYTES, captured)
-    held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(load_line(raw), agent, base))
+    held = 0
+    visible = False
+    for raw in data.splitlines():
+        messages = conversation_rows(load_line(raw), agent, base)
+        held += sum(len(wire_row(row)) + 1 for row in messages)
+        visible = visible or any(row["role"] in ("user", "assistant") for row in messages)
+    if tail_page and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET and not visible:
+        return tail_visible_start(agent, start, older, base, end, data)
     fill = fill and held < TAIL_BYTES // 2
     shown = 0
     offset = base
@@ -1969,8 +1995,15 @@ def fit_tail(rows, oldest):
     budget = sum(len(wire_row(row)) + 1 for row in rows)
     if budget <= TAIL_BYTES or len(rows) < 2:
         return rows, oldest
+    newest = question = None
+    for index, row in enumerate(rows):
+        if row["role"] in ("user", "assistant"):
+            newest = index
+            if row["role"] == "user":
+                question = index
+    keep = question if question is not None else (newest or 0)
     start = 0
-    while budget > TAIL_BYTES and start + 1 < len(rows):
+    while budget > TAIL_BYTES and start + 1 < len(rows) and (start < keep or budget > TAIL_VISIBLE_BYTES):
         budget -= len(wire_row(rows[start])) + 1
         start += 1
     kept = rows[start:]
@@ -2115,8 +2148,17 @@ def response(q, source=None, as_owner=False, resolved=None):
         if tail_reuse == "append":
             rows, oldest = fit_tail(rows, oldest)
         elif tail_reuse != "exact" and mode != "delta" and budget > TAIL_BYTES and len(groups) > 1 and any(row["role"] in ("tool", "tool_result") for row in rows):
+            newest = question = None
+            for index, (_consumed, row_start, _cost) in enumerate(groups):
+                stop = groups[index + 1][1] if index + 1 < len(groups) else len(rows)
+                block = rows[row_start:stop]
+                if any(row["role"] in ("user", "assistant") for row in block):
+                    newest = index
+                    if any(row["role"] == "user" for row in block):
+                        question = index
+            keep = question if question is not None else (newest or 0)
             first = 0
-            while budget > TAIL_BYTES and first + 1 < len(groups):
+            while budget > TAIL_BYTES and first < keep and first + 1 < len(groups):
                 budget -= groups[first][2]
                 first += 1
             base, row_start, _cost = groups[first]
@@ -3185,7 +3227,7 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data", "handover_file") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -3519,6 +3561,7 @@ def host_agent_env(provider, sid):
     path = env.get('PATH', '')
     env['PATH'] = tools + (':' + path if path else '')
     env['MULTIBOT_PROVIDER'] = provider
+    env['MULTIBOT_SID'] = sid
     env['MULTIBOT_APP_VERSION'] = globals().get('MULTIBOT_APP_VERSION', '')
     if provider != 'claude':
         env['MULTIBOT_HOST'] = host_key(provider, sid)
@@ -3800,6 +3843,8 @@ def host_session_state(provider, sid):
 
 
 def host_history_append(provider, sid, session, row):
+    if row.get("role") == "user" and isinstance(row.get("text"), str):
+        host_fresh_note_user(session["state"], row["text"])
     if not session.get("state", {}).get("display_history"):
         return
     row = dict(row, id=row.get("id") or "history-" + uuid.uuid4().hex,
@@ -3856,6 +3901,8 @@ def host_fresh_archive(provider, sid, tmux, session):
             native = session["state"].get("native_session") or sid
             with host_fresh_transcript(provider, sid, native) as transcript:
                 if transcript is not None:
+                    host_fresh_note_transcript(session["state"], transcript)
+                    transcript.seek(0)
                     offset = 0
                     for line in transcript:
                         try:
@@ -3892,6 +3939,151 @@ def host_fresh_archive(provider, sid, tmux, session):
             pass
 
 
+def host_fresh_note_user(state, text):
+    if isinstance(text, str) and re.search(r"(?<!\S)/valentin-mode(?=\s|$)", text):
+        state["valentin_mode"] = True
+
+
+VALENTIN_MODE_CHUNK = 1 << 20
+VALENTIN_MODE_KEEP = 512
+VALENTIN_MODE_WORD = b"valentin-mode"
+VALENTIN_MODE_COMMAND = re.compile(rb"<command-name>/valentin-mode</command-name>")
+VALENTIN_MODE_SKILL = re.compile(rb'"skill"\s*:\s*"valentin-mode"')
+VALENTIN_MODE_BASE_DIR = re.compile(rb"Base directory for this skill:\s*([^\s\"\\]+)")
+
+
+def host_fresh_transcript_valentin(buffer):
+    if VALENTIN_MODE_COMMAND.search(buffer) or VALENTIN_MODE_SKILL.search(buffer):
+        return True
+    return any(match.group(1).endswith(b"/valentin-mode") for match in VALENTIN_MODE_BASE_DIR.finditer(buffer))
+
+
+def host_fresh_note_transcript(state, transcript):
+    if state.get("valentin_mode") or transcript is None:
+        return
+    try:
+        transcript.seek(0)
+        carry = b""
+        while True:
+            chunk = transcript.read(VALENTIN_MODE_CHUNK)
+            if not chunk:
+                return
+            buffer = carry + chunk
+            at = buffer.find(VALENTIN_MODE_WORD)
+            while at != -1:
+                if host_fresh_transcript_valentin(buffer[max(0, at - VALENTIN_MODE_KEEP):at + VALENTIN_MODE_KEEP]):
+                    state["valentin_mode"] = True
+                    return
+                at = buffer.find(VALENTIN_MODE_WORD, at + 1)
+            carry = buffer[-VALENTIN_MODE_KEEP:]
+    except (OSError, TypeError, AttributeError, ValueError):
+        return
+
+
+def host_fresh_busy(session):
+    return session["turn"] is not None or session["sends"] or session["parked"]
+
+
+def host_fresh_handover_path(provider, sid):
+    return host_paths(provider, sid)["root"] / (host_key(provider, sid) + ".handover-" + uuid.uuid4().hex + ".json")
+
+
+def host_fresh_read_handover(path):
+    if not isinstance(path, str) or not path.strip():
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text if text else None
+
+
+def host_fresh_save_handover(provider, sid, session, tmux, text):
+    try:
+        host_fresh_archive(provider, sid, tmux, session)
+        handover = host_fresh_handover_path(provider, sid)
+        host_write(handover, dict(text=text, provider=provider, sid=sid, at=time.time()))
+        fresh = dict(phase="reset", file=handover.name, started=time.time())
+        session["state"]["fresh_start"] = fresh
+        session["state"].pop("fresh_start_queued", None)
+        host_state_write(provider, sid, session["state"])
+        return fresh
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        return None
+
+
+def host_layout_publish_conversation(provider, sid, conversation_sid):
+    if not isinstance(conversation_sid, str) or SESSION_ID.fullmatch(conversation_sid) is None:
+        return False
+    key = os.environ.get("MULTIPROMPT_KEY")
+    if not isinstance(key, str) or not key:
+        return False
+    url = os.environ.get("MULTIPROMPT_URL", "https://account.multiprompt.dev").rstrip("/")
+    config = host_config(provider, sid) or {}
+    tmux = config.get("tmux")
+    if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
+        return False
+    try:
+        host_slot = int(os.environ.get("MULTIPROMPT_HOST", "0"))
+    except ValueError:
+        host_slot = 0
+    if host_slot < 0 or host_slot > 2:
+        host_slot = 0
+    import urllib.request
+    headers = {"Authorization": "Bearer " + key, "X-Layout-Features": "csid"}
+    request = urllib.request.Request(url + "/v1/layout", headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        host_log(provider, sid, "layout_publish_failed", dict(reason="read_failed"))
+        return False
+    if not isinstance(body, dict) or not isinstance(body.get("layout"), dict):
+        return False
+    layout = body["layout"]
+    revision = body.get("revision")
+    tabs = layout.get("tabs")
+    if not isinstance(tabs, list) or not isinstance(revision, int):
+        return False
+    matched = False
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        session_name = tab.get("tmux_session")
+        if not isinstance(session_name, str):
+            continue
+        if tab.get("tmux_host") == host_slot and session_name.casefold() == tmux.casefold():
+            tab["csid"] = conversation_sid
+            matched = True
+            break
+    if not matched:
+        host_log(provider, sid, "layout_publish_skipped", dict(reason="tab_missing", tmux=tmux))
+        return False
+    payload = json.dumps(dict(base_revision=revision, layout=layout), separators=(",", ":")).encode("utf-8")
+    for attempt in range(5):
+        put = urllib.request.Request(url + "/v1/layout", data=payload, headers=dict(headers, **{"Content-Type": "application/json"}), method="PUT")
+        try:
+            with urllib.request.urlopen(put, timeout=8) as response:
+                if response.status == 409:
+                    request = urllib.request.Request(url + "/v1/layout", headers=headers, method="GET")
+                    with urllib.request.urlopen(request, timeout=8) as again:
+                        body = json.loads(again.read().decode("utf-8"))
+                    layout = body["layout"]
+                    revision = body["revision"]
+                    for tab in layout.get("tabs") or []:
+                        if isinstance(tab, dict) and tab.get("tmux_host") == host_slot and isinstance(tab.get("tmux_session"), str) and tab.get("tmux_session").casefold() == tmux.casefold():
+                            tab["csid"] = conversation_sid
+                    payload = json.dumps(dict(base_revision=revision, layout=layout), separators=(",", ":")).encode("utf-8")
+                    continue
+                if 200 <= response.status < 300:
+                    host_log(provider, sid, "layout_published", dict(csid=conversation_sid, tmux=tmux))
+                    return True
+        except (OSError, ValueError, UnicodeError):
+            break
+    host_log(provider, sid, "layout_publish_failed", dict(reason="write_failed"))
+    return False
+
+
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
     retry = isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed")
@@ -3924,21 +4116,36 @@ def host_fresh_send(provider, sid, tmux, session, text):
     return True
 
 
-def host_fresh_start(provider, sid, tmux, session):
+def host_fresh_start(provider, sid, tmux, session, handover_file=None):
     fresh = session["state"].get("fresh_start")
     if isinstance(fresh, dict) and fresh.get("phase") == "resume_failed":
-        if session["turn"] is not None or session["sends"] or session["parked"]:
-            return dict(status="busy", reason="chat_busy")
+        if host_fresh_busy(session):
+            session["state"]["fresh_start_queued"] = dict(retry=True)
+            host_state_write(provider, sid, session["state"])
+            return dict(status="started", reason="fresh_start_queued")
         fresh.update(phase="resume", started=time.time())
         session.pop("fresh_resumed", None)
         host_state_write(provider, sid, session["state"])
         return dict(status="started")
-    if fresh:
+    if fresh or isinstance(session["state"].get("fresh_start_queued"), dict):
         return dict(status="already", reason="fresh_start_pending")
-    if session["turn"] is not None or session["sends"] or session["parked"]:
-        return dict(status="busy", reason="chat_busy")
+    if host_fresh_busy(session):
+        queued = dict()
+        if handover_file:
+            queued["handover_file"] = handover_file
+        session["state"]["fresh_start_queued"] = queued
+        host_state_write(provider, sid, session["state"])
+        return dict(status="started", reason="fresh_start_queued")
     if not session.get("ready") and provider != "claude":
         return dict(status="busy", reason="agent_starting")
+    supplied = host_fresh_read_handover(handover_file) if handover_file else None
+    if handover_file and supplied is None:
+        return dict(status="error", reason="handover_unreadable")
+    if supplied:
+        if not host_fresh_save_handover(provider, sid, session, tmux, supplied):
+            host_fresh_error(provider, sid, tmux, session, "Could not save the handover.")
+            return dict(status="error", reason="handover_write_failed")
+        return dict(status="started")
     try:
         host_fresh_archive(provider, sid, tmux, session)
         session["state"]["fresh_start"] = dict(phase="handover", text={}, started=time.time())
@@ -3956,6 +4163,25 @@ def host_fresh_start(provider, sid, tmux, session):
         host_fresh_error(provider, sid, tmux, session, "Could not save the handover.")
         return dict(status="error", reason="handover_write_failed")
     return dict(status="started")
+
+
+def host_fresh_drain_queued(provider, sid, tmux, session):
+    queued = session["state"].pop("fresh_start_queued", None)
+    if not isinstance(queued, dict) or host_fresh_busy(session) or session["state"].get("fresh_start"):
+        if isinstance(queued, dict):
+            session["state"]["fresh_start_queued"] = queued
+        return False
+    host_state_write(provider, sid, session["state"])
+    if queued.get("retry"):
+        fresh = session["state"].get("fresh_start")
+        if isinstance(fresh, dict) and fresh.get("phase") == "resume_failed":
+            fresh.update(phase="resume", started=time.time())
+            session.pop("fresh_resumed", None)
+            host_state_write(provider, sid, session["state"])
+            return True
+    handover = queued.get("handover_file")
+    host_fresh_start(provider, sid, tmux, session, handover)
+    return True
 
 
 def host_fresh_finish(provider, sid, tmux, session, status):
@@ -3992,11 +4218,13 @@ def host_fresh_prepare(provider, sid, state):
     saved = host_read(host_paths(provider, sid)["root"] / fresh["file"])
     if not saved or not saved.get("text"):
         raise ValueError("handover_missing")
-    updated = dict(state, context_session=str(uuid.uuid4()), fresh_start=dict(fresh, phase="resume"))
+    native = str(uuid.uuid4())
+    updated = dict(state, context_session=native, fresh_start=dict(fresh, phase="resume"))
     updated.pop("native_session", None)
     host_state_write(provider, sid, updated)
     state.clear()
     state.update(updated)
+    host_layout_publish_conversation(provider, sid, native)
     return True
 
 
@@ -4017,6 +4245,10 @@ def host_fresh_resume(provider, sid, tmux, session):
                   "The host read only your saved handover file, " + fresh["file"] + ":\n\n" + saved["text"] +
                   "\n\nAcknowledge reading this handover and name the next unfinished task. "
                   "Do not execute work or call tools in this first reply.")
+    elif session["state"].get("valentin_mode"):
+        handover_path = (host_paths(provider, sid)["root"] / fresh["file"]).resolve()
+        prompt = ("/valentin-mode Fresh start: read the handover at " + str(handover_path) +
+                  ", re-run /board-drain, resume.")
     else:
         prompt = ("You are the same chat after a fresh start. Your name, picture, address and board login "
                   "are unchanged. Your previous conversation is display history, not context. "
@@ -4719,7 +4951,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
-        return host_fresh_start(provider, sid, tmux, session)
+        return host_fresh_start(provider, sid, tmux, session, request.get("handover_file"))
     if operation == "deliver" and session["state"].get("fresh_start"):
         return dict(status="busy", reason="fresh_start_pending")
     if operation in ("approval_reply", "question_reply", "plan_reply"):
@@ -5086,6 +5318,8 @@ def host_turn_end(provider, sid, tmux, session, payload, detail):
     host_state_write(provider, sid, session["state"])
     host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None, **detail))
     host_fresh_finish(provider, sid, tmux, session, payload.get("status"))
+    if session["turn"] is None and not session["sends"] and not session["parked"]:
+        host_fresh_drain_queued(provider, sid, tmux, session)
 
 
 def host_codex_policy(session):
@@ -5874,6 +6108,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
+            if idle and host_fresh_drain_queued(provider, sid, tmux, session):
+                continue
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
                     return
@@ -8189,7 +8425,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 131
+RUNTIME_GENERATION = 133
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8307,6 +8543,13 @@ if __name__ == '__main__':
                             relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
                             _os.chmod('mp-layout', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
+                            pass
+                    fresh_source = globals().get('MP_FRESH_SOURCE')
+                    if isinstance(fresh_source, str) and fresh_source:
+                        try:
+                            published = publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
+                            _os.chmod(published, 0o600, dir_fd=directory)
+                        except (ValueError, OSError):
                             pass
                     zsb_source = globals().get('ZSB_SOURCE')
                     if isinstance(zsb_source, str) and zsb_source:

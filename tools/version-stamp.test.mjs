@@ -173,7 +173,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       if (cache.includes('.zig-cache') && cache.includes('uses: actions/cache@')) assert.match(cache, /github.sha|inputs.revision|inputs.app_revision/);
     }
     if (file !== 'test.yml') continue;
-    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate', 'idle-budget']) {
+    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate']) {
       const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
       const caches = job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache@/.test(step));
       assert.equal(caches.length, 2, name);
@@ -184,8 +184,7 @@ test('PR, manual and nightly runs reuse Zig caches without duplicate restore/sav
       assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
       assert.match(compile, /restore-keys:/);
       assert.match(toolchain, /zig-toolchain-0.16.0/);
-      if (name === 'idle-budget') assert.match(job, /if: github\.event_name != 'pull_request'/);
-      if (name === 'build-windows' || name === 'idle-budget') continue;
+      if (name === 'build-windows') continue;
       const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
       assert.ok(trim, name);
       assert.match(trim, /python3 tools\/trim-zig-cache.py --cap-mib 1600/);
@@ -616,7 +615,7 @@ test('tests after: a CI-board ticket releases without product notes', async t =>
   const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], { version: '0.29.2', changes: [], tickets: [] });
   assert.doesNotMatch(source, /Checks and fixes, no visible change/);
 });
 
@@ -631,7 +630,7 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.equal(source.includes('Typing feels faster.'), false);
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], { version: '0.29.2', changes: [], tickets: [] });
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
   assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
 });

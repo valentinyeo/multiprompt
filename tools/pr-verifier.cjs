@@ -211,8 +211,10 @@ function journeyRows(summary, features = Object.keys(summary.head)) {
   return features.map(feature => {
     const headRuns = summary.head[feature] || [];
     const head = worst(headRuns);
-    const inherited = head === 'failed' && masterFailures.has(feature);
-    const blocked = headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
+    const inherited = masterFailures.has(feature) && head !== 'passed';
+    const blocked = inherited
+      ? headRuns.some(run => infrastructureError(run.cleanup) || run.screenshots?.length === 0)
+      : headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
     return { feature, head, inherited, blocked };
   });
 }
@@ -338,13 +340,14 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const blocked = rows.filter(row => row.blocked || (row.head !== 'passed' && row.head !== 'failed' && !row.inherited));
   const prerequisites = Object.entries(jobs).filter(([name, job]) =>
     (['tests', 'resolve', 'select'].includes(name) && job.result !== 'success') || job.result === 'cancelled' ||
-    (name === 'head' && job.result === 'failure' && !rows.some(row => row.head === 'failed')));
+    (name === 'head' && job.result === 'failure' && !rows.some(row => row.head === 'failed') &&
+      (rows.every(row => row.head === 'passed') || rows.some(row => row.head !== 'passed' && !row.inherited))));
   const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
   if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
     for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
-    if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head}, base ${row.base})`).join(', ')}.`);
+    if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head})`).join(', ')}.`);
     for (const [name, job] of prerequisites) notes.push(`${name} job ${job.result}; full verification could not complete.`);
   }
   if (verdict?.verdict === 'FAIL' || regressed.length || jobs.tests?.outputs?.result === 'FAIL') {

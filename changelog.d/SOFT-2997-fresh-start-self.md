@@ -1,0 +1,1 @@
+A live chat can fresh-start itself from inside the session without losing its place on phone or desktop.
