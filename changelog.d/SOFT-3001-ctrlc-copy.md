@@ -1,1 +1,0 @@
-Ctrl+C in a shell tab copies a text selection again and still sends an interrupt when nothing is selected.

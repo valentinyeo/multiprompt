@@ -1292,6 +1292,7 @@ pub var g_chat_switch_content_sid: u32 = 0;
 pub var g_chat_file_valid = false;
 pub var g_chat_file_request_id: u32 = 0;
 pub var g_chat_code_font: HANDLE = null;
+pub var g_chat_emoji_font: HANDLE = null;
 pub var g_chat_layout_storage: [CHAT_MAX_BLOCKS]RECT = undefined;
 pub var g_chat_layout_rects: []RECT = &g_chat_layout_storage;
 pub var g_chat_bubble_storage: [CHAT_MAX_BLOCKS]chat_style.BubblePos = @splat(.single);

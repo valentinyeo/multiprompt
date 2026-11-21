@@ -9333,6 +9333,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_chat_input_brush = null;
             if (app_state.g_chat_code_font != null) _ = DeleteObject(app_state.g_chat_code_font);
             app_state.g_chat_code_font = null;
+            if (app_state.g_chat_emoji_font != null) _ = DeleteObject(app_state.g_chat_emoji_font);
+            app_state.g_chat_emoji_font = null;
             uninstallHook();
             uninstallForegroundHook();
             @import("browser_pane.zig").uninstallBrowserDockHooks();
