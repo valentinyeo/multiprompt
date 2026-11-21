@@ -2486,24 +2486,40 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 pub fn showReconnectedConsole(idx: u32) void {
     if (!@import("ssh_reconnect.zig").eventEffects(@import("drawing.zig").reconnectTabVisible(idx)).invalidate_content or
         !@import("chat_composer.zig").shellConsoleShouldBeVisible(idx)) return;
-    if (positionReconnectedConsole(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+    if (!layoutReconnectedConsole(idx)) return;
+    _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+}
+
+pub fn layoutReconnectedConsole(idx: u32) bool {
+    if (!@import("drawing.zig").reconnectConsoleLayoutAllowed(idx)) return false;
+    return positionReconnectedConsole(idx);
+}
+
+fn finalizeReconnectedConsoleLayout(idx: u32, left: i32, top: i32, w: i32, h: i32) void {
+    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return;
+    @import("focus.zig").verifyShellWindowSize(app_state.shells[idx].hwnd, left, top, w, h);
+    if (shellProcessAliveForRead(idx)) _ = normalizeConsoleFont(idx, app_state.shells[idx].pid);
 }
 
 fn positionReconnectedConsole(idx: u32) bool {
-    if (!@import("drawing.zig").reconnectTabVisible(idx)) return false;
     const shell = &app_state.shells[idx];
     if (shell.hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return false;
     const pane = @import("browser_pane.zig");
     var rc: RECT = std.mem.zeroes(RECT);
     if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
     rc = @import("window_layout.zig").activePaneContentRect(rc);
-    rc.top += pane.threadTitleHeight();
+    const con_top = rc.top + pane.threadTitleHeight();
     if (!shell.full_width) {
         const col = pane.centeredConsoleColumn(rc.right, rc.left, 0, pane.consoleCellW());
         rc.left = col.left;
         rc.right = col.left + col.width;
     }
-    return SetWindowPos(shell.hwnd, null, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW) != 0;
+    const w = rc.right - rc.left;
+    const h = rc.bottom - con_top;
+    if (w <= 0 or h <= 0) return false;
+    if (SetWindowPos(shell.hwnd, null, rc.left, con_top, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW) == 0) return false;
+    finalizeReconnectedConsoleLayout(idx, rc.left, con_top, w, h);
+    return true;
 }
 
 pub fn markSshTabDisconnected(idx: u32) void {
@@ -3256,8 +3272,11 @@ pub fn finishStartupShell(job: *StartupShell) void {
     }
     if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);
     if (job.reconnect) {
-        if (idx == app_state.active_shell and @import("drawing.zig").reconnectTabVisible(idx)) {
-            if (positionReconnectedConsole(idx)) showReconnectedConsole(idx);
+        if (idx == app_state.active_shell and layoutReconnectedConsole(idx) and
+            @import("drawing.zig").reconnectTabVisible(idx) and
+            @import("chat_composer.zig").shellConsoleShouldBeVisible(idx))
+        {
+            _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "startup-reconnect-ready");
         }
         @import("chat_send.zig").sshRequestSessionProbe();
         return;

@@ -1709,7 +1709,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     switch (msg) {
         WM_SYSCOMMAND => {
             if ((wp & 0xFFF0) == @import("win32.zig").SC_MAXIMIZE and activeBrowserHasForegroundFocus()) return 0;
-            if ((wp & 0xFFF0) == @import("win32.zig").SC_KEYMENU and activeShellHasForegroundFocus()) return 0;
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_UPDATE_CHANGED => {

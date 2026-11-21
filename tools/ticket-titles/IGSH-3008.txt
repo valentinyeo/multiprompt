@@ -1,1 +1,0 @@
-Enter in a server shell tab opens the window menu instead of sending the command

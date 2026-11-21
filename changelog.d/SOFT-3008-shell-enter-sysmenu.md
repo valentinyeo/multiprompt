@@ -1,1 +1,0 @@
-Pressing Enter in a server shell tab no longer opens the window menu instead of sending the command.

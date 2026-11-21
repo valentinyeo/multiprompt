@@ -1402,12 +1402,20 @@ test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 perc
     }
 }
 
-pub fn reconnectTabVisible(idx: u32) bool {
+fn reconnectConsolePlacementAllowed(idx: u32) bool {
     return idx < app_state.shell_count and idx == app_state.active_shell and
         (!app_state.g_single_window or app_state.shells[idx].workspace == app_state.g_active_workspace) and
         !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
         !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
-        !app_state.g_snippet_create_active and !app_state.g_restoring and !app_state.g_account_locked;
+        !app_state.g_snippet_create_active and !app_state.g_account_locked;
+}
+
+pub fn reconnectConsoleLayoutAllowed(idx: u32) bool {
+    return reconnectConsolePlacementAllowed(idx);
+}
+
+pub fn reconnectTabVisible(idx: u32) bool {
+    return reconnectConsolePlacementAllowed(idx) and !app_state.g_restoring;
 }
 
 pub fn invalidateReconnectContent(idx: u32) void {

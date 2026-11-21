@@ -1329,19 +1329,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 1;
             }
         }
-        if (activeShellHasForegroundFocus() and !isCtrlDown() and wp == WM_SYSKEYDOWN and (kb.vkCode == 0x0D or kb.vkCode == 0x20)) {
-            app_state.g_sysmenu_pending = false;
-            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
-        }
         if (wp == WM_SYSKEYDOWN and kb.vkCode == 0x20 and !isCtrlDown() and foregroundIsOurs()) {
             app_state.g_sysmenu_pending = true;
             return 1;
         }
         if ((wp == WM_KEYUP or wp == WM_SYSKEYUP) and app_state.g_sysmenu_pending) {
-            if (activeShellHasForegroundFocus()) {
-                app_state.g_sysmenu_pending = false;
-                return 1;
-            }
             if (kb.vkCode == 0x12 or kb.vkCode == 0xA4 or kb.vkCode == 0xA5) {
                 app_state.g_sysmenu_pending = false;
                 keybd_event(0xFF, 0, 0, 0);
