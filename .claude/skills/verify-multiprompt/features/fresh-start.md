@@ -12,7 +12,7 @@ Verify on: push
 
 Open a live remote chat in Chat View, exchange a couple of messages, then choose **Chat View: Fresh start** from Ctrl+K. Wait while the agent saves a handover and the chat reopens with cleared context but the same name, photo and address.
 
-Path B (pending): in-chat `mp-fresh --handover <file>` once SOFT-2997 and SOFT-2998 land.
+Path B (unit-tested elsewhere): in-chat `mp-fresh --handover <file>` — see `tools/mp-fresh`, `src/mp_fresh.py`, and `tools/chat-mp-fresh.test.js` (SOFT-2997).
 
 ## Driving it with control.ps1
 
@@ -32,4 +32,4 @@ Retain before/after screenshots, `fresh-start-host.jsonl`, `agent-host` copies, 
 
 ## Gotchas
 
-Only SSH/tmux and the Claude child are synthetic; composer, palette routing, session save, layout tab `csid` and agent-host files are production paths. This journey does not prove real Claude handover quality, Codex/Pi fresh start, or the pending `mp-fresh` in-chat path. Do not reuse a production chat row.
+Only SSH/tmux and the Claude child are synthetic; composer, palette routing, session save, layout tab `csid` and agent-host files are production paths. This journey does not prove real Claude handover quality, Codex/Pi fresh start, or the in-chat `mp-fresh` path (covered by unit tests). Do not reuse a production chat row.
