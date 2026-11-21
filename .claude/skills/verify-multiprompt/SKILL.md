@@ -74,12 +74,6 @@ The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
 
-## Agent name sync
-
-The [agent-sync](features/agent-sync.md) journey runs on GitHub Linux through `verify.yml`. It exercises the production reader protocol, talk installer, checksum-verified Hypertask CLI and real 50-second systemd user timer. Only the Hypertask HTTP service is a loopback stand-in. The identical harness runs against head and merge base, retaining HTTP requests, timer logs, stored links and cleanup. It does not launch the Windows app or rename a production agent.
-
-When a PR changes the verifier workflows themselves, dispatch `pr-verifier.yml --ref <head-branch> -f pr=<number>` so the new routing can run before merge.
-
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:
