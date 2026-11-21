@@ -30,7 +30,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh'];
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'work-pool.mjs', 'auto-release-admit.sh'];
   if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
   if (fs.existsSync(path.join(root, 'tools/ticket-id.js'))) dependencies.push('ticket-id.js');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
@@ -156,7 +156,7 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 4);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 7);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);

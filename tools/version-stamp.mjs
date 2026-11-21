@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pooled } from './work-pool.mjs';
 import { tokenize } from './strip-comments.mjs';
 import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
 import { canonicalTicketId, fragmentTicketId } from './ticket-id.js';
@@ -276,7 +277,81 @@ export function previousReleaseTag(tags, tag) {
   return tags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags).at(-1) ?? null;
 }
 
-function releaseHistory(tag, changelog, publishedTags) {
+function gitAsync(args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}${stderr ? `: ${stderr.trim()}` : ''}`;
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+function batchObjects(ids) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['cat-file', '--batch'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const output = [];
+    const errors = [];
+    child.stdout.on('data', chunk => output.push(chunk));
+    child.stderr.on('data', chunk => errors.push(chunk));
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code !== 0) {
+        reject(new Error(`git cat-file --batch failed: ${Buffer.concat(errors).toString('utf8').trim()}`));
+        return;
+      }
+      resolve(Buffer.concat(output));
+    });
+    child.stdin.end(ids.map(id => `${id}\n`).join(''));
+  });
+}
+
+function parseBatch(buffer) {
+  const contents = new Map();
+  let offset = 0;
+  while (offset < buffer.length) {
+    const end = buffer.indexOf(10, offset);
+    const [id, type, size] = buffer.slice(offset, end).toString('utf8').split(' ');
+    if (type === 'missing' || !Number.isInteger(Number(size))) throw new Error(`Missing git object ${id}`);
+    const start = end + 1;
+    contents.set(id, buffer.slice(start, start + Number(size)).toString('utf8'));
+    offset = start + Number(size) + 1;
+  }
+  return contents;
+}
+
+async function fragmentTrees(history) {
+  const refs = `refs/tags`;
+  const listing = async () => {
+    const text = await gitAsync(['for-each-ref', '--format=%(refname:short) %(objectname) %(*objectname)', refs]);
+    return new Map(text.split(/\r?\n/).filter(Boolean).map(line => {
+      const [name, object, peeled] = line.split(' ');
+      return [name, peeled || object];
+    }));
+  };
+  let objects = await listing();
+  const missing = history.filter(name => !objects.has(name));
+  for (const name of missing) await gitAsync(['fetch', '--no-tags', 'origin', `${refs}/${name}:${refs}/${name}`]);
+  if (missing.length) objects = await listing();
+  for (const name of history) if (!objects.has(name)) throw new Error(`Missing release tag ${name}`);
+  const trees = await pooled(history, 8, async name => {
+    const text = await gitAsync(['ls-tree', '-r', '-z', `${refs}/${name}`, '--', 'changelog.d/']);
+    return text.split('\0').filter(Boolean).map(entry => {
+      const tab = entry.indexOf('\t');
+      return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]];
+    });
+  });
+  const contents = parseBatch(await batchObjects([...new Set(trees.flat().map(([, object]) => object))]));
+  return history.map((name, i) => ({
+    sha: objects.get(name),
+    files: Object.fromEntries(trees[i].map(([file, object]) => [file, contents.get(object)])),
+  }));
+}
+
+async function releaseHistory(tag, changelog, publishedTags) {
   const older = publishedTags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
   if (!older.length) {
     if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') throw new Error('Shallow checkout has no release tags; fetch tags before building');
@@ -285,32 +360,30 @@ function releaseHistory(tag, changelog, publishedTags) {
   const stamped = changelog.match(/\.ver\s*=\s*"(\d+\.\d+\.\d+)"/)?.[1];
   const base = stamped ? older.findLastIndex(name => compareTags(name, `v${stamped}`) <= 0) : -1;
   const history = older.slice(Math.max(base, 0));
-  for (const name of history) {
-    const ref = `refs/tags/${name}`;
-    try {
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
-    } catch {
-      git(['fetch', '--no-tags', 'origin', `${ref}:${ref}`]);
-    }
-  }
-  return history.map((name, i) => {
-    const ref = `refs/tags/${name}`;
-    return {
-      tag: name,
-      files: readTree(ref),
-      sha: git(['rev-parse', `${ref}^{commit}`]).trim(),
-      commits: i && compareTags(name, 'v0.28.1027') >= 0 && !reviewedReleases[name] ? releaseCommits(`refs/tags/${history[i - 1]}`, ref) : [],
-    };
+  const [snapshots, commits] = await Promise.all([
+    fragmentTrees(history),
+    pooled(history, 8, (name, i) => i && compareTags(name, 'v0.28.1027') >= 0 && !reviewedReleases[name]
+      ? releaseCommitsAsync(`refs/tags/${history[i - 1]}`, `refs/tags/${name}`)
+      : []),
+  ]);
+  return history.map((name, i) => ({ tag: name, files: snapshots[i].files, sha: snapshots[i].sha, commits: commits[i] }));
+}
+
+function parseCommits(text) {
+  return text.split(/\r?\n/).filter(Boolean).map(line => {
+    const tab = line.indexOf('\t');
+    return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
   });
 }
 
 function releaseCommits(previous, head) {
   git(['merge-base', '--is-ancestor', previous, head]);
-  return git(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`])
-    .split(/\r?\n/).filter(Boolean).map(line => {
-      const tab = line.indexOf('\t');
-      return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
-    });
+  return parseCommits(git(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
+}
+
+async function releaseCommitsAsync(previous, head) {
+  await gitAsync(['merge-base', '--is-ancestor', previous, head]);
+  return parseCommits(await gitAsync(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
 }
 
 function check(baseRev, headRev) {
@@ -343,7 +416,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
       if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
       const files = readTree('HEAD');
-      const history = releaseHistory(base, files[changelogPath], publishedTags);
+      const history = await releaseHistory(base, files[changelogPath], publishedTags);
       if (!history.length && compareTags(base, 'v0.28.1027') >= 0) throw new Error('No published baseline; fetch published release tags before building');
       const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
       const unresolved = buildUnresolvedChangelog(files, base, history, commits);
@@ -355,3 +428,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exitCode = 1;
   }
 }
+
+export { releaseHistory as newReleaseHistory };
