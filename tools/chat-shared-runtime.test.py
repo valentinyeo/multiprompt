@@ -127,6 +127,7 @@ class RuntimeTest(unittest.TestCase):
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-send'
         self.assertTrue(published.is_symlink())
         self.assertEqual(published.read_text(), body)
+        self.assertTrue(os.access(published, os.X_OK))
 
     def test_zsb_ships_inside_the_runtime_as_an_executable_copy(self):
         body = "#!/bin/sh\necho zsb\n"
@@ -166,6 +167,12 @@ class RuntimeTest(unittest.TestCase):
         )
         prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
         return prelude + SOURCE
+
+    def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
+        self.info(self.bundle())
+        published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-fresh'
+        self.assertTrue(published.is_symlink())
+        self.assertTrue(os.access(published, os.X_OK))
 
     def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
         self.info(self.bundle())

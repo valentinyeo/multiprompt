@@ -8579,7 +8579,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 135
+RUNTIME_GENERATION = 136
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8667,7 +8667,7 @@ if __name__ == '__main__':
                     if isinstance(mp_send_source, str) and mp_send_source:
                         try:
                             published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
-                            _os.chmod(published, 0o600, dir_fd=directory)
+                            _os.chmod(published, 0o700, dir_fd=directory)
                         except (ValueError, OSError):
                             pass
                     feedback_source = globals().get('FEEDBACK_SOURCE')
@@ -8702,7 +8702,7 @@ if __name__ == '__main__':
                     if isinstance(fresh_source, str) and fresh_source:
                         try:
                             published = publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
-                            _os.chmod(published, 0o600, dir_fd=directory)
+                            _os.chmod(published, 0o700, dir_fd=directory)
                         except (ValueError, OSError):
                             pass
                     zsb_source = globals().get('ZSB_SOURCE')
