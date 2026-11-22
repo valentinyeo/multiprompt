@@ -856,6 +856,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&paste_focus_tests.step);
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
     test_step.dependOn(&shell_focus_tests.step);
+    const alt_tab_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/alt-tab-front.test.js" });
+    test_step.dependOn(&alt_tab_front_tests.step);
     const console_font_lifecycle_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font-lifecycle.test.js" });
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);
