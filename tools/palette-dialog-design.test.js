@@ -1,0 +1,126 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
+
+const palette = () => read('src/sidebar.zig').split('if (app_state.g_search_active) {')[1].split('if (app_state.g_shortcuts_active)')[0];
+
+test('IGSH-1061: palette paints the approved neutral card, not blue selection or memory tags', () => {
+  const paint = palette();
+  assert.match(paint, /RGB\(0x35, 0x35, 0x35\)/);
+  assert.match(paint, /RGB\(0x18, 0x18, 0x18\)/);
+  assert.match(paint, /RECENT SESSIONS/);
+  assert.match(paint, /Search sessions and commands/);
+  assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(4\)/);
+  assert.match(paint, /fillRoundRect\(hdc, input_bg_rc, uiScaled\(4\)/);
+  assert.doesNotMatch(paint, /(?:shells\[shell_idx\]|sess)\.ram_mb/);
+  assert.match(paint, /workspaceDisplayName\(app_state\.shells\[shell_idx\]\.workspace/);
+});
+
+test('IGSH-1698: shared palette panel and keycaps use four-pixel corners', () => {
+  assert.match(palette(), /const overlay_radius: i32 = uiScaled\(8\);/);
+  const keycap = read('src/palette_text.zig').split('pub fn keycap(')[1].split('\nfn titleCased(')[0];
+  assert.equal([...keycap.matchAll(/fillRoundRect\([^\n]+drawing\.uiScaled\(4\)/g)].length, 2);
+});
+
+test('IGSH-1061: pointer, wheel, reorder and paint share the new palette geometry', () => {
+  const drawing = read('src/drawing.zig');
+  assert.match(drawing, /pub fn searchRowH\(\) i32 \{\s*return uiScaled\(39\)/);
+  assert.match(drawing, /pub fn searchOverlayW\(\) i32 \{[\s\S]*?uiScaled\(560\)/);
+  assert.match(drawing, /pub fn searchOverlayOy[\s\S]*?uiScaled\(120\)/);
+  assert.match(drawing, /const oy = searchOverlayOy\(win_h, overlay_h\)/);
+  const main = read('src/main.zig');
+  for (const prefix of ['click', 'wheel', 'drag']) assert.match(main, new RegExp(`const ${prefix}_oy = searchOverlayOy\\(${prefix}_win_h, ${prefix}_oh\\)`));
+  assert.match(palette(), /searchOverlayOy\(win_h, overlay_h\)/);
+  assert.match(drawing, /pub fn searchVisibleRows/);
+  assert.match(read('src/command_palette.zig'), /g_search_result_count, @import\("drawing.zig"\)\.searchVisibleRows\(\)/);
+});
+
+test('IGSH-1061: native messages share the custom dialog and preserve confirmation results', () => {
+  assert.match(read('src/fonts.zig'), /return @import\("dialog.zig"\)\.messageBox\(hwnd, text, caption, flags\)/);
+  const dialog = read('src/dialog.zig');
+  assert.doesNotMatch(dialog, /w\.MessageBoxW/);
+  assert.match(dialog, /0x181818/);
+  assert.match(dialog, /state\.px\(440\)/);
+  assert.match(dialog, /fillRoundRect\(dc, cell, state\.px\(20\),/);
+  assert.match(dialog, /0x828bf2/);
+  assert.match(dialog, /pixel\.\* >> 1/);
+  assert.match(dialog, /if \(enabled\) _ = EnableWindow\(owner, 0\)/);
+  assert.match(dialog, /EnableWindow\(owner, 1\)/);
+  assert.match(dialog, /0x1b => self\.result = closeResult/);
+  assert.match(dialog, /button\.result == 2/);
+  const account = read('src/account_desktop.zig');
+  for (const label of ['Later', 'Use recovery key', 'Enter passphrase', 'Remove']) assert.ok(account.includes(`L("${label}")`), label);
+  assert.match(account, /\.label = L\("Remove"\), \.result = 6, \.destructive = true/);
+  assert.match(read('src/reminders.zig'), /\.label = L\("Snooze"\), \.result = 1/);
+});
+
+test('IGSH-1061: static labels and shortcut hints use the formatter, not user session names', () => {
+  const paint = palette();
+  assert.match(paint, /paletteDrawText/);
+  assert.match(paint, /draw\(hdc, @ptrCast\(&app_state\.shells\[shell_idx\]\.name\)/);
+  const formatter = read('src/palette_text.zig');
+  assert.match(formatter, /pub fn sentence/);
+  assert.match(formatter, /pub fn keycap/);
+});
+
+test('IGSH-1906: Ctrl+K drops shortcut chips, footer, and modal shadow slabs', () => {
+  const paint = palette();
+  assert.doesNotMatch(paint, /keycap\(hdc, L\("Esc"\)/);
+  assert.doesNotMatch(paint, /palette_text\.zig"\)\.footer/);
+  assert.doesNotMatch(paint, /drawModalShadow\(hdc, ox, oy, overlay_w, overlay_h/);
+  const formatter = read('src/palette_text.zig');
+  assert.match(formatter, /if \(shortcut\) return 0;/);
+  assert.match(read('src/drawing.zig'), /pub fn searchFooterH\(\) i32 \{\s*return uiScaled\(12\)/);
+});
+
+test('IGSH-1061: custom native surfaces use declared Win32 APIs and guarded focus', () => {
+  assert.match(read('src/fonts.zig'), /return @import\("dialog.zig"\)\.messageBox/);
+  assert.match(read('src/sidebar.zig'), /const CreateFontW = @import\("fonts.zig"\)\.create/);
+  const declarations = new Set([...read('src/win32.zig').matchAll(/\b(?:fn|const)\s+(\w+)/g)].map(match => match[1]));
+  const missing = source => [...new Set([...source.matchAll(/\bw\.(\w+)/g)].map(match => match[1]))].filter(name => !declarations.has(name));
+  for (const name of ['dialog', 'palette_text']) assert.deepEqual(missing(read(`src/${name}.zig`)), [], name);
+  assert.deepEqual(missing('w.NotAWin32Export()'), ['NotAWin32Export']);
+  const dialog = read('src/dialog.zig');
+  assert.match(dialog, /focus\.ShowWindow\(hwnd, 5\)/);
+  assert.match(dialog, /focus\.SetFocus\(hwnd\)/);
+  assert.doesNotMatch(dialog, /w\.(?:ShowWindow|SetFocus|SetForegroundWindow)\(/);
+});
+
+
+test('IGSH-1061: dialog measures body against full content width and uses approved corner radius', () => {
+  assert.match(read('src/fonts.zig'), /return @import\("dialog.zig"\)\.messageBox/);
+  const dialog = read('src/dialog.zig');
+  assert.match(dialog, /const text_width = @max\(0, width - state\.px\(48\)\);/);
+  assert.match(dialog, /var body = title_rc;/);
+  assert.match(dialog, /dwrite\.DialogLayout\.create\(dc, state\.text, text_width\)/);
+  assert.match(dialog, /fillRoundRect\(dc, state\.card, state\.px\(20\), outline\)/);
+  assert.match(dialog, /fillRoundRect\(dc, inner, state\.px\(20\) - 1, panel\)/);
+});
+
+test('IGSH-1061: palette typing waits for owned foreground after asynchronous browser cancellation', () => {
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const body = control.match(/function Invoke-JourneyCommand \{([^]*?)\n\}/)?.[1];
+  assert.ok(body, 'production palette journey accepts a stable command name');
+  assert.match(body, /\$start = \(Read-SharedText \$log\).Length[\s\S]*Press @\(0x11, 0x4B\)/,
+    'queries read only results emitted after this palette opened');
+  assert.match(body, /Read-SharedText \$log\).Substring\(\$start\)[\s\S]*-contains \[string\]\$target/,
+    'the current result list must contain the resolved command');
+  assert.match(body, /Retry-PaletteOpen \$log \$start[\s\S]*GetFocusedWindow\(\$script:window\) -eq \$script:window[\s\S]*'command palette initialized and owned frame focused' 20\s+Type-Text \$query/,
+    'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');
+  const workflow = read('.github/workflows/palette-dialog-design.yml');
+  assert.match(workflow, /red-control:\s+if: github\.ref != 'refs\/heads\/master'\s+uses: \.\/\.github\/workflows\/check-red-run\.yml/);
+  assert.match(workflow, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| 'origin\/master' \}\}/);
+  assert.match(workflow, /head: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(workflow, /palette-dialog-design:\s+needs: red-control/);
+  assert.match(workflow, /needs\.red-control\.result == 'success' \|\| needs\.red-control\.result == 'skipped'/);
+  assert.match(read('.github/workflows/check-red-run.yml'), /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(workflow, /node tools\/check-red-run\.mjs/);
+  const typing = control.match(/function Type-Text\([^]*?\n\}/)?.[0];
+  assert.match(typing, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/,
+    'typing must still refuse input when foreground is foreign');
+});

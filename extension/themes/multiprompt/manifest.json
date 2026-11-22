@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "multiprompt browser theme - multiprompt",
+  "version": "1.0.0",
+  "theme": {
+    "colors": {
+      "bookmark_text": [247, 248, 248],
+      "button_background": [8, 9, 10, 1],
+      "frame": [8, 9, 10],
+      "frame_inactive": [8, 9, 10],
+      "ntp_background": [8, 9, 10],
+      "ntp_link": [130, 143, 255],
+      "ntp_text": [247, 248, 248],
+      "tab_background_text": [180, 184, 190],
+      "tab_text": [247, 248, 248],
+      "toolbar": [16, 17, 19]
+    },
+    "tints": { "buttons": [0.67, 0.15, 0.92] }
+  }
+}

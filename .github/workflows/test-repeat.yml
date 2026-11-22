@@ -1,0 +1,110 @@
+name: Test repeat
+run-name: test-repeat ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }} x${{ inputs.count || 10 }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: A tools/*.test.js path or IGSH-816 CLEAN
+        required: true
+        default: tools/bridge-profile-pipes.test.js
+        type: string
+      count:
+        description: Number of independent runs (1 to 20)
+        required: true
+        default: 10
+        type: number
+  schedule:
+    - cron: '8 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-repeat-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.matrix.outputs.runs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate inputs and create matrix
+        id: matrix
+        env:
+          TEST: ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }}
+          COUNT: ${{ inputs.count || 10 }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const { TEST, COUNT, GITHUB_OUTPUT } = process.env;
+          if (TEST !== 'IGSH-816 CLEAN' && (!/^tools\/[a-zA-Z0-9._-]+\.test\.js$/.test(TEST) || !fs.statSync(TEST).isFile())) {
+            throw new Error('test must name an existing tools/*.test.js file or IGSH-816 CLEAN');
+          }
+          if (!/^(?:[1-9]|1[0-9]|20)$/.test(COUNT)) {
+            throw new Error('count must be an integer from 1 to 20');
+          }
+          fs.appendFileSync(GITHUB_OUTPUT, `runs=${JSON.stringify(Array.from({ length: Number(COUNT) }, (_, index) => index + 1))}\n`);
+          NODE
+
+  repeat:
+    name: repeat ${{ matrix.run }}
+    needs: plan
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(needs.plan.outputs.runs) }}
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build test executables
+        if: inputs.test != 'IGSH-816 CLEAN'
+        run: zig build --summary all
+      - name: Run selected test
+        if: inputs.test != 'IGSH-816 CLEAN'
+        env:
+          TEST: ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }}
+        shell: pwsh
+        run: |
+          $env:BRIDGE_EXE = Join-Path $env:GITHUB_WORKSPACE 'zig-out/bin/zigshell-bridge.exe'
+          $env:ZIG_EXE = (Get-Command zig).Source
+          node --test $env:TEST
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run desktop tests with inherited render state
+        if: inputs.test == 'IGSH-816 CLEAN'
+        run: zig build test-main --summary all -Dcpu=x86_64_v3
+      - name: Run CLEAN chat pixel tests
+        if: inputs.test == 'IGSH-816 CLEAN' && !cancelled()
+        shell: bash
+        run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+      - name: Require every CLEAN pixel test
+        if: inputs.test == 'IGSH-816 CLEAN' && always()
+        run: node tools/check-clean-chat-output.mjs clean-chat-output.log

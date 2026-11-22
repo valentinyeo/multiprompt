@@ -1,0 +1,445 @@
+const { test } = require('node:test');
+
+const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createHash } = require('node:crypto');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+const root = path.resolve(__dirname, '..');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8')).replace(/\r\n/g, '\n');
+const skill = '.claude/skills/verify-multiprompt/';
+const driver = read(skill + 'control.ps1');
+const workflow = read('.github/workflows/verify.yml');
+const voice = read('src/voice.zig');
+
+function journeyContract(source) {
+  const begin = source.indexOf("        'chat-dictation' {");
+  assert.ok(begin >= 0);
+  const recipe = source.slice(begin, source.indexOf("        'chat-tables' {", begin));
+  let offset = 0;
+  for (const step of [
+    "Select-Theme 'dark'", "Press @(0x12, 0x43)", "Wait-ChatFocus 'Edit'",
+    '$composer.Current.ProcessId -ne $process.Id', '$mic = Get-DictationMic $handle',
+    "Assert-DictationMic $mic $false 'dictation-idle'", "Snapshot 'before'",
+    "foreach ($stop in @('enter', 'ctrl-d', 'mic-click'))",
+    "if ([VerifyNative]::EditText($handle) -cne '') { throw",
+    'Press @(0x11, 0x44)', 'fixture-audio-bytes\\t89160$',
+    "Assert-DictationMic $micLive $true ($stop + '-listening')", 'Type-Text $typed',
+    "[VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1",
+    'GetFocusedWindow($script:window) -ne $handle', "Assert-DictationMic $micLive $true ($stop + '-typed-listening')",
+    "Snapshot 'action'", 'Doctor\n                Assert-Foreground',
+    '$immediate = [Diagnostics.Stopwatch]::StartNew()',
+    "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }",
+    "'mic-click' { [VerifyNative]::ClickClient($script:window,", "$expected = $typed + ' Go forward ten meters.'",
+    "[VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1",
+    '$elapsed = $immediate.ElapsedMilliseconds', 'if ($elapsed -gt 1000) { throw',
+    'WM_GETTEXT = [VerifyNative]::EditText($handle)', "Assert-DictationMic $mic $false ($stop + '-stopped')",
+    "@('audio-bytes\\t89160', 'fixture-response-bytes\\t101', 'http-status\\t200', 'target-chat-composer\\t22')",
+    '.Count -ne $iteration) { throw', "Snapshot ($stop + '-delivered')",
+    "name = ('dictation-' + $stop); passed = $true; typedWhileListening = $typed",
+    'if ($result.checks.Count -ne 3) { throw', "Snapshot 'after'",
+  ]) {
+    const at = recipe.indexOf(step, offset);
+    assert.ok(at >= offset, `missing or misordered ${step}`);
+    offset = at + step.length;
+  }
+  const timed = recipe.slice(recipe.indexOf('$immediate ='), recipe.indexOf('$elapsed ='));
+  assert.equal((timed.match(/::Chord\(/g) || []).length, 2);
+  assert.equal((timed.match(/::ClickClient\(/g) || []).length, 1);
+  assert.doesNotMatch(timed, /Type-Text|Press |Snapshot|Start-Sleep|Get-Content|SetFocus/);
+  assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
+  const geometry = source.slice(source.indexOf('function Get-DictationMic('), source.indexOf('function Wait-ChatFocus('));
+  for (const required of [
+    "[VerifyNative]::Class($Composer) -cne 'Edit'", '$transcript.Current.ProcessId -ne $process.Id',
+    'GetAncestor($transcriptHandle, 2) -ne $script:window', '$left -lt $edit.Right - $origin.X',
+    '[VerifyNative]::GetDpiForWindow($script:window) / 96.0', '::DictationMicPixels(',
+    '$pixels[1] -ge 3', '$pixels[0] -gt $pixels[2] / 2', '$pixels[0] -eq 0',
+  ]) assert.ok(geometry.includes(required), required);
+  const pixels = source.slice(source.indexOf('public static int[] DictationMicPixels('), source.indexOf('public static List<int[]> GreyButtonPixels('));
+  for (const required of ['WindowFromPoint(center) != owner', 'graphics.CopyFromScreen(', 'pixels.Save(output,', 'c.R == 63 && c.G == 83 && c.B == 113', 'active ? 80 : 137', 'active ? 150 : 146', 'active ? 255 : 164']) assert.ok(pixels.includes(required), required);
+}
+
+test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned native Edit text are mandatory', () => {
+  journeyContract(driver);
+  for (const required of [
+    'Press @(0x11, 0x44)', "'enter' { [VerifyNative]::Chord(@(0x0D)) }",
+    "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }", "'mic-click' { [VerifyNative]::ClickClient($script:window,",
+    "Assert-DictationMic $micLive $true ($stop + '-listening')", 'Type-Text $typed',
+    '[VerifyNative]::EditText($handle) -ceq $typed', '[VerifyNative]::EditText($handle) -ceq $expected',
+    'if ($elapsed -gt 1000) { throw', '$pixels[0] -gt $pixels[2] / 2',
+    'WindowFromPoint(center) != owner', '$transcript.Current.ProcessId -ne $process.Id',
+  ]) {
+    const broken = driver.replaceAll(required, 'REMOVED');
+    assert.notEqual(broken, driver, required);
+    assert.throws(() => journeyContract(broken), assert.AssertionError, required);
+  }
+});
+
+test('IGSH-846 Windows journey covers Escape discard and restart through real inputs', () => {
+  const begin = driver.indexOf("            $draft = [VerifyNative]::EditText($handle)", driver.indexOf("        'chat-dictation' {"));
+  const recipe = driver.slice(begin, driver.indexOf("        'chat-tables' {", begin));
+  let offset = 0;
+  for (const step of [
+    "$draft = [VerifyNative]::EditText($handle)",
+    "Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'",
+    "Assert-DictationMic $micLive $true 'escape-listening'", "Type-Text ' keep this'",
+    'Press @(0x1B, 0x1B)', "'\\tcancel\\t0$'", "'\\taudio-bytes\\t89160$'",
+    "Assert-DictationMic $mic $false 'escape-cancelled'",
+    "if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 Escape changed the existing draft' }",
+    "Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'",
+    "Assert-DictationMic $micLive $true 'escape-restarted'",
+    "throw 'IGSH-846 cancelled transcript arrived late'",
+    "throw \"IGSH-846 cancelled recording reached transcription or delivery: $stage\"",
+    "Press @(0x0D) 'Enter: transcribe only the restarted recording'",
+    "$expected = $draft + ' Go forward ten meters.'",
+    "Assert-DictationMic $mic $false 'escape-restart-stopped'",
+    "throw \"IGSH-846 restarted recording did not deliver exactly once: $stage\"",
+    "'escape-restart.text.json'",
+  ]) {
+    const at = recipe.indexOf(step, offset);
+    assert.ok(at >= offset, `missing or misordered ${step}`);
+    offset = at + step.length;
+  }
+  assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
+});
+
+function sendContract(source) {
+  const begin = source.indexOf("            Press @(0x11, 0x41) 'Ctrl+A: select the restarted dictation draft before the send cases'");
+  assert.ok(begin >= 0);
+  const recipe = source.slice(begin, source.indexOf("        'chat-tables' {", begin));
+  let offset = 0;
+  for (const step of [
+    '$send = Get-DictationSend $mic', "foreach ($way in @('send-click', 'ctrl-enter'))",
+    "Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'",
+    "Assert-DictationMic $micLive $true ($way + '-listening')", "$typed = 'typing-' + $way", 'Type-Text $typed',
+    "Snapshot ($way + '-listening')",
+    "'send-click' { [VerifyNative]::ClickClient($script:window,", "'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }",
+    "[VerifyNative]::EditText($handle) -ceq ''",
+    "$expected = $typed + ' Go forward ten meters.'", 'Test-Path $outbox', '$_.t -ceq $expected',
+    "Assert-DictationMic $mic $false ($way + '-stopped')", '$deliveries++', "Snapshot ($way + '-sent')",
+    "name = ('dictation-' + $way)",
+  ]) {
+    const at = recipe.indexOf(step, offset);
+    assert.ok(at >= offset, `missing or misordered ${step}`);
+    offset = at + step.length;
+  }
+  const press = recipe.slice(recipe.indexOf('$immediate ='), recipe.indexOf('$elapsed ='));
+  assert.doesNotMatch(press, /Type-Text|Press |Snapshot|Start-Sleep|SetFocus|PostMessage/);
+  assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
+  const geometry = source.slice(source.indexOf('function Get-DictationSend('), source.indexOf('function Assert-DictationMic('));
+  for (const required of ['$transcript.Current.ProcessId -ne $process.Id', '$left -le $Mic[2]', 'GetDpiForWindow($script:window) / 96.0']) assert.ok(geometry.includes(required), required);
+  const mic = source.slice(source.indexOf('function Get-DictationMic('), source.indexOf('function Get-DictationSend('));
+  assert.ok(mic.includes('- [Math]::Floor(6 * $scale) - $size'));
+}
+
+test('IGSH-965 one press on send or Ctrl+Enter while dictating stops, appends the spoken words and sends them to the session', () => {
+  sendContract(driver);
+  for (const required of ["'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }", '$_.t -ceq $expected', '$send = Get-DictationSend $mic', "[VerifyNative]::EditText($handle) -ceq ''", 'Test-Path $outbox', '- [Math]::Floor(6 * $scale) - $size']) {
+    const broken = driver.replaceAll(required, 'REMOVED');
+    assert.notEqual(broken, driver, required);
+    assert.throws(() => sendContract(broken), assert.AssertionError, required);
+  }
+});
+
+test('IGSH-965 send sits at the far right and the queued send is armed and consumed on the real paths', () => {
+  const composer = read('src/chat_composer.zig');
+  const main = read('src/main.zig');
+  assert.match(composer, /const slots = chatSendSlots\(composer_card, send_size, send_margin, [^\n]*chatComposerHasText\(\) or chat_dictation_state != \.idle\);/);
+  assert.match(composer, /const mic_w = chatDictationMicFit\(chatDictationMicWidth\(chat_dictation_state\), [^\n]*\);\s*const mic_btn = RECT\{\s*\.left = slots\.left - uiScaled\(6\) - mic_w,/);
+  assert.match(composer, /\.right = mic_btn\.left - uiScaled\(12\),/);
+  assert.match(composer, /try std\.testing\.expect\(layout\.send_btn\.left > layout\.mic_btn\.right\);/);
+  assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);
+  const readyStart = voice.indexOf('pub fn handleDictationReady(');
+  const ready = voice.slice(readyStart, readyStart + 6000);
+  assert.match(ready, /const send_queued = app_state\.g_dictation_send_queued\.swap\(false, \.acq_rel\);/);
+  assert.equal((ready.match(/chatDictationSendFlush\(send_queued\)/g) || []).length, 2);
+  assert.match(voice, /pub fn cancelDictation\(\) void \{[^}]*g_dictation_send_queued\.store\(false, \.release\);/);
+  assert.match(composer, /const dictating = dictated\.len > 0 and app_state\.g_dictation_running\.load\(\.acquire\) and\s*std\.mem\.eql\(u8, dictated, app_state\.g_chat_draft_owner\[0\.\.app_state\.g_chat_draft_owner_len\]\);/);
+  const keys = composer.slice(composer.indexOf('fn chatDictationKey('), composer.indexOf('pub fn chatDictationClick('));
+  assert.doesNotMatch(keys, /g_dictation_send_queued/);
+});
+
+function seamContract(source) {
+  const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
+  for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
+  const capture = source.slice(source.indexOf('fn captureDictationPcm('), source.indexOf('fn deepgramTranscribePcm('));
+  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", audio.buf\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) \{[\s\S]*?Sleep\(100\);\s*\}\s*app_state.g_dictation_level.store\(0, .release\);\s*return;/);
+  const transcribe = source.slice(source.indexOf('fn deepgramTranscribePcm('), source.indexOf('fn dictationWorkerThread('));
+  const offline = transcribe.slice(0, transcribe.indexOf('    var key_buf:'));
+  for (const required of ['if (dictationFixtureEnabled())', 'readDictationFixture("goforward.pcm", expected)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'readDictationFixture("response.json", &response)', 'parseDeepgramTranscript(response[0..n], transcript_out)']) assert.ok(offline.includes(required), required);
+  assert.doesNotMatch(offline, /WinHttp|dictationSetTranscript|SetWindowText|chatDraftAppend/);
+  assert.match(source, /if \(!dictationFixtureEnabled\(\) and readDeepgramApiKey\(&key_buf\) == null\)/);
+  const worker = source.slice(source.indexOf('fn dictationWorkerThread('), source.indexOf('pub fn synthesizeCtrlVIntoForeground('));
+  for (const required of ['captureDictationPcm(&audio)', 'deepgramTranscribePcm(audio.slice(), &transcript_utf8)', 'dictationSetTranscriptUtf8(', 'WM_APP_DICTATION_READY']) assert.ok(worker.includes(required), required);
+}
+
+test('IGSH-812 replay replaces only hardware/provider I/O and retains the production worker and parser', () => {
+  seamContract(voice);
+  for (const required of ['"GITHUB_ACTIONS", "true"', '"MULTIPROMPT_NO_LOGIN", "1"', 'readDictationFixture("goforward.pcm", audio.buf)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'parseDeepgramTranscript(response[0..n], transcript_out)', 'captureDictationPcm(&audio)']) {
+    const broken = voice.replaceAll(required, 'REMOVED');
+    assert.notEqual(broken, voice);
+    assert.throws(() => seamContract(broken), assert.AssertionError, required);
+  }
+  assert.match(driver, /\$env:MULTIPROMPT_DICTATION_FIXTURE = \$null\s+if \(\$Feature -eq 'chat-dictation'\)/);
+  assert.match(driver, /'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE'(?:, '[A-Z_]+')*\)\)/);
+});
+
+test('IGSH-812 speech fixture is recorded, pinned, licensed, non-silent PCM with an explicit response stand-in', () => {
+  const base = 'tools/fixtures/IGSH-812/';
+  const pcm = fs.readFileSync(path.join(root, base, 'goforward.pcm'));
+  const source = JSON.parse(read(base + 'source.json'));
+  assert.equal(pcm.length, 89160);
+  assert.equal(createHash('sha256').update(pcm).digest('hex'), source.sha256);
+  assert.equal(source.sha256, 'f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71');
+  assert.match(source.revision, /^[a-f0-9]{40}$/);
+  assert.equal(source.path, 'test/data/goforward.raw');
+  let power = 0;
+  for (let i = 0; i < pcm.length; i += 2) power += pcm.readInt16LE(i) ** 2;
+  assert.ok(Math.sqrt(power / (pcm.length / 2)) > 100);
+  const response = read(base + 'response.json');
+  assert.equal(Buffer.byteLength(response), 101);
+  const transcript = JSON.parse(response).results.channels[0].alternatives[0].transcript;
+  assert.equal(transcript, 'Go forward ten meters.');
+  assert.equal(transcript.length, 22);
+  assert.match(read(base + 'LICENSE.pocketsphinx'), /Redistribution and use/);
+  assert.match(read(base + 'README.md'), /hand-authored provider-format response/);
+});
+
+test('IGSH-812 registration is additive and existing contract checks remain on the Windows workflow', () => {
+  assert.match(driver, /ValidateSet\([^\n]*'chat-dictation'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-dictation'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-dictation'));
+  assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
+  assert.match(workflow, /FEATURE -eq 'chat-dictation' -and \$env:RELEASE_TAG\) \{ throw/);
+  for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
+  const map = read(skill + 'features/chat-dictation.md');
+  assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
+  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'Windows runtime proof']) assert.ok(map.includes(item), item);
+  assert.ok(read(skill + 'features/README.md').includes('](chat-dictation.md)'));
+  assert.ok(read(skill + 'SKILL.md').includes('](features/chat-dictation.md)'));
+  assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| Windows proof recorded/);
+});
+
+test('IGSH-893 audit evidence serializes plain lines within five seconds after Windows PowerShell initialization', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dictation-audit-'));
+  try {
+    const auditPath = path.join(directory, 'dictation-audit.log');
+    const lines = ['123\tfixture-audio-bytes\t89160', '124\ttarget-chat-composer\t22'];
+    fs.writeFileSync(auditPath, lines.join('\n'));
+    const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
+    assert.ok(auditRead, 'production audit read exists');
+    const helper = driver.slice(driver.indexOf('function Read-DictationAudit('), driver.indexOf('function Get-DictationMic('));
+    const script = `$ErrorActionPreference = 'Stop'
+${helper}
+$auditPath = $env:AUDIT_PATH
+$held = [IO.File]::Open($auditPath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try { $audit = ${auditRead[1]} } finally { $held.Dispose() }
+if ((ConvertTo-Json -InputObject @{} -Compress) -cne '{}') { throw 'JSON serializer precondition failed' }
+Write-Host ('AUDIT_READ_READY type=' + $audit[0].GetType().FullName + ' properties=' + ($audit[0].PSObject.Properties.Name -join ','))
+foreach ($line in $audit) {
+    if ($line -isnot [string] -or ($line.PSObject.Properties.Name -join ',') -cne 'Length') { throw 'Audit line has provider metadata' }
+}
+$process = [Diagnostics.Process]::GetCurrentProcess()
+$cpu = $process.TotalProcessorTime.TotalMilliseconds
+$cold = [Diagnostics.Stopwatch]::StartNew()
+$warmup = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress
+Write-Host ('COLD_SERIALIZATION_MS=' + $cold.ElapsedMilliseconds)
+$process.Refresh()
+Write-Host ('COLD_CPU_MS=' + ($process.TotalProcessorTime.TotalMilliseconds - $cpu))
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$json = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress
+Write-Host ('SERIALIZATION_MS=' + $clock.ElapsedMilliseconds)
+if ($json -cne $warmup) { throw 'Warmup changed audit evidence' }
+Write-Output $json`;
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.equal(result.error, undefined, JSON.stringify({ error: result.error?.message, stdout: result.stdout, stderr: result.stderr, expression: auditRead[1] }));
+    assert.equal(result.status, 0, result.stderr);
+    console.log(result.stdout);
+    const elapsed = result.stdout.match(/^SERIALIZATION_MS=(\d+)/m);
+    assert.ok(elapsed, result.stdout);
+    assert.ok(Number(elapsed[1]) < 5000, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout.split(/^SERIALIZATION_MS=\d+\s*/m)[1]).audit, lines);
+    const broken = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script.replace(auditRead[1], '@(Get-Content $auditPath)')], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.match(broken.stdout, /AUDIT_READ_READY[^\n]*PSPath/);
+    assert.equal(broken.error, undefined, broken.error?.message);
+    assert.notEqual(broken.status, 0, broken.stdout);
+    assert.match(broken.stderr, /Audit line has provider metadata/);
+    console.log('DICTATION_OLD_PROVIDER_METADATA_REJECTED');
+    console.log('DICTATION_AUDIT_SERIALIZATION_OK');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-893 a stalled precondition fails within its named timeout', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const start = driver.indexOf('function Wait-Until(');
+  const wait = driver.slice(start, driver.indexOf('\nfunction ', start + 1));
+  const script = `$ErrorActionPreference = 'Stop'; $process = $null; ${wait}
+    try { Wait-Until { $false } 'deliberately stalled recorded PCM capture precondition' -Seconds 1 -PollMilliseconds 20; throw 'Stall unexpectedly passed' }
+    catch { if ($_.Exception.Message -notlike 'Waited 1 s for deliberately stalled recorded PCM capture precondition.*') { throw }; Write-Output 'DICTATION_STALL_TIMEOUT_OK' }`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 5000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /DICTATION_STALL_TIMEOUT_OK/);
+});
+
+
+test('IGSH-1072 queued composer shortcuts read message-time modifiers after physical release', () => {
+  const composer = read('src/chat_composer.zig');
+  const dispatch = composer.slice(composer.indexOf('fn chatComposerSubclassCore('), composer.indexOf('    if (chatImagePasteIntercept(msg, wp))', composer.indexOf('fn chatComposerSubclassCore(')));
+  assert.doesNotMatch(dispatch, /GetAsyncKeyState|isCtrlDown\(/);
+  assert.match(dispatch, /GetKeyState\(0x11\)/);
+  assert.match(dispatch, /GetKeyState\(0x10\)/);
+  assert.match(dispatch, /GetKeyState\(@as\(i32, VK_MENU\)\)/);
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release"'));
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+A selects the full dictation draft"'));
+  assert.ok(composer.includes('SetKeyboardState(&queued)'));
+});
+
+test('IGSH-1072 branch build identity is embedded and independently checked by the native journey', () => {
+  assert.match(workflow, /name: Identify branch executable[\s\S]*?git rev-parse HEAD[\s\S]*?VERIFY_VERSION=/);
+  assert.match(workflow, /run: zig build[^\n]*-Dversion="\$\{\{ env\.VERIFY_VERSION \}\}"/);
+  assert.match(workflow, /version = \$env:VERIFY_VERSION/);
+  const identity = workflow.slice(workflow.indexOf('      - name: Identify branch executable'), workflow.indexOf('      - name: Build branch executable'));
+  assert.match(identity, /git describe --tags --match 'v\[0-9\]\*' --abbrev=0 HEAD/);
+  assert.match(identity, /VERIFY_REVISION=\$revision/);
+  assert.doesNotMatch(identity, /-verify\.|\$version = [^\n]*\$env:FEATURE/);
+  assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
+  assert.match(workflow, /\$embeddedRevision -cne \$revision -or -not \$binary\.Contains\("MPREVISION=\$revision;"\)/);
+  assert.match(workflow, /if \(-not \$binary\.Contains\("MPVERSION=\$version;"\)\) \{ throw 'Executable version mismatch' \}/);
+  const build = read('build.zig');
+  assert.match(build, /revision_marker = b\.fmt\("MPREVISION=\{s\};", \.\{build_revision orelse ""\}\)/);
+  assert.match(build, /pub export const mp_revision_marker:/);
+  assert.match(build, /std\.zig\.fmtString\(revision_marker\)/);
+  for (const executable of ['exe', 'dev_exe']) {
+    assert.ok(build.includes(`${executable}.root_module.addObject(revision_object)`));
+  }
+  assert.match(driver, /Executable build\/version marker mismatch/);
+  assert.match(driver, /Doctor: executable version mismatch/);
+});
+
+test('IGSH-1072 executable resolver rejects stale revisions and wrong versions before any journey', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Resolve real executable[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const revision = 'a'.repeat(40);
+  const version = '1.2.3';
+  for (const [marker, expectedError, expectedRevision = revision] of [
+    [`MPVERSION=${version};MPREVISION=${revision};`, ''],
+    [`MPVERSION=${version};MPREVISION=${revision};`, 'Executable source revision mismatch', 'b'.repeat(40)],
+    [`MPVERSION=${version};MPREVISION=${'b'.repeat(40)};`, 'Executable source revision mismatch'],
+    [`MPVERSION=9.9.9;MPREVISION=${revision};`, 'Executable version mismatch'],
+    [`MPVERSION=${version};`, 'Executable source revision mismatch'],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-identity-'));
+    try {
+      fs.mkdirSync(path.join(directory, 'zig-out', 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'multiprompt.exe'), marker);
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
+        cwd: directory,
+        env: { ...process.env, FEATURE: '', RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: expectedRevision, GITHUB_ENV: path.join(directory, 'github-env') },
+        encoding: 'utf8',
+      });
+      assert.ifError(result.error);
+      if (expectedError) {
+        assert.notEqual(result.status, 0, marker);
+        assert.ok((result.stdout + result.stderr).includes(expectedError), result.stdout + result.stderr);
+        assert.equal(fs.existsSync(path.join(directory, 'evidence', 'build.json')), false);
+      } else {
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const build = JSON.parse(fs.readFileSync(path.join(directory, 'evidence', 'build.json'), 'utf8').replace(/^\uFEFF/, ''));
+        assert.equal(build.revision, revision);
+        assert.equal(build.embeddedRevision, revision);
+        assert.equal(build.version, version);
+        assert.equal(build.sha256, createHash('sha256').update(marker).digest('hex'));
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('IGSH-1103 generated failure and update results retain verified executable identity', () => {
+  const retain = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1];
+  const generated = retain.split('\n').filter(line => line.includes('@{ feature = '));
+  assert.equal(generated.length, 2);
+  for (const line of generated) {
+    assert.match(line, /version = \$env:VERIFY_VERSION;/);
+    assert.match(line, /sha256 = \$env:VERIFY_SHA256;/);
+  }
+});
+
+const powershellHost = process.platform === 'win32' ? 'powershell' : 'pwsh';
+const powershellAvailable = require('node:child_process').spawnSync(powershellHost, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0']).status === 0;
+
+test('IGSH-1103 retained results preserve failure details and actual executable identity', { skip: !powershellAvailable }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const version = '1.2.3';
+  const sha256 = createHash('sha256').update('resolved executable').digest('hex');
+  const existing = { feature: 'appearance', status: 'failed', version, sha256, checks: [{ name: 'native-crash', passed: false }], error: 'original failure', cleanup: 'original cleanup' };
+  for (const [feature, result, update, resolved = true] of [
+    ['chat-messages-only', null, null],
+    ['chat-delivery', null, null],
+    ['appearance', existing, null],
+    ['appearance', { ...existing, status: 'passed' }, null],
+    ['safe-updates', null, { success: false, checks: [{ name: 'rollback', passed: false }], cleanup: 'fixture cleanup' }],
+    ['safe-updates', null, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
+    ['safe-updates', { feature: 'safe-updates', status: 'passed', version, sha256, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
+    ['appearance', null, null, false],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-retained-identity-'));
+    try {
+      const evidence = path.join(directory, 'evidence');
+      fs.mkdirSync(evidence);
+      if (result) fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result));
+      if (update) fs.writeFileSync(path.join(evidence, 'safe-updates.json'), JSON.stringify(update));
+      const run = spawnSync(powershellHost, ['-NoProfile', '-NonInteractive', '-Command', script], {
+        cwd: directory,
+        env: { ...process.env, FEATURE: feature, VERIFY_VERSION: resolved ? version : '', VERIFY_SHA256: resolved ? sha256 : '' },
+        encoding: 'utf8',
+      });
+      assert.ifError(run.error);
+      assert.equal(run.status, 0, run.stdout + run.stderr);
+      const retained = JSON.parse(fs.readFileSync(path.join(evidence, 'result.json'), 'utf8').replace(/^\uFEFF/, ''));
+      if (result) {
+        assert.deepEqual(retained, result);
+      } else {
+        assert.equal(retained.feature, feature);
+        assert.equal(retained.version || '', resolved ? version : '');
+        assert.equal(retained.sha256 || '', resolved ? sha256 : '');
+        assert.equal(retained.status, 'failed');
+        if (update) {
+          assert.match(retained.error, /stopped before its final check/);
+          assert.deepEqual(retained.checks, update.checks);
+          assert.equal(retained.cleanup, update.cleanup);
+        } else {
+          assert.match(retained.error, /Workflow failed before the harness produced a result/);
+          assert.match(retained.cleanup, /disposable runner teardown/);
+          if (feature === 'chat-delivery') {
+            assert.deepEqual(retained.cases.map(item => item.name), ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone']);
+            assert.ok(retained.cases.every(item => item.passed === false));
+          }
+        }
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});

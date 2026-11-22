@@ -1,0 +1,1738 @@
+import ctypes
+from ctypes import wintypes
+import datetime
+import json
+import importlib.util
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+import time
+import uuid
+
+ROOT = Path(os.environ["MP_VERIFY_STATE"])
+MODE = sys.argv[1]
+ARGS = sys.argv[2:]
+
+
+def state():
+    value = json.loads((ROOT / "state.json").read_text(encoding="utf-8-sig"))
+    if value.get("binding"):
+        value["bindingStatus"] = not (ROOT / "binding-status-hidden").exists()
+    return value
+
+
+def record(file, **values):
+    row = dict(ms=time.time_ns() // 1000000, pid=os.getpid(), case=state()["name"], **values)
+    data = (json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8")
+    if file == "invocations.jsonl" and values.get("kind") == "reader" and "--watch" in values.get("argv", []):
+        witnesses = ROOT / "reader-subscriptions"
+        witnesses.mkdir(exist_ok=True)
+        (witnesses / (uuid.uuid4().hex + ".json")).write_bytes(data)
+    with (ROOT / file).open("ab", buffering=0) as output:
+        output.write(data)
+
+
+BOX_WIDTH = 30
+
+
+def box_rows(buffer):
+    rows = []
+    for line in buffer.split("\n"):
+        rows.extend([line[i:i + BOX_WIDTH] for i in range(0, len(line), BOX_WIDTH)] or [""])
+    return rows
+
+
+def stateful(value):
+    return "leftover" in value or value["mode"] == "idle"
+
+
+def box_buffer():
+    file = ROOT / "box.json"
+    if file.exists():
+        return json.loads(file.read_text(encoding="utf-8"))["buffer"]
+    value = state()
+    return value["leftover"] + "\n" if "leftover" in value else ""
+
+
+def ctrl_u(buffer):
+    if not buffer or buffer.endswith("\n"):
+        return buffer[:-1]
+    start = buffer.rfind("\n") + 1
+    rel = len(buffer) - start
+    row = rel // BOX_WIDTH - (1 if rel % BOX_WIDTH == 0 else 0)
+    return buffer[:start + row * BOX_WIDTH]
+
+
+def ctrl_k(buffer, cursor):
+    if cursor >= len(buffer):
+        return buffer
+    if buffer[cursor] == "\n":
+        return buffer[:cursor] + buffer[cursor + 1:]
+    start = buffer.rfind("\n", 0, cursor) + 1
+    stop = start + ((cursor - start) // BOX_WIDTH + 1) * BOX_WIDTH
+    newline = buffer.find("\n", cursor)
+    if newline != -1:
+        stop = min(stop, newline)
+    return buffer[:cursor] + buffer[stop:]
+
+
+def screen(value, buffer=None):
+    if value.get("binding"):
+        status = "[workspace] 0:bash*" if value.get("bindingStatus") else "Status temporarily hidden"
+        return "Named terminal: workspace\nExisting conversation sentinel\n\n" + status + "\n"
+    head = "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n"
+    if stateful(value):
+        if buffer is None:
+            buffer = value["leftover"] + "\n" if "leftover" in value else ""
+        rows = box_rows(buffer) if buffer else [value["suggestion"] if value["mode"] == "idle" else ""]
+        return head + "\u276f " + rows[0] + "\n" + "".join("  " + row + "\n" for row in rows[1:]) + "\u2500" * 50 + "\n"
+    return head + "\u276f " + (value["suggestion"] if value["mode"] == "idle" else "") + "\n" + "\u2500" * 50 + "\n"
+
+
+SGR_DIM = "\x1b[2m"
+SGR_RESET = "\x1b[0m"
+FAKE_LOCK = ROOT / "claude.lock"
+
+
+def fake_locked(action):
+    deadline = time.time() + 10
+    while True:
+        try:
+            handle = os.open(FAKE_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError):
+            try:
+                if time.time() - FAKE_LOCK.stat().st_mtime > 5:
+                    FAKE_LOCK.unlink()
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise TimeoutError("fake Claude lock")
+            time.sleep(0.01)
+    try:
+        return action()
+    finally:
+        os.close(handle)
+        for _ in range(200):
+            try:
+                FAKE_LOCK.unlink()
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError:
+                time.sleep(0.01)
+
+
+def fake_read():
+    return json.loads((ROOT / "claude.json").read_text(encoding="utf-8"))
+
+
+def fake_write(claude):
+    (ROOT / "claude.json").write_text(json.dumps(claude, ensure_ascii=True), encoding="utf-8")
+
+
+def fake_suggestion_shown(claude):
+    return bool(claude["suggestion"]) and claude["mode"] == "idle" and not claude["box"]
+
+
+def fake_screen(claude, escapes):
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        rows = ["Claude Code", "", "☐ " + question["header"], question["question"], ""]
+        for index, option in enumerate(question["options"], 1):
+            mark = "☒ " if index in claude.get("question_selected", []) else "☐ " if question.get("multiSelect") else ""
+            cursor = "❯ " if index == 1 else "  "
+            rows.extend([f"{cursor}{index}. {mark}{option['label']}", "     " + option.get("description", "")])
+        rows += [f"  {len(question['options']) + 1}. Type something.", "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
+        if claude.get("question_other"):
+            rows.append("❯ " + claude["box"])
+        return "\n".join(rows) + "\n"
+    lines = ["Hax" if claude.get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    for question, answer in claude.get("turns", []):
+        lines.extend(["❯ " + question, "● " + answer, ""])
+    lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
+    rows = claude["box"].split("\n") if claude["box"] else [""]
+    first = rows[0]
+    if fake_suggestion_shown(claude):
+        first = SGR_DIM + claude["suggestion"] + SGR_RESET if escapes else claude["suggestion"]
+    lines += ["❯ " + first, *("  " + row for row in rows[1:]), "─" * 50]
+    return "\n".join(lines) + "\n"
+
+
+def fake_stamp():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def fake_event(kind, **fields):
+    value = state()
+    row = dict(type=kind, timestamp=fake_stamp(), sessionId=value["sid"])
+    if kind != "queue-operation":
+        row.update(uuid=str(uuid.uuid4()), isSidechain=False)
+    row.update(fields)
+    if kind == "assistant" and state().get("name") == "cancel-held":
+        row["message"]["stop_reason"] = "end_turn"
+    data = (json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8")
+    with open(value["transcript"], "ab", buffering=0) as output:
+        output.write(data)
+
+
+def fake_queue_event(operation, content=None, **extra):
+    fields = dict(operation=operation, **extra)
+    if content is not None:
+        fields["content"] = content
+    fake_event("queue-operation", **fields)
+
+
+def fake_submit(claude, text):
+    if claude["mode"] == "busy":
+        claude["queue"].append(text)
+        fake_queue_event("enqueue", text)
+    else:
+        fake_event("user", message=dict(role="user", content=text))
+        if state().get("name") == "cancel-held":
+            fake_event("assistant", message=dict(role="assistant", id="reply_" + uuid.uuid4().hex, content=[dict(type="text", text="Received " + text)]))
+            claude.setdefault("turns", []).append([text, "Received " + text])
+        elif state().get("name") == "reactions" and text == "What should I do next?":
+            fake_event("assistant", message=dict(role="assistant", id="msg_followup", content=[dict(type="text", text="The next answer stays visible after reacting.")]))
+
+
+def fake_take(claude):
+    first = True
+    while claude["queue"]:
+        text = claude["queue"].pop(0)
+        if first:
+            fake_queue_event("remove", text, reason="absorbed_mid_turn")
+        else:
+            fake_queue_event("dequeue")
+        first = False
+        fake_event("attachment", attachment=dict(type="queued_command", prompt=text, commandMode="prompt"))
+    fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="Done with the queued messages.")]))
+    claude["mode"] = "idle"
+
+
+def fake_question_done(claude, labels):
+    question = claude["question"]["questions"][claude["question_index"]]
+    record("question-answers.jsonl", question=question["question"], labels=labels)
+    claude["question_index"] += 1
+    claude["question_selected"] = []
+    claude["question_other"] = False
+    if claude["question_index"] == len(claude["question"]["questions"]):
+        fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=claude["question_id"], content="answers received")]))
+        claude["question"] = None
+
+
+def fake_key(claude, key):
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        if claude.get("question_other"):
+            if key == "Enter":
+                fake_question_done(claude, [claude["box"]])
+                claude["box"] = ""
+                return True
+        elif len(key) == 1 and key.isdigit():
+            index = int(key)
+            if index == len(question["options"]) + 1:
+                claude["question_other"] = True
+            elif 1 <= index <= len(question["options"]):
+                if question.get("multiSelect"):
+                    selected = claude["question_selected"]
+                    selected.remove(index) if index in selected else selected.append(index)
+                else:
+                    fake_question_done(claude, [question["options"][index - 1]["label"]])
+            else:
+                return False
+            return True
+        elif key == "Enter" and question.get("multiSelect"):
+            fake_question_done(claude, [question["options"][i - 1]["label"] for i in sorted(claude["question_selected"])])
+            return True
+    if key == "Enter":
+        if claude["box"]:
+            text, claude["box"] = claude["box"], ""
+            fake_submit(claude, text)
+    elif key == "C-u":
+        claude["box"] = ""
+    elif key == "Up":
+        if claude["queue"]:
+            queued = list(claude["queue"])
+            fake_queue_event("popAll", "\n".join(queued))
+            claude["box"] = "\n".join(queued + ([claude["box"]] if claude["box"] else []))
+            claude["queue"] = []
+    elif key == "BSpace":
+        claude["box"] = claude["box"][:-1]
+    elif key == "Space":
+        claude["box"] += " "
+    elif key not in ("C-x", "C-s"):
+        return False
+    return True
+
+
+def fake_run(origin, op, argv, change):
+    def run():
+        claude = fake_read()
+        outcome = change(claude)
+        fake_write(claude)
+        record("frames.jsonl", origin=origin, op=op, argv=argv, mode=claude["mode"], queue=claude["queue"], box=claude["box"],
+               suggestionShown=fake_suggestion_shown(claude), screen=fake_screen(claude, False), escaped=fake_screen(claude, True))
+        return outcome
+    return fake_locked(run)
+
+
+def fake_send(argv):
+    literal = False
+    keys = []
+    index = 1
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "-t":
+            index += 2
+        elif argument == "-l":
+            literal = True
+            index += 1
+        elif argument == "--":
+            keys = argv[index + 1:]
+            break
+        else:
+            keys.append(argument)
+            index += 1
+
+    def change(claude):
+        supported = True
+        for key in keys:
+            if literal:
+                claude["box"] += key
+            elif not fake_key(claude, key):
+                supported = False
+        return supported
+    return fake_run("app", "send-keys", argv, change)
+
+
+def hax_init(value):
+    for index, name in enumerate(value["sessions"]):
+        sid = f"11111111-1111-4111-8111-{index + 1:012d}"
+        transcript = Path(value["home"]) / ".local/state/hax/sessions/shared-runners" / f"2026-01-01T00-00-00Z_{sid}.jsonl"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type="session", version=1, id=sid, timestamp="2026-01-01T00:00:00Z", cwd=value["cwd"], provider="codex", model="neutral")]
+        if name != "runner-empty":
+            events += [dict(kind="user", text=f"IGSH1043 runner {index} question"), dict(kind="assistant", text=f"IGSH1043 runner {index} saved reply")]
+        transcript.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+        pid = value["panes"][name]
+        process = Path(value["procRoot"]) / str(pid)
+        (process / "fd").mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (hax) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"hax\0-p\0neutral\0")
+        os.symlink(transcript, process / "fd/3")
+    fake_write(dict(hax=True, mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
+def fake_init():
+    value = state()
+    if value.get("hax"):
+        return hax_init(value)
+    pane = str(value["panePid"])
+    for target in (value["transcript"], value["meta"]):
+        Path(target).parent.mkdir(parents=True, exist_ok=True)
+    Path(value["transcript"]).write_bytes(b"")
+    Path(value["meta"]).write_text(json.dumps(dict(sessionId=value["sid"], cwd=value["cwd"], pid=value["panePid"])), encoding="utf-8")
+    process = Path(value["procDir"])
+    process.mkdir(parents=True, exist_ok=True)
+    (process / "stat").write_text(pane + " (claude) S 1 " + pane + " " + pane + " 0 -1", encoding="utf-8")
+    (process / "cmdline").write_bytes(b"claude\0")
+    fake_write(dict(mode=value["mode"], box="", queue=[], suggestion=value["suggestion"]))
+    if value.get("name") == "reactions":
+        fake_event("user", message=dict(role="user", content="start the reaction session"))
+        prefix = "Same first words " + "for this example " * 8
+        for identity, suffix in (("msg_first", "FIRST REPLY"), ("msg_second", "SECOND REPLY")):
+            fake_event("assistant", message=dict(role="assistant", id=identity, content=[dict(type="text", text=prefix + "\n\n" + suffix + " ✓ ⚠ 👍 👍🏽 👨‍👩‍👧 ❤️")]))
+        return 0
+    fake_event("user", message=dict(role="user", content=("Please outline the next steps for this sample project. We need clear details and readable messages that wrap naturally within the centered chat column. Please include the implementation order, the checks to run, and how to confirm the result in both wide and narrow views. Width sample: " + "M" * 100 if os.environ.get("CHAT_WIDTH_PROOF") == "1" else "start the fake session")))
+    fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=("The fake session is ready. Here is a sample reply with enough detail to wrap across several lines. Both sides should stay comfortably inside the chat column as the window becomes narrower. Width sample: " + "M" * 100 if os.environ.get("CHAT_WIDTH_PROOF") == "1" else "The fake session is ready."))]))
+    return 0
+
+
+def session_names():
+    return state().get("sessions") or ["verify-agent"]
+
+
+def seed_event(handle, sid, kind, **fields):
+    row = dict(type=kind, timestamp=fake_stamp(), sessionId=sid, uuid=str(uuid.uuid4()), isSidechain=False)
+    row.update(fields)
+    handle.write((json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8"))
+
+
+SEED_PARAGRAPH = "This paragraph stands in for a long assistant answer with enough words to wrap across several lines of the chat column, so every message needs real text layout work when the transcript is shown. "
+
+
+def fake_seed_many(rounds):
+    value = state()
+    home = Path(value["home"])
+    for index, name in enumerate(value["sessions"]):
+        pid = value["panes"][name]
+        sid = value["sids"][name]
+        cwd = value.get("cwds", {}).get(name, f"C:/verify/work{index}")
+        transcript = home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd) / f"{sid}.jsonl"
+        meta = home / ".claude" / "sessions" / f"{pid}.json"
+        process = Path(value["procRoot"]) / str(pid)
+        for target in (transcript, meta):
+            target.parent.mkdir(parents=True, exist_ok=True)
+        meta.write_text(json.dumps(dict(sessionId=sid, cwd=cwd, pid=pid)), encoding="utf-8")
+        process.mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (claude) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"claude\0")
+        with open(transcript, "wb") as output:
+            for r in range(rounds):
+                seed_event(output, sid, "user", message=dict(role="user", content=f"Session {index} question {r}: please explain the next step in detail and show the checks to run."))
+                body = f"Session {index} answer {r}\n\n" + (SEED_PARAGRAPH * 3 + "\n\n") * 3
+                body += "- first point with some explanatory words\n- second point with some explanatory words\n- third point with some explanatory words\n\n"
+                body += "```python\n" + "".join(f"value_{k} = compute({k}, {r})\n" for k in range(8)) + "```\n"
+                if r % 10 == 0:
+                    body += "\n| name | value |\n| --- | --- |\n" + "".join(f"| row {k} | {k * r} |\n" for k in range(5))
+                seed_event(output, sid, "assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=body)]))
+                identity = f"seed-{index}-{r}"
+                seed_event(output, sid, "assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo seeded"))]))
+                seed_event(output, sid, "user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="seeded tool output " * 100, is_error=False)]))
+    fake_write(dict(mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
+RECOVERY_TEXTS = {
+    "recovery-head": "RECOVERY_HEAD_".ljust(200, "h") + " ",
+    "pending-one": "PENDING_ONE",
+    "pending-two": "PENDING_TWO",
+    "accepted-fourth": "ACCEPTED_FOURTH",
+}
+
+
+RECOVERY_IDS = dict(zip(RECOVERY_TEXTS, ("desktop-101", "desktop-102", "desktop-103", "desktop-104")))
+
+
+def recovery_queue():
+    import hashlib
+    return Path(os.environ["HOME"]) / ".local/state/multiprompt/held-messages" / hashlib.sha256(b"verify-agent").hexdigest() / "queue.sqlite3"
+
+
+def recovery_snapshot():
+    import sqlite3
+    value = state()
+    path = Path(value["transcript"])
+    info = path.stat()
+    with sqlite3.connect(recovery_queue().resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as db:
+        db.row_factory = sqlite3.Row
+        rows = [dict(row) for row in db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created")]
+        claims = [dict(row) for row in db.execute("SELECT sid,inode,offset,key,digest FROM held_receipts ORDER BY offset")]
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+    return dict(sid=value["sid"], inode=info.st_ino, source_bytes=info.st_size,
+                schema_version=version, rows=rows, claims=claims, screen=fake_screen(fake_read(), False))
+
+
+def recovery_fixture(op):
+    import sqlite3
+    value = state()
+    path = Path(value["transcript"])
+    queue = recovery_queue()
+    if op == "recovery-init":
+        queue.parent.mkdir(parents=True, exist_ok=True)
+        if queue.exists():
+            raise ValueError("recovery queue must be fresh")
+        info = path.stat()
+        with sqlite3.connect(queue) as db:
+            db.execute("CREATE TABLE messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, scan INTEGER NOT NULL DEFAULT 0, origin INTEGER NOT NULL, source_inode INTEGER NOT NULL, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, recovery_scan INTEGER)")
+            db.execute("CREATE TABLE held_receipts (sid TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(sid,inode,offset))")
+            for index, (key, text) in enumerate(RECOVERY_TEXTS.items(), 1):
+                db.execute("INSERT INTO messages(key,sid,text,queued_at,state,scan,origin,source_inode,created,recovery_scan) VALUES (?,?,?,?,?,?,?,?,?,NULL)",
+                           (RECOVERY_IDS[key], value["sid"], text, time.time_ns() // 1000000 + index, "submitted" if index == 1 else "queued", info.st_size, info.st_size, info.st_ino, index))
+            db.execute("PRAGMA user_version=1")
+        fake_run("shell", op, [], lambda claude: claude.__setitem__("box", "unsent terminal draft") is None)
+        return 0
+    if op == "recovery-accept":
+        with sqlite3.connect(queue, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE messages SET recovery_scan=NULL")
+            db.execute("PRAGMA user_version=1")
+            rows = db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created").fetchall()
+            origin = path.stat().st_size
+            (ROOT / "recovery-source-before.jsonl").write_bytes(path.read_bytes())
+            fake_event("user", message=dict(role="user", content=RECOVERY_TEXTS["recovery-head"].rstrip(" ")))
+            with path.open("ab") as output:
+                padding = (json.dumps(dict(type="system", sessionId=value["sid"], message="padding" * 128)) + "\n").encode()
+                output.write(padding * (512 * 1024 // len(padding) + 2))
+            fake_event("user", message=dict(role="user", content=RECOVERY_TEXTS["accepted-fourth"]))
+            end = path.stat().st_size
+            (ROOT / "recovery-source-appended.jsonl").write_bytes(path.read_bytes())
+            db.execute("UPDATE messages SET scan=?", (end,))
+            record("recovery-event.jsonl", legacy_rows=rows, origin=origin, eof=end, inode=path.stat().st_ino, appended_rows=db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created").fetchall())
+        return 0
+    if op == "recovery-snapshot":
+        print(json.dumps(recovery_snapshot()))
+        return 0
+    raise ValueError("unknown recovery fixture operation")
+
+
+def shell():
+    op = ARGS[0] if ARGS else ""
+    if op == "history-refresh":
+        fake_event("progress", data=dict(type="hook_progress", hookName="history-refresh"))
+        return 0
+    if op == "resume" and len(ARGS) == 2:
+        value = state()
+        value["sid"] = ARGS[1]
+        value["transcript"] = str(Path(value["transcript"]).with_name(value["sid"] + ".jsonl"))
+        (ROOT / "state.json").write_text(json.dumps(value), encoding="utf-8")
+        return fake_init()
+    if op == "turn" and len(ARGS) == 2:
+        question, answer = "Remote question " + ARGS[1], "Remote answer " + ARGS[1]
+        fake_event("user", message=dict(role="user", content=question))
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "refresh-live-tail":
+        path = Path(state()["transcript"])
+        with path.open("r+b", buffering=0) as transcript:
+            first = transcript.read(1)
+            transcript.seek(0)
+            transcript.write(first)
+        record("tail-refreshes.jsonl", bytes=path.stat().st_size)
+        return 0
+    if op == "live-turn" and len(ARGS) == 2:
+        def complete(claude):
+            accepted = list(claude["queue"])
+            fake_take(claude)
+            answer = "Live answer " + ARGS[1]
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
+            claude.setdefault("turns", []).append([" | ".join(accepted), answer])
+            if state().get("longChatProof"):
+                claude["mode"] = "busy"
+            record("live-turns.jsonl", turn=int(ARGS[1]), accepted=accepted, answer=answer)
+            return True
+        return 0 if fake_run("shell", op, ARGS, complete) else 3
+    if op == "detach-console":
+        (ROOT / "console-detached").touch()
+        return 0
+    if op == "init":
+        return fake_init()
+    if op in ("recovery-init", "recovery-accept", "recovery-snapshot"):
+        return recovery_fixture(op)
+    if op == "resync-init":
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Before resync")]))
+        result = fake_run("shell", op, ARGS, lambda claude: fake_submit(claude, "stale waiting message") is None)
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Stable trailing source boundary. " * 12)]))
+        return 0 if result else 3
+    if op == "resync-rewrite":
+        path = Path(state()["transcript"])
+        before = path.read_bytes()
+        stat = path.stat()
+        after = before.replace(b"Before resync", b"After  resync").replace(b'"enqueue"', b'"dequeue"')
+        if before == after or len(before) != len(after):
+            raise ValueError("Resync fixture must change content without changing cursor")
+        with path.open("r+b") as file:
+            file.write(after)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        record("resync-rewrite.jsonl", bytes=len(after), before=before.decode(), after=after.decode())
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.__setitem__("queue", []) is None) else 3
+    if op == "reply-reference":
+        original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))
+        for i in range(20):
+            fake_event("user", message=dict(role="user", content=f"Intervening question {i}"))
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=f"Intervening answer {i}")]))
+        quoted = "\n".join("> " + line for line in original.split("\n"))
+        fake_event("user", message=dict(role="user", content=quoted + "\n\nMy compact answer"))
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Reply received.")]))
+        return 0
+    if op == "session-notes":
+        senders = ["Hax Runner 10", "Chief Of Staff", "Poteto", "hax-runner-6", "hax-runner-2"]
+        for sender in senders:
+            body = "IGSH-975 native journey is now fully green. " + "Details follow in a very long machine message that used to fill the whole screen. " * 6 + "Run: https://example.com/run"
+            fake_event("user", message=dict(role="user", content=f"[from {sender}] {body}"))
+        return 0
+    if op == "question" and len(ARGS) == 2:
+        payload = json.loads(Path(ARGS[1]).read_text(encoding="utf-8"))
+        identity = "question-" + uuid.uuid4().hex
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="tool_use", id=identity, name="AskUserQuestion", input=payload)]))
+        def ask(claude):
+            claude.update(question=payload, question_id=identity, question_index=0, question_selected=[], question_other=False)
+            return True
+        return 0 if fake_run("shell", op, ARGS, ask) else 3
+    if op == "plain-list":
+        text = "I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets"
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=text)]))
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append(["Three separate questions", text]) is None) else 3
+    if op == "seed-many" and len(ARGS) == 2:
+        return fake_seed_many(int(ARGS[1]))
+    if op == "seed-shapes" and len(ARGS) == 2:
+        spec = importlib.util.spec_from_file_location("chat_shapes", Path(__file__).with_name("chat-shapes.py"))
+        shapes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shapes)
+        fake_seed_many(0)
+        shapes.seed(ARGS[1], ROOT / "state.json")
+        return 0
+    if op == "messages" and len(ARGS) == 2:
+        body = "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32
+        if state().get("name") == "reactions":
+            body = body.replace("\n\n", " ✓ ⚠ 👍\n\n")
+        for i in range(int(ARGS[1])):
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + body)]))
+        return 0
+    if op in ("retention-init", "retention-burst"):
+        count = 1998 if op == "retention-init" else int(ARGS[1])
+        counter = ROOT / "retention-count"
+        start = int(counter.read_text()) if counter.exists() else 0
+        for i in range(start, start + count):
+            fake_event("assistant", message=dict(role="assistant", id=f"retention-{i}", content=[dict(type="text", text=f"IGSH934 message {i:05d}")]))
+        counter.write_text(str(start + count))
+        transcript = Path(state()["transcript"])
+        with (ROOT / "retention-expected.jsonl").open("ab") as output:
+            rows = transcript.read_bytes().splitlines(keepends=True)
+            output.write(b"".join(rows if op == "retention-init" else rows[-count:]))
+        return 0
+    if op == "retention-reset" or (op == "forget-message" and len(ARGS) == 2):
+        transcript = Path(state()["transcript"])
+        rows = transcript.read_bytes().splitlines(keepends=True)
+        if op == "forget-message":
+            kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
+            if len(kept) != len(rows) - 1:
+                raise ValueError("Expected one source message to disappear")
+        else:
+            kept = rows[-20:]
+        replacement = transcript.with_suffix(".replacement")
+        replacement.write_bytes(b"".join(kept))
+        if os.name == "nt":
+            class RenameInfo(ctypes.Structure):
+                _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+                            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                          wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+            kernel.CreateFileW.restype = wintypes.HANDLE
+            kernel.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+            kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.CreateFileW(str(replacement), 0x10000, 7, None, 3, 0x80, None)
+            if handle == wintypes.HANDLE(-1).value:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                filename = str(transcript.resolve()).encode("utf-16-le")
+                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
+                info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
+                info.Flags = 1 | 2
+                info.FileNameLength = len(filename)
+                ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.FileName.offset, filename, len(filename))
+                if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            os.replace(replacement, transcript)
+        return 0
+    if op == "retention-empty":
+        transcript = Path(state()["transcript"])
+        (ROOT / "retention-source-backup").write_bytes(transcript.read_bytes())
+        transcript.write_bytes(b"")
+        return 0
+    if op == "retention-restore":
+        Path(state()["transcript"]).write_bytes((ROOT / "retention-source-backup").read_bytes())
+        return 0
+    if op == "switch-history":
+        for i in range(2000):
+            text = f"IGSH954 message {i:04d}\n\n" + "A realistic long conversation paragraph with **readable words** and enough detail to wrap within the chat column. " * 8
+            fake_event("assistant", message=dict(role="assistant", id="switch-" + str(i), content=[dict(type="text", text=text)]))
+        return 0
+    if op == "history":
+        if state().get("name") == "live-delivery" and state().get("longChatProof"):
+            import gzip
+            fixture = Path(__file__).resolve().parent.parent / "fixtures/IGSH-1152/original-history.jsonl.gz"
+            for line in gzip.decompress(fixture.read_bytes()).splitlines():
+                row = json.loads(line)
+                fake_event(row["type"], message=row["message"])
+            return 0
+        for i in range(320 if state().get("longChatProof") else 24):
+            fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
+            identity = "history-" + str(i)
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (3000 if state().get("longChatProof") else 12000), is_error=False)]))
+        if state().get("longChatProof"):
+            for i in range(300):
+                identity = "history-tail-" + str(i)
+                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
+                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
+        tail_calls = state().get("soft2779Tail")
+        if isinstance(tail_calls, int) and tail_calls > 0:
+            for i in range(tail_calls):
+                identity = "soft-2779-tail-" + str(i)
+                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
+                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
+        return 0
+    if op == "todo":
+        fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
+        fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id="activity-todo", content="verified", is_error=False)]))
+        return 0
+    if op == "activity":
+        descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]
+        for i in range(11):
+            identity = "activity-" + str(i)
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo verified", description=descriptions[i % len(descriptions)]))]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="verified", is_error=False)]))
+        return 0
+    if op == "reaction-fallback":
+        fake_event("user", message=dict(role="user", content="👍 to: Unavailable reply [mp:0000000000000000]"))
+        return 0
+    if op == "show":
+        sys.stdout.write(json.dumps(fake_locked(fake_read)) + "\n")
+        return 0
+    if op == "text" and len(ARGS) == 2:
+        change = lambda claude: claude.__setitem__("box", claude["box"] + ARGS[1]) is None
+    elif op == "key" and len(ARGS) == 2:
+        change = lambda claude: fake_key(claude, ARGS[1])
+    elif op == "accept":
+        def change(claude):
+            text = claude["queue"].pop(0)
+            fake_queue_event("remove", text, reason="absorbed_mid_turn")
+            (ROOT / "accepted.json").write_text(json.dumps(dict(text=text, ms=time.time_ns() // 1_000_000)), encoding="utf-8")
+            return True
+    elif op == "finish-accepted":
+        def change(claude):
+            accepted = json.loads((ROOT / "accepted.json").read_text(encoding="utf-8"))
+            fake_event("attachment", attachment=dict(type="queued_command", prompt=accepted["text"], commandMode="prompt"))
+            return True
+    elif op == "idle":
+        change = lambda claude: fake_take(claude) is None
+    elif op == "busy":
+        change = lambda claude: claude.__setitem__("mode", "busy") is None
+    else:
+        record("unsupported.jsonl", operation="shell input", argv=ARGS)
+        return 2
+    return 0 if fake_run("shell", op, ARGS, change) else 3
+
+
+class COORD(ctypes.Structure):
+    _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short), ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+
+class INFO(ctypes.Structure):
+    _fields_ = [("size", COORD), ("cursor", COORD), ("attributes", wintypes.WORD), ("window", RECT), ("maximum", COORD)]
+
+
+def attach(session):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetStdHandle.restype = wintypes.HANDLE
+    kernel.GetConsoleScreenBufferInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(INFO)]
+    kernel.FillConsoleOutputCharacterW.argtypes = [wintypes.HANDLE, wintypes.WCHAR, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.FillConsoleOutputAttribute.argtypes = [wintypes.HANDLE, wintypes.WORD, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.ReadConsoleOutputCharacterW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.ReadConsoleOutputAttribute.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.WORD), wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.SetConsoleCursorPosition.argtypes = [wintypes.HANDLE, COORD]
+    kernel.SetConsoleTextAttribute.argtypes = [wintypes.HANDLE, wintypes.WORD]
+    kernel.WriteConsoleW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    handle = kernel.GetStdHandle(-11)
+    previous = None
+    (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    while True:
+        value = state()
+        info = INFO()
+        count = wintypes.DWORD()
+        if not kernel.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        geometry = (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
+        if (value, geometry) != previous:
+            lines = len(screen(value).splitlines())
+            top = max(0, info.window.Bottom - lines)
+            size = info.size.X * info.size.Y
+            if not kernel.FillConsoleOutputCharacterW(handle, " ", size, COORD(0, 0), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            kernel.FillConsoleOutputAttribute(handle, 7, size, COORD(0, 0), ctypes.byref(count))
+            kernel.SetConsoleCursorPosition(handle, COORD(0, top))
+            kernel.SetConsoleTextAttribute(handle, 7)
+            text = screen(value).replace("\n", "\r\n")
+            if not kernel.WriteConsoleW(handle, text, len(text), ctypes.byref(count), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if value["mode"] == "idle":
+                if not kernel.FillConsoleOutputAttribute(handle, 8, len(value["suggestion"]), COORD(2, top + 4), ctypes.byref(count)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            kernel.SetConsoleCursorPosition(handle, COORD(2, top + 4))
+            raw = ctypes.create_unicode_buffer(info.size.X * lines)
+            if not kernel.ReadConsoleOutputCharacterW(handle, raw, len(raw), COORD(0, top), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(lines)]
+            if rows != [line.rstrip() for line in screen(value).splitlines()]:
+                raise RuntimeError("Console screen readback mismatch")
+            attribute = wintypes.WORD()
+            if not kernel.ReadConsoleOutputAttribute(handle, ctypes.byref(attribute), 1, COORD(2, top + 4), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if value["mode"] == "idle" and attribute.value != 8:
+                raise RuntimeError("Console suggestion is not grey")
+            record("console.jsonl", session=session, screen=screen(value), rows=rows, suggestionAttribute=attribute.value, promptRow=top + 4, greySuggestion=value["mode"] == "idle")
+            (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=screen(value))), encoding="utf-8")
+            previous = (value, geometry)
+        time.sleep(0.1)
+
+
+def box_send():
+    buffer = box_buffer()
+    submitted = None
+    sent = ARGS[3:]
+    if sent[:1] == ["-l"]:
+        buffer += sent[sent.index("--") + 1] if "--" in sent else ""
+    else:
+        for name in sent:
+            if name == "C-u":
+                buffer = ctrl_u(buffer)
+            elif name == "C-k":
+                buffer = ctrl_k(buffer, len(buffer))
+            elif name == "Enter":
+                submitted = buffer if buffer.strip() else None
+                buffer = ""
+            else:
+                record("unsupported.jsonl", operation="box key", argv=ARGS)
+                return 95
+    (ROOT / "box.json").write_text(json.dumps(dict(buffer=buffer)), encoding="utf-8")
+    record("agent-buffer.jsonl", argv=ARGS, submitted=submitted, box=buffer)
+    return 0
+
+
+def console_kernel():
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetStdHandle.restype = wintypes.HANDLE
+    kernel.GetConsoleScreenBufferInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(INFO)]
+    kernel.FillConsoleOutputCharacterW.argtypes = [wintypes.HANDLE, wintypes.WCHAR, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.FillConsoleOutputAttribute.argtypes = [wintypes.HANDLE, wintypes.WORD, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.ReadConsoleOutputCharacterW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.ReadConsoleOutputAttribute.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.WORD), wintypes.DWORD, COORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.SetConsoleCursorPosition.argtypes = [wintypes.HANDLE, COORD]
+    kernel.SetConsoleTextAttribute.argtypes = [wintypes.HANDLE, wintypes.WORD]
+    kernel.WriteConsoleW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    return kernel
+
+
+def console_rows(lines, width):
+    width = max(1, width)
+    rows = []
+    for line in lines:
+        rows.extend(line[start:start + width] for start in range(0, max(len(line), 1), width))
+    return rows
+
+
+def attach_fake(session):
+    if (ROOT / "console-detached").exists():
+        return
+    kernel = console_kernel()
+    handle = kernel.GetStdHandle(-11)
+    previous = None
+    (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    while True:
+        if (ROOT / "console-detached").exists():
+            return
+        claude = fake_locked(fake_read)
+        info = INFO()
+        count = wintypes.DWORD()
+        if not kernel.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        geometry = (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
+        if (claude, geometry) != previous:
+            shown = fake_screen(claude, False)
+            lines = console_rows(shown.splitlines(), info.size.X - 1)
+            top = max(0, info.window.Bottom - len(lines))
+            row = next(i for i, line in enumerate(lines) if line.startswith("❯"))
+            size = info.size.X * info.size.Y
+            if not kernel.FillConsoleOutputCharacterW(handle, " ", size, COORD(0, 0), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            kernel.FillConsoleOutputAttribute(handle, 7, size, COORD(0, 0), ctypes.byref(count))
+            kernel.SetConsoleCursorPosition(handle, COORD(0, top))
+            kernel.SetConsoleTextAttribute(handle, 7)
+            text = "\r\n".join(lines) + "\r\n"
+            if not kernel.WriteConsoleW(handle, text, len(text), ctypes.byref(count), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            grey = fake_suggestion_shown(claude)
+            if grey and not kernel.FillConsoleOutputAttribute(handle, 8, len(claude["suggestion"]), COORD(2, top + row), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            kernel.SetConsoleCursorPosition(handle, COORD(2, top + row))
+            raw = ctypes.create_unicode_buffer(info.size.X * len(lines))
+            if not kernel.ReadConsoleOutputCharacterW(handle, raw, len(raw), COORD(0, top), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(len(lines))]
+            if rows != [line.rstrip() for line in lines]:
+                raise RuntimeError("Console screen readback mismatch")
+            attribute = wintypes.WORD()
+            if not kernel.ReadConsoleOutputAttribute(handle, ctypes.byref(attribute), 1, COORD(2, top + row), ctypes.byref(count)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if grey and attribute.value != 8:
+                raise RuntimeError("Console suggestion is not grey")
+            record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=attribute.value, promptRow=top + row, greySuggestion=grey)
+            (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")
+            previous = (claude, geometry)
+        time.sleep(0.05)
+
+
+def capture_screen(escapes):
+    value = state()
+    if value.get("fake"):
+        return fake_locked(lambda: fake_screen(fake_read(), escapes))
+    shown = screen(value, box_buffer() if stateful(value) else None)
+    if escapes and value["mode"] == "idle":
+        suggestion = value["suggestion"]
+        shown = shown.replace("\u276f " + suggestion, "\u276f " + SGR_DIM + suggestion + SGR_RESET, 1)
+    return shown
+
+
+def tmux_buffer(argv, input):
+    name = argv[argv.index("-b") + 1]
+    if not re.fullmatch(r"mp-send-[0-9a-f]{32}", name):
+        return 95
+    directory = ROOT / "tmux-buffers"
+    directory.mkdir(exist_ok=True)
+    path = directory / name
+    operation = argv[0]
+    text = None
+    if operation == "load-buffer":
+        payload = input.read()
+        path.write_bytes(payload)
+        text = payload.decode("utf-8")
+    elif operation == "paste-buffer":
+        if not path.exists():
+            return 1
+        text = path.read_bytes().decode("utf-8")
+        if not fake_send(["send-keys", "-t", argv[argv.index("-t") + 1], "-l", "--", text]):
+            return 95
+        if "-d" in argv:
+            path.unlink()
+    elif path.exists():
+        path.unlink()
+    else:
+        return 1
+    record("tmux-buffers.jsonl", argv=argv, text=text)
+    return 0
+
+
+def tmux(argv, input, output):
+    fake = state().get("fake")
+    if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
+        return tmux_buffer(argv, input)
+    if fake and len(argv) == 5 and argv[:3] == ["display-message", "-p", "-t"] and argv[3] in ["=" + name + ":" for name in session_names()] and argv[4] == "#{window_height}":
+        record("invocations.jsonl", kind="dimensions", argv=argv, height=24)
+        output.write("24\n")
+        return 0
+    if argv[:1] == ["capture-pane"]:
+        shown = capture_screen("-e" in argv)
+        record("capture.jsonl", argv=argv, screen=shown)
+        if hasattr(output, "reconfigure"):
+            output.reconfigure(newline="\n")
+        output.write(shown)
+        return 0
+    if argv[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in argv:
+        (ROOT / "send-blocked").touch()
+        deadline = time.monotonic() + 30
+        while not (ROOT / "release-send").exists():
+            if time.monotonic() > deadline:
+                return 96
+            time.sleep(0.05)
+    if argv[:1] == ["send-keys"]:
+        if stateful(state()):
+            return box_send()
+        record("agent-buffer.jsonl", argv=argv)
+        if fake and not fake_send(argv):
+            record("unsupported.jsonl", argv=argv)
+            return 95
+        return 0
+    if argv[:1] == ["list-panes"]:
+        if fake:
+            panes = state().get("panes")
+            if panes:
+                target = argv[argv.index("-t") + 1].lstrip("=") if "-t" in argv else ""
+                if target in panes:
+                    output.write(str(panes[target]) + "\n")
+            else:
+                output.write(str(state()["panePid"]) + "\n")
+        return 0
+    record("unsupported.jsonl", argv=argv)
+    return 95
+
+
+VPS_POLL_COMMAND = (
+    "printf '@capacity|'; "
+    "getconf _NPROCESSORS_ONLN 2>/dev/null | tr '\\n' '|'; "
+    "cut -d' ' -f1 /proc/loadavg 2>/dev/null | tr '\\n' '|'; "
+    "grep '^MemTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^MemAvailable:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^SwapTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^SwapFree:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
+    "printf '\\n'; "
+    "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host list --tmux-format 2>/dev/null; true"
+)
+
+
+def declined_remote(argv):
+    pos = 0
+    forward = None
+    while pos < len(argv) and argv[pos].startswith("-"):
+        option = argv[pos]
+        if option in ("-o", "-R") and pos + 1 < len(argv):
+            if option == "-R":
+                forward = argv[pos + 1]
+            pos += 2
+        elif option in ("-T", "-N"):
+            pos += 1
+        else:
+            return None
+    if pos >= len(argv):
+        return None
+    remote = " ".join(argv[pos + 1:])
+    if not remote and "-N" in argv[:pos] and forward and re.fullmatch(r"19548:127\.0\.0\.1:[0-9]{1,5}", forward):
+        return "notification-forward", "", 255
+    if forward is not None:
+        return None
+    if remote == "cat ~/.local/state/token-ladder/status.json":
+        return "ladder-status", "", 1
+    if re.fullmatch(r"if test -f ~/\.local/state/multiprompt/relay-v1; then mkdir -p -m 700 /tmp/mp-notify-\$\(id -u\) && rm -f /tmp/mp-notify-\$\(id -u\)/[A-Za-z0-9_-]{1,32}-[0-9a-f]{16}\.sock && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi", remote):
+        return "notification-relay", "MP_RELAY_LEGACY\n", 0
+    if remote in (VPS_POLL_COMMAND, "while IFS= read -r _; do { " + VPS_POLL_COMMAND + "; } </dev/null; printf '@@ZS_END@@\\n'; done"):
+        return "capacity-poll", "", 1
+    return None
+
+
+def completion(remote):
+    spec = importlib.util.spec_from_file_location("mp_complete", Path(__file__).parents[1] / "agent-notifications/mp_complete.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    helper.CACHE.parent.mkdir(parents=True, exist_ok=True)
+
+    def reply(line):
+        if state().get("slashProof"):
+            target = next((arg for arg in ARGS if arg in ("remote-1", "remote-2", "remote-3")), "unknown")
+            owner = "inne" if "sudo -n -H -u inne -- python3 /home/inne/" in " ".join(ARGS) else "login"
+            record("completion-owner.jsonl", target=target, owner=owner, request=line.strip())
+            fields = line.rstrip("\n").split("\t")
+            if target != "remote-1" or owner != "inne":
+                return f"@mp\t{fields[0]}\t{fields[1]}\terror\t-\t0\n@@MP_END@@\n"
+            return f"@mp\t{fields[0]}\t{fields[1]}\tok\t/home/inne/projects/sample\t1\nS\tverify-owner\t\tOwner account skill\n@@MP_END@@\n"
+        helper.CACHE.write_text(json.dumps({"key": helper.cache_key(), "at": time.time(), "commands": []}), encoding="utf-8")
+        response = helper.request(line)
+        rows = [row.split("\t")[1] for row in response.splitlines()[1:-1]]
+        record("completion.jsonl", request=line.strip(), names=rows)
+        time.sleep(0.8)
+        return response
+
+    if remote[2:] == ["--serve"]:
+        for line in sys.stdin:
+            sys.stdout.write(reply(line))
+            sys.stdout.flush()
+        return 0
+    if len(remote) == 4 and remote[2] == "--once":
+        import base64
+        sys.stdout.write(reply(base64.b64decode(remote[3]).decode("utf-8")))
+        return 0
+    return 95
+
+
+def install_reaction_tmux(namespace):
+    import io
+    import types
+
+    original = namespace['subprocess'].run
+
+    def run(command, **kwargs):
+        if command[:1] != ['tmux']:
+            return original(command, **kwargs)
+        output = io.StringIO()
+        code = tmux(command[1:], io.BytesIO(kwargs.get('input', b'')), output)
+        text = kwargs.get('text') or kwargs.get('encoding') or kwargs.get('universal_newlines')
+        stdout = output.getvalue() if text else output.getvalue().encode('utf-8')
+        stderr = '' if text else b''
+        if code and kwargs.get('check'):
+            raise subprocess.CalledProcessError(code, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, code, stdout, stderr)
+
+    namespace['subprocess'] = types.SimpleNamespace(**dict(vars(subprocess), run=run))
+    record('reader-boundary.jsonl', tmux='in-process fake command boundary; production connector unchanged')
+
+
+def install_reaction_worker(namespace):
+    import threading
+    from contextlib import closing
+
+    workers = {}
+    lock = threading.Lock()
+
+    def start(query, source, only_if_work=False):
+        key = (query['provider'], query['sid'])
+        with lock:
+            if key in workers:
+                workers[key].set()
+                return
+            wake = threading.Event()
+            workers[key] = wake
+
+        def run():
+            try:
+                while True:
+                    wake.clear()
+                    namespace['message_poll'](query['tmux'], *key)
+                    dispatched = namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    if dispatched.get('message') is not None:
+                        record('message-dispatch.jsonl', result=dispatched)
+                    with closing(namespace['message_store_db'](query['tmux'])) as db:
+                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
+                    with lock:
+                        if not pending and not wake.is_set():
+                            del workers[key]
+                            return
+                    wake.wait(0.1)
+            except Exception as error:
+                record('reaction-worker.jsonl', stage='error', error=repr(error))
+                with lock:
+                    workers.pop(key, None)
+
+        record('reaction-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='Windows thread; production poll and dispatch unchanged')
+        threading.Thread(target=run, daemon=True).start()
+
+    namespace['start_message_worker'] = start
+
+
+def reader_namespace():
+    import base64
+
+    source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    published = ROOT / "app-reader.py"
+    if not published.exists():
+        published.write_text(source, encoding="utf-8")
+    namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
+    exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+    if state().get("name") == "resync-recovery":
+        import hashlib
+        full = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        inner = hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest()
+        generation = namespace.get("RUNTIME_GENERATION")
+        record("recovery-bootstrap.jsonl", full_sha256=full, inner_sha256=inner, generation=generation)
+        if (full, inner, generation) != ("27e681fab0bbebf4620f0ff47c66d1fcc4442152fb1c7046eac376726a2672d0", "458a0cb74a3500963f4a50e5ee01d25422f860b76ee4507a56f1aab13e0abaee", 3):
+            raise ValueError("unexpected published reader bootstrap")
+    try:
+        spec = importlib.util.spec_from_file_location("queue_trace", Path(__file__).with_name("queue_trace.py"))
+        trace = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(trace)
+        trace.install(namespace, source, ROOT)
+    except Exception:
+        pass
+    namespace["start_held_worker"] = lambda *args: None
+    if os.name == "nt" and state().get("name") == "model-settings":
+        namespace["events_wake"] = lambda: None
+    if state().get("slashProof"):
+        spec = importlib.util.spec_from_file_location("slash_host", Path(__file__).with_name("slash_host.py"))
+        slash_host = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(slash_host)
+        slash_host.install(namespace, ROOT, record)
+    if os.name == "nt":
+        import msvcrt
+        import types
+
+        locking = types.ModuleType("fcntl")
+        locking.LOCK_EX, locking.LOCK_NB, locking.LOCK_UN = 2, 4, 8
+
+        def flock(handle, operation):
+            descriptor = handle if isinstance(handle, int) else handle.fileno()
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            mode = msvcrt.LK_UNLCK if operation & locking.LOCK_UN else msvcrt.LK_NBLCK if operation & locking.LOCK_NB else msvcrt.LK_LOCK
+            try:
+                msvcrt.locking(descriptor, mode, 1)
+            except OSError as error:
+                if operation & locking.LOCK_NB:
+                    raise BlockingIOError() from error
+                raise
+
+        locking.flock = flock
+        sys.modules["fcntl"] = locking
+        namespace["events_wake"] = lambda: None
+        record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") == "cancel-held":
+            original_subprocess = namespace["subprocess"]
+
+            class WorkerDiagnostics:
+                def __getattr__(self, name):
+                    return getattr(original_subprocess, name)
+
+                def Popen(self, args, *positional, **options):
+                    if "--message-worker" not in args:
+                        return original_subprocess.Popen(args, *positional, **options)
+                    if len(args) != 8 or args[1:3] != ['-u', '-c'] or args[4] != '--message-worker':
+                        raise ValueError('unexpected message worker bootstrap')
+                    adapted = [args[0], '-u', str(Path(__file__).resolve()), 'message-worker', *args[5:]]
+                    with (ROOT / "message-worker.stderr.log").open("ab", buffering=0) as errors:
+                        options["stderr"] = errors
+                        try:
+                            child = original_subprocess.Popen(adapted, *positional, **options)
+                        except Exception as error:
+                            record("message-worker.jsonl", event="spawn-failed", error=repr(error))
+                            raise
+                    record("message-worker.jsonl", event="spawned", child_pid=child.pid)
+                    return child
+
+            namespace["subprocess"] = WorkerDiagnostics()
+        if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone"):
+            install_reaction_tmux(namespace)
+            install_reaction_worker(namespace)
+        if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
+            namespace["start_message_worker"] = lambda *args, **kwargs: None
+            record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
+        if state().get("name") in ("accepted-message", "recall-handed"):
+            import threading
+
+            worker_name = 'recall' if state().get('name') == 'recall-handed' else 'accepted'
+
+            def start_worker(query, source, only_if_work=False):
+                if source is None:
+                    return
+                request = dict(message_protocol=1, tmux=query['tmux'], provider=query['provider'], sid=query['sid'])
+
+                def work():
+                    lock_path = ROOT / (worker_name + '-message-worker.lock')
+                    with lock_path.open('a') as lock:
+                        try:
+                            locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
+                        except BlockingIOError:
+                            return
+                        record(worker_name + '-worker.jsonl', stage='started', request=request)
+                        while True:
+                            try:
+                                namespace['message_poll'](request['tmux'], request['provider'], request['sid'])
+                                result = namespace['message_store_request'](dict(request, op='message_dispatch'))
+                                if result.get('message') is not None:
+                                    record(worker_name + '-worker.jsonl', stage='dispatch', result=result)
+                            except Exception as error:
+                                record(worker_name + '-worker-errors.jsonl', error=repr(error))
+                            time.sleep(0.25)
+
+                threading.Thread(target=work, daemon=True).start()
+
+            namespace['start_message_worker'] = start_worker
+            record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+    if state().get("name") == "chat-still":
+        spec = importlib.util.spec_from_file_location("chat_still_host", Path(__file__).parents[1] / "chat-still/host.py")
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
+    if state().get("name") in ("working-live", "steady-live"):
+        fixture_path = Path(__file__).with_name("working-host.py")
+        assert fixture_path.is_file(), "Hosted working provider fixture is missing"
+        spec = importlib.util.spec_from_file_location("working_host", fixture_path)
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
+        original_push = namespace["events_push"]
+
+        def working_push(subscriptions):
+            pages = [(sub, namespace["message_events_page"](sub["provider"], sub["sid"], sub["after"]))
+                     for sub in subscriptions.values() if sub["sid"] == fixture.SID]
+            original_push(subscriptions)
+            for sub, page in pages:
+                if page["events"]:
+                    record("working-host.jsonl", stage="pushed", sid=sub["sid"], events=page["events"])
+
+        namespace["events_push"] = working_push
+        original_request = namespace["serve_request"]
+
+        def working_request(line, source, subscriptions, lock):
+            query = json.loads(line)
+            original_request(line, source, subscriptions, lock)
+            if query.get("op") == "events_subscribe" and query.get("sid") == fixture.SID:
+                record("working-host.jsonl", stage="subscribed", sid=fixture.SID, provider=query.get("provider"))
+
+        namespace["serve_request"] = working_request
+    if state().get("name") == "startup-failure":
+        original = namespace["serve_request"]
+        sid = "a1b2c3d4-1593-4000-8000-000000001593"
+
+        def request(line, source, subscriptions, lock):
+            original(line, source, subscriptions, lock)
+            query = json.loads(line)
+            if query.get("op") != "events_subscribe" or query.get("sid") != sid:
+                return
+            marker = ROOT / "startup-failure-started"
+            try:
+                fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                return
+            os.close(fd)
+            record("startup-failure.jsonl", stage="subscribed", sid=sid, provider=query.get("provider"))
+            import threading
+            errors = []
+
+            def host():
+                try:
+                    namespace["host_startup_failure"]("claude", sid, "verify-agent", {}, "cwd_unavailable")
+                except Exception as error:
+                    errors.append(error)
+
+            worker = threading.Thread(target=host)
+            worker.start()
+            worker.join()
+            if errors:
+                raise errors[0]
+            page = namespace["message_events_page"]("claude", sid, 0)
+            record("startup-failure.jsonl", stage="host-stopped", sid=sid, standin="thread", events=page["events"])
+
+        namespace["serve_request"] = request
+    return namespace
+
+
+def run_message_worker():
+    if os.name != "nt" or state().get("name") != "cancel-held" or len(ARGS) != 3:
+        raise ValueError("message worker adapter requires the owned Windows cancellation fixture")
+    tmux, provider, sid = ARGS
+    if tmux != "verify-agent" or provider != "claude" or sid != state().get("sid"):
+        raise ValueError("message worker adapter requires the fake Claude session")
+    namespace = reader_namespace()
+    original_host_switch = namespace["host_dispatch_switch"]
+
+    def fake_terminal_only(provider, sid):
+        if original_host_switch(provider, sid):
+            raise RuntimeError("real provider dispatch is forbidden in the cancellation fixture")
+        return False
+
+    namespace["host_dispatch_switch"] = fake_terminal_only
+    import selectors
+    original_selector = selectors.DefaultSelector
+
+    class PollingSelector(original_selector):
+        def select(self, timeout=None):
+            if not self.get_map():
+                time.sleep(timeout if timeout is not None else 1)
+                return []
+            return super().select(timeout)
+
+    selectors.DefaultSelector = PollingSelector
+    record("message-worker.jsonl", event="adapter-start", tmux=tmux, provider=provider, sid=sid)
+    namespace["message_worker"](tmux, provider, sid)
+    record("message-worker.jsonl", event="adapter-stop", tmux=tmux, provider=provider, sid=sid)
+
+
+
+def terminal_session(command):
+    value = state()
+    if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="workspace")
+        return "workspace", None
+    if value.get("binding") and "tmux if-shell -F -t " in command:
+        expected = re.search(r"#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9:$]+)\}", command)
+        current = value.get("generation", "1700:123:$7")
+        if not expected:
+            raise RuntimeError("Guarded attach omitted the expected generation")
+        if expected[1] != current:
+            record("invocations.jsonl", kind="refused", expected=expected[1], actual=current, command=command)
+            return None, "Saved terminal session changed; refusing to attach.\r\n"
+        record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
+        return "workspace", None
+    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
+    if match and match[1] in session_names():
+        record("invocations.jsonl", kind="attach", session=match[1])
+        return match[1], None
+    record("unsupported.jsonl", operation="terminal command", command=command)
+    return None, None
+
+
+def terminal_frame(session, size):
+    value = state()
+    if value.get("fake"):
+        claude = fake_locked(fake_read)
+        shown = fake_screen(claude, False)
+        marked = fake_screen(claude, True)
+        grey = fake_suggestion_shown(claude)
+        key = json.dumps(claude, sort_keys=True)
+    else:
+        shown = marked = screen(value)
+        grey = value["mode"] == "idle"
+        key = json.dumps(value, sort_keys=True)
+    lines = marked.splitlines()
+    row = next((i for i, line in enumerate(shown.splitlines()) if line.startswith("❯")), 0)
+    text = "\x1b[0m\x1b[2J\x1b[H" + "\r\n".join(lines) + "\r\n\x1b[" + str(row + 1) + ";3H"
+    return (key, tuple(size)), shown, text, grey, row
+
+
+def terminal_reader():
+    import base64
+    import threading
+
+    box = dict(size=[24, 80], opening=None, closed=False)
+    changed = threading.Event()
+    opened = threading.Event()
+
+    def drain():
+        try:
+            for raw in sys.stdin.buffer:
+                try:
+                    value = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                if box["opening"] is None and isinstance(value.get("command"), str):
+                    box["opening"] = value
+                    if isinstance(value.get("size"), list):
+                        box["size"] = value["size"]
+                    opened.set()
+                elif isinstance(value.get("size"), list):
+                    box["size"] = value["size"]
+                    changed.set()
+        except (OSError, ValueError):
+            pass
+        finally:
+            box["closed"] = True
+            opened.set()
+            changed.set()
+
+    threading.Thread(target=drain, daemon=True).start()
+    opened.wait()
+    if box["opening"] is None:
+        return 0
+
+    def send(data):
+        sys.stdout.buffer.write(base64.b64encode(data) + b"\n")
+        sys.stdout.buffer.flush()
+
+    session, refusal = terminal_session(box["opening"]["command"])
+    if session is None:
+        if refusal:
+            send(refusal.encode("utf-8"))
+            return 0
+        return 96
+    if (ROOT / "console-detached").exists():
+        return 0
+    (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    previous = None
+    while not box["closed"]:
+        if (ROOT / "console-detached").exists():
+            return 0
+        key, shown, text, grey, row = terminal_frame(session, box["size"])
+        if key != previous:
+            send(text.encode("utf-8"))
+            rows = [line.rstrip() for line in shown.splitlines()]
+            record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=8 if grey else 7, promptRow=row, greySuggestion=grey)
+            (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")
+            previous = key
+        changed.wait(0.05)
+        changed.clear()
+    return 0
+
+
+def transport_reader():
+    import base64
+    import queue
+    import threading
+
+    broker = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    transport = dict(__name__="verified_transport")
+    exec(compile(broker, "<app-supplied-transport>", "exec"), transport)
+    source = sys.stdin.buffer.readline(transport["MAX_INPUT"] + 1)
+    if not source.endswith(b"\n"):
+        raise ValueError("incomplete transport reader source")
+    events = queue.Queue(128)
+    channels = {}
+
+    def receive():
+        try:
+            while True:
+                line = sys.stdin.buffer.readline(transport["MAX_INPUT"] + 1)
+                if not line:
+                    break
+                if len(line) > transport["MAX_INPUT"] or not line.endswith(b"\n"):
+                    raise ValueError("oversized transport input")
+                events.put((None, json.loads(line)))
+        finally:
+            events.put((None, None))
+
+    def emit(value):
+        sys.stdout.buffer.write((json.dumps(value, separators=(",", ":")) + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
+
+    def close(cid):
+        item = channels.pop(cid, None)
+        if item is None:
+            return
+        item["stop"].set()
+        try:
+            item["pending"].put_nowait(None)
+        except queue.Full:
+            pass
+        child = item["child"]
+        child.terminate()
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        child.stdin.close()
+        child.stdout.close()
+
+    def read_output(cid, item):
+        try:
+            while not item["stop"].is_set():
+                line = item["child"].stdout.readline(transport["MAX_FRAME"] + 1)
+                if not line or len(line) > transport["MAX_FRAME"]:
+                    break
+                events.put((cid, line.rstrip(b"\r\n").decode("utf-8")))
+        finally:
+            events.put((cid, None))
+
+    def write_input(cid, item):
+        try:
+            item["child"].stdin.write(source)
+            item["child"].stdin.flush()
+            while not item["stop"].is_set():
+                line = item["pending"].get()
+                if line is None:
+                    break
+                item["child"].stdin.write(line)
+                item["child"].stdin.flush()
+                with item["lock"]:
+                    item["bytes"] -= len(line)
+        except (OSError, ValueError):
+            events.put((cid, None))
+
+    threading.Thread(target=receive, daemon=True).start()
+    emit(dict(ready=True))
+    try:
+        while True:
+            cid, value = events.get()
+            if cid is not None:
+                if cid not in channels:
+                    continue
+                if value is None:
+                    close(cid)
+                    emit(dict(channel=cid, closed=True))
+                else:
+                    emit(dict(channel=cid, data=value))
+                continue
+            if value is None:
+                return
+            cid = value["channel"]
+            if type(cid) is not int or cid < 1:
+                raise ValueError("invalid transport channel")
+            if value.get("close"):
+                close(cid)
+                continue
+            data = value.get("data")
+            if not isinstance(data, str):
+                close(cid)
+                emit(dict(channel=cid, closed=True))
+                continue
+            if cid not in channels:
+                if not value.get("open", True):
+                    emit(dict(channel=cid, closed=True))
+                    continue
+                if len(channels) >= transport["MAX_CHANNELS"]:
+                    emit(dict(channel=cid, closed=True))
+                    continue
+                mode = "--terminal" if value.get("terminal") else "--watch" if value.get("watch") else "--serve"
+                entry = "terminal_reader" if value.get("terminal") else "watch_reader" if value.get("watch") else "serve_reader"
+                record("invocations.jsonl", kind="reader", argv=[mode], channel=cid)
+                bootstrap = ("import importlib.util;"
+                             f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
+                             "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                             f"m.{entry}()")
+                child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, mode], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                item = dict(child=child, pending=queue.Queue(64), stop=threading.Event(), lock=threading.Lock(), bytes=0)
+                channels[cid] = item
+                threading.Thread(target=read_output, args=(cid, item), daemon=True).start()
+                threading.Thread(target=write_input, args=(cid, item), daemon=True).start()
+            item = channels[cid]
+            line = (data + "\n").encode("utf-8")
+            with item["lock"]:
+                item["bytes"] += len(line)
+                overflow = item["bytes"] > transport["MAX_INPUT"]
+            try:
+                if overflow:
+                    raise queue.Full
+                item["pending"].put_nowait(line)
+            except queue.Full:
+                close(cid)
+                emit(dict(channel=cid, closed=True))
+    finally:
+        for cid in list(channels):
+            close(cid)
+
+
+def serve_reader():
+    namespace = reader_namespace()
+    if state().get("name") == "model-settings":
+        import hashlib
+        sid = state()["sid"]
+        record("model-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(enabled=True, tmux="verify-agent", command=[sys.executable, str(Path(__file__).with_name("model-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("model-host-start.jsonl", result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
+    if state().get("name") == "recall-handed":
+        import hashlib
+        sid = state()["sid"]
+        record("recall-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(enabled=True, tmux="verify-agent", command=[sys.executable, str(Path(__file__).with_name("recall-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("recall-host-start.jsonl", result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
+    namespace["serve"](namespace["READER_SOURCE"])
+
+
+def watch_reader():
+    namespace = reader_namespace()
+
+    def changes(q, resolved, supplied_source, as_owner):
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.FindFirstChangeNotificationW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.DWORD]
+        kernel.FindFirstChangeNotificationW.restype = wintypes.HANDLE
+        kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent).removeprefix("\\\\?\\")])
+        notification = kernel.FindFirstChangeNotificationW(watch_root, True, 0x13)
+        if notification == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            paths = [resolved[2], ROOT / "claude.json", ROOT / "box.json", ROOT / "state.json"]
+            def fingerprint():
+                result = []
+                for path in paths:
+                    try:
+                        info = path.stat()
+                        result.append((info.st_ino, info.st_size, info.st_mtime_ns))
+                    except FileNotFoundError:
+                        result.append(None)
+                return result
+            def refresh_screen():
+                started = time.perf_counter_ns()
+                q["watch_screen"] = capture_screen(True)
+                q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
+
+            previous = fingerprint()
+            refresh_screen()
+            yield resolved
+            while True:
+                if kernel.WaitForSingleObject(notification, 0xFFFFFFFF) != 0:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if not kernel.FindNextChangeNotification(notification):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                current = fingerprint()
+                if current != previous:
+                    if current[1:] != previous[1:]:
+                        refresh_screen()
+                    previous = current
+                    yield resolved
+        finally:
+            kernel.FindCloseChangeNotification(notification)
+
+    namespace["watch_changes"] = changes
+    namespace["watch"](namespace["READER_SOURCE"])
+    return 0
+
+
+def ssh():
+    if ARGS == ["-V"]:
+        print("OpenSSH_verification")
+        return 0
+    if len(ARGS) == 2 and ARGS[0] == "-G" and ARGS[1] in ("remote-1", "remote-2", "remote-3"):
+        record("invocations.jsonl", kind="config", argv=ARGS)
+        print("hostname " + ARGS[1] + "\nuser verify\nport 22")
+        return 0
+    if (ROOT / "connection-held").exists():
+        record("connection-waits.jsonl", operation="connect held")
+        while (ROOT / "connection-held").exists():
+            time.sleep(0.05)
+    command = " ".join(ARGS)
+    declined = declined_remote(ARGS)
+    if declined:
+        kind, output, exit_code = declined
+        if kind == "capacity-poll" and state().get("hax"):
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += "".join(name + "|1700000000|10|/verify/shared-runners|hax|Hax\n" for name in session_names())
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
+        record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
+        sys.stdout.write(output)
+        return exit_code
+    if state().get("binding") and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="workspace")
+        attach("workspace")
+        return 0
+    python = re.search(r"\bpython3\s", command)
+    if python:
+        remote = shlex.split(command[python.start():])
+        if remote[1].endswith("/mp_complete.py"):
+            return completion(remote)
+        record("invocations.jsonl", kind="reader", argv=remote)
+        if remote[-1:] == ["--watch"]:
+            value = state()
+            if value.get("remoteHome"):
+                os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
+            try:
+                return watch_reader()
+            except Exception:
+                import traceback
+                (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+                raise
+        env = os.environ.copy()
+        if os.name == "nt":
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        if state().get("remoteHome"):
+            env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
+        entry = "serve_reader" if remote[-1:] == ["--serve"] else None
+        if os.name == "nt" and remote[1:] == ["-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"]:
+            entry = "transport_reader"
+            remote.append("--transport")
+        if entry:
+            remote[3] = ("import importlib.util;"
+                         f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
+                         f"m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.{entry}()")
+        with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
+            return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+    if "tmux list-clients" in command:
+        record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
+        names = session_names()
+        identity = "".join(f"@@I {name}|{state().get('generation', '1700:123:$7')}\n" for name in names) if state().get("binding") else ""
+        print("\n".join(names) + "\n" + identity + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
+        return 0
+    if "tmux list-sessions" in command:
+        record("invocations.jsonl", kind="list", operation="list-sessions")
+        for name in session_names():
+            print(name + "\t1\t1")
+        return 0
+    if state().get("binding") and "tmux if-shell -F -t " in command:
+        expected = re.search(r"#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9:$]+)\}", command)
+        current = state().get("generation", "1700:123:$7")
+        if not expected:
+            raise RuntimeError("Guarded attach omitted the expected generation")
+        if expected[1] != current:
+            record("invocations.jsonl", kind="refused", expected=expected[1], actual=current, command=command)
+            print("Saved terminal session changed; refusing to attach.")
+            return 0
+        record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
+        attach("workspace")
+        return 0
+    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
+    if match and match[1] in session_names():
+        record("invocations.jsonl", kind="attach", session=match[1])
+        (attach_fake if state().get("fake") else attach)(match[1])
+        return 0
+    record("unsupported.jsonl", operation="remote command", hasPython=bool(python), argv=ARGS, command=command)
+    return 96
+
+
+if __name__ == "__main__":
+    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else run_message_worker() if MODE == "message-worker" else ssh())

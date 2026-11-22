@@ -1,0 +1,427 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { tokenize } from './strip-comments.mjs';
+import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
+import { canonicalTicketId, fragmentTicketId } from './ticket-id.js';
+const titleCatalog = loadTicketTitles();
+
+const reviewedReleases = {
+  'v0.28.1027': ['77690fa1b105d6cd8070484decb8273d835334bf', { 'IGSH-1154': null }],
+  'v0.28.1028': ['93ff8a0631761eefaf772b58ccb7a6318c7edc02', { 'IGSH-1154': 'Large messages no longer block queue receipts.' }],
+  'v0.28.1029': ['cf508172357d1344bfc6be893dc857fdeb87af91', { 'IGSH-1154': 'Stuck messages can recover without duplicate sends.' }],
+  'v0.28.1030': ['967eee1cbabc094772d567daf3d75cc2d713d9e3', { 'IGSH-1154': null }],
+  'v0.28.1031': ['1648c59e146e06be0fec8247f6db800da4fba3ad', { 'IGSH-1193': 'The app title stays Multi Bot.' }],
+  'v0.28.1032': ['f2bcef5380210cbbcf57d06c75031676e66f88f1', { 'IGSH-1229': 'Codex conversations stay with their sessions.', 'IGSH-1217': 'Codex conversations stay with their sessions.' }],
+  'v0.28.1033': ['2959b4bb020415fe98730f0155e526f68a4308dd', { 'IGSH-1229': null }],
+  'v0.28.1034': ['af3ea232f557386345bd9628fa28c97e5d038deb', { 'IGSH-1154': 'Queued messages can recover after missed confirmations.' }],
+  'v0.28.1035': ['c490189d5d85ebf4c1c65ad801feac634994d5b3', { 'IGSH-1239': 'Chat clients can share one message reader.' }],
+  'v0.28.1036': ['3aa30b208e28eefd8b005ef252f2f208a99afa4b', { 'IGSH-1239': 'Damaged reader settings no longer select older versions.' }],
+  'v0.28.1037': ['3d9dc2d44eaa91e47098c69054c0b02b4edd2c5f', { 'IGSH-1229': 'Unknown chats stay out of neighbouring sessions.', 'IGSH-1239': 'Unknown chats stay out of neighbouring sessions.' }],
+  'v0.28.1038': ['920dffe80a424393d74e5bd0b8514b6bddb2df12', { 'IGSH-1154': 'Messages can queue while the bot works.', 'IGSH-1239': 'Messages can queue while the bot works.' }],
+  'v0.28.1039': ['76f39d4c0ee1a140e4304c8995074daf81e86b53', { 'IGSH-1154': null }],
+  'v0.28.1040': ['8c4b6c99cef41bd6b8c9ab48e789c3f09430cb68', { 'IGSH-1239': null }],
+  'v0.28.1042': ['9ee03f97b05f50238aaac77154ebf11be3cc30b7', { 'IGSH-1154': null, 'IGSH-1239': null }],
+  'v0.28.1043': ['fc76d5714ced43500552fa0398f8b2f56ee41bd5', { 'IGSH-1154': 'Confirmed message copies match by receipt.', 'IGSH-1239': 'Confirmed message copies match by receipt.' }],
+  'v0.28.1044': ['28b4cc4cf52133396321b7e5fc7557bb2337843d', { 'IGSH-1154': null, 'IGSH-1239': null }],
+  'v0.28.1045': ['62c6637d826fcd8c35e43ca52f9161cf8d4c154a', { 'IGSH-1154': null }],
+  'v0.28.1046': ['1c5e0cccc66cf1c6f962746b4d23506ff0d366f5', { 'IGSH-1154': 'Queued sends avoid competing terminal handoffs.' }],
+  'v0.28.1047': ['4ebe5f53eeda7d8a945cfb3af2598672a87c0218', { 'IGSH-1154': null }],
+  'v0.28.1048': ['e62769a0862c8518a68a74ea6bfc6030b03dad3b', { 'IGSH-1154': null, 'IGSH-1239': null }],
+  'v0.28.1339': ['1f91520248bd00bf99308dcec5717b3199574fdf', { 'IGSH-1266': 'A failed move to the terminal keeps your chat open.' }],
+};
+
+export const reviewedCommits = {
+  'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83a': 'HYCI-158',
+  'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1': 'HYCI-168',
+  '31797d916a1d68082901de71966c2e4a02036e80': 'HYCI-147',
+  '03c8a7198930c20e5c4a57bd9799cd2e73b5312c': 'IGSH-1528',
+  'ef5ef94e58b9c7741df9fc72e0c899fb5f42e82a': 'IGSH-1697',
+  '8f52c2a6cf81d617d61bf6c439ec29719d850062': 'IGSH-1615',
+  '303734dbef8add073075166d2ea8e0d4a091646c': ['IGSH-1544', 'IGSH-1545', 'IGSH-1546'],
+  'ee394be0c178378919a6d4d3499329f5d3636691': 'SOFT-2567',
+  '2452e248a2fe8ff78be0b342273b7677dd7c3f52': 'SOFT-2584',
+  'e55f7487157660752c2b22f4619bf86cbc33e9d9': 'SOFT-2567',
+  '23c96fbf3085173cbe7db56c373a70e05aee506c': 'SOFT-2686',
+  '17ff55175dfff3ceffd45d41d8517d149c6be787': 'SOFT-2718',
+  '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
+  '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
+  '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9': 'SOFT-2902',
+};
+
+const mainPath = 'src/main.zig';
+const changelogPath = 'src/changelog.zig';
+const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
+const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
+export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the automatic release stamps the version after merge';
+
+export function autoRevertBranch(env = process.env) {
+  return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
+}
+
+export function plainChange(line) {
+  return !!line.trim() && !(/[A-Z]+-\d+|[\/\\`]|#\d+|\b(?:PR|pull request)\s*#?\s*\d+|\b[\w-]+\.[a-zA-Z][\w.-]*|[\x00-\x1f\x7f]/i.test(line));
+}
+
+export function productChange(line) {
+  return plainChange(line) && !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:checks?|tests?|CI|proofs?|pipelines?|workflows?)\b/i.test(line));
+}
+
+const engineeringTitle = /^(?:\[INFRA\]\s*|Multiprompt verify:\s*|Multiprompt verification playbook:\s*|Release gate:\s*|CI:\s*)/i;
+
+function userFacingTitle(title) {
+  if (!title.trim()) return false;
+  if (/checks and fixes, no visible change/i.test(title)) return false;
+  if (engineeringTitle.test(title)) return false;
+  return !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:tests?|proofs?|pipelines?|workflows?)\b/i.test(title));
+}
+
+export function userFacingReleaseLine(line) {
+  if (typeof line !== 'string') return false;
+  const text = line.trim();
+  const match = /^([A-Z][A-Z0-9]*-[1-9]\d*) (.*)$/s.exec(text);
+  if (!match || text.length > 512 || /[\x00-\x1f\x7f]/.test(text)) return false;
+  const [, id, title] = match;
+  if (id.startsWith('HYCI-')) return false;
+  return userFacingTitle(title);
+}
+
+export function fragmentLines(file, text) {
+  fragmentTicketId(file);
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
+  if (lines.some(line => !plainChange(line))) throw new Error(`${file}: write plain product lines without ticket ids, file names, paths or PR numbers`);
+  return lines;
+}
+
+export function runtimeZigTokens(source) {
+  const tokens = tokenize(source, 'zig').tokens;
+  const result = [];
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (depth === 0 && tokens[i][0] === 'word' && tokens[i][1] === 'test') {
+      if (tokens[i + 1]?.[0] === 'string') i++;
+      if (tokens[++i]?.[1] !== '{') throw new Error('Invalid Zig test declaration');
+      let testDepth = 1;
+      while (testDepth && ++i < tokens.length) {
+        if (tokens[i][0] === 'code' && tokens[i][1] === '{') testDepth++;
+        if (tokens[i][0] === 'code' && tokens[i][1] === '}') testDepth--;
+      }
+      if (testDepth) throw new Error('Unclosed Zig test declaration');
+      continue;
+    }
+    if (tokens[i][0] === 'code' && tokens[i][1] === '{') depth++;
+    if (tokens[i][0] === 'code' && tokens[i][1] === '}') depth--;
+    result.push(tokens[i]);
+  }
+  return JSON.stringify(result);
+}
+
+export function checkFragments(base, head, changed) {
+  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    const lines = fragmentLines(file, head[file]);
+    if (changed.includes(file) && lines.some(line => !productChange(line))) throw new Error(`${file}: write a specific user-visible change; omit notes for checks, tests or pipeline work`);
+  }
+  const appChanged = changed.some(file => (file.startsWith('src/') || file.startsWith('extension/')) &&
+    (!file.endsWith('.zig') || !(file in base) || !(file in head) || runtimeZigTokens(base[file]) !== runtimeZigTokens(head[file])));
+  if (appChanged && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');
+  }
+}
+
+export function stampTree(files, requestedVersion, titles = titleCatalog) {
+  const removed = Object.keys(files).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md').sort();
+  if (!removed.length && !requestedVersion) return null;
+  const current = files[mainPath]?.match(versionLine);
+  if (!current) throw new Error('Expected one APP_VERSION line in src/main.zig');
+  const version = requestedVersion ?? `${current[1]}.${current[2]}.${BigInt(current[3]) + 1n}`;
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Invalid build version');
+  const tickets = [];
+  const bullets = [];
+  const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
+  for (const file of removed) {
+    fragmentLines(file, files[file]);
+    const ticket = fragmentTicketId(file);
+    if (!tickets.includes(ticket)) {
+      tickets.push(ticket);
+      const text = ticketLine(ticketRecord(ticket, titles[ticket]));
+      bullets.push(`        .{ .text = "${escape(text)}", .ticket = "${ticket}" },`);
+    }
+  }
+  if (!bullets.length) throw new Error('No unpublished product changes; wait for the next useful update');
+  if (!changelogStart.test(files[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
+  const result = { ...files };
+  result[mainPath] = files[mainPath].replace(versionLine, line => line.replace(/"[^"]+"/, `"${version}"`));
+  result[changelogPath] = files[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${version}", .items = &.{\n${bullets.join('\n')}\n    } },`);
+  for (const file of removed) delete result[file];
+  return { version, tickets, files: result, removed };
+}
+
+export function classifyTrees(base, head, changed) {
+  const kept = Object.keys(base).filter(file => file.startsWith('changelog.d/') && file in head);
+  const folded = { ...base };
+  for (const file of kept) delete folded[file];
+  let stamp;
+  try { stamp = stampTree(folded); } catch {}
+  if (stamp) for (const file of kept) stamp.files[file] = base[file];
+  if (stamp && changed.length && changed.every(file => file === mainPath || file === changelogPath || stamp.removed.includes(file) && !(file in head))) {
+    const paths = new Set([...Object.keys(stamp.files), ...Object.keys(head)]);
+    if ([...paths].every(file => stamp.files[file] === head[file])) return 'STAMP';
+  }
+  const lines = (tree, file, pattern) => (tree[file] || '').split(/\r?\n/).filter(line => pattern.test(line)).map(line => line.replace(/^(pub const APP_VERSION = )build_config\.app_version orelse ("\d+\.\d+\.\d+";)$/, '$1$2'));
+  if (JSON.stringify(lines(base, mainPath, /\bAPP_VERSION\s*=/)) !== JSON.stringify(lines(head, mainPath, /\bAPP_VERSION\s*=/)) ||
+      JSON.stringify(lines(base, changelogPath, /\.ver = /)) !== JSON.stringify(lines(head, changelogPath, /\.ver = /))) return 'HAND_EDIT';
+  return 'CODE';
+}
+
+const fragmentFiles = tree => Object.fromEntries(Object.entries(tree).filter(([file]) => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md'));
+const addedSince = (current, previous) => Object.fromEntries(Object.entries(current).filter(([file, text]) => previous[file] !== text));
+
+function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
+  if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw new Error('Invalid release tag');
+  const version = tag.slice(1);
+  if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) {
+    if (compareTags(tag, 'v0.28.1027') >= 0) throw new Error(`Release ${tag} already exists in source; generate from the previous release`);
+    return files[changelogPath];
+  }
+  let result = { ...files };
+  const stamp = (stepTag, fragments, stepCommits, sha, current) => {
+    if (compareTags(stepTag, 'v0.28.1027') < 0) {
+      const tickets = new Set();
+      for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
+        fragmentLines(file, text);
+        const ticket = fragmentTicketId(file);
+        tickets.add(ticket);
+      }
+      if (!tickets.size && current) throw new Error('No unpublished product changes; wait for the next useful update');
+      if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
+      const bullets = [...tickets].map(ticket => `        .{ .text = "", .ticket = "${ticket}" },`).join('\n');
+      result[changelogPath] = result[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${stepTag.slice(1)}", .items = &.{\n${bullets}${bullets ? '\n' : ''}    } },`);
+      return;
+    }
+    const reviewed = reviewedReleases[stepTag];
+    if (reviewed && sha !== reviewed[0]) throw new Error(`${stepTag}: reviewed release commit does not match ${sha || 'missing commit'}`);
+    const notes = new Map(Object.entries(reviewed?.[1] || {}));
+    if (!reviewed) {
+      for (const commit of stepCommits || []) {
+        const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
+        const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
+        if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
+        for (const ticket of tickets.map(canonicalTicketId)) {
+          if (!notes.has(ticket)) notes.set(ticket, null);
+        }
+      }
+    }
+    for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
+      fragmentLines(file, text);
+      const ticket = fragmentTicketId(file);
+      if (!reviewed && !notes.has(ticket)) throw new Error(`${stepTag}: ${ticket} fragment has no matching commit ticket`);
+      if (!notes.has(ticket)) notes.set(ticket, null);
+    }
+    if (!notes.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
+    if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
+    const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
+    const bullets = [...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`);
+    result[changelogPath] = result[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${stepTag.slice(1)}", .items = &.{\n${bullets.join('\n')}\n    } },`);
+  };
+  let previous = history.length ? fragmentFiles(history[0].files) : {};
+  for (const step of history.slice(1)) {
+    const added = addedSince(fragmentFiles(step.files), previous);
+    stamp(step.tag, added, step.commits, step.sha, false);
+    previous = fragmentFiles(step.files);
+  }
+  stamp(tag, addedSince(fragmentFiles(files), previous), commits, undefined, true);
+  return result[changelogPath];
+}
+
+
+export function changelogTicketIds(source) {
+  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => match[1]).filter(Boolean).map(canonicalTicketId))];
+}
+
+export function applyTicketTitles(source, titles) {
+  return source.replace(/^[ \t]*\.\{ \.text = "(?:\\.|[^"\\])*", \.ticket = "([^"\\]*)" \},\r?\n/gm, (row, id) => {
+    if (!id) throw new Error('Unidentified changelog row; remove pre-ticket legacy rows before release');
+    id = canonicalTicketId(id);
+    const line = ticketLine(ticketRecord(id, titles[id]));
+    const literal = JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
+    return `        .{ .text = ${literal}, .ticket = "${id}" },\n`;
+  });
+}
+
+export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog) {
+  return applyTicketTitles(buildUnresolvedChangelog(files, tag, history, commits), titles);
+}
+
+function git(args, cwd, timeout) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
+}
+
+export function readTree(rev, cwd, remaining, sourcePaths = [], only = null) {
+  const read = args => git(args, cwd, remaining?.());
+  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', ...(only ?? [mainPath, changelogPath, 'changelog.d/', ...sourcePaths])]).split('\0').filter(Boolean);
+  return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
+}
+
+const tagParts = name => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(name)?.slice(1).map(BigInt) ?? null;
+export function compareTags(a, b) {
+  const x = tagParts(a);
+  const y = tagParts(b);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
+}
+
+export function previousReleaseTag(tags, tag) {
+  return tags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags).at(-1) ?? null;
+}
+
+const historyWorkers = 8;
+
+async function pool(items, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(historyWorkers, items.length) }, run));
+  return results;
+}
+
+function gitAsync(args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}${stderr ? `: ${stderr.trim()}` : ''}`;
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+function tagObjects(text) {
+  return new Map(text.split(/\r?\n/).filter(Boolean).map(line => {
+    const [name, object, peeled] = line.split(' ');
+    return [name, peeled || object];
+  }));
+}
+
+function blobIds(text) {
+  return new Map(text.split('\0').filter(Boolean).map(entry => {
+    const tab = entry.indexOf('\t');
+    return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]];
+  }));
+}
+
+async function historyTrees(history) {
+  const refs = new Map(history.map(name => [name, `refs/tags/${name}`]));
+  const list = () => gitAsync(['for-each-ref', '--format=%(refname:short) %(objectname) %(*objectname)', 'refs/tags']);
+  let objects = tagObjects(await list());
+  const missing = history.filter(name => !objects.has(name));
+  for (const name of missing) await gitAsync(['fetch', '--no-tags', 'origin', `${refs.get(name)}:${refs.get(name)}`]);
+  if (missing.length) objects = tagObjects(await list());
+  for (const name of history) if (!objects.has(name)) throw new Error(`Missing release tag ${name}`);
+  const blobs = await pool(history, name => gitAsync(['ls-tree', '-r', '-z', refs.get(name), '--', 'changelog.d/']).then(blobIds));
+  const contents = new Map();
+  const unread = new Map();
+  history.forEach((name, i) => {
+    const batch = new Map();
+    for (const [file, id] of blobs[i]) {
+      if (contents.has(id) || batch.has(id)) continue;
+      batch.set(id, file);
+    }
+    if (batch.size) unread.set(refs.get(name), batch);
+    for (const id of batch.keys()) contents.set(id, null);
+  });
+  await pool([...unread], async ([ref, batch]) => {
+    const ids = [...batch.keys()];
+    const tree = readTree(ref, undefined, undefined, [], ids.map(id => batch.get(id)));
+    for (const id of ids) {
+      const text = tree[batch.get(id)];
+      if (text === undefined) throw new Error(`Missing release fragment ${batch.get(id)} at ${ref}`);
+      contents.set(id, text);
+    }
+  });
+  return history.map((name, i) => ({ sha: objects.get(name), files: Object.fromEntries([...blobs[i]].map(([file, id]) => [file, contents.get(id)])) }));
+}
+
+async function releaseHistory(tag, changelog, publishedTags) {
+  const older = publishedTags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
+  if (!older.length) {
+    if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') throw new Error('Shallow checkout has no release tags; fetch tags before building');
+    return [];
+  }
+  const stamped = changelog.match(/\.ver\s*=\s*"(\d+\.\d+\.\d+)"/)?.[1];
+  const base = stamped ? older.findLastIndex(name => compareTags(name, `v${stamped}`) <= 0) : -1;
+  const history = older.slice(Math.max(base, 0));
+  const [snapshots, commits] = await Promise.all([
+    historyTrees(history),
+    pool(history, (name, i) => i && compareTags(name, 'v0.28.1027') >= 0 && !reviewedReleases[name] ? releaseCommitsAsync(`refs/tags/${history[i - 1]}`, `refs/tags/${name}`) : []),
+  ]);
+  return history.map((name, i) => ({ tag: name, files: snapshots[i].files, sha: snapshots[i].sha, commits: commits[i] }));
+}
+
+function parseCommits(text) {
+  return text.split(/\r?\n/).filter(Boolean).map(line => {
+    const tab = line.indexOf('\t');
+    return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
+  });
+}
+
+function releaseCommits(previous, head) {
+  git(['merge-base', '--is-ancestor', previous, head]);
+  return parseCommits(git(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
+}
+
+async function releaseCommitsAsync(previous, head) {
+  await gitAsync(['merge-base', '--is-ancestor', previous, head]);
+  return parseCommits(await gitAsync(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
+}
+
+function check(baseRev, headRev) {
+  const changed = git(['diff', '--name-only', '-z', baseRev, headRev]).split('\0').filter(Boolean);
+  const sourcePaths = changed.filter(file => file.startsWith('src/') && file.endsWith('.zig'));
+  const base = readTree(baseRev, undefined, undefined, sourcePaths);
+  const head = readTree(headRev, undefined, undefined, sourcePaths);
+  const kind = classifyTrees(base, head, changed);
+  if (kind === 'HAND_EDIT') {
+    const diff = git(['diff', '--no-ext-diff', '--unified=0', baseRev, headRev, '--', mainPath, changelogPath]);
+    console.error(diff.split(/\r?\n/).filter(line => /^[+-](?![+-])/.test(line) && (/\bAPP_VERSION\s*=/.test(line) || /\.ver = /.test(line))).join('\n'));
+    console.error(fixHint);
+  }
+  if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
+  else if (kind === 'CODE') checkFragments(base, head, changed);
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
+  console.log(kind);
+  return kind === 'HAND_EDIT' ? 1 : 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const [command, base, head, ...extra] = process.argv.slice(2);
+    if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
+    else if (command === 'pending' && base && head && !extra.length) {
+      const changes = addedSince(fragmentFiles(readTree(head)), fragmentFiles(readTree(base)));
+      const lines = Object.entries(changes).flatMap(([file, text]) => fragmentLines(file, text).filter(productChange));
+      if (lines.length) console.log(lines.join('\n'));
+    } else if (command === 'build' && base && !extra.length) {
+      const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+      if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
+      const files = readTree('HEAD');
+      const history = await releaseHistory(base, files[changelogPath], publishedTags);
+      if (!history.length && compareTags(base, 'v0.28.1027') >= 0) throw new Error('No published baseline; fetch published release tags before building');
+      const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
+      const unresolved = buildUnresolvedChangelog(files, base, history, commits);
+      const titles = await resolveTicketTitles(changelogTicketIds(unresolved), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
+      fs.writeFileSync(changelogPath, applyTicketTitles(unresolved, titles));
+    } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "commit": "42561d88ac4f8a6521534471812dd85658d36ec1",
+  "evidence": "https://github.com/valentinyeo/multiprompt/actions/runs/43348050761/job/131632073790",
+  "before": {"tick_ms":360640,"idle_ms":308015,"deep_idle":1,"server_fetch":30,"thread_spawn":8,"invalidate":32,"timer_fire":342,"log_line":6,"process_spawn":29,"timers":{"2":2,"5":1,"15":2,"16":9,"19":89,"20":44,"22":5,"24":5,"27":120,"28":3,"29":2,"36":11,"41":1,"172":3,"255":45}},
+  "after": {"tick_ms":663437,"idle_ms":610812,"deep_idle":1,"server_fetch":71,"thread_spawn":8,"invalidate":32,"timer_fire":435,"log_line":6,"process_spawn":70,"timers":{"2":7,"5":1,"15":12,"16":9,"19":99,"20":54,"22":5,"24":5,"27":120,"28":13,"29":2,"36":49,"41":1,"172":13,"255":45}}
+}

@@ -1,0 +1,852 @@
+const std = @import("std");
+const w = @import("win32.zig");
+const L = std.unicode.utf8ToUtf16LeStringLiteral;
+const HRESULT = i32;
+const Slot = *const anyopaque;
+const DWRITE_MEASURING_MODE_GDI_CLASSIC = 1;
+const DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC = 5;
+
+const Factory = extern struct {
+    v: *const extern struct {
+        unknown: [3]Slot,
+        font_collection_and_files: [7]Slot,
+        createRenderingParams: *const fn (*Factory, *?*RenderingParams) callconv(w.WINAPI) HRESULT,
+        monitorRenderingParams: Slot,
+        createCustomRenderingParams: *const fn (*Factory, f32, f32, f32, u32, u32, *?*RenderingParams) callconv(w.WINAPI) HRESULT,
+        font_loaders_and_text: [4]Slot,
+        getGdiInterop: *const fn (*Factory, *?*GdiInterop) callconv(w.WINAPI) HRESULT,
+    },
+};
+const RenderingParams = extern struct {
+    v: *const extern struct {
+        unknown: [2]Slot,
+        release: *const fn (*RenderingParams) callconv(w.WINAPI) u32,
+        getGamma: *const fn (*RenderingParams) callconv(w.WINAPI) f32,
+        getEnhancedContrast: *const fn (*RenderingParams) callconv(w.WINAPI) f32,
+        remaining: [3]Slot,
+    },
+};
+const GdiInterop = extern struct {
+    v: *const extern struct {
+        unknown: [3]Slot,
+        logfont_conversions: [3]Slot,
+        createFontFaceFromHdc: *const fn (*GdiInterop, w.HANDLE, *?*FontFace) callconv(w.WINAPI) HRESULT,
+        createBitmapRenderTarget: *const fn (*GdiInterop, w.HANDLE, u32, u32, *?*BitmapRenderTarget) callconv(w.WINAPI) HRESULT,
+    },
+};
+const FontFace = extern struct {
+    v: *const extern struct {
+        unknown: [2]Slot,
+        release: *const fn (*FontFace) callconv(w.WINAPI) u32,
+        font_properties_and_metrics: [8]Slot,
+        getGlyphIndices: *const fn (*FontFace, [*]const u32, u32, [*]u16) callconv(w.WINAPI) HRESULT,
+    },
+};
+const BitmapRenderTarget = extern struct {
+    v: *const extern struct {
+        unknown: [3]Slot,
+        drawGlyphRun: *const fn (*BitmapRenderTarget, f32, f32, u32, *const GlyphRun, *RenderingParams, u32, ?*w.RECT) callconv(w.WINAPI) HRESULT,
+        getMemoryDC: *const fn (*BitmapRenderTarget) callconv(w.WINAPI) w.HANDLE,
+        getPixelsPerDip: Slot,
+        setPixelsPerDip: *const fn (*BitmapRenderTarget, f32) callconv(w.WINAPI) HRESULT,
+        transforms_and_size: [3]Slot,
+        resize: *const fn (*BitmapRenderTarget, u32, u32) callconv(w.WINAPI) HRESULT,
+    },
+};
+const GlyphRun = extern struct {
+    face: *FontFace,
+    em_size: f32,
+    count: u32,
+    indices: [*]const u16,
+    advances: [*]const f32,
+    offsets: ?*const anyopaque = null,
+    sideways: w.BOOL = 0,
+    bidi_level: u32 = 0,
+};
+const ScriptAnalysis = extern struct { flags: u16, state: u16 };
+const ScriptItem = extern struct { position: i32, analysis: ScriptAnalysis };
+const GlyphOffset = extern struct { advance: f32, ascender: f32 };
+const GdiOffset = extern struct { x: i32, y: i32 };
+const Abc = extern struct { a: i32, b: u32, c: i32 };
+extern "usp10" fn ScriptItemize([*]const u16, i32, i32, ?*const anyopaque, ?*const anyopaque, [*]ScriptItem, *i32) callconv(w.WINAPI) HRESULT;
+extern "usp10" fn ScriptShape(w.HANDLE, *?*anyopaque, [*]const u16, i32, i32, *ScriptAnalysis, [*]u16, [*]u16, [*]u16, *i32) callconv(w.WINAPI) HRESULT;
+extern "usp10" fn ScriptPlace(w.HANDLE, *?*anyopaque, [*]const u16, i32, [*]const u16, *ScriptAnalysis, [*]i32, [*]GdiOffset, *Abc) callconv(w.WINAPI) HRESULT;
+extern "usp10" fn ScriptFreeCache(*?*anyopaque) callconv(w.WINAPI) HRESULT;
+
+const TextMetric = extern struct {
+    height: i32,
+    ascent: i32,
+    descent: i32,
+    internal_leading: i32,
+    external_leading: i32,
+    average_width: i32,
+    maximum_width: i32,
+    weight: i32,
+    overhang: i32,
+    digitized_aspect_x: i32,
+    digitized_aspect_y: i32,
+    first: u16,
+    last: u16,
+    default: u16,
+    break_char: u16,
+    italic: u8,
+    underlined: u8,
+    struck_out: u8,
+    pitch: u8,
+    charset: u8,
+};
+const LogFont = extern struct {
+    height: i32,
+    width: i32,
+    escapement: i32,
+    orientation: i32,
+    weight: i32,
+    attributes: [8]u8,
+    name: [32]u16,
+};
+extern "dwrite" fn DWriteCreateFactory(u32, *const w.GUID, *?*Factory) callconv(w.WINAPI) HRESULT;
+extern "gdi32" fn GetTextMetricsW(w.HANDLE, *TextMetric) callconv(w.WINAPI) w.BOOL;
+extern "gdi32" fn GetBkMode(w.HANDLE) callconv(w.WINAPI) i32;
+extern "gdi32" fn GetBkColor(w.HANDLE) callconv(w.WINAPI) u32;
+extern "gdi32" fn GetMapMode(w.HANDLE) callconv(w.WINAPI) i32;
+extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+
+const CachedFace = struct {
+    font: w.HANDLE = null,
+    face: ?*FontFace = null,
+};
+threadlocal var factory: ?*Factory = null;
+threadlocal var interop: ?*GdiInterop = null;
+threadlocal var params: ?*RenderingParams = null;
+threadlocal var target: ?*BitmapRenderTarget = null;
+threadlocal var target_width: u32 = 0;
+threadlocal var target_height: u32 = 0;
+threadlocal var faces: [32]CachedFace = @splat(.{});
+pub threadlocal var painted_runs: u64 = 0;
+pub threadlocal var fallback_runs: u64 = 0;
+pub const IGSH_610 = true;
+
+pub fn enabled() bool {
+    var value: [8]u16 = undefined;
+    return IGSH_610 and !(w.GetEnvironmentVariableW(L("IGSH_610"), &value, value.len) == 1 and value[0] == '0');
+}
+
+pub fn resetFonts() void {
+    for (&faces) |*entry| {
+        if (entry.face) |face| _ = face.v.release(face);
+        entry.* = .{};
+    }
+}
+
+fn initialize() bool {
+    if (factory == null) {
+        const iid = w.GUID{ .Data1 = 0xb859ee5a, .Data2 = 0xd838, .Data3 = 0x4b5b, .Data4 = .{ 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48 } };
+        if (DWriteCreateFactory(0, &iid, &factory) < 0) return false;
+    }
+    const f = factory orelse return false;
+    if (interop == null and f.v.getGdiInterop(f, &interop) < 0) return false;
+    if (params == null) {
+        var defaults: ?*RenderingParams = null;
+        if (f.v.createRenderingParams(f, &defaults) < 0) return false;
+        const p = defaults orelse return false;
+        defer _ = p.v.release(p);
+        if (f.v.createCustomRenderingParams(f, p.v.getGamma(p), p.v.getEnhancedContrast(p), 0, 0, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, &params) < 0) return false;
+    }
+    return interop != null and params != null;
+}
+
+fn fontFace(hdc: w.HANDLE) ?*FontFace {
+    const font = w.GetCurrentObject(hdc, 6) orelse return null;
+    for (&faces) |*entry| if (entry.font == font) return entry.face;
+    for (&faces) |*entry| {
+        if (entry.font != null) continue;
+        var face: ?*FontFace = null;
+        if (interop.?.v.createFontFaceFromHdc(interop.?, hdc, &face) < 0) return null;
+        entry.* = .{ .font = font, .face = face };
+        return face;
+    }
+    return null;
+}
+
+const max_units = 4096;
+const Segment = struct {
+    codepoints: [max_units]u32 = undefined,
+    ends: [max_units]usize = undefined,
+    indices: [max_units]u16 = undefined,
+    advances: [max_units]f32 = undefined,
+    count: usize = 0,
+    width: i32 = 0,
+};
+
+fn decode(text: []const u16, segment: *Segment) bool {
+    if (text.len > max_units) return false;
+    var i: usize = 0;
+    segment.count = 0;
+    while (i < text.len) {
+        var cp: u32 = text[i];
+        i += 1;
+        if (cp >= 0xd800 and cp <= 0xdbff) {
+            if (i == text.len or text[i] < 0xdc00 or text[i] > 0xdfff) return false;
+            cp = 0x10000 + ((cp - 0xd800) << 10) + (text[i] - 0xdc00);
+            i += 1;
+        } else if (cp >= 0xdc00 and cp <= 0xdfff) return false;
+        if (cp < 0x20 or cp == 0x7f or (cp >= 0x300 and cp <= 0x36f) or (cp >= 0x590 and cp <= 0x109f) or (cp >= 0x1780 and cp <= 0x18af) or (cp >= 0x200b and cp <= 0x200f) or (cp >= 0x202a and cp <= 0x202e) or (cp >= 0x2060 and cp <= 0x206f) or (cp >= 0xfe00 and cp <= 0xfe0f) or (cp >= 0xe0100 and cp <= 0xe01ef)) return false;
+        segment.codepoints[segment.count] = cp;
+        segment.ends[segment.count] = i;
+        segment.count += 1;
+    }
+    return true;
+}
+
+fn prepare(hdc: w.HANDLE, face: *FontFace, text: []const u16, segment: *Segment) bool {
+    if (!decode(text, segment)) return false;
+    if (face.v.getGlyphIndices(face, &segment.codepoints, @intCast(segment.count), &segment.indices) < 0) return false;
+    for (segment.indices[0..segment.count]) |glyph| if (glyph == 0) return false;
+    var extents: [max_units]i32 = undefined;
+    var fit: i32 = 0;
+    var size: w.SIZE = undefined;
+    if (w.GetTextExtentExPointW(hdc, text.ptr, @intCast(text.len), std.math.maxInt(i32), &fit, &extents, &size) == 0) return false;
+    var previous: i32 = 0;
+    for (segment.ends[0..segment.count], 0..) |end, n| {
+        const next = extents[end - 1];
+        segment.advances[n] = @floatFromInt(next - previous);
+        previous = next;
+    }
+    segment.width = size.cx;
+    return previous == size.cx;
+}
+
+fn ellipsize(hdc: w.HANDLE, face: *FontFace, width: i32, segment: *Segment) ?usize {
+    const dot = [1]u32{'.'};
+    var glyph: [1]u16 = undefined;
+    if (face.v.getGlyphIndices(face, &dot, 1, &glyph) < 0 or glyph[0] == 0) return null;
+    var dot_size: w.SIZE = undefined;
+    if (w.GetTextExtentPoint32W(hdc, L("."), 1, &dot_size) == 0) return null;
+    const dots = 3;
+    var kept: usize = 0;
+    var used: i32 = 0;
+    while (kept < segment.count) : (kept += 1) {
+        const next = used + @as(i32, @intFromFloat(segment.advances[kept]));
+        if (next + dots * dot_size.cx > width) break;
+        used = next;
+    }
+    if (kept + dots > max_units) return null;
+    @memset(segment.indices[kept..][0..dots], glyph[0]);
+    @memset(segment.advances[kept..][0..dots], @floatFromInt(dot_size.cx));
+    segment.count = kept + dots;
+    segment.width = used + dots * dot_size.cx;
+    return kept;
+}
+
+pub fn emHeight(hdc: w.HANDLE) ?i32 {
+    var metric: TextMetric = undefined;
+    if (GetTextMetricsW(hdc, &metric) == 0) return null;
+    return metric.height - metric.internal_leading;
+}
+
+fn ensureTarget(hdc: w.HANDLE, width: u32, height: u32) bool {
+    if (target == null) {
+        if (interop.?.v.createBitmapRenderTarget(interop.?, hdc, width, height, &target) < 0) return false;
+    } else if (width > target_width or height > target_height) {
+        if (target.?.v.resize(target.?, @max(width, target_width), @max(height, target_height)) < 0) return false;
+    }
+    target_width = @max(width, target_width);
+    target_height = @max(height, target_height);
+    return target != null and target.?.v.setPixelsPerDip(target.?, 1) >= 0;
+}
+
+const DialogLayoutHandle = opaque {};
+extern "c" fn mp_dialog_layout_create(w.HANDLE, [*]const u16, u32, i32, *i32) ?*DialogLayoutHandle;
+extern "c" fn mp_dialog_layout_release(*DialogLayoutHandle) void;
+extern "c" fn mp_dialog_layout_draw(*DialogLayoutHandle, w.HANDLE, *const w.RECT, *const w.RECT, u32) c_int;
+
+pub const DialogLayout = struct {
+    handle: *DialogLayoutHandle,
+    height: i32,
+
+    pub fn create(dc: w.HANDLE, text: []const u16, width: i32) ?DialogLayout {
+        if (text.len > std.math.maxInt(i32) or width <= 0) return null;
+        var height: i32 = 0;
+        const handle = mp_dialog_layout_create(dc, text.ptr, @intCast(text.len), width, &height) orelse return null;
+        return .{ .handle = handle, .height = height };
+    }
+
+    pub fn release(self: DialogLayout) void {
+        mp_dialog_layout_release(self.handle);
+    }
+
+    pub fn draw(self: DialogLayout, dc: w.HANDLE, bounds: w.RECT, client: w.RECT, color: u32) bool {
+        return mp_dialog_layout_draw(self.handle, dc, &bounds, &client, color) != 0;
+    }
+};
+
+const PositionedContext = struct {
+    text: []const u16,
+    advances: []const f32,
+    x: i32,
+    y: i32,
+    clip: w.RECT,
+    color: u32,
+};
+
+extern "c" fn mp_draw_color_positioned(w.HANDLE, [*]const u16, u32, [*]const f32, i32, i32, *const w.RECT, u32, *const fn (*anyopaque, w.HANDLE, [*]const u8) callconv(.c) c_int, *anyopaque) c_int;
+
+fn positionedCallback(raw: *anyopaque, hdc: w.HANDLE, omit: [*]const u8) callconv(.c) c_int {
+    const context: *PositionedContext = @ptrCast(@alignCast(raw));
+    return @intFromBool(drawPositionedPlain(hdc, context.text, context.advances, context.x, context.y, context.clip, context.color, omit[0..context.text.len]));
+}
+
+pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x: i32, y: i32, clip: w.RECT, color: u32) bool {
+    if (text.len == 0) return true;
+    if (text.len != advances.len or text.len > std.math.maxInt(i32)) return false;
+    var context = PositionedContext{ .text = text, .advances = advances, .x = x, .y = y, .clip = clip, .color = color };
+    const result = mp_draw_color_positioned(hdc, text.ptr, @intCast(text.len), advances.ptr, x, y, &clip, color, &positionedCallback, &context);
+    if (result == 1) return true;
+    return drawPositionedPlain(hdc, text, advances, x, y, clip, color, null);
+}
+
+fn drawPositionedPlain(hdc: w.HANDLE, text: []const u16, advances: []const f32, x: i32, y: i32, clip: w.RECT, color: u32, omit: ?[]const u8) bool {
+    if (text.len == 0) return true;
+    if (text.len != advances.len or !initialize()) return false;
+    const face = fontFace(hdc) orelse return false;
+    var metric: TextMetric = undefined;
+    if (GetTextMetricsW(hdc, &metric) == 0) return false;
+    const allocator = std.heap.page_allocator;
+    const items = allocator.alloc(ScriptItem, text.len + 1) catch return false;
+    defer allocator.free(items);
+    var item_count: i32 = 0;
+    if (ScriptItemize(text.ptr, @intCast(text.len), @intCast(items.len), null, null, items.ptr, &item_count) < 0) return false;
+    const clusters = allocator.alloc(u16, text.len) catch return false;
+    defer allocator.free(clusters);
+    const positions = allocator.alloc(f32, text.len + 1) catch return false;
+    defer allocator.free(positions);
+    positions[0] = 0;
+    for (advances, 0..) |advance, unit| positions[unit + 1] = positions[unit] + advance;
+    const width = clip.right - clip.left;
+    const height = clip.bottom - clip.top;
+    if (width <= 0 or height <= 0) return true;
+    if (!ensureTarget(hdc, @intCast(width), @intCast(height))) return false;
+    const t = target.?;
+    const memory = t.v.getMemoryDC(t);
+    if (memory == null or w.BitBlt(memory, 0, 0, width, height, hdc, clip.left, clip.top, w.GDI_SRCCOPY) == 0) return false;
+    for (items[0..@intCast(item_count)], 0..) |*item, item_index| {
+        const item_begin: usize = @intCast(item.position);
+        const item_end: usize = @intCast(items[item_index + 1].position);
+        var begin = item_begin;
+        var end = item_end;
+        var split = false;
+        var cache: ?*anyopaque = null;
+        defer _ = ScriptFreeCache(&cache);
+        while (begin < item_end) {
+            if (split) {
+                const mask = omit orelse return false;
+                while (begin < item_end and mask[begin] != 0) : (begin += 1) {}
+                if (begin == item_end) break;
+                end = begin;
+                while (end < item_end and mask[end] == 0) : (end += 1) {}
+            }
+            const units = end - begin;
+            var capacity = units + units / 2 + 16;
+            var analysis = item.analysis;
+            if (split and begin != item_begin) analysis.flags &= ~@as(u16, 0x1000);
+            if (split and end != item_end) analysis.flags &= ~@as(u16, 0x2000);
+            while (true) {
+            const indices = allocator.alloc(u16, capacity) catch return false;
+            defer allocator.free(indices);
+            const attributes = allocator.alloc(u16, capacity) catch return false;
+            defer allocator.free(attributes);
+            var glyph_count: i32 = 0;
+            const shaped = ScriptShape(hdc, &cache, text[begin..].ptr, @intCast(units), @intCast(capacity), &analysis, indices.ptr, clusters[begin..].ptr, attributes.ptr, &glyph_count);
+            if (shaped == @as(i32, @bitCast(@as(u32, 0x8007000e)))) {
+                capacity *= 2;
+                continue;
+            }
+            if (shaped == @as(i32, @bitCast(@as(u32, 0x80040200))) and omit != null and !split) {
+                split = true;
+                break;
+            }
+            if (shaped < 0) return false;
+            const count: usize = @intCast(glyph_count);
+            const widths = allocator.alloc(i32, count) catch return false;
+            defer allocator.free(widths);
+            const native_offsets = allocator.alloc(GdiOffset, count) catch return false;
+            defer allocator.free(native_offsets);
+            var abc: Abc = undefined;
+            if (ScriptPlace(hdc, &cache, indices.ptr, glyph_count, attributes.ptr, &analysis, widths.ptr, native_offsets.ptr, &abc) < 0) return false;
+            const offsets = allocator.alloc(GlyphOffset, count) catch return false;
+            defer allocator.free(offsets);
+            const zero_advances = allocator.alloc(f32, count) catch return false;
+            defer allocator.free(zero_advances);
+            @memset(zero_advances, 0);
+            var glyph: usize = 0;
+            var kept: usize = 0;
+            while (glyph < count) {
+                const cluster_start = glyph;
+                glyph += 1;
+                while (glyph < count and attributes[glyph] & 0x10 == 0) : (glyph += 1) {}
+                const rtl = analysis.flags & 0x0400 != 0;
+                var anchor: f32 = if (rtl) -std.math.inf(f32) else std.math.inf(f32);
+                var masked = false;
+                var retained = false;
+                for (clusters[begin..end], begin..) |cluster, unit| {
+                    if (cluster == cluster_start) {
+                        anchor = if (rtl) @max(anchor, positions[unit]) else @min(anchor, positions[unit]);
+                        if (omit) |mask| {
+                            if (mask[unit] != 0) masked = true else retained = true;
+                        } else retained = true;
+                    }
+                }
+                if (!std.math.isFinite(anchor) or (masked and retained)) return false;
+                if (rtl) for (widths[cluster_start..glyph]) |advance| {
+                    anchor -= @floatFromInt(advance);
+                };
+                for (cluster_start..glyph) |g| {
+                    if (!masked) {
+                        indices[kept] = indices[g];
+                        offsets[kept] = .{ .advance = anchor + @as(f32, @floatFromInt(native_offsets[g].x)), .ascender = @floatFromInt(native_offsets[g].y) };
+                        kept += 1;
+                    }
+                    anchor += @floatFromInt(widths[g]);
+                }
+            }
+            if (kept != 0) {
+                const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(kept), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
+                if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
+            }
+            begin = end;
+            break;
+            }
+        }
+    }
+    if (w.BitBlt(hdc, clip.left, clip.top, width, height, memory, 0, 0, w.GDI_SRCCOPY) == 0) return false;
+    painted_runs += 1;
+    return true;
+}
+
+fn paint(hdc: w.HANDLE, text: []const u16, rect: w.RECT, flags: u32) ?i32 {
+    const supported = w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_VCENTER | w.DT_CENTER | w.DT_RIGHT | w.DT_END_ELLIPSIS;
+    if ((flags & ~supported) != 0 or (flags & w.DT_SINGLELINE) == 0 or (flags & w.DT_NOPREFIX) == 0 or GetMapMode(hdc) != 1) return null;
+    var metric: TextMetric = undefined;
+    var lf: LogFont = undefined;
+    if (GetTextMetricsW(hdc, &metric) == 0 or w.GetObjectW(w.GetCurrentObject(hdc, 6), @sizeOf(LogFont), &lf) == 0) return null;
+    if (lf.escapement != 0 or lf.orientation != 0 or metric.struck_out != 0) return null;
+    if (!initialize()) return null;
+    const face = fontFace(hdc) orelse return null;
+    var segment: Segment = .{};
+    if (!prepare(hdc, face, text, &segment)) return null;
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    if (width <= 0 or height <= 0) return 0;
+    if ((flags & w.DT_END_ELLIPSIS) != 0 and segment.width > width and ellipsize(hdc, face, width, &segment) == null) return null;
+    if (!ensureTarget(hdc, @intCast(width), @intCast(height))) return null;
+    const t = target.?;
+    const memory = t.v.getMemoryDC(t);
+    if (memory == null or w.BitBlt(memory, 0, 0, width, height, hdc, rect.left, rect.top, w.GDI_SRCCOPY) == 0) return null;
+    const x = if ((flags & w.DT_RIGHT) != 0) width - segment.width else if ((flags & w.DT_CENTER) != 0) @divTrunc(width - segment.width, 2) else 0;
+    const y = if ((flags & w.DT_VCENTER) != 0) @divTrunc(height - metric.height, 2) else 0;
+    const color = w.GetTextColor(hdc);
+    if (GetBkMode(hdc) == 2) {
+        const brush = w.CreateSolidBrush(GetBkColor(hdc)) orelse return null;
+        defer _ = w.DeleteObject(brush);
+        const background = w.RECT{ .left = x, .top = y, .right = x + segment.width, .bottom = y + metric.height };
+        if (w.FillRect(memory, &background, brush) == 0) return null;
+    }
+    const em = metric.height - metric.internal_leading;
+    if (em <= 0) return null;
+    const run = GlyphRun{ .face = face, .em_size = @floatFromInt(em), .count = @intCast(segment.count), .indices = &segment.indices, .advances = &segment.advances };
+    if (t.v.drawGlyphRun(t, @floatFromInt(x), @floatFromInt(y + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return null;
+    if (metric.underlined != 0) {
+        var post: [12]u8 = undefined;
+        var head: [20]u8 = undefined;
+        if (w.GetFontData(hdc, 0x74736f70, 0, &post, post.len) != post.len or w.GetFontData(hdc, 0x64616568, 0, &head, head.len) != head.len) return null;
+        const units = std.mem.readInt(u16, head[18..20], .big);
+        if (units == 0) return null;
+        const position = @divTrunc(@as(i32, std.mem.readInt(i16, post[8..10], .big)) * em, units);
+        const thickness = @max(1, @divTrunc(@as(i32, std.mem.readInt(i16, post[10..12], .big)) * em, units));
+        const underline = w.RECT{ .left = x, .top = y + metric.ascent - position, .right = x + segment.width, .bottom = y + metric.ascent - position + thickness };
+        const brush = w.CreateSolidBrush(color) orelse return null;
+        defer _ = w.DeleteObject(brush);
+        if (w.FillRect(memory, &underline, brush) == 0) return null;
+    }
+    if (w.BitBlt(hdc, rect.left, rect.top, width, height, memory, 0, 0, w.GDI_SRCCOPY) == 0) return null;
+    painted_runs += 1;
+    return metric.height;
+}
+
+extern "c" fn mp_draw_color_text(w.HANDLE, [*]const u16, u32, *w.RECT, u32, *const fn (w.HANDLE, [*]const u16, i32, *w.RECT, u32) callconv(.c) i32) c_int;
+
+fn drawPlain(hdc: w.HANDLE, text: [*]const u16, count: i32, rect: *w.RECT, flags: u32) callconv(.c) i32 {
+    if (enabled()) if (paint(hdc, text[0..@intCast(count)], rect.*, flags)) |height| return height;
+    return w.DrawTextW(hdc, text, count, rect, flags);
+}
+
+pub fn draw(hdc: w.HANDLE, text: [*]const u16, count: i32, rect: *w.RECT, flags: u32) i32 {
+    if (count != 0) {
+        const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);
+        const height = mp_draw_color_text(hdc, text, @intCast(len), rect, flags, &drawPlain);
+        if (height != 0) {
+            if (enabled()) painted_runs += 1;
+            return height;
+        }
+    }
+    if (enabled() and count != 0) {
+        const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);
+        if (len > 0) if (paint(hdc, text[0..len], rect.*, flags)) |height| return height;
+    }
+    fallback_runs += 1;
+    return w.DrawTextW(hdc, text, count, rect, flags);
+}
+
+test "IGSH-610 switch defaults on and only zero restores GDI" {
+    var previous: [32768]u16 = undefined;
+    const length = w.GetEnvironmentVariableW(L("IGSH_610"), &previous, previous.len);
+    defer _ = w.SetEnvironmentVariableW(L("IGSH_610"), if (length > 0 and length < previous.len) @ptrCast(&previous) else null);
+    try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_610"), null) != 0);
+    try std.testing.expect(enabled());
+    try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_610"), L("0")) != 0);
+    try std.testing.expect(!enabled());
+    try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_610"), L("1")) != 0);
+    try std.testing.expect(enabled());
+}
+
+test "IGSH-610 surrogate decoding preserves scalar and UTF-16 advance boundaries" {
+    var segment: Segment = .{};
+    try std.testing.expect(decode(L("A\u{1f600}B"), &segment));
+    try std.testing.expectEqualSlices(u32, &.{ 'A', 0x1f600, 'B' }, segment.codepoints[0..segment.count]);
+    try std.testing.expectEqualSlices(usize, &.{ 1, 3, 4 }, segment.ends[0..segment.count]);
+    try std.testing.expect(!decode(&.{0xd800}, &segment));
+    try std.testing.expect(!decode(&.{0xdc00}, &segment));
+}
+
+test "IGSH-610 real glyph runs match GDI advances and missing glyphs use pixel-identical fallback" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 400, .height = -60 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-18, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    try std.testing.expect(initialize());
+    const face = fontFace(dc) orelse return error.TestUnexpectedResult;
+    const sample = L("AV To office widths 0123");
+    var segment: Segment = .{};
+    try std.testing.expect(prepare(dc, face, sample, &segment));
+    var sum: f32 = 0;
+    for (segment.advances[0..segment.count], segment.ends[0..segment.count]) |advance, end| {
+        sum += advance;
+        var size: w.SIZE = undefined;
+        try std.testing.expect(w.GetTextExtentPoint32W(dc, sample, @intCast(end), &size) != 0);
+        try std.testing.expectEqual(@as(f32, @floatFromInt(size.cx)), sum);
+    }
+    try std.testing.expectEqual(@as(f32, @floatFromInt(segment.width)), sum);
+    var rc = w.RECT{ .left = 0, .top = 0, .right = 400, .bottom = 60 };
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. 400 * 60 * 4];
+    @memset(pixels, 0);
+    const before_painted = painted_runs;
+    const before_fallback = fallback_runs;
+    _ = draw(dc, sample, @intCast(sample.len), &rc, w.DT_SINGLELINE | w.DT_NOPREFIX);
+    if (enabled()) {
+        try std.testing.expectEqual(before_painted + 1, painted_runs);
+        try std.testing.expectEqual(before_fallback, fallback_runs);
+    } else {
+        try std.testing.expectEqual(before_painted, painted_runs);
+        try std.testing.expectEqual(before_fallback + 1, fallback_runs);
+    }
+    _ = GdiFlush();
+    @memset(pixels, 0);
+    try std.testing.expect(paint(dc, sample, rc, w.DT_SINGLELINE | w.DT_NOPREFIX) != null);
+    _ = GdiFlush();
+    var smoothed = false;
+    var inked = false;
+    var pixel: usize = 0;
+    while (pixel < pixels.len) : (pixel += 4) {
+        try std.testing.expectEqual(pixels[pixel], pixels[pixel + 1]);
+        try std.testing.expectEqual(pixels[pixel], pixels[pixel + 2]);
+        inked = inked or pixels[pixel] != 0;
+        smoothed = smoothed or (pixels[pixel] > 0 and pixels[pixel] < 255);
+    }
+    try std.testing.expect(inked and smoothed);
+    const first_target = target;
+    try std.testing.expect(paint(dc, sample, rc, w.DT_SINGLELINE | w.DT_NOPREFIX) != null);
+    try std.testing.expectEqual(first_target, target);
+    _ = GdiFlush();
+    const missing = L("missing \u{10ffff}");
+    try std.testing.expect(!prepare(dc, face, missing, &segment));
+    @memset(pixels, 0);
+    try std.testing.expect(paint(dc, missing, rc, w.DT_SINGLELINE | w.DT_NOPREFIX) == null);
+    const before = fallback_runs;
+    _ = draw(dc, missing, @intCast(missing.len), &rc, w.DT_SINGLELINE | w.DT_NOPREFIX);
+    try std.testing.expectEqual(before + 1, fallback_runs);
+    _ = GdiFlush();
+    const actual = try std.testing.allocator.dupe(u8, pixels);
+    defer std.testing.allocator.free(actual);
+    @memset(pixels, 0);
+    _ = w.DrawTextW(dc, missing, @intCast(missing.len), &rc, w.DT_SINGLELINE | w.DT_NOPREFIX);
+    _ = GdiFlush();
+    try std.testing.expectEqualSlices(u8, actual, pixels);
+    resetFonts();
+    for (faces) |entry| try std.testing.expect(entry.face == null and entry.font == null);
+}
+
+test "IGSH-678 overflowing end-ellipsis code rows keep GDI truncation and draw through DirectWrite" {
+    const fonts = @import("fonts.zig");
+    const registered = fonts.register();
+    if (!registered) std.debug.print("IGSH-678 fonts.register failed\n", .{});
+    try std.testing.expect(registered);
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse {
+        std.debug.print("IGSH-678 CreateCompatibleDC failed\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    defer _ = w.DeleteDC(dc);
+    const width = 200;
+    const height = 24;
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse {
+        std.debug.print("IGSH-678 CreateDIBSection failed\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.create(-11, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, fonts.CHAT_QUALITY, 0, L(fonts.MONO_FACE)) orelse {
+        std.debug.print("IGSH-678 fonts.create returned null\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    const initialized = initialize();
+    if (!initialized) std.debug.print("IGSH-678 initialize failed\n", .{});
+    try std.testing.expect(initialized);
+    const face = fontFace(dc) orelse {
+        std.debug.print("IGSH-678 fontFace returned null\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    const line = L("+<p>Decision, reviewer 2026-10-23 answering the question about the smaller views");
+    var segment: Segment = .{};
+    const prepared = prepare(dc, face, line, &segment);
+    if (!prepared) std.debug.print("IGSH-678 prepare failed count={d} width={d}\n", .{ segment.count, segment.width });
+    try std.testing.expect(prepared);
+    if (segment.width <= width) std.debug.print("IGSH-678 line is not wider than the row: segment.width={d} row={d}\n", .{ segment.width, width });
+    try std.testing.expect(segment.width > width);
+    const full_width = segment.width;
+    const kept = ellipsize(dc, face, width, &segment) orelse {
+        std.debug.print("IGSH-678 ellipsize returned null\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    if (kept == 0) std.debug.print("IGSH-678 ellipsize kept nothing, row={d}\n", .{width});
+    try std.testing.expect(kept > 0);
+    if (segment.width > width) std.debug.print("IGSH-678 ellipsized width {d} exceeds row {d} (full {d}, kept {d})\n", .{ segment.width, width, full_width, kept });
+    try std.testing.expect(segment.width <= width);
+    var gdi: [line.len + 8]u16 = @splat(0);
+    @memcpy(gdi[0..line.len], line);
+    var gdi_rc = w.RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    _ = w.DrawTextW(dc, &gdi, @intCast(line.len), &gdi_rc, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_END_ELLIPSIS | 0x10000);
+    const dots = std.mem.indexOf(u16, &gdi, L("...")) orelse {
+        std.debug.print("IGSH-678 GDI output has no dots: {any}\n", .{gdi});
+        return error.TestUnexpectedResult;
+    };
+    if (dots != segment.ends[kept - 1]) std.debug.print("IGSH-678 GDI kept {d} units, ours {d} (kept {d} characters)\n", .{ dots, segment.ends[kept - 1], kept });
+    try std.testing.expectEqualSlices(u16, line[0..segment.ends[kept - 1]], gdi[0..dots]);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    @memset(pixels, 0);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    var rc = w.RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const before_painted = painted_runs;
+    const before_fallback = fallback_runs;
+    _ = draw(dc, line, @intCast(line.len), &rc, w.DT_SINGLELINE | w.DT_END_ELLIPSIS | w.DT_NOPREFIX | w.DT_VCENTER);
+    _ = GdiFlush();
+    if (!enabled()) {
+        try std.testing.expectEqual(before_fallback + 1, fallback_runs);
+        return;
+    }
+    try std.testing.expectEqual(before_painted + 1, painted_runs);
+    try std.testing.expectEqual(before_fallback, fallback_runs);
+    var smoothed = false;
+    var inked: usize = 0;
+    var full: usize = 0;
+    var last_inked: usize = 0;
+    var pixel: usize = 0;
+    while (pixel < pixels.len) : (pixel += 4) {
+        if (pixels[pixel] == 0) continue;
+        inked += 1;
+        if (pixels[pixel] == 255) full += 1;
+        last_inked = @max(last_inked, (pixel / 4) % width);
+        smoothed = smoothed or pixels[pixel] < 255;
+    }
+    if (inked == 0) std.debug.print("IGSH-678 DirectWrite drew no ink\n", .{});
+    try std.testing.expect(inked > 0);
+    if (!smoothed) std.debug.print("IGSH-678 no smoothed pixels: inked={d} full_intensity={d}\n", .{ inked, full });
+    try std.testing.expect(smoothed);
+    if (@as(i32, @intCast(last_inked)) > segment.width) std.debug.print("IGSH-678 ink reaches column {d}, ellipsized width {d}\n", .{ last_inked, segment.width });
+    try std.testing.expect(@as(i32, @intCast(last_inked)) <= segment.width);
+    try std.testing.expect(last_inked > 0);
+}
+
+test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixels" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const width = 600;
+    const height = 400;
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    const samples = [_][]const u16{ L("✓"), L("⚠"), L("👍"), L("✗"), L("👍🏽"), L("👨‍👩‍👧"), L("❤️"), L("⚠️"), L("1️⃣"), L("🇬🇧") };
+    for ([_]bool{ false, true }) |color| {
+        @memset(pixels, 0);
+        for (samples, 0..) |sample, row| {
+            var text: [64]u16 = @splat(0);
+            @memcpy(text[0..sample.len], sample);
+            const original = text;
+            var before: w.SIZE = undefined;
+            try std.testing.expect(w.GetTextExtentPoint32W(dc, &text, @intCast(sample.len), &before) != 0);
+            var rect = w.RECT{ .left = 20, .top = @intCast(row * 40), .right = 140, .bottom = @intCast((row + 1) * 40) };
+            if (color) {
+                _ = draw(dc, &text, @intCast(sample.len), &rect, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_VCENTER);
+            } else {
+                _ = w.DrawTextW(dc, &text, @intCast(sample.len), &rect, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_VCENTER);
+            }
+            _ = GdiFlush();
+            try std.testing.expectEqualSlices(u16, &original, &text);
+            var after: w.SIZE = undefined;
+            try std.testing.expect(w.GetTextExtentPoint32W(dc, &text, @intCast(sample.len), &after) != 0);
+            try std.testing.expectEqual(before.cx, after.cx);
+            var chromatic: usize = 0;
+            for (row * 40..(row + 1) * 40) |y| {
+                for (20..140) |x| {
+                    const pixel = pixels[(y * width + x) * 4 ..][0..3];
+                    const low = @min(pixel[0], pixel[1], pixel[2]);
+                    const high = @max(pixel[0], pixel[1], pixel[2]);
+                    if (high - low > 24) chromatic += 1;
+                }
+            }
+            std.debug.print("IGSH-1089 color={} row={d} chromatic={d}\n", .{ color, row, chromatic });
+            if (color and row != samples.len - 1) try std.testing.expect(chromatic > 5);
+        }
+        var bmp: [54 + width * height * 4]u8 = undefined;
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], bmp.len, .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], pixels);
+        const file = w.CreateFileW(if (color) L("emoji-after.bmp") else L("emoji-before.bmp"), 0x40000000, 0, null, 2, 0x80, null);
+        try std.testing.expect(file != null and file != @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+        defer _ = w.CloseHandle(file);
+        var written: u32 = 0;
+        try std.testing.expect(w.WriteFile(file, &bmp, bmp.len, &written, null) != 0 and written == bmp.len);
+    }
+}
+
+test "IGSH-1089 partially scrolled emoji keep the message background and clipping" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 200, .height = -60 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. 200 * 60 * 4];
+    @memset(pixels, 32);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    const saved = w.SaveDC(dc);
+    defer _ = w.RestoreDC(dc, saved);
+    _ = w.IntersectClipRect(dc, 0, 0, 100, 20);
+    var rect = w.RECT{ .left = 20, .top = -12, .right = 100, .bottom = 28 };
+    _ = draw(dc, L("👍"), 2, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX);
+    _ = GdiFlush();
+    var size: w.SIZE = undefined;
+    try std.testing.expect(w.GetTextExtentPoint32W(dc, L("👍"), 2, &size) != 0);
+    var colored: usize = 0;
+    var background: usize = 0;
+    for (0..60) |y| {
+        for (0..200) |x| {
+            const pixel = pixels[(y * 200 + x) * 4 ..][0..3];
+            if (x >= 100 or y >= 20) try std.testing.expectEqualSlices(u8, &.{ 32, 32, 32 }, pixel);
+            if (y < 20 and x >= 20 and x < 20 + @as(usize, @intCast(size.cx)) and std.mem.eql(u8, pixel, &.{ 32, 32, 32 })) background += 1;
+            if (@max(pixel[0], pixel[1], pixel[2]) - @min(pixel[0], pixel[1], pixel[2]) > 24) colored += 1;
+        }
+    }
+    try std.testing.expect(colored > 5);
+    try std.testing.expect(background > 10);
+    try std.testing.expectEqualSlices(u8, &.{ 32, 32, 32 }, pixels[0..3]);
+}
+
+test "IGSH-1089 color emoji preserve nonuniform rounded badge backgrounds" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const width = 120;
+    const height = 40;
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    for (0..height) |y| {
+        @memset(pixels[y * width * 4 ..][0 .. width * 4], @as(u8, @intCast(16 + y * 3)));
+    }
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    var rect = w.RECT{ .left = 20, .top = 0, .right = 100, .bottom = height };
+    _ = draw(dc, L("👍"), 2, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX);
+    _ = GdiFlush();
+    var colored: usize = 0;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const pixel = pixels[(y * width + x) * 4 ..][0..3];
+            if (pixel[0] == pixel[1] and pixel[1] == pixel[2]) {
+                try std.testing.expectEqual(@as(u8, @intCast(16 + y * 3)), pixel[0]);
+            } else colored += 1;
+        }
+    }
+    try std.testing.expect(colored > 5);
+}

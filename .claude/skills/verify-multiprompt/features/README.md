@@ -1,0 +1,192 @@
+# Multiprompt desktop verification map
+
+Read the matching feature before driving. [Recent changes coverage](../coverage.md) lists ticket gaps and this pass's run results. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. Baseline file stems are `verify.yml`'s `feature` input; the SSH maps below use the separate reconnect workflow.
+
+## Verify these first
+
+- [Chat in long sessions](long-session-chat.md).
+- [Real server chats](server-chats.md).
+- [Clear a server chat](chat-clear.md).
+- [Stop a running reply](chat-stop.md).
+- [Send and queue messages](chat-message-sending.md).
+- [Formal chat delivery](chat-delivery-formal.md).
+- [CI repair receipt](ci-repair-receipt.md).
+- [Service route receipt](service-route-receipt.md).
+- [Test CLI checks](verify-cli.md).
+
+Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
+
+## User-facing features
+
+Start with one feature, then pick a named journey. The area files keep the reference's four-section contract. Their operation recipes name user inputs, observable proof and exact missing prerequisites. The shortcut crosswalk includes every source row; the owning area files include palette actions and dynamic row families.
+
+- [Sidebar sessions](sidebar-sessions.md).
+- [Chat view and composer](chat-and-composer.md).
+- [Command palette](palette.md).
+- [Browser pane](browser-pane.md).
+- [Workspaces and rooms](workspaces-rooms.md).
+- [Shortcuts](shortcuts.md).
+- [Settings and appearance](settings-appearance.md).
+- [Notifications and Inbox](notifications-inbox.md).
+- [Relaunch and update](relaunch-update.md).
+- [Account, devices and server sync](account-sync.md).
+- [Voice and dictation](voice-dictation.md).
+- [Computer pane](computer-pane.md).
+- [Snippets and custom commands](snippets-commands.md).
+
+Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/command_palette.zig`, and `openwiki/architecture/features.md`. Use `drive.ps1 <feature> <journey>` with the identity/evidence arguments shown in each map. It reuses existing control helpers. The new maps link existing journeys and mark missing full paths unreachable; they do not add product behavior or claim those paths passed. GitHub `verify.yml -f feature=appearance` and `-f feature=command-palette` now use this entry point and retain video. Other workflow routes remain in the [migration inventory](../inventory.md) for follow-up. Do not claim those routes already produce video or that Rooms passed offline.
+
+## Real server journey
+
+- [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
+
+## Source feature coverage
+
+Run `node tools/check-feature-coverage.mjs` from the repository root. It prints numeric coverage and every gap from `SHORTCUT_ROWS`, palette source rows and row families, and the shipped architecture features. Shortcut section headings, palette group headings, test-only rows and Future Features are not actions. Dynamic session names are instances of their source row family, not separate features.
+
+Add `Covers: <source entry ID>, <another ID>` below a feature file's title. Copy exact IDs from the gap list. A claim counts only when that same file has user entry points and a live driving recipe with actions and observable evidence. Claim only the exact entries that recipe exercises. A generic palette journey does not cover every palette action. Unreachable or placeholder recipes never count. The weekly source and live pass checks whether the claims are true.
+
+Coverage is a report, not a gate. The weekly `maintain-verification.yml` pass runs the tool with `continue-on-error: true`, and no pull request is blocked or passed by a coverage number. Existing gaps remain visible for Part H, w-2567h, and the weekly source and live pass closes them. There is no editable allowlist to expand.
+
+`maintain-verification.yml` runs pstack `maintain-verification-skill` each Tuesday using the same pinned Claude action, Sonnet model and OAuth secret as the PR verifier's Claude path. It leaves an existing maintenance PR alone. Clean or blocked runs open no PR. A changed run must name source and successful hosted live evidence for every feature before the publisher permits one corrections PR confined to this verification skill. Missing live prerequisites block the pass; they are not coverage. The workflow never merges. Automatic corrections are Markdown-only because master journeys cannot prove an uncommitted driver change. A needed executable correction blocks publication until a separate branch can prove it live.
+
+## Baseline preconditions
+
+- Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
+- A real branch build or checksum-verified release executable with matching embedded version.
+- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one owned single-window instance and an initialized CMD tab. Existing baseline recipes start empty; real-size coverage must use Part A's disclosed seeded profile. The harness must see the owned `ZigShell` HWND through UI Automation.
+- Documented `MULTIPROMPT_NO_LOGIN=1` offline mode. Account login, device approval, sync, real AI agents, SSH/tmux and browser integration are not verified by this baseline.
+- Read-only Doctor passes before input. Never rewrite app state after launch, set app settings to bypass a user action or reuse a shared desktop. Part A owns all new real-size seed data; existing legacy fixtures retain their disclosed boundaries.
+
+## Driving conventions
+
+For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+
+Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without a model picker, capped at eight per pull request. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. A source file that more than five maps list, such as `src/main.zig` or `src/command_palette.zig`, is shared core and selects no journey by itself; when nothing is selected for a `src/` change, `appearance` runs as the one smoke journey. Journeys dropped over the cap are named in the verdict.
+
+The nightly master run and each release run every runnable recipe, including the formerly manual recipes. `Verify on:` retains the legacy smoke-set metadata. Reconnect and diagnostic recipes without a `Driving it with control.ps1` heading keep their separate workflows. The shared control driver remains a separate concern.
+
+Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
+
+## Proof and failure reporting
+
+Require `result.json` status `passed`, a successful cleanup, before/action/after screenshots you have inspected, action trace, and the feature-specific saved-file or window-state assertions. The artifact is `verify-<stem>`. Side effects come from the app or the real console command; the harness only reads them. Evidence survives scratch cleanup under `evidence/` in the runner and in the downloaded artifact.
+
+A passing selected journey does not cover all listed entry points or every sub-feature of Multiprompt. Record the exact entry path actually exercised. Missing shells, inaccessible windows, unmatched selections and missing saved values fail; do not replace them with mocks or skip them. Map entries below describe runnable journeys, not a historical claim that each has already passed.
+
+## Diagnostic verification
+
+- [Room reply grouping](../diagnostics/room-reply-grouping.md): hosted native replay regression; production Rooms and paired Android walkthrough remain required.
+
+- [Remote switch speed](../diagnostics/remote-switch-speed.md): dedicated Windows baseline/candidate workflow, 20 session switches and 20 workspace switches, 2,000 rendered messages, native paint gaps, one-core CPU, and two-second recovery.
+
+- [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
+- [Device approval](../diagnostics/device-approval.md): deterministic production prompt and key-rollout checks; live desktop and phone screenshots remain separate acceptance proof.
+
+- [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
+
+## Legacy journey recipes
+
+- [A chat stays still](chat-still.md): exact newest-visible message rectangle on every native paint and DWM frame, idle and during streaming.
+
+- [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
+- [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
+
+- [Inbox bottom space](inbox-space.md): a complete existing row fills the screenshot-marked band and native clicking opens that row.
+
+- [Computer menu](computer-menu.md): Computer stays inside the existing chat three-dots menu; real click selects its pane and returning preserves the draft.
+
+- [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
+
+- [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
+- [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
+
+- [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Jump to newest](chat-newest.md): Shift+G twice, exact draft preservation and the renamed palette action, with direct verifier checks.
+- [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
+
+- [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
+
+- [What's new](whats-new.md): real keyboard changelog navigation and source-backed screenshot review.
+- [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
+- [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
+- [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
+- [Chat options](chat-options.md): only structured provider questions become cards, with multiple selection and Other; ordinary reply lists stay text.
+- [Permission rows](permission-rows.md): hosted console-boundary clicks, shortcuts, receipts and screenshots; visual review remains required.
+- [Live chat commands](chat-slash.md): Plan and permission modes through the composer and Ctrl+K; unsupported commands never enter the outbox.
+- [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.
+- [Chat code font](chat-code-font.md): a real console fenced code block draws Nordwand Mono cells 2 pt smaller than before, the app logs the selected code face, and the branch painter proves overflowing diff rows stay smooth on DirectWrite.
+- [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.
+- [Chat first paint](chat-first-paint.md): quit with Chat View and a docked browser pane open, relaunch, and require the transcript, message box and composer card to keep one position from the first painted frame until restore finishes.
+- [Chat send latency](chat-send-latency.md): send 20 messages from Chat View with real keystrokes and require each message to be drawn in the transcript within 100 ms of the send key.
+- [Relaunch saved sessions](relaunch-saved-sessions.md): the relaunch check. A seeded Starred workspace of 14 live sessions and 6 cached copies is launched and quit three times, the last two with every notification port occupied; each session must appear once and the selected chat must stay.
+- [Saved terminal binding](tmux-binding.md): adopted remote identities survive missing status text and five reopens.
+- [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
+- [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
+- [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
+- [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
+- [Session actions](session-actions.md): native quit/reopen, ordered right-click actions, single-request deletion and reopening/copying both original histories through explicit synthetic remote boundaries.
+- [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
+- [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
+- [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
+- [Server runner group](server-open-group.md): import one account shell tab into a group named Runners, then import that same tab again without adding a tab or a group.
+- [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
+- [Servers](servers.md): add a disposable server in the real app, paste its one setup line, test the own-key sign-in, then remove it and require the key to be refused. Manual-only release journey.
+- [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
+- [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
+- [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
+- [Inbox without shortcut legend](inbox-no-footer.md): manual paired release/branch pixel proof across Inbox states and themes.
+- [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
+- [Inbox order](inbox-order.md): recent sessions lead the Inbox and a newer notification moves the older session above it, checked against app-published timestamps and a visual review of both captures.
+- [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
+- [Status card](status-card.md): measure the one-line sidebar status card on all three pages after real Ctrl+Shift+G presses and capture its hover view; fail outside 20 to 30 px.
+- [Title bar](title-bar.md): native caption glyph identity and app-black caption-facing masks with mismatched Chrome themes at real 100%, 125% and 150% monitor scaling.
+- [Window controls](window-controls.md): app-owned buttons, dragging, snapping and reclaimed chat height.
+- [Pane layout](pane-layout.md): preserve pane geometry and Alt+Q input routing without focus rings; compare exact margin pixels and screenshots across themes against a pinned pre-fix control.
+- [Browser corners](browser-corners.md): twenty mixed activations retain all four rounded corner masks, measured from pixels and real window stacking.
+- [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
+- [Browser switch speed](browser-switch-speed.md) (on demand only): compare 20 Ctrl+Tab switches without panes against 20 with warm docked browsers and five freshly frozen returns in console and Chat View; fail above a 50 ms median gap.
+- [Chat switch speed](chat-switch-speed.md) (on demand only): 20 Ctrl+N switches across five seeded remote Claude sessions in Chat View with the browser pane closed and open; fail above a 150 ms median click-to-chat-shown time or any 100 ms window hang.
+- [Own browser profile](browser-own-profile.md): a workspace listed in `browser-own-profile.txt` opens its pane in its own empty Chrome profile and pipe, while other workspaces keep the shared profile untouched, including after restart.
+- [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
+- [Chat tab browser shortcut](chat-browser-shortcut.md): Alt+A opens a real browser window from a Chat View tab.
+- [Chat tab browser starts by itself](chat-browser-autoload.md): switching to a Chat View tab with its browser slot on starts the browser with no key.
+- [Remove a stuck Not sent message](chat-not-sent-remove.md): Up then Delete removes a Not sent message from an old session.
+- [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
+- [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
+- [Double-click thumbs up](chat-double-click.md): real mouse add/remove, painted badge, unchanged draft and exactly one transport submission.
+- [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
+- [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
+- [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.
+- [Composer buttons](composer-buttons.md): one-line and six-line working drafts retain equally round, bottom-aligned attach, microphone and Send controls.
+- [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
+- [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
+
+The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Real remote/provider and authenticated browser paths still need the exact prerequisites in their owning operation recipe; the browser recovery journey deliberately has no extension attached.
+
+- [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
+
+### SSH reconnect maps
+
+- [SSH tab reconnect](ssh-tab-reconnect.md): background transport loss without layout/focus disruption; case A.
+- [Ended remote session](ended-remote-session.md): confirmed missing tmux session stops retries and shows Session ended; case B.
+- [Saved remote workspace](saved-remote-workspace.md): two seeded remote tabs restore to a usable workspace; launch/Doctor.
+
+These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconnect/`, not `control.ps1` or `verify.yml`'s feature input. Read the shared skill's Drive section for dispatch, stand-in boundary, artifacts and cleanup. Only SSH is replaced; native app layout, focus, reconnect and ended-session state run for real on GitHub Windows.
+
+## Code interview anchors
+
+- Primary surface, normal build and offline mode: `README.md`, `CONTRIBUTING.md`.
+- Keyboard routing and shortcut labels: `src/shortcuts.zig`, `openwiki/operations/keyboard-shortcuts.md`, `src/focus.zig`.
+- Startup flags: `parseNoWindowRestoreFlag` at `src/startup.zig:108`, `parseSingleWindowFlag` at `src/startup.zig:146`; title: `buildWindowTitle` at `src/startup.zig:308`. Initial CMD fallback: `spawnShell` at `src/main.zig:8234`; deferred readiness: `WM_DEFERRED` at `src/main.zig:1349`.
+- Palette queries: `updateSearchResults` at `src/command_palette.zig:1462`, UI-size keywords: `ui_labels` at `src/command_palette.zig:3859`, theme filtering: `g_search_theme_mode` at `src/command_palette.zig:1700`; actions: `WM_APP_SEARCH_CONFIRM` at `src/main.zig:4328`, UI size: `SEARCH_UI_BIGGER_OFFSET` at `src/main.zig:4966`. Displayed labels: `UI Size: Increase` at `src/sidebar.zig:3658`, `New CMD Shell` at `src/sidebar.zig:4056`.
+- Theme persistence: `saveGlobalTheme` at `src/themes.zig:232`; menu: `SEARCH_THEME_MENU_OFFSET` at `src/main.zig:6438`; apply: `SEARCH_THEME_SYSTEM_OFFSET` at `src/main.zig:6450`.
+- Session persistence: `getSessionPath` at `src/session.zig:95`, `saveSessionTo` at `src/session.zig:155`, `saveSession` at `src/session.zig:797`; saved scale: `g_ui_scale` at `src/session.zig:645`; workspace data: `active_workspace` at `src/session.zig:671`. Workspace actions: `switchToWorkspace` at `src/workspaces.zig:2711`, `newWorkspace` at `src/workspaces.zig:3245`; rename: `src/rename.zig`.
+- Inbox publication: `publishInboxStateNow` at `src/inbox.zig:240`; visibility: `openInbox` at `src/inbox.zig:1374`, `closeInbox` at `src/inbox.zig:1409`; unread toggle: `inboxToggleReadRow` at `src/inbox.zig:1687`, keyboard dispatch: `handleInboxKey` at `src/inbox.zig:1717`.
+
+Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.
+
+- [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
+- [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
+
+Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.

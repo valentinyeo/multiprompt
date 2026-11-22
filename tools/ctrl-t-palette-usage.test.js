@@ -1,0 +1,394 @@
+const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+
+const source = require('./app-source').readAppSource();
+const accountReconnect = fs.readFileSync(
+  path.join(__dirname, "usage-telemetry", "reconnect-accounts.ps1"),
+  "utf8",
+);
+
+function functionBody(name, nextName) {
+  const start = source.indexOf(`fn ${name}(`);
+  const end = source.indexOf(`\nfn ${nextName}(`, start);
+  assert.notStrictEqual(start, -1, `${name} is missing`);
+  assert.notStrictEqual(end, -1, `could not isolate ${name}`);
+  return source.slice(start, end);
+}
+
+test("Alt+T starts only the configured program in a fresh workspace tmux session", () => {
+  const spawn = functionBody("spawnWorkspaceSession", "spawnWorkspaceSessionAt");
+  assert.match(spawn, /workspaceConfiguredTerminalFolder\(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len\)/);
+  assert.match(spawn, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/,
+    "the repo picker must remain the neutral fallback");
+  const spawnAt = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
+  assert.match(spawnAt, /workspaceSessionProgram\(configured_program, with_agent\)/,
+    "an explicit alt_t program wins and Claude is the default");
+  assert.match(spawnAt, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
+  assert.match(spawnAt, /var cmd_buf: \[WORKSPACE_TERM_LAUNCH_MAX\]u8 = undefined;/);
+  const chooser = functionBody("workspaceLaunchCommand", "workspaceSessionProgram");
+  assert.match(chooser, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/,
+    "a program that is not a Claude workload must still start through the typed tmux command");
+  assert.match(spawnAt, /spawnShellWithSession\(\.tmux, session, null, null\)/);
+  assert.match(spawnAt, /if \(hosted\) \|provider\| \{[\s\S]*?shells\[ns\]\.ai_agent = provider\.aiAgent\(\)/);
+  assert.match(spawnAt, /program\.len > 0 and commandCreatesAgentWorkload\(program\)/);
+
+  const build = functionBody("buildWorkspaceTmuxLaunchCmd", "buildWorkspaceTmuxSessionName");
+  assert.match(build, /"tmux new-session -d -s "/);
+  assert.match(build, /" -c "/);
+  assert.match(build, /" 2>\/dev\/null; tmux send-keys -t "/);
+  assert.match(build, /" 'cd "/);
+  assert.match(build, /" && "/);
+  assert.match(build, /" 2>\/dev\/null; tmux attach -t "/);
+
+  const handlerStart = source.indexOf("WM_APP_NEW_TAB_DEFAULT => {");
+  const handlerEnd = source.indexOf("\n        WM_APP_UI_BIGGER => {", handlerStart);
+  assert.notStrictEqual(handlerStart, -1);
+  assert.notStrictEqual(handlerEnd, -1);
+  const handler = source.slice(handlerStart, handlerEnd);
+  assert.match(handler, /spawnWorkspaceTmuxSession\(\)/);
+  assert.doesNotMatch(handler, /spawnCustomCmd|workspaceScopedDefaultCustomCommand|globalDefaultCustomCommand/,
+    "legacy command defaults must not launch cmd for Alt+T");
+
+  const folder = functionBody("workspaceConfiguredTerminalFolder", "customCmdMatchesQuery");
+  assert.match(folder, /folderEntryIndexFor\(ws_name\)/);
+  assert.doesNotMatch(folder, /startup_cmd|spawnCustomCmd|tnn|Claude/);
+  const entry = functionBody("folderEntryIndexFor", "workspaceConfiguredTerminalFolder");
+  assert.match(entry, /c\.is_default/);
+  assert.match(entry, /c\.cwd/);
+  assert.match(folder, /c\.alt_t/);
+});
+
+test("Alt+T and shell Ctrl+T open workspace tabs while browser Ctrl+T passes through", () => {
+  const hook = functionBody("keyboardHookProc", "pointOverActiveShell");
+  assert.match(hook,
+    /!isCtrlDown\(\) and kb\.vkCode == 0x54 and foregroundIsOurs\(\)[\s\S]*?WM_APP_NEW_TAB_DEFAULT/,
+    "one AltGr-safe universal Alt+T handler must route to the workspace new-session action");
+
+  const allSessionsStart = hook.indexOf("if (g_all_sessions_active and !g_search_active) {");
+  const inboxStart = hook.indexOf("if (g_inbox_active and !g_search_active", allSessionsStart);
+  const browserStart = hook.indexOf("\n        if (g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus())");
+  assert.notStrictEqual(allSessionsStart, -1);
+  assert.notStrictEqual(inboxStart, -1);
+  assert.notStrictEqual(browserStart, -1);
+
+  const allSessions = hook.slice(allSessionsStart, hook.indexOf("if (g_inbox_active and !g_search_active", allSessionsStart));
+  const inbox = hook.slice(inboxStart, hook.indexOf("\n            if (g_search_active)", inboxStart));
+  const browser = hook.slice(browserStart, hook.indexOf("\n        if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and !g_win_held and kb.vkCode == 0x25", browserStart));
+  for (const [name, body] of [["All Sessions", allSessions], ["Inbox", inbox], ["browser focus", browser]]) {
+    assert.doesNotMatch(body, /kb\.vkCode == 0x54[\s\S]{0,400}?WM_APP_NEW_TAB_DEFAULT/,
+      `${name} must not intercept Ctrl+T as a shell action`);
+  }
+
+  const isolationStart = hook.indexOf("if (ctrl and (kb.flags & 0x20) == 0 and kb.vkCode != 0x09");
+  const isolationEnd = hook.indexOf("if (ctrl and kb.vkCode == 0x56) {", isolationStart);
+  const isolation = hook.slice(isolationStart, isolationEnd);
+  assert.match(isolation, /activeBrowserHasForegroundFocus\(\)\) \{\s+return CallNextHookEx/,
+    "browser-owned Ctrl shortcuts must pass to the native browser");
+  assert.doesNotMatch(isolation, /kb\.vkCode == 0x54/,
+    "Ctrl+T must not be exempted from browser passthrough");
+  assert.match(hook, /kb\.vkCode == 0x54[\s\S]*?activeBrowserHasForegroundFocus\(\)[\s\S]*?WM_APP_NEW_TAB_DEFAULT/,
+    "Ctrl+T outside browser focus uses the workspace default");
+  assert.match(hook, /kb\.vkCode == 0x54[\s\S]*?WM_APP_REOPEN_CLOSED/,
+    "Ctrl+Shift+T must keep reopening the last closed multiprompt tab");
+});
+
+test("Ctrl+K ranks intent, workspace context, and decaying usage stably", () => {
+  const key = functionBody("paletteUsageKey", "loadPaletteUsage");
+  for (const field of ["label", "workspace", "startup_cmd", "cwd"]) {
+    assert.match(key, new RegExp(`c\\.${field}`),
+      `custom command usage identity must include ${field}`);
+  }
+  assert.match(key, /@intFromEnum\(c\.kind\)/,
+    "reordering commands.json must not transfer usage to a different command");
+
+  const primary = functionBody("palettePrimaryLabel", "asciiStartsWithCI");
+  for (const dynamicSource of ["g_tmux_cache", "g_archived", "g_reminders", "g_session_overview_rows"]) {
+    assert.match(primary, new RegExp(dynamicSource),
+      `typed dynamic-session matches must rank from ${dynamicSource}`);
+  }
+  const queryRank = functionBody("paletteQueryRank", "paletteWorkspaceRank");
+  assert.match(queryRank, /target < shell_count[\s\S]*?paletteWideTextMatchRank/,
+    "an exact live-tab search must outrank unrelated learned commands");
+
+  const outranks = functionBody("paletteResultOutranks", "sortSearchResultsByRank");
+  const kindPos = outranks.indexOf("if (key_kind != prev_kind) return key_kind < prev_kind;");
+  const matchPos = outranks.indexOf("paletteQueryRank(key)");
+  const workspacePos = outranks.indexOf("paletteWorkspaceRank(key)");
+  const frecencyPos = outranks.indexOf("paletteFrecencyAt(key_usage, now)");
+  assert.ok(kindPos >= 0 && kindPos < matchPos && matchPos < workspacePos && workspacePos < frecencyPos,
+    "row kind must outrank match quality, workspace context and usage");
+  assert.match(outranks, /else \{[\s\S]*?paletteTargetIsDestructive/,
+    "an empty palette must keep destructive actions below ordinary commands");
+  assert.doesNotMatch(outranks, /key_usage\.count > prev_usage\.count/,
+    "raw lifetime counts must never directly determine palette order");
+
+  const frecency = functionBody("paletteFrecencyAt", "paletteResultOutranks");
+  assert.match(frecency, /age < 24 \* ticks_per_hour/);
+  assert.match(frecency, /age < 7 \* 24 \* ticks_per_hour/);
+  assert.match(frecency, /frequency < 15/,
+    "frequency must be capped below the gap between recency bands");
+
+  const sort = functionBody("sortSearchResultsByRank", "asciiEqualsCI");
+  assert.match(sort, /paletteResultOutranks\(key, prev, key_kind, kinds\[j - 1\], now\)/);
+  assert.match(sort, /if \(!paletteResultOutranks/,
+    "equal/unseen commands must preserve their curated fallback order");
+
+  const update = functionBody("updateSearchResults", "u16ToLower");
+  assert.match(update, /sortSearchResultsByRank\(\);[\s\S]*?keepSearchSelectionVisible\(\)/,
+    "the completed top-level result list must be ranked before selection is clamped");
+  assert.match(source, /const target = g_search_results\[g_search_sel\];\s+if \(paletteRowIsHeader\(target\)\) return 0;/,
+    "a group header row is never confirmed");
+  assert.match(source, /recordPaletteUsage\(target\);/, "confirming a palette action must persist its use");
+  assert.match(source, /loadPaletteUsage\(\);[\s\S]*?loadSnippetsIfChanged\(\);[\s\S]*?updateSearchResults\(\);/,
+    "each palette open must see usage recorded by other workspace windows");
+});
+
+test("empty Ctrl+K promotes the session just left for one-Enter toggling", () => {
+  const switching = functionBody("switchToShell", "nthVisibleShell");
+  assert.match(switching,
+    /idx != prev[\s\S]*?g_previous_shell_sid = shells\[prev\]\.shell_id/,
+    "a real session switch must remember the stable id of the session just left");
+
+  const update = functionBody("updateSearchResults", "u16ToLower");
+  const rankPos = update.indexOf("sortSearchResultsByRank();");
+  const resolvePos = update.indexOf("findShellById(g_previous_shell_sid)");
+  const promotePos = update.indexOf("promoteSearchTargetToFront", resolvePos);
+  assert.ok(rankPos >= 0 && rankPos < resolvePos && resolvePos < promotePos,
+    "the previous live session must be resolved by id and promoted after normal ranking");
+  assert.match(update, /g_search_len == 0\) \{[\s\S]*?pickRecentSessions[\s\S]*?promoteSearchTargetToFront/,
+    "typed searches must keep intent-first ranking instead of forcing history to row zero");
+});
+
+test("all session rename entry points synchronize display surfaces without changing stable ids", () => {
+  const rename = functionBody("startRenameInternal", "startGroupRename");
+  assert.match(rename, /g_edit_sync_remote_name = true/,
+    "F2, double-click, and title-band renames must use the canonical synchronized path");
+
+  const inboxRename = functionBody("startInboxRename", "inboxRelTime");
+  assert.match(inboxRename, /g_edit_is_inbox = true;[\s\S]*?g_edit_sync_remote_name = true/,
+    "Inbox F2 must synchronize the same logical session name");
+
+  const commit = functionBody("commitRename", "openTabContextPalette");
+  assert.match(commit, /applyCanonicalSessionRename\(g_edit_tab, buf\[0\.\.ulen\], sync_remote\)/);
+  assert.doesNotMatch(commit, /tmux_session_len\s*=\s*0/,
+    "clearing a display name must not destroy the stable tmux binding");
+
+  const canonical = functionBody("applyCanonicalSessionRename", "shellNameFromU16AsciiTrimmed");
+  assert.match(canonical, /syncShellDisplayNameSurfaces\(idx, sync_name, true\)/);
+  assert.doesNotMatch(canonical, /tmux_session_len\s*=(?!=)/,
+    "the canonical rename path may update display surfaces but not stable bindings");
+
+  const paletteRename = functionBody("beginPaletteRenameInput", "startThreadTitleRename");
+  assert.match(paletteRename, /startRename\(idx\)/);
+  assert.doesNotMatch(paletteRename, /startThreadTitleRename\(/);
+  assert.match(rename, /g_edit_sid = shells\[idx\]\.shell_id/);
+  assert.match(rename, /SetWindowTextW\(g_edit_hwnd, @ptrCast\(&shells\[idx\]\.name\)\)/);
+  assert.match(rename, /SendMessageW\(g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);
+  assert.match(commit, /findShellById\(renamed_sid\)/);
+  assert.match(source, /target == SEARCH_RENAME_SYNC_OFFSET[\s\S]*?beginPaletteRenameInput\(shell\)/);
+  assert.match(source, /L\("Rename Session"\)/);
+  assert.match(source, /L\("Use Agent or Terminal Session Name"\)/);
+
+  assert.match(canonical, /blockExternalNameSyncUntilTitleChanges/,
+    "an outbound rename must block the old agent title from taking the tab name back");
+  assert.match(source, /localAgentTerminalDisplayName\(title\)/,
+    "local coding-agent titles must participate in reverse name synchronization");
+  assert.match(source, /codexDisplayNameIsAutomaticProjectTitle/,
+    "Codex project-name terminal titles must not impersonate thread renames");
+
+});
+
+test("IGSH-1546 Ctrl+K Codex and Pi chat rows start a hosted live chat", () => {
+  assert.match(functionBody("spawnCodexTmuxSession", "spawnPiTmuxSession"), /spawnHostedChatSession\(\.codex\)/);
+  assert.match(functionBody("spawnPiTmuxSession", "clampSearchSelectionAndScroll"), /spawnHostedChatSession\(\.pi\)/);
+  assert.doesNotMatch(source, /buildCodexTmuxLaunchCmd/);
+});
+
+test("Ctrl+K shell rows use readable names without decorative prefixes", () => {
+  const paintStart = source.indexOf("if (g_search_active) {", source.indexOf("fn paintSidebar("));
+  const paintEnd = source.indexOf("\nfn updateSearchResults(", paintStart);
+  const paint = source.slice(paintStart, paintEnd);
+  assert.doesNotMatch(paint, /L\("\+ /, "palette action names must not start with '+'");
+  for (const label of [
+    "Command Prompt",
+    "Server 1 tmux session",
+    "Server 2 tmux session",
+    "Open shell on VPS 1",
+    "Open shell on VPS 2",
+    "PowerShell",
+    "Bash",
+    "Git Bash",
+    "New Codex chat",
+  ]) {
+    assert.match(paint, new RegExp(label), `missing normalized palette label: ${label}`);
+  }
+});
+
+test("Ctrl+K no longer lists open-all VPS host rows", () => {
+  const update = functionBody("updateSearchResults", "u16ToLower");
+  assert.doesNotMatch(update, /g_search_results\[[^\]]+\] = SEARCH_OPENALL_OFFSET/);
+  for (const id of [
+    "SEARCH_OPENALL_HOST_DE_OFFSET",
+    "SEARCH_OPENALL_HOST_UK_OFFSET",
+    "SEARCH_OPENALL_HOST_INNE_OFFSET",
+  ]) {
+    assert.doesNotMatch(update, new RegExp(id), `host picker row still listed: ${id}`);
+  }
+
+  const dispatchStart = source.indexOf("if (target == SEARCH_OPENALL_OFFSET)");
+  const dispatchEnd = source.indexOf("\n                if (target == SEARCH_THEME_BACK_OFFSET)", dispatchStart);
+  assert.notStrictEqual(dispatchStart, -1);
+  assert.notStrictEqual(dispatchEnd, -1);
+  const dispatch = source.slice(dispatchStart, dispatchEnd);
+  assert.match(dispatch, /g_search_openall_host_mode = true/,
+    "the root action must enter the VPS picker instead of opening every host");
+  assert.match(dispatch, /SEARCH_OPENALL_HOST_INNE_OFFSET => 2/);
+  assert.match(dispatch, /if \(host_mode and e\.host != selected_host\) continue/,
+    "bulk attach must stay on the chosen host");
+  assert.match(dispatch, /spawnShellWithSession\(\.tmux, sn, null, null\)/);
+});
+
+test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
+  assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
+  assert.match(source,
+    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
+  assert.doesNotMatch(source,
+    /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_INNE_OFFSET;/, "the secondary profile folds into one Sign In row");
+
+  const update = functionBody("updateSearchResults", "u16ToLower");
+  for (const alias of [
+    "reconnect ai usage accounts",
+    "login ai usage",
+    "fix stale telemetry",
+    "claude telemetry login",
+    "usage account login",
+  ]) {
+    assert.match(update, new RegExp(`"${alias}"`), `missing reconnect alias: ${alias}`);
+  }
+  assert.match(update,
+    /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;/);
+  assert.match(update, /"owner@example.com"/);
+  assert.match(update, /"secondary@example.com"/);
+
+  const paintStart = source.indexOf("if (g_search_active) {", source.indexOf("fn paintSidebar("));
+  const paintEnd = source.indexOf("\nfn updateSearchResults(", paintStart);
+  const paint = source.slice(paintStart, paintEnd);
+  assert.match(paint, /const is_usage_login = is_usage_login_primary or is_usage_login_inne;/);
+  assert.match(paint,
+    /else if \(is_usage_login\)[\s\S]*?L\("Usage: Sign In to Primary Claude Account"\)[\s\S]*?L\("Usage: Sign In to Secondary Claude Account"\)[\s\S]*?L\("secondary@example.com"\)/);
+  for (const classifier of ["const is_newwin =", "const is_openall =", "const is_new_shell ="]) {
+    const start = paint.indexOf(classifier);
+    const end = paint.indexOf(";", start);
+    assert.match(paint.slice(start, end), /!is_usage_login/,
+      `${classifier} must not claim the reconnect action's numeric offset`);
+  }
+
+  const launcher = functionBody("showUsageAccountLogin", "syncUsageTelemetryCollector");
+  assert.match(launcher, /tools\\\\usage-telemetry\\\\reconnect-accounts\.ps1/);
+  assert.match(launcher, /-AccountId claude-primary -ForceLogin/);
+  assert.match(launcher, /-AccountId claude-secondary -ForceLogin/);
+  assert.match(launcher, /L\("wt\.exe"\)/,
+    "the OAuth wizard should prefer a terminal with a working paste shortcut");
+  assert.match(launcher, /L\("-w new pwsh\.exe "\)/);
+  assert.match(launcher, /if \(terminal != null[\s\S]*?return true;/,
+    "a successful Windows Terminal launch must not open a second wizard");
+  assert.match(launcher, /fallback = ShellExecuteW\(null, L\("open"\), L\("pwsh\.exe"\)/,
+    "machines without Windows Terminal still need a visible PowerShell fallback");
+
+  const dispatchStart = source.indexOf("if (target == SEARCH_USAGE_LOGIN_PRIMARY_OFFSET or target == SEARCH_USAGE_LOGIN_INNE_OFFSET)");
+  assert.notStrictEqual(dispatchStart, -1);
+  const dispatch = source.slice(dispatchStart, source.indexOf("\n                if (target ==", dispatchStart + 10));
+  assert.match(dispatch, /showUsageAccountLogin\(account\)/);
+  assert.match(dispatch, /AI usage account login is not installed/);
+
+  assert.match(accountReconnect,
+    /Where-Object \{ \$_\.provider -eq 'claude' \}/,
+    "provider-specific login flows must not be mixed");
+  assert.match(accountReconnect, /\[ValidateSet\('', 'claude-primary', 'claude-secondary'\)\]/);
+  assert.match(accountReconnect, /Where-Object Id -eq \$AccountId/,
+    "a targeted action must select exactly one configured profile");
+  assert.match(accountReconnect, /if \(\$ForceLogin -or \$assessment\.NeedsLogin\)/,
+    "a manual per-account reconnect must bypass a misleading reusable-token assessment");
+  assert.match(accountReconnect, /Read-ClaudeCredential/);
+  assert.match(accountReconnect, /FutureExpiry/);
+  assert.match(accountReconnect, /RefreshUsable/,
+    "an expired access token remains reusable while Claude's refresh token exists");
+  assert.match(accountReconnect,
+    /@\('AuthenticationRequired', 'CredentialsMissing'\) -contains \$errorName/,
+    "only exact collector authentication failures may force OAuth");
+  assert.doesNotMatch(accountReconnect, /@\('stale', 'error'\)/,
+    "a generic provider error must not be mistaken for a broken login");
+  assert.match(accountReconnect,
+    /\$latestSnapshot = Read-TelemetrySnapshot[\s\S]*?Get-ClaudeAccountAssessment[\s\S]*?already current; login skipped/,
+    "each queued profile must be checked again before another browser login opens");
+  assert.match(accountReconnect, /Find-TelemetryAccountRow/);
+  assert.doesNotMatch(accountReconnect, /Where-Object id -eq [^\r\n]+\)\[0\]/,
+    "a missing first-run snapshot row must not abort the reconnect wizard under strict mode");
+  assert.match(accountReconnect, /NO TERMINAL PASTE NEEDED[\s\S]*?masked native field[\s\S]*?clipboard watcher remains available as a fallback/,
+    "the visible wizard must explain native-field submission and its fallback");
+  assert.match(accountReconnect, /function Show-ClaudeAuthorizationCodeDialog/);
+  assert.match(accountReconnect, /UseSystemPasswordChar = \$true/,
+    "the native authorization-code field must mask its contents");
+  assert.match(accountReconnect, /ShortcutsEnabled = \$true/,
+    "the native field must accept ordinary Ctrl+V");
+  assert.match(accountReconnect, /\$form\.AcceptButton = \$submit/,
+    "Enter must submit the focused native field");
+  assert.match(accountReconnect, /\$form\.CancelButton = \$cancel/,
+    "Escape must cancel the native field");
+  assert.match(accountReconnect,
+    /\$manualCode = Show-ClaudeAuthorizationCodeDialog \$publicLabel[\s\S]*?Send-ClaudeAuthorizationCode \$manualCode/,
+    "the validated native field must feed the exact console input writer");
+  assert.match(accountReconnect, /Get-ClaudePublicAccountLabel/);
+  assert.match(accountReconnect, /return 'Primary'[\s\S]*?return 'Secondary'/,
+    "the reconnect UI must not expose account email addresses on a live stream");
+  assert.match(accountReconnect, /function Test-ClaudeAuthorizationCode/);
+  assert.match(accountReconnect, /\[A-Za-z0-9_-\]\{20,\}#\[A-Za-z0-9_-\]\{20,\}/,
+    "only a Claude authorization-code-shaped clipboard value may be submitted");
+  assert.match(accountReconnect, /WriteConsoleInputW/,
+    "the wizard must bypass terminal paste bindings through the console input buffer");
+  assert.match(accountReconnect, /VirtualKeyCode = VK_PACKET/,
+    "authorization-code characters must use the Unicode console key identity");
+  assert.match(accountReconnect,
+    /\$clipboardBeforeLogin = \(Get-ClipboardText\)\.Trim\(\)[\s\S]*?\$clipboardNow -ne \$clipboardBeforeLogin[\s\S]*?Send-ClaudeAuthorizationCode/,
+    "only a fresh browser clipboard code may be submitted to the waiting login");
+  assert.match(accountReconnect, /\$env:CLAUDE_CONFIG_DIR = \$account\.ConfigDir/,
+    "each email must keep its isolated Claude profile");
+  assert.match(accountReconnect, /& claude auth logout/,
+    "a forced reconnect must clear only the selected profile before login");
+  assert.match(accountReconnect,
+    /if \(-not \[string\]::IsNullOrWhiteSpace\(\$account\.Email\)\) \{\s*\$loginArguments \+= @\('--email', \$account\.Email\)/,
+    "only a configured email may prefill the login, never a display label");
+  assert.match(accountReconnect,
+    /Start-Process -FilePath \$claudeExe -ArgumentList \$loginArguments/,
+    "the optional email arguments must reach the observable login child process");
+  assert.match(accountReconnect, /LastWriteTimeUtc -ge \$loginStartedAt/);
+  assert.match(accountReconnect, /Stop-Process -Id \$loginProcess\.Id -Force/,
+    "a browser flow that wrote the credential must not leave the terminal waiting forever");
+  assert.match(accountReconnect, /Request-TelemetryRefresh/);
+  assert.match(accountReconnect, /Test-CredentialNewerThanTelemetry/,
+    "a manual Claude sign-in must be detected even when the old row is only retrying");
+  assert.match(accountReconnect, /LastWriteTimeUtc -gt \$sampleAt/,
+    "only a credential newer than its last telemetry sample may bypass the provider cooldown once");
+  assert.doesNotMatch(accountReconnect, /Get-CimInstance Win32_Process|--usage-telemetry|multiprompt-telemetry|\$collectorPath/,
+    "the recovery flow must not look for or launch a separate collector process");
+  assert.match(accountReconnect, /OpenExisting\('Local\\MultipromptUsageTelemetryRefresh'\)/,
+    "a verified login must wake the in-process collector through its refresh event");
+  assert.match(accountReconnect, /status -eq 'ok'/);
+  assert.doesNotMatch(accountReconnect, /Write-Host[^\r\n]*\$accessToken/,
+    "credential values must never be printed");
+});
+
+test("Claude reconnect assessment distinguishes provider errors from auth failures", t => {
+  const result = childProcess.spawnSync(
+    process.platform === "win32" ? "pwsh.exe" : "pwsh",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      path.join(__dirname, "usage-telemetry", "test_reconnect_accounts.ps1")],
+    { encoding: "utf8", env: { ...process.env, APPDATA: process.env.APPDATA || require("node:os").tmpdir() } },
+  );
+  if (result.error?.code === "ENOENT" && process.platform !== "win32") return t.skip("PowerShell reconnect assessment runs on Windows CI");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Reconnect account assessment: PASS/);
+});

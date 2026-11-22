@@ -1,0 +1,1 @@
+{"tabs":[{"kind":"cmd","name":"Pinned shell","locked":true,"chat_view_lock":"shell","pinned_top":true,"cv":true},{"kind":"cmd","name":"Unpinned chat","locked":true,"chat_view_lock":"chat","cv":false},{"kind":"cmd","name":"Pinned chat","locked":false,"chat_view_lock":"chat","pinned_top":true,"cv":false}],"active_tab":0,"groups":[],"locked_section_collapsed":true}

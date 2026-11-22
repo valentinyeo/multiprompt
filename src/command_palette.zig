@@ -1,0 +1,6290 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
+const app_state = @import("app_state.zig");
+const std = @import("std");
+const json_reader = @import("json_reader.zig");
+const IS_DEV = @import("main.zig").IS_DEV;
+const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
+const WIN32_FIND_DATAW = @import("win32.zig").WIN32_FIND_DATAW;
+const CloseHandle = @import("win32.zig").CloseHandle;
+const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const FindFirstFileW = @import("win32.zig").FindFirstFileW;
+const FindClose = @import("win32.zig").FindClose;
+const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const GetLocalTime = @import("win32.zig").GetLocalTime;
+const ShellExecuteW = @import("win32.zig").ShellExecuteW;
+const L = @import("startup.zig").L;
+const ShellKind = @import("app_state.zig").ShellKind;
+const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
+const MAX_SHELLS = @import("app_state.zig").MAX_SHELLS;
+const RECENT_SESSION_ROWS = @import("app_state.zig").RECENT_SESSION_ROWS;
+const NUM_BUTTONS = @import("app_state.zig").NUM_BUTTONS;
+const MAX_LWS = @import("app_state.zig").MAX_LWS;
+const MAX_GROUPS = @import("app_state.zig").MAX_GROUPS;
+const selectedTabCount = @import("sidebar.zig").selectedTabCount;
+const selectedTabsIncludeGrouped = @import("sidebar.zig").selectedTabsIncludeGrouped;
+const capacityAdmitNewAgent = @import("capacity.zig").capacityAdmitNewAgent;
+const commandCreatesAgentWorkload = @import("capacity.zig").commandCreatesAgentWorkload;
+const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
+const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
+const SEARCH_SOUND_OFFSET = @import("app_state.zig").SEARCH_SOUND_OFFSET;
+const SEARCH_THEME_MENU_OFFSET = @import("app_state.zig").SEARCH_THEME_MENU_OFFSET;
+const SEARCH_THEME_BACK_OFFSET = @import("app_state.zig").SEARCH_THEME_BACK_OFFSET;
+const SEARCH_THEME_SYSTEM_OFFSET = @import("app_state.zig").SEARCH_THEME_SYSTEM_OFFSET;
+const SEARCH_THEME_DARK_OFFSET = @import("app_state.zig").SEARCH_THEME_DARK_OFFSET;
+const SEARCH_THEME_MID_OFFSET = @import("app_state.zig").SEARCH_THEME_MID_OFFSET;
+const SEARCH_THEME_LIGHT_OFFSET = @import("app_state.zig").SEARCH_THEME_LIGHT_OFFSET;
+const SEARCH_THEME_AMOLED_OFFSET = @import("app_state.zig").SEARCH_THEME_AMOLED_OFFSET;
+const SEARCH_THEME_EDGE_GRAY_OFFSET = @import("app_state.zig").SEARCH_THEME_EDGE_GRAY_OFFSET;
+const SEARCH_THEME_DEV_BLUE_OFFSET = @import("app_state.zig").SEARCH_THEME_DEV_BLUE_OFFSET;
+const SEARCH_THEME_DEV_EDIT_OFFSET = @import("app_state.zig").SEARCH_THEME_DEV_EDIT_OFFSET;
+const SEARCH_THEME_DEV_RELOAD_OFFSET = @import("app_state.zig").SEARCH_THEME_DEV_RELOAD_OFFSET;
+const SEARCH_THEME_MULTIPROMPT_OFFSET = @import("app_state.zig").SEARCH_THEME_MULTIPROMPT_OFFSET;
+const SEARCH_OPENALL_OFFSET = @import("app_state.zig").SEARCH_OPENALL_OFFSET;
+const SEARCH_OPENFOLDER_OFFSET = @import("app_state.zig").SEARCH_OPENFOLDER_OFFSET;
+const SEARCH_RECOVER_REPO_OFFSET = @import("app_state.zig").SEARCH_RECOVER_REPO_OFFSET;
+const SEARCH_OPENALL_HOST_BACK_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_BACK_OFFSET;
+const SEARCH_OPENALL_HOST_DE_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_DE_OFFSET;
+const SEARCH_OPENALL_HOST_UK_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_UK_OFFSET;
+const SEARCH_OPENALL_HOST_INNE_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_INNE_OFFSET;
+const SEARCH_NEWWIN_OFFSET = @import("app_state.zig").SEARCH_NEWWIN_OFFSET;
+const SEARCH_CREATEWS_OFFSET = @import("app_state.zig").SEARCH_CREATEWS_OFFSET;
+const SEARCH_WORKSPACES_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACES_MENU_OFFSET;
+const SEARCH_WORKSPACE_DELETE_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
+const SEARCH_QUIT_OFFSET = @import("app_state.zig").SEARCH_QUIT_OFFSET;
+const SEARCH_FULLWIDTH_OFFSET = @import("app_state.zig").SEARCH_FULLWIDTH_OFFSET;
+const SEARCH_SHORTCUTS_OFFSET = @import("app_state.zig").SEARCH_SHORTCUTS_OFFSET;
+const SEARCH_CLOSEWIN_OFFSET = @import("app_state.zig").SEARCH_CLOSEWIN_OFFSET;
+const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET;
+const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
+const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
+const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
+const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
+const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
+const SEARCH_SHOW_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_SHOW_FAVORITES_OFFSET;
+const SEARCH_SHOW_ALL_OFFSET = @import("app_state.zig").SEARCH_SHOW_ALL_OFFSET;
+const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
+const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
+const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
+const SEARCH_HIDESIDEBAR_OFFSET = @import("app_state.zig").SEARCH_HIDESIDEBAR_OFFSET;
+const SEARCH_HIDEPILLS_OFFSET = @import("app_state.zig").SEARCH_HIDEPILLS_OFFSET;
+const SEARCH_NEXTUNREAD_OFFSET = @import("app_state.zig").SEARCH_NEXTUNREAD_OFFSET;
+const SEARCH_SIDEBAR_COLLAPSE_OFFSET = @import("app_state.zig").SEARCH_SIDEBAR_COLLAPSE_OFFSET;
+const SEARCH_SIDEBAR_HIDE_OFFSET = @import("app_state.zig").SEARCH_SIDEBAR_HIDE_OFFSET;
+const SEARCH_TABSORT_INBOX_OFFSET = @import("app_state.zig").SEARCH_TABSORT_INBOX_OFFSET;
+const SEARCH_TABSORT_MANUAL_OFFSET = @import("app_state.zig").SEARCH_TABSORT_MANUAL_OFFSET;
+const SEARCH_UNREADONLY_OFFSET = @import("app_state.zig").SEARCH_UNREADONLY_OFFSET;
+const SEARCH_THREADTITLE_OFFSET = @import("app_state.zig").SEARCH_THREADTITLE_OFFSET;
+const SEARCH_FONT_BIGGER_OFFSET = @import("app_state.zig").SEARCH_FONT_BIGGER_OFFSET;
+const SEARCH_FONT_SMALLER_OFFSET = @import("app_state.zig").SEARCH_FONT_SMALLER_OFFSET;
+const SEARCH_FONT_RESET_OFFSET = @import("app_state.zig").SEARCH_FONT_RESET_OFFSET;
+const SEARCH_UI_BIGGER_OFFSET = @import("app_state.zig").SEARCH_UI_BIGGER_OFFSET;
+const SEARCH_UI_SMALLER_OFFSET = @import("app_state.zig").SEARCH_UI_SMALLER_OFFSET;
+const SEARCH_UI_RESET_OFFSET = @import("app_state.zig").SEARCH_UI_RESET_OFFSET;
+const SEARCH_CUSTOMCMD_EDIT_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_EDIT_OFFSET;
+const SEARCH_CUSTOMCMD_RELOAD_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_RELOAD_OFFSET;
+const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
+const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
+const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
+const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
+const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
+const SEARCH_REOPEN_SERVER_SHELL_OFFSET = @import("app_state.zig").SEARCH_REOPEN_SERVER_SHELL_OFFSET;
+const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
+const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
+const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
+const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
+const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
+const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
+const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
+const SEARCH_COMPUTER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_TOGGLE_OFFSET;
+const SEARCH_COMPUTER_CONTROL_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_CONTROL_OFFSET;
+const SEARCH_COMPUTER_WIDTH_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_WIDTH_OFFSET;
+const SEARCH_COMPUTER_RETRY_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_RETRY_OFFSET;
+const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
+const SEARCH_BROWSER_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_URL_OFFSET;
+const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_INSTRUCT_OFFSET;
+const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
+const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
+const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+const SEARCH_SHARED_SERVER_CONNECTION_OFFSET = @import("app_state.zig").SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
+const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
+const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
+const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
+const SEARCH_BROWSER_FORWARD_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FORWARD_OFFSET;
+const SEARCH_BROWSER_MODE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_MODE_OFFSET;
+const SEARCH_UPDATE_OFFSET = @import("app_state.zig").SEARCH_UPDATE_OFFSET;
+const SEARCH_RESTART_OFFSET = @import("app_state.zig").SEARCH_RESTART_OFFSET;
+const SEARCH_ZSB_REBIND_OFFSET = @import("app_state.zig").SEARCH_ZSB_REBIND_OFFSET;
+const SEARCH_SHELL_DIAG_OFFSET = @import("app_state.zig").SEARCH_SHELL_DIAG_OFFSET;
+const SEARCH_SYNC_NAME_OFFSET = @import("app_state.zig").SEARCH_SYNC_NAME_OFFSET;
+const SEARCH_RENAME_SYNC_OFFSET = @import("app_state.zig").SEARCH_RENAME_SYNC_OFFSET;
+const SEARCH_END_TMUX_OFFSET = @import("app_state.zig").SEARCH_END_TMUX_OFFSET;
+const SEARCH_REMIND_ME_OFFSET = @import("app_state.zig").SEARCH_REMIND_ME_OFFSET;
+const SEARCH_WS_SNOOZE_OFFSET = @import("app_state.zig").SEARCH_WS_SNOOZE_OFFSET;
+const SEARCH_WS_SNOOZED_OFFSET = @import("app_state.zig").SEARCH_WS_SNOOZED_OFFSET;
+const SEARCH_WS_BRINGBACK_OFFSET = @import("app_state.zig").SEARCH_WS_BRINGBACK_OFFSET;
+const SEARCH_WS_SNOOZED_ROW_OFFSET = @import("app_state.zig").SEARCH_WS_SNOOZED_ROW_OFFSET;
+const SEARCH_REMINDERS_MENU_OFFSET = @import("app_state.zig").SEARCH_REMINDERS_MENU_OFFSET;
+const SEARCH_GROUPMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_MENU_OFFSET;
+const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_BACK_OFFSET;
+const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
+const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
+const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
+const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
+const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
+const SEARCH_CHAT_MODEL_SOL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SOL_OFFSET;
+const SEARCH_CHAT_MODEL_TERRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_TERRA_OFFSET;
+const SEARCH_CHAT_MODEL_LUNA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_LUNA_OFFSET;
+const SEARCH_CHAT_MODEL_ASTRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_ASTRA_OFFSET;
+const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
+const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
+const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
+const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
+const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
+const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
+const SEARCH_PI_LOGIN_OFFSET = @import("app_state.zig").SEARCH_PI_LOGIN_OFFSET;
+const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
+const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
+const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
+const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
+const SEARCH_AI_USAGE_OFFSET = @import("app_state.zig").SEARCH_AI_USAGE_OFFSET;
+const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
+const SEARCH_REMOVE_SERVER_1_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_1_OFFSET;
+const SEARCH_REMOVE_SERVER_2_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_2_OFFSET;
+const SEARCH_REMOVE_SERVER_3_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_3_OFFSET;
+const SEARCH_SKILLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SKILLS_MENU_OFFSET;
+const SEARCH_SKILLS_BACK_OFFSET = @import("app_state.zig").SEARCH_SKILLS_BACK_OFFSET;
+const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET;
+const SEARCH_CRASH_REPORTS_OFFSET = @import("app_state.zig").SEARCH_CRASH_REPORTS_OFFSET;
+const SEARCH_CRASH_NOW_OFFSET = @import("app_state.zig").SEARCH_CRASH_NOW_OFFSET;
+const SEARCH_HIBERNATE_NOW_OFFSET = @import("app_state.zig").SEARCH_HIBERNATE_NOW_OFFSET;
+const SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET = @import("app_state.zig").SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
+const SEARCH_INBOX_EXCLUDE_OFFSET = @import("app_state.zig").SEARCH_INBOX_EXCLUDE_OFFSET;
+const SEARCH_REMIND_PRESET_OFFSET = @import("app_state.zig").SEARCH_REMIND_PRESET_OFFSET;
+const SEARCH_GROUPMOVE_GROUP_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_GROUP_OFFSET;
+const SEARCH_POWER_AUTO_OFFSET = @import("app_state.zig").SEARCH_POWER_AUTO_OFFSET;
+const SEARCH_POWER_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_POWER_ALWAYS_OFFSET;
+const SEARCH_POWER_OFF_OFFSET = @import("app_state.zig").SEARCH_POWER_OFF_OFFSET;
+const SEARCH_FAVORITE_OFFSET = @import("app_state.zig").SEARCH_FAVORITE_OFFSET;
+const SEARCH_LADDER_AUTO_OFFSET = @import("app_state.zig").SEARCH_LADDER_AUTO_OFFSET;
+const SEARCH_LADDER_CLAUDE_OFFSET = @import("app_state.zig").SEARCH_LADDER_CLAUDE_OFFSET;
+const SEARCH_LADDER_CODEX_OFFSET = @import("app_state.zig").SEARCH_LADDER_CODEX_OFFSET;
+const SEARCH_LADDER_DASH_OFFSET = @import("app_state.zig").SEARCH_LADDER_DASH_OFFSET;
+const SEARCH_VOICE_MODE_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_ON_OFFSET;
+const SEARCH_VOICE_MODE_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_OFF_OFFSET;
+const SEARCH_ETA_NUMBERS_OFFSET = @import("app_state.zig").SEARCH_ETA_NUMBERS_OFFSET;
+const SEARCH_ETA_PROGRESS_OFFSET = @import("app_state.zig").SEARCH_ETA_PROGRESS_OFFSET;
+const SEARCH_ETA_ACCURACY_OFFSET = @import("app_state.zig").SEARCH_ETA_ACCURACY_OFFSET;
+const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
+const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
+const SEARCH_VOICE_ALWAYS_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_ON_OFFSET;
+const SEARCH_VOICE_ALWAYS_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_OFF_OFFSET;
+const SEARCH_VOICE_STOP_OFFSET = @import("app_state.zig").SEARCH_VOICE_STOP_OFFSET;
+const SEARCH_VOICE_SPEED_100_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_100_OFFSET;
+const SEARCH_VOICE_SPEED_125_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_125_OFFSET;
+const SEARCH_VOICE_SPEED_140_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_140_OFFSET;
+const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_150_OFFSET;
+const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
+const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
+const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CHAT_REACT_LIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_LIKE_OFFSET;
+const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_DISLIKE_OFFSET;
+const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
+const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
+const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
+const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
+const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
+const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
+const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
+const SEARCH_CHAT_FRESH_START_OFFSET = @import("app_state.zig").SEARCH_CHAT_FRESH_START_OFFSET;
+const SEARCH_CHAT_SWITCH_CLAUDE_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CLAUDE_OFFSET;
+const SEARCH_CHAT_SWITCH_CODEX_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CODEX_OFFSET;
+const SEARCH_CHAT_SWITCH_PI_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_PI_OFFSET;
+const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
+const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
+const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
+const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECTION_MENU_OFFSET;
+const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXPAND_TABLE_OFFSET;
+const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
+const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
+const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
+const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
+const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
+const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
+const SEARCH_CHAT_MODE_BYPASS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_BYPASS_OFFSET;
+const SEARCH_CHAT_PLUS_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_PLUS_MENU_OFFSET;
+const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
+const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
+const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
+const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_CLEAR_OFFSET;
+const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
+const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
+const SEARCH_CHAT_PUSH_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_PUSH_QUEUED_OFFSET;
+const SEARCH_CHAT_EDIT_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_EDIT_QUEUED_OFFSET;
+const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_OFFSET;
+const REMIND_PRESET_EVENING = @import("app_state.zig").REMIND_PRESET_EVENING;
+const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
+const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
+const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
+const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
+const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
+const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
+const SEARCH_SESSION_OVERVIEW_MENU_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
+const SEARCH_ARCHIVED_VIEW_OFFSET = @import("app_state.zig").SEARCH_ARCHIVED_VIEW_OFFSET;
+const SEARCH_BROWSER_SHOTURL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_SHOTURL_OFFSET;
+const SEARCH_PIN_TOP_OFFSET = @import("app_state.zig").SEARCH_PIN_TOP_OFFSET;
+const SEARCH_UNARCHIVE_HIDDEN_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_HIDDEN_OFFSET;
+const SEARCH_UNARCHIVE_UNATTACHED_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_UNATTACHED_OFFSET;
+const SEARCH_BROWSER_ENGINE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_ENGINE_OFFSET;
+const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
+const SEARCH_USAGE_LOGIN_INNE_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_INNE_OFFSET;
+const SEARCH_CUSTOMCMD_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_OFFSET;
+const SEARCH_WORKSPACE_BACK_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_BACK_OFFSET;
+const SEARCH_WORKSPACE_DELETE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_OFFSET;
+const SEARCH_WSSORT_OFFSET = @import("app_state.zig").SEARCH_WSSORT_OFFSET;
+const SEARCH_WSMOVE_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_OFFSET;
+const SEARCH_WSMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_NEW_OFFSET;
+const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET;
+const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
+const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
+const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
+const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
+const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
+const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
+const SEARCH_TABCTX_WSMOVE = @import("app_state.zig").SEARCH_TABCTX_WSMOVE;
+const SEARCH_TABCTX_GROUP_NEW = @import("app_state.zig").SEARCH_TABCTX_GROUP_NEW;
+const SEARCH_TABCTX_GROUP_REMOVE = @import("app_state.zig").SEARCH_TABCTX_GROUP_REMOVE;
+const SEARCH_TABCTX_GROUP_NEW_TAB_IN = @import("app_state.zig").SEARCH_TABCTX_GROUP_NEW_TAB_IN;
+const SEARCH_TABCTX_MOVE_NEW_WS = @import("app_state.zig").SEARCH_TABCTX_MOVE_NEW_WS;
+const SEARCH_TABCTX_CLEAR_SEL = @import("app_state.zig").SEARCH_TABCTX_CLEAR_SEL;
+const SEARCH_TABCTX_ARCHIVE = @import("app_state.zig").SEARCH_TABCTX_ARCHIVE;
+const SEARCH_TABCTX_BROWSER = @import("app_state.zig").SEARCH_TABCTX_BROWSER;
+const SEARCH_TABCTX_END_TMUX = @import("app_state.zig").SEARCH_TABCTX_END_TMUX;
+const SEARCH_TABCTX_PIN_TOP = @import("app_state.zig").SEARCH_TABCTX_PIN_TOP;
+const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
+const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
+const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
+const SEARCH_TABCTX_CHAT_VIEW = @import("app_state.zig").SEARCH_TABCTX_CHAT_VIEW;
+const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALLOW;
+const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
+const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
+const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
+const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
+const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
+const SEARCH_TABCTX_GOOGLE_SIGNIN = @import("app_state.zig").SEARCH_TABCTX_GOOGLE_SIGNIN;
+const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
+const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
+const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
+const SEARCH_ADDFAVICON_OFFSET = @import("app_state.zig").SEARCH_ADDFAVICON_OFFSET;
+const SEARCH_ARCHIVED_OFFSET = @import("app_state.zig").SEARCH_ARCHIVED_OFFSET;
+const SEARCH_REMINDER_ROW_OFFSET = @import("app_state.zig").SEARCH_REMINDER_ROW_OFFSET;
+const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OVERVIEW_SEARCH_ROWS;
+const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
+const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
+const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
+const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
+const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
+const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
+const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
+const pi_models = @import("pi_models.zig");
+const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
+const CustomCmd = @import("app_state.zig").CustomCmd;
+const MAX_PALETTE_USAGE = @import("app_state.zig").MAX_PALETTE_USAGE;
+const SEARCH_PALETTE_HEADER_OFFSET = @import("app_state.zig").SEARCH_PALETTE_HEADER_OFFSET;
+const PALETTE_HEADER_COUNT = @import("app_state.zig").PALETTE_HEADER_COUNT;
+const MAX_TMUX_SESSIONS = @import("app_state.zig").MAX_TMUX_SESSIONS;
+const PaletteUsage = @import("app_state.zig").PaletteUsage;
+const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
+const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
+const WorkspaceEntry = @import("app_state.zig").WorkspaceEntry;
+const setShellName = @import("shell_poll.zig").setShellName;
+const win32WidePath = @import("file_io.zig").win32WidePath;
+const win32OpenRead = @import("file_io.zig").win32OpenRead;
+const win32OpenWrite = @import("file_io.zig").win32OpenWrite;
+const win32WriteAll = @import("file_io.zig").win32WriteAll;
+const win32ReadAll = @import("file_io.zig").win32ReadAll;
+const mergeWorkspaceRegistryFromDisk = @import("workspaces.zig").mergeWorkspaceRegistryFromDisk;
+const workspaceCanDelete = @import("workspaces.zig").workspaceCanDelete;
+const scanLiveWorkspaceWindows = @import("workspaces.zig").scanLiveWorkspaceWindows;
+const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
+const workspaceCanMoveIntoClosedStandalone = @import("workspaces.zig").workspaceCanMoveIntoClosedStandalone;
+const hasClosedWorkspaceMoveDestinations = @import("workspaces.zig").hasClosedWorkspaceMoveDestinations;
+const debugLog2 = @import("diagnostics.zig").debugLog2;
+const saveSession = @import("session.zig").saveSession;
+const TMUX_HOST_UK = @import("app_state.zig").TMUX_HOST_UK;
+const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
+const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
+const loadSnippetsIfChanged = @import("snippets.zig").loadSnippetsIfChanged;
+const snippetMatchesQuery = @import("snippets.zig").snippetMatchesQuery;
+const MAX_REMINDERS = @import("app_state.zig").MAX_REMINDERS;
+const loadRemindersIfNeeded = @import("reminders.zig").loadRemindersIfNeeded;
+const snoozedWorkspaceIndex = @import("reminders.zig").snoozedWorkspaceIndex;
+const ensureSnoozeMarkers = @import("reminders.zig").ensureSnoozeMarkers;
+const remindPresetLabel = @import("reminders.zig").remindPresetLabel;
+const reminderMatchesSearch = @import("reminders.zig").reminderMatchesSearch;
+const spawnShellWithSession = @import("console.zig").spawnShellWithSession;
+const faviconHostForShell = @import("vps.zig").faviconHostForShell;
+const tmuxCacheEntryAlreadyOpen = @import("vps.zig").tmuxCacheEntryAlreadyOpen;
+const buildFilteredTmux = @import("vps.zig").buildFilteredTmux;
+const focusedSessionFolder = @import("vps.zig").focusedSessionFolder;
+const workspacePrimaryRepo = @import("vps.zig").workspacePrimaryRepo;
+const countFolderSessions = @import("vps.zig").countFolderSessions;
+const sessionOverviewRowMatches = @import("archive.zig").sessionOverviewRowMatches;
+const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows;
+const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
+const browserPaneActive = @import("browser_pane.zig").browserPaneActive;
+const activeShellHasShotUrlPane = @import("browser_pane.zig").activeShellHasShotUrlPane;
+const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
+const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
+const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
+const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
+const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
+const RepoRow = @import("vps.zig").RepoRow;
+const REPO_SCAN_ROWS = @import("app_state.zig").REPO_SCAN_ROWS;
+const repoRowsForHost = @import("vps.zig").repoRowsForHost;
+const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
+const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
+const chatOutboxCountForShell = @import("chat_send.zig").chatOutboxCountForShell;
+const chatEchoCountNotSentForShell = @import("chat_send.zig").chatEchoCountNotSentForShell;
+const chatEchoCountDeliveredForShell = @import("chat_send.zig").chatEchoCountDeliveredForShell;
+const hasMultipromptLogin = @import("account_desktop.zig").hasMultipromptLogin;
+const nowFileTime = @import("inbox.zig").nowFileTime;
+const publishInboxState = @import("inbox.zig").publishInboxState;
+const findShellById = @import("inbox.zig").findShellById;
+
+fn getCommandsJsonPath(buf: *[512]u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 480) return null;
+    const rest = "\\ZigShell\\commands.json";
+    @memcpy(buf[appdata_len .. appdata_len + rest.len], rest);
+    return buf[0 .. appdata_len + rest.len];
+}
+
+fn ensureCommandsJsonStarter() void {
+    var path_buf: [512]u8 = undefined;
+    const path = getCommandsJsonPath(&path_buf) orelse return;
+    if (win32OpenRead(path)) |h| {
+        _ = CloseHandle(h);
+        return;
+    }
+    const starter =
+        "{\n" ++
+        "  \"_doc\": \"multiprompt custom spawn commands. Fields per entry: label = palette row text (required); kind = cmd|pwsh|vps|vps2 (vps = Remote host 1 ssh, vps2 = Remote host 2 ssh; default cmd); cmd = startup command (remote kinds run it as bash -ic '<cmd>'; quotes are NOT allowed in v1 — such entries are skipped); cwd = working directory; workspace = only show in the workspace with this name (empty/absent = all). For a workspace-scoped remote entry, default = true and cwd define Alt+T's host/folder; cmd stays palette-only. Optional alt_t = claude starts that program in the new tmux session after changing to cwd (allowed characters: letters, digits, space, dash, underscore, dot, slash, equals). Without alt_t the session stays a plain shell. Reloaded automatically when the file changes (checked on every Ctrl+K open) or via Ctrl+K 'Commands: Reload'.\",\n" ++
+        "  \"commands\": [\n" ++
+        "    { \"label\": \"Claude GitHub\", \"kind\": \"cmd\", \"cmd\": \"claude\", \"cwd\": \"C:\\\\Users\\\\user\\\\Documents\\\\GitHub\" }\n" ++
+        "  ]\n" ++
+        "}\n";
+    const h = win32OpenWrite(path) orelse return;
+    win32WriteAll(h, starter);
+    _ = CloseHandle(h);
+}
+
+pub fn openCommandsJsonInEditor() void {
+    ensureCommandsJsonStarter();
+    var path_buf: [512]u8 = undefined;
+    const path = getCommandsJsonPath(&path_buf) orelse return;
+    var wpath_buf: [520]u16 = undefined;
+    const wpath = win32WidePath(&wpath_buf, path) orelse return;
+    const SHOW_NORMAL: i32 = 1;
+    _ = ShellExecuteW(null, L("open"), L("notepad.exe"), wpath.ptr, null, SHOW_NORMAL);
+}
+
+fn customCmdHasQuote(s: []const u8) bool {
+    for (s) |c| {
+        if (c == '\'' or c == '"') return true;
+    }
+    return false;
+}
+
+fn altTProgramSafe(program: []const u8) bool {
+    if (program.len == 0 or program.len >= 127) return false;
+    for (program) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != ' ' and c != '-' and c != '_' and c != '.' and c != '/' and c != '=') return false;
+    }
+    return true;
+}
+
+test "Alt+T program accepts only shell-safe command characters" {
+    try std.testing.expect(altTProgramSafe("claude --model opus-4.1"));
+    try std.testing.expect(altTProgramSafe("env VAR=value claude"));
+    for ([_][]const u8{ "", "claude; whoami", "claude\nexit", "claude'", "claude$(id)", "claude\\x", "claude|cat", "claude&whoami" }) |bad| {
+        try std.testing.expect(!altTProgramSafe(bad));
+    }
+}
+
+fn loadCustomCommands() void {
+    app_state.g_custom_cmds_count = 0;
+    var path_buf: [512]u8 = undefined;
+    const path = getCommandsJsonPath(&path_buf) orelse return;
+    const h = win32OpenRead(path) orelse return;
+    var json_buf: [16384]u8 = undefined;
+    const n = win32ReadAll(h, &json_buf);
+    _ = CloseHandle(h);
+    if (n == 0) return;
+    var parsed = json_reader.parse(std.heap.page_allocator, json_buf[0..n]) catch return;
+    defer parsed.deinit();
+    for (json_reader.array(json_reader.field(parsed.value, "commands"))) |obj| {
+        if (app_state.g_custom_cmds_count >= MAX_CUSTOM_CMDS) break;
+        var c = CustomCmd{};
+        c.label_len = json_reader.copyString(obj, "label", &c.label);
+        if (c.label_len == 0) c.label_len = json_reader.copyString(obj, "name", &c.label);
+        c.workspace_len = json_reader.copyString(obj, "workspace", &c.workspace);
+        c.startup_cmd_len = json_reader.copyString(obj, "cmd", &c.startup_cmd);
+        c.cwd_len = json_reader.copyString(obj, "cwd", &c.cwd);
+        c.alt_t_len = json_reader.copyString(obj, "alt_t", &c.alt_t);
+        var kind_buf: [16]u8 = std.mem.zeroes([16]u8);
+        var kind_len = json_reader.copyString(obj, "kind", &kind_buf);
+        if (kind_len == 0) kind_len = json_reader.copyString(obj, "host", &kind_buf);
+        const ks = kind_buf[0..kind_len];
+        c.kind = if (asciiEqualsCI(ks, "pwsh") or asciiEqualsCI(ks, "powershell")) .pwsh else if (asciiEqualsCI(ks, "vps") or asciiEqualsCI(ks, "de") or asciiEqualsCI(ks, "host1")) .vps else if (asciiEqualsCI(ks, "vps2") or asciiEqualsCI(ks, "uk") or asciiEqualsCI(ks, "host2")) .vps2 else .cmd;
+        c.is_default = json_reader.boolTrue(obj, "default");
+        var folder_host_buf: [8]u8 = std.mem.zeroes([8]u8);
+        const folder_host_len = json_reader.copyString(obj, "folder_host", &folder_host_buf);
+        if (folder_host_len == 1 and folder_host_buf[0] >= '0' and folder_host_buf[0] <= '9') {
+            c.folder_host = folder_host_buf[0] - '0';
+        }
+        if (c.alt_t_len > 0 and !altTProgramSafe(c.alt_t[0..c.alt_t_len])) {
+            debugLog2("commands.json: entry rejected (unsafe alt_t): ", c.label[0..c.label_len]);
+            continue;
+        }
+        if (c.label_len > 0 and !customCmdHasQuote(c.startup_cmd[0..c.startup_cmd_len])) {
+            app_state.g_custom_cmds[app_state.g_custom_cmds_count] = c;
+            app_state.g_custom_cmds_count += 1;
+        } else if (c.label_len > 0) {
+            debugLog2("commands.json: entry rejected (quote in cmd): ", c.label[0..c.label_len]);
+        }
+    }
+}
+
+pub fn loadCustomCommandsIfChanged() void {
+    var path_buf: [512]u8 = undefined;
+    const path = getCommandsJsonPath(&path_buf) orelse return;
+    var wbuf: [520]u16 = undefined;
+    const w = win32WidePath(&wbuf, path) orelse return;
+    var data: WIN32_FIND_DATAW = undefined;
+    const find = FindFirstFileW(w.ptr, &data);
+    if (find == INVALID_HANDLE_VALUE_PTR) return;
+    _ = FindClose(find);
+    if (data.ftLastWriteTime.dwLowDateTime == app_state.g_custom_cmds_mtime_lo and
+        data.ftLastWriteTime.dwHighDateTime == app_state.g_custom_cmds_mtime_hi) return;
+    app_state.g_custom_cmds_mtime_lo = data.ftLastWriteTime.dwLowDateTime;
+    app_state.g_custom_cmds_mtime_hi = data.ftLastWriteTime.dwHighDateTime;
+    loadCustomCommands();
+}
+
+fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 470) return null;
+    const rest = "\\ZigShell\\palette-usage.tsv";
+    @memcpy(buf[appdata_len .. appdata_len + rest.len], rest);
+    return buf[0 .. appdata_len + rest.len];
+}
+
+const ShellRow = struct { target: usize, keywords: []const u8 };
+
+const AdoptHostJob = struct {
+    id: u32 = 0,
+    host: u8 = 0,
+    sid: [36]u8 = std.mem.zeroes([36]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
+    cwd: [256]u8 = std.mem.zeroes([256]u8),
+    cwd_len: u16 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+const MoveChatJob = struct {
+    id: u32 = 0,
+    host: u8 = 0,
+    target: u8 = 0,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
+    cwd: [256]u8 = std.mem.zeroes([256]u8),
+    cwd_len: u16 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+const RESTART_HOSTS = 3;
+const RestartChatJob = struct {
+    all: bool = false,
+    fresh: bool = false,
+    switch_to: u8 = 0,
+    count: u8 = 0,
+    hosts: [RESTART_HOSTS]u8 = @splat(0),
+    ids: [RESTART_HOSTS]u32 = @splat(0),
+    provider: [8]u8 = std.mem.zeroes([8]u8),
+    provider_len: u8 = 0,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+const SHELL_ROWS = [_]ShellRow{
+    .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
+    .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 3, .keywords = "open shell on vps 1 host1 server 1 ssh new host1 vps shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "open shell on vps 2 host2 server 2 ssh new host2 vps shell" },
+    .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
+    .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
+};
+
+pub const PICK_REPO_LABEL = "Pick repo...";
+pub const SET_FOLDER_LABEL = "Set workspace folder...";
+
+fn newSessionRowOrder(target: usize) u16 {
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    for (rows, 0..) |row, i| {
+        if (row == target) return @intCast(i + 1);
+    }
+    return 0;
+}
+
+test "IGSH-1266 new session rows keep the approved order" {
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
+    try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
+    try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Claude in terminal", palettePrimaryLabel(SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Cursor chat", palettePrimaryLabel(SEARCH_NEW_CURSOR_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("Open session...", palettePrimaryLabel(SEARCH_OPEN_SESSION_MENU_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("More shells...", palettePrimaryLabel(SEARCH_SHELLS_MENU_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("pick repo choose repository folder repo", palettePrimaryLabel(SEARCH_PICK_REPO_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("set workspace folder declare workspace folder repo", palettePrimaryLabel(SEARCH_SET_FOLDER_OFFSET) orelse "");
+    try std.testing.expect(std.mem.indexOf(u8, palettePrimaryLabel(SEARCH_REOPEN_OFFSET) orelse "", "reopen") != null);
+    try std.testing.expect(!std.mem.eql(u8, palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse ""));
+}
+
+fn paletteTargetTracksUsage(target: usize) bool {
+    if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return true;
+    if (newSessionRowOrder(target) != 0) return true;
+    if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) return true;
+    if (target == SEARCH_SNIPPET_MANAGE_OFFSET or
+        target == SEARCH_SOUND_OFFSET or
+        target == SEARCH_THEME_MENU_OFFSET or
+        target == SEARCH_SETTINGS_OFFSET or
+        target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET or
+        target == app_state.SEARCH_SERVERS_OFFSET or
+        (target >= SEARCH_OPENALL_OFFSET and target <= SEARCH_RECOVER_REPO_OFFSET) or
+        (target >= SEARCH_NEWWIN_OFFSET and target <= SEARCH_CREATEWS_OFFSET) or
+        (target >= SEARCH_WORKSPACES_MENU_OFFSET and target <= SEARCH_SNIPPET_BACK_OFFSET) or
+        (target >= SEARCH_SESSION_OVERVIEW_MENU_OFFSET and target <= SEARCH_USAGE_LOGIN_INNE_OFFSET) or
+        target == SEARCH_RENAMEWIN_OFFSET or
+        target == SEARCH_MOBILE_OFFSET or
+        target == SEARCH_WS_SNOOZE_OFFSET or
+        target == SEARCH_WS_SNOOZED_OFFSET or
+        target == SEARCH_WS_BRINGBACK_OFFSET or
+        target == SEARCH_ADDFAVICON_OFFSET)
+    {
+        return true;
+    }
+    return target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS;
+}
+
+fn paletteUsageKey(target: usize) ?u64 {
+    if (!paletteTargetTracksUsage(target)) return null;
+    if (target < SEARCH_CUSTOMCMD_OFFSET or target >= SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) {
+        return @intCast(target);
+    }
+    const idx = target - SEARCH_CUSTOMCMD_OFFSET;
+    if (idx >= app_state.g_custom_cmds_count) return null;
+    const c = &app_state.g_custom_cmds[idx];
+    var hash: u64 = 14695981039346656037;
+    for ([_][]const u8{
+        c.label[0..c.label_len],
+        c.workspace[0..c.workspace_len],
+        c.startup_cmd[0..c.startup_cmd_len],
+        c.cwd[0..c.cwd_len],
+    }) |part| {
+        for (part) |ch| {
+            hash = (hash ^ ch) *% 1099511628211;
+        }
+        hash = (hash ^ 0xFF) *% 1099511628211;
+    }
+    hash = (hash ^ @intFromEnum(c.kind)) *% 1099511628211;
+    return hash | (@as(u64, 1) << 63);
+}
+
+pub fn loadPaletteUsage() void {
+    app_state.g_palette_usage_count = 0;
+    var path_buf: [512]u8 = undefined;
+    const path = paletteUsagePath(&path_buf) orelse return;
+    const h = win32OpenRead(path) orelse return;
+    defer _ = CloseHandle(h);
+    var file_buf: [16384]u8 = undefined;
+    const n = win32ReadAll(h, &file_buf);
+    var lines = std.mem.tokenizeAny(u8, file_buf[0..n], "\r\n");
+    while (lines.next()) |line| {
+        if (app_state.g_palette_usage_count >= MAX_PALETTE_USAGE) break;
+        var fields = std.mem.splitScalar(u8, line, '\t');
+        const key_text = fields.next() orelse continue;
+        const count_text = fields.next() orelse continue;
+        const last_text = fields.next() orelse continue;
+        const key = std.fmt.parseInt(u64, key_text, 10) catch continue;
+        if (key == 0) continue;
+        const count = std.fmt.parseInt(u32, count_text, 10) catch continue;
+        const last_used = std.fmt.parseInt(u64, last_text, 10) catch continue;
+        app_state.g_palette_usage[app_state.g_palette_usage_count] = .{
+            .key = key,
+            .count = count,
+            .last_used = last_used,
+        };
+        app_state.g_palette_usage_count += 1;
+    }
+}
+
+fn savePaletteUsage() void {
+    var path_buf: [512]u8 = undefined;
+    const path = paletteUsagePath(&path_buf) orelse return;
+    var out: [16384]u8 = undefined;
+    var pos: usize = 0;
+    for (0..app_state.g_palette_usage_count) |i| {
+        const e = &app_state.g_palette_usage[i];
+        const line = std.fmt.bufPrint(out[pos..], "{d}\t{d}\t{d}\r\n", .{ e.key, e.count, e.last_used }) catch break;
+        pos += line.len;
+    }
+    const h = win32OpenWrite(path) orelse return;
+    defer _ = CloseHandle(h);
+    win32WriteAll(h, out[0..pos]);
+}
+
+fn paletteUsageFor(target: usize) PaletteUsage {
+    const key = paletteUsageKey(target) orelse return .{};
+    for (0..app_state.g_palette_usage_count) |i| {
+        if (app_state.g_palette_usage[i].key == key) return app_state.g_palette_usage[i];
+    }
+    return .{ .key = key };
+}
+
+pub fn recordPaletteUsage(target: usize) void {
+    const key = paletteUsageKey(target) orelse return;
+    loadPaletteUsage();
+    for (0..app_state.g_palette_usage_count) |i| {
+        if (app_state.g_palette_usage[i].key != key) continue;
+        if (app_state.g_palette_usage[i].count < std.math.maxInt(u32)) app_state.g_palette_usage[i].count += 1;
+        app_state.g_palette_usage[i].last_used = nowFileTime();
+        savePaletteUsage();
+        return;
+    }
+    if (app_state.g_palette_usage_count >= MAX_PALETTE_USAGE) return;
+    app_state.g_palette_usage[app_state.g_palette_usage_count] = .{
+        .key = key,
+        .count = 1,
+        .last_used = nowFileTime(),
+    };
+    app_state.g_palette_usage_count += 1;
+    savePaletteUsage();
+}
+
+fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    const words = @import("ui_words.zon");
+    if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
+    if (target == SEARCH_TABCTX_BROWSER) {
+        if (findShellById(app_state.g_tabctx_sid)) |idx| {
+            if (@import("computer_pane.zig").chosenFor(idx)) return words.computer_return_browser;
+        }
+    }
+    if (target == app_state.SEARCH_TABCTX_PIN_PAGE) return words.browser_pin_page;
+    if (target == app_state.SEARCH_TABCTX_UNPIN_PAGE) return words.browser_unpin_page;
+    if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
+    if (target == app_state.SEARCH_SERVERS_OFFSET) return "servers ssh key add test remove server";
+    if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
+    if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
+    if (target == app_state.SEARCH_BOT_PHOTO_UPLOAD) return words.bot_photo_upload;
+    if (target == app_state.SEARCH_BOT_PHOTO_RESET) return words.bot_photo_reset;
+    if (target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) return @import("bot_look.zig").faces[target - app_state.SEARCH_BOT_FACE_OFFSET];
+    if (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT) return @import("bot_look.zig").colors[target - app_state.SEARCH_BOT_COLOR_OFFSET];
+    const room = @import("room_frontend.zig");
+    if (target == room.new_room_target) return "New room";
+    if (target == room.edit_room_target) return "Edit room";
+    if (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) return room.paletteRoomName(target - app_state.SEARCH_ROOM_ROW_OFFSET);
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude session";
+    if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) return "New Claude in terminal";
+    if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
+    if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
+    if (target == SEARCH_PI_LOGIN_OFFSET) return "Log in";
+    if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) return "New Cursor chat";
+    if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
+    if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
+    if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+        const rows = pickRepoPresentedRows();
+        const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
+        if (idx >= rows.len) return null;
+        return rows[idx].path[0..rows[idx].path_len];
+    }
+    const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+    if (chatActionLabel(target, if (action_index) |ti| @import("sidebar.zig").effPinnedTop(ti) else false)) |label| return label;
+    if (target == SEARCH_OPEN_SESSION_MENU_OFFSET) return "Open session...";
+    if (target == SEARCH_SHELLS_MENU_OFFSET) return "More shells...";
+    if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
+    if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
+    if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
+    if (target == SEARCH_TABCTX_ADOPT_HOST) return "Move chat to new mode";
+    if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) return "Sign in to Google in this profile";
+    if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
+    if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
+    if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
+    if (target == SEARCH_TABCTX_CHAT_RESTART_AI) return "chat view restart the ai agent stopped claude resume";
+    if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
+    if (target == app_state.SEARCH_TABCTX_FRESH_START) return "Fresh start handover clear context same chat picture address";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) return "Switch AI to Claude keep chat name picture address history";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) return "Switch AI to Codex keep chat name picture address history";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_PI) return "Switch AI to Pi keep chat name picture address history";
+    if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
+        const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
+        return switch (target) {
+            SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat clear bubbles cache",
+            SEARCH_TABCTX_RECONNECT => "reattach tab",
+            SEARCH_TABCTX_INBOX_EXCLUDE => if (tab != null and tab.?.inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
+            SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
+            SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
+            SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "keep alive: on" else "keep alive: off",
+            SEARCH_TABCTX_PIN_TOP => if (tab != null and @import("sidebar.zig").effPinnedTop(findShellById(app_state.g_tabctx_sid).?)) "unpin from top" else "pin to top",
+            SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "keep tab awake: on" else "keep tab awake: off",
+            SEARCH_TABCTX_WSMOVE => "move to workspace",
+            SEARCH_TABCTX_GROUP_NEW => "add to new group",
+            SEARCH_TABCTX_GROUP_REMOVE => "remove from group",
+            SEARCH_TABCTX_ADOPT_HOST => "move chat to new mode",
+            SEARCH_TABCTX_GOOGLE_SIGNIN => "sign in to google account chrome profile",
+            SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new chat in this group",
+            SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
+            SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
+            SEARCH_TABCTX_ARCHIVE => if (tab != null and tab.?.tmux_session_len > 0) "archive session" else "close session",
+            SEARCH_TABCTX_END_TMUX => "end tmux session",
+            SEARCH_TABCTX_BROWSER => if (tab != null and tab.?.browser_enabled) "close browser pane" else "open browser pane",
+            SEARCH_TABCTX_CHAT_VIEW => "chat view live chat switch to terminal alt c",
+            else => null,
+        };
+    }
+    if (target >= SEARCH_WSMOVE_OFFSET and target < SEARCH_WSMOVE_OFFSET + MAX_LWS) {
+        const idx = target - SEARCH_WSMOVE_OFFSET;
+        if (idx >= app_state.g_lws_count) return null;
+        return app_state.g_ws_names[idx][0..app_state.g_ws_name_len[idx]];
+    }
+    const workspace_index: ?usize = if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES)
+        target - SEARCH_WORKSPACE_OFFSET
+    else if (target >= SEARCH_WORKSPACE_DELETE_OFFSET and target < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES)
+        target - SEARCH_WORKSPACE_DELETE_OFFSET
+    else
+        null;
+    if (workspace_index) |idx| {
+        if (idx >= app_state.g_workspace_count) return null;
+        return app_state.g_workspaces[idx].name[0..app_state.g_workspaces[idx].name_len];
+    }
+    if (target >= SEARCH_REMIND_PRESET_OFFSET and target < SEARCH_REMIND_PRESET_OFFSET + REMIND_PRESET_COUNT)
+        return remindPresetLabel(target - SEARCH_REMIND_PRESET_OFFSET);
+    if (target >= SEARCH_TMUX_OFFSET and target < SEARCH_NEW_OFFSET) {
+        const idx = target - SEARCH_TMUX_OFFSET;
+        if (idx >= app_state.g_tmux_cache_count) return null;
+        const entry = &app_state.g_tmux_cache[idx];
+        if (entry.title_len > 0) return entry.title[0..entry.title_len];
+        return entry.name[0..entry.name_len];
+    }
+    if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) {
+        const labels = [_][]const u8{
+            "new cmd shell",
+            "attach host1 tmux session",
+            "attach host2 tmux session",
+            "Open shell on VPS 1",
+            "Open shell on VPS 2",
+            "new powershell",
+            "new bash shell",
+            "new git bash shell",
+        };
+        return labels[target - SEARCH_NEW_OFFSET];
+    }
+    if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) {
+        const idx = target - SEARCH_CUSTOMCMD_OFFSET;
+        if (idx >= app_state.g_custom_cmds_count) return null;
+        return app_state.g_custom_cmds[idx].label[0..app_state.g_custom_cmds[idx].label_len];
+    }
+    if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) {
+        const idx = target - SEARCH_ARCHIVED_OFFSET;
+        if (idx >= app_state.g_archived_count or idx >= app_state.g_archived.items.len) return null;
+        return app_state.g_archived.items[idx].name[0..app_state.g_archived.items[idx].name_len];
+    }
+    if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) {
+        const idx = target - SEARCH_WS_SNOOZED_ROW_OFFSET;
+        if (idx >= app_state.g_reminder_count) return null;
+        return app_state.g_reminders[idx].name[0..app_state.g_reminders[idx].name_len];
+    }
+    if (target >= SEARCH_REMINDER_ROW_OFFSET and target < SEARCH_REMINDER_ROW_OFFSET + MAX_REMINDERS) {
+        const idx = target - SEARCH_REMINDER_ROW_OFFSET;
+        if (idx >= app_state.g_reminder_count) return null;
+        return app_state.g_reminders[idx].name[0..app_state.g_reminders[idx].name_len];
+    }
+    if (target >= SEARCH_SESSION_OVERVIEW_ROW_OFFSET and target < SEARCH_SESSION_OVERVIEW_ROW_OFFSET + MAX_SESSION_OVERVIEW_SEARCH_ROWS) {
+        const idx = target - SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
+        if (idx >= app_state.g_session_overview_count or idx >= app_state.g_session_overview_rows.items.len) return null;
+        return app_state.g_session_overview_rows.items[idx].name[0..app_state.g_session_overview_rows.items[idx].name_len];
+    }
+    if (target >= SEARCH_SKILL_ROW_OFFSET and target < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS) {
+        const idx = target - SEARCH_SKILL_ROW_OFFSET;
+        if (idx >= app_state.g_palette_skills.len) return null;
+        return app_state.g_palette_skills[idx].name;
+    }
+    if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
+        const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
+        if (model_idx >= pi_models.models().len) return null;
+        const all = pi_models.models();
+        return all[model_idx].nameText();
+    }
+    return switch (target) {
+        SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
+        SEARCH_PI_MODELS_BACK_OFFSET => "Back",
+        SEARCH_WSMOVE_NEW_OFFSET => "move to new workspace",
+        SEARCH_GROUPMOVE_NEW_OFFSET => "new group",
+        SEARCH_GROUPMOVE_NONE_OFFSET => "no group",
+        SEARCH_THEME_SYSTEM_OFFSET => "system",
+        SEARCH_THEME_DARK_OFFSET => "dark",
+        SEARCH_THEME_MID_OFFSET => "mid",
+        SEARCH_THEME_LIGHT_OFFSET => "light",
+        SEARCH_THEME_AMOLED_OFFSET => "amoled",
+        SEARCH_THEME_EDGE_GRAY_OFFSET => "edge grey",
+        SEARCH_THEME_MULTIPROMPT_OFFSET => "multi bot",
+        SEARCH_THEME_DEV_BLUE_OFFSET => "dev blue",
+        SEARCH_THEME_DEV_EDIT_OFFSET => "edit dev theme json",
+        SEARCH_THEME_DEV_RELOAD_OFFSET => "reload dev theme",
+        SEARCH_SOUND_OFFSET => "notification sounds",
+        SEARCH_THEME_MENU_OFFSET => "themes",
+        SEARCH_SETTINGS_OFFSET => "settings preferences look keys about",
+        SEARCH_OPENALL_OFFSET => "open all vps tmux sessions",
+        SEARCH_OPENFOLDER_OFFSET => "open sessions in this folder",
+        SEARCH_RECOVER_REPO_OFFSET => "recover workspace repo sessions",
+        SEARCH_OPENALL_HOST_BACK_OFFSET => "back",
+        SEARCH_OPENALL_HOST_DE_OFFSET => "host1 vps",
+        SEARCH_OPENALL_HOST_UK_OFFSET => "host2 vps",
+        SEARCH_OPENALL_HOST_INNE_OFFSET => "secondary cro vps",
+        SEARCH_NEWWIN_OFFSET => "new workspace window",
+        SEARCH_CREATEWS_OFFSET => "create workspace",
+        SEARCH_WORKSPACES_MENU_OFFSET => "open workspace",
+        SEARCH_WORKSPACE_DELETE_MENU_OFFSET => "delete workspace",
+        SEARCH_QUIT_OFFSET => "quit multi bot",
+        SEARCH_FULLWIDTH_OFFSET => "full-width",
+        SEARCH_SHORTCUTS_OFFSET => "keyboard shortcuts",
+        SEARCH_CLOSEWIN_OFFSET => "archive workspace",
+        SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET => "archived workspaces",
+        SEARCH_RECONNECT_OFFSET => "reattach tab",
+        SEARCH_SINGLEWIN_OFFSET => "single-window mode",
+        SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
+        SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
+        SEARCH_GOINBOX_OFFSET => "go to inbox",
+        SEARCH_SHOW_FREQUENT_OFFSET => "show frequent split",
+        SEARCH_FREQUENT_FIRST_OFFSET => "frequent as first tab",
+        SEARCH_SHOW_FAVORITES_OFFSET => "show favorites split",
+        SEARCH_SHOW_ALL_OFFSET => "show all split",
+        SEARCH_INBOX_FREQUENT_OFFSET => "inbox: frequent input today 24 hours watch-only six hours",
+        SEARCH_WSSORT_MENU_OFFSET => "sort workspaces",
+        SEARCH_WSMOVE_MENU_OFFSET => "move to workspace",
+        SEARCH_GROUPMOVE_MENU_OFFSET => "move to group",
+        SEARCH_HIDESIDEBAR_OFFSET => "sidebar",
+        SEARCH_HIDEPILLS_OFFSET => "workspace switcher",
+        SEARCH_NEXTUNREAD_OFFSET => "next unread session",
+        SEARCH_SIDEBAR_COLLAPSE_OFFSET => "sidebar collapse",
+        SEARCH_SIDEBAR_HIDE_OFFSET => "sidebar hide",
+        SEARCH_TABSORT_INBOX_OFFSET => "tab order",
+        SEARCH_TABSORT_MANUAL_OFFSET => "tab order manual",
+        SEARCH_POWER_AUTO_OFFSET => "power saver auto always off",
+        SEARCH_POWER_ALWAYS_OFFSET => "power saver always",
+        SEARCH_POWER_OFF_OFFSET => "power saver off",
+        SEARCH_LADDER_AUTO_OFFSET => "token ladder auto claude codex choose plan",
+        SEARCH_LADDER_CLAUDE_OFFSET => "token ladder burn claude",
+        SEARCH_LADDER_CODEX_OFFSET => "token ladder burn codex",
+        SEARCH_LADDER_DASH_OFFSET => "token ladder open dashboard",
+        SEARCH_VOICE_MODE_ON_OFFSET => "voice mode on",
+        SEARCH_VOICE_MODE_OFF_OFFSET => "voice mode off",
+        SEARCH_ETA_NUMBERS_OFFSET => "eta countdown numbers",
+        SEARCH_ETA_PROGRESS_OFFSET => "eta progress line",
+        SEARCH_ETA_ACCURACY_OFFSET => "estimate accuracy",
+        SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET => "chat view on everywhere",
+        SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET => "chat view off everywhere",
+        SEARCH_VOICE_STOP_OFFSET => "voice stop speaking mute",
+        SEARCH_VOICE_ALWAYS_ON_OFFSET => "voice always listening on talk over",
+        SEARCH_VOICE_ALWAYS_OFF_OFFSET => "voice always listening off taking turns",
+        SEARCH_VOICE_SPEED_100_OFFSET => "voice speed speed faster slower",
+        SEARCH_VOICE_SPEED_125_OFFSET => "voice speed 1.25x",
+        SEARCH_VOICE_SPEED_140_OFFSET => "voice speed 1.4x",
+        SEARCH_VOICE_SPEED_150_OFFSET => "voice speed 1.5x",
+        SEARCH_VOICE_REPLAY_OFFSET => "voice read last reply repeat replay",
+        SEARCH_VOICE_PREVIOUS_OFFSET => "voice read previous reply",
+        SEARCH_VOICE_NEXT_OFFSET => "voice read next reply",
+        SEARCH_UNREADONLY_OFFSET => "toggle unread only",
+        SEARCH_THREADTITLE_OFFSET => "thread title",
+        SEARCH_FONT_BIGGER_OFFSET => "console font bigger",
+        SEARCH_FONT_SMALLER_OFFSET => "console font smaller",
+        SEARCH_FONT_RESET_OFFSET => "console font reset",
+        SEARCH_UI_BIGGER_OFFSET => "ui size increase",
+        SEARCH_UI_SMALLER_OFFSET => "ui size decrease",
+        SEARCH_UI_RESET_OFFSET => "ui size reset",
+        SEARCH_CUSTOMCMD_EDIT_OFFSET => "commands edit commands.json",
+        SEARCH_CUSTOMCMD_RELOAD_OFFSET => "commands reload",
+        SEARCH_ARCHIVE_OFFSET => "archive session",
+        SEARCH_REOPEN_OFFSET => "reopen closed tab restore undo",
+        SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude session chat terminal tab agent",
+        SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
+        SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
+        SEARCH_NEW_CURSOR_CHAT_OFFSET => "new cursor chat session agent cli",
+        SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
+        SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
+        SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
+        SEARCH_OPEN_SESSION_MENU_OFFSET => "open session attach tmux list pick",
+        SEARCH_REOPEN_SERVER_SHELL_OFFSET => "reopen server shell detached tmux attach orphaned",
+        SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
+        SEARCH_URLPICK_OFFSET => "open url from screen",
+        SEARCH_CLOSETAB_OFFSET => "close tab",
+        SEARCH_FAVORITE_OFFSET => "favorite: toggle star session",
+        SEARCH_MUTETAB_OFFSET => "mute tab",
+        SEARCH_INBOX_EXCLUDE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
+        SEARCH_KEEPALIVE_OFFSET => "keep alive",
+        SEARCH_CHAT_VIEW_OFFSET => "chat view live chat switch terminal alt c",
+        SEARCH_CHAT_MODEL_OPUS_OFFSET => "chat view: model opus",
+        SEARCH_CHAT_MODEL_SONNET_OFFSET => "chat view: model sonnet",
+        SEARCH_CHAT_MODEL_HAIKU_OFFSET => "chat view: model haiku",
+        SEARCH_CHAT_MODEL_FABLE_OFFSET => "chat view: model fable",
+        SEARCH_CHAT_MODEL_SOL_OFFSET => "chat view: model sol",
+        SEARCH_CHAT_MODEL_TERRA_OFFSET => "chat view: model terra",
+        SEARCH_CHAT_MODEL_LUNA_OFFSET => "chat view: model luna",
+        SEARCH_CHAT_MODEL_ASTRA_OFFSET => "chat view: model astra",
+        SEARCH_CHAT_EFFORT_LOW_OFFSET => "chat view: effort low",
+        SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => "chat view: effort medium",
+        SEARCH_CHAT_EFFORT_HIGH_OFFSET => "chat view: effort high",
+        SEARCH_CHAT_ALLOW_OFFSET => "chat view allow",
+        SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
+        SEARCH_CHAT_DENY_OFFSET => "chat view deny",
+        SEARCH_CHAT_STOP_OFFSET => if (app_state.ISSUE_265_WORKING_BAR) "chat view stop the agent interrupt" else "stop agent",
+        SEARCH_PI_LOGIN_OFFSET => "log in pi login sign in provider",
+        SEARCH_CHAT_QUEUE_SEND_OFFSET => "chat view send queued messages now offline outbox",
+        SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat clear bubbles cache",
+        SEARCH_CHAT_TAB_URL_OFFSET => "chat view insert browser tab url link ctrl shift x",
+        SEARCH_CHAT_QUEUE_CLEAR_OFFSET => "chat view clear offline queue discard queued messages",
+        SEARCH_CHAT_RETRY_UNSENT_OFFSET => "chat view retry unsent messages not sent resend",
+        SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "chat view discard unsent messages not sent",
+        SEARCH_CHAT_PUSH_QUEUED_OFFSET => "chat view send queued in claude message now push",
+        SEARCH_CHAT_EDIT_QUEUED_OFFSET => "chat view edit queued messages pull back into the prompt box",
+        SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multi bot sync",
+        SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
+        SEARCH_SYNC_STATUS_OFFSET => "account: devices",
+        SEARCH_AI_USAGE_OFFSET => "usage and servers / collapsed status cards",
+        SEARCH_APPROVE_DEVICES_OFFSET => "account: approve devices",
+        SEARCH_REMOVE_SERVER_1_OFFSET => "account: remove server 1",
+        SEARCH_REMOVE_SERVER_2_OFFSET => "account: remove server 2",
+        SEARCH_REMOVE_SERVER_3_OFFSET => "account: remove server 3",
+        SEARCH_LAYOUT_PULL_OFFSET => "sync: pull now",
+        SEARCH_SKILLS_MENU_OFFSET => "skills",
+        SEARCH_CHAT_REPLY_OFFSET => "Chat View: Reply to latest agent message",
+        SEARCH_CHAT_REACT_LIKE_OFFSET => "Chat View: React 👍 to latest Claude message",
+        SEARCH_CHAT_REACT_DISLIKE_OFFSET => "Chat View: React 👎 to latest Claude message",
+        SEARCH_CHAT_REACT_HEART_OFFSET => "Chat View: React ❤️ to latest Claude message",
+        SEARCH_CLEAN_CHAT_OFFSET => "Chat View: Toggle CLEAN chat messages only hide read receipts queued status",
+        SEARCH_CHAT_TODO_OFFSET => "Chat View: Toggle todo list",
+        SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
+        SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
+        SEARCH_CHAT_NEWEST_OFFSET => "Jump to newest message jump to bottom end",
+        SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
+        SEARCH_CHAT_FRESH_START_OFFSET => "Chat View: Fresh start handover clear context same chat picture address",
+        SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
+        SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
+        SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
+        SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
+        SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
+        SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
+        SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
+        SEARCH_CHAT_DICTATION_OFFSET => "chat view dictation microphone speech start stop ctrl d",
+        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
+        SEARCH_CHAT_COPY_SELECTION_OFFSET => "chat view copy selection ctrl c",
+        SEARCH_CHAT_SELECTION_MENU_OFFSET => @import("ui_words.zon").palette_chat_selection_menu,
+        SEARCH_CHAT_EXPAND_TABLE_OFFSET => "chat view expand table full screen enlarge zoom read wide table",
+        SEARCH_CHAT_FOCUS_MESSAGES_OFFSET => "chat view focus messages keyboard up down enter options reply copy delete cancel waiting",
+        SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
+        SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
+        SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
+        SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
+        SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
+        SEARCH_CHAT_MODE_BYPASS_OFFSET => "chat permission mode: bypass",
+        SEARCH_CHAT_PLUS_MENU_OFFSET => "Chat View: Plus Menu attach file model effort permission level",
+        SEARCH_SKILLS_BACK_OFFSET => "back",
+        SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
+        SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) words.computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
+        SEARCH_BROWSER_URL_OFFSET => "browser open url",
+        SEARCH_BROWSER_INSTRUCT_OFFSET => "browser: insert agent instructions",
+        SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser: focus address bar",
+        SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "browser: switch focus between terminal and pane",
+        SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET => "external browser links when pane off",
+        SEARCH_SHARED_SERVER_CONNECTION_OFFSET => "remote tabs: share one server connection",
+        SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser: auto-suspend idle panes",
+        SEARCH_KEEPAWAKE_OFFSET => "keep tab awake",
+        SEARCH_HIBERNATE_NOW_OFFSET => "hibernate browser panes now",
+        SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET => "close all browser panes",
+        SEARCH_CRASH_REPORTS_OFFSET => "crash reports open folder",
+        SEARCH_CRASH_NOW_OFFSET => "debug crash now",
+        SEARCH_CHANGELOG_OFFSET => "changelog",
+        SEARCH_BROWSER_BACK_OFFSET => "browser back",
+        SEARCH_BROWSER_FORWARD_OFFSET => "browser forward",
+        SEARCH_BROWSER_MODE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native) "browser: use app address bar" else "browser: use browser address bar and tabs",
+        SEARCH_BROWSER_ENGINE_OFFSET => if (app_state.g_browser_engine == .edge) "browser: switch all panes to chrome" else "browser: switch all panes to edge",
+        SEARCH_RESTART_OFFSET => "restart multi bot",
+        SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
+        SEARCH_ZSB_REBIND_OFFSET => "browser: repair agent connection",
+        SEARCH_SHELL_DIAG_OFFSET => "copy session diagnostics",
+        SEARCH_SYNC_NAME_OFFSET => "use agent or terminal session name",
+        SEARCH_RENAME_SYNC_OFFSET => "rename session",
+        SEARCH_END_TMUX_OFFSET => "end tmux session",
+        SEARCH_REMIND_ME_OFFSET => "remind me",
+        SEARCH_REMINDERS_MENU_OFFSET => "reminders",
+        SEARCH_WS_SNOOZE_OFFSET => "workspace snooze",
+        SEARCH_WS_SNOOZED_OFFSET => "workspace snoozed wake",
+        SEARCH_WS_BRINGBACK_OFFSET => "workspace bring back all sessions",
+        SEARCH_CODEX_TMUX_OFFSET => "new codex session in this folder",
+        SEARCH_SNIPPETS_MENU_OFFSET => "use snippets",
+        SEARCH_SNIPPET_MANAGE_OFFSET => "manage snippets",
+        SEARCH_SNIPPET_CREATE_OFFSET => "create snippet",
+        SEARCH_SNIPPET_BACK_OFFSET => "back",
+        SEARCH_SESSION_OVERVIEW_MENU_OFFSET => "show all sessions",
+        SEARCH_ARCHIVED_VIEW_OFFSET => "archived sessions",
+        SEARCH_BROWSER_SHOTURL_OFFSET => "browser screenshot tab link in shell",
+        SEARCH_PIN_TOP_OFFSET => "pin tab to top",
+        SEARCH_UNARCHIVE_HIDDEN_OFFSET => "restore workspace waiting sessions",
+        SEARCH_UNARCHIVE_UNATTACHED_OFFSET => "restore disconnected workspace sessions",
+        SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account",
+        SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account",
+        SEARCH_RENAMEWIN_OFFSET => "rename workspace",
+        SEARCH_MOBILE_OFFSET => "mobile latency mode",
+        SEARCH_ADDFAVICON_OFFSET => "add favicon",
+        else => null,
+    };
+}
+
+fn asciiStartsWithCI(text: []const u8, prefix: []const u8) bool {
+    if (prefix.len > text.len) return false;
+    for (prefix, 0..) |c, i| {
+        if (std.ascii.toLower(text[i]) != std.ascii.toLower(c)) return false;
+    }
+    return true;
+}
+
+fn paletteTextMatchRank(text: []const u8, query: []const u16) u8 {
+    if (query.len == 0) return 0;
+    var query_ascii: [64]u8 = undefined;
+    if (query.len > query_ascii.len) return 0;
+    for (query, 0..) |c, i| {
+        if (c > 0x7F) return 0;
+        query_ascii[i] = @intCast(c);
+    }
+    const q = query_ascii[0..query.len];
+    if (asciiEqualsCI(text, q)) return 4;
+    if (asciiStartsWithCI(text, q)) return 3;
+    var word_start: usize = 0;
+    while (word_start < text.len) {
+        while (word_start < text.len and !std.ascii.isAlphanumeric(text[word_start])) : (word_start += 1) {}
+        if (word_start >= text.len) break;
+        if (asciiStartsWithCI(text[word_start..], q)) return 2;
+        while (word_start < text.len and std.ascii.isAlphanumeric(text[word_start])) : (word_start += 1) {}
+    }
+    return if (asciiContainsQueryInsensitive(text, query)) 1 else 0;
+}
+
+fn paletteFoldU16(c: u16) u16 {
+    return if (c >= 'A' and c <= 'Z') c + 32 else c;
+}
+
+fn paletteU16IsWord(c: u16) bool {
+    return c > 0x7F or std.ascii.isAlphanumeric(@intCast(c));
+}
+
+pub fn paletteWideTextMatchRank(text: []const u16, query: []const u16) u8 {
+    if (query.len == 0) return 0;
+    if (text.len == query.len) {
+        var exact = true;
+        for (text, query) |tc, qc| {
+            if (paletteFoldU16(tc) != paletteFoldU16(qc)) {
+                exact = false;
+                break;
+            }
+        }
+        if (exact) return 4;
+    }
+    if (text.len >= query.len) {
+        var prefix = true;
+        for (query, 0..) |qc, i| {
+            if (paletteFoldU16(text[i]) != paletteFoldU16(qc)) {
+                prefix = false;
+                break;
+            }
+        }
+        if (prefix) return 3;
+    }
+    var word_start: usize = 0;
+    while (word_start < text.len) {
+        while (word_start < text.len and !paletteU16IsWord(text[word_start])) : (word_start += 1) {}
+        if (word_start >= text.len) break;
+        if (text.len - word_start >= query.len) {
+            var word_prefix = true;
+            for (query, 0..) |qc, i| {
+                if (paletteFoldU16(text[word_start + i]) != paletteFoldU16(qc)) {
+                    word_prefix = false;
+                    break;
+                }
+            }
+            if (word_prefix) return 2;
+        }
+        while (word_start < text.len and paletteU16IsWord(text[word_start])) : (word_start += 1) {}
+    }
+    return if (u16ContainsInsensitive(text, query)) 1 else 0;
+}
+
+fn paletteQueryRank(target: usize) u8 {
+    if (app_state.g_search_len == 0) return 0;
+    if (target >= SEARCH_SNIPPET_OFFSET and target < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS) {
+        const idx = target - SEARCH_SNIPPET_OFFSET;
+        if (idx >= app_state.g_snippet_count) return 1;
+        return @max(1, paletteWideTextMatchRank(app_state.g_snippets[idx].name[0..app_state.g_snippets[idx].name_len], app_state.g_search_buf[0..app_state.g_search_len]));
+    }
+    if (target < app_state.shell_count) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        const name_rank = paletteWideTextMatchRank(app_state.shells[target].name[0..app_state.shells[target].name_len], query);
+        return @max(1, name_rank, paletteTextMatchRank(sessionFolderLeaf(&app_state.shells[target]), query));
+    }
+    const group_index: ?usize = if (target >= SEARCH_GROUPMOVE_GROUP_OFFSET and target < SEARCH_GROUPMOVE_GROUP_OFFSET + MAX_GROUPS)
+        target - SEARCH_GROUPMOVE_GROUP_OFFSET
+    else if (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS)
+        target - SEARCH_TABCTX_GROUP_ADD_OFFSET
+    else
+        null;
+    if (group_index) |idx| {
+        if (idx >= app_state.group_count) return 1;
+        return @max(1, paletteWideTextMatchRank(app_state.groups[idx].name[0..app_state.groups[idx].name_len], app_state.g_search_buf[0..app_state.g_search_len]));
+    }
+    const label = palettePrimaryLabel(target) orelse return 1;
+    const rank = paletteTextMatchRank(label, app_state.g_search_buf[0..app_state.g_search_len]);
+    if (target == app_state.SEARCH_TABCTX_HIDE) return @max(1, rank, paletteTextMatchRank("close tab", app_state.g_search_buf[0..app_state.g_search_len]));
+    if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) return @max(1, rank, paletteTextMatchRank("rename session", app_state.g_search_buf[0..app_state.g_search_len]), paletteTextMatchRank("rename tab", app_state.g_search_buf[0..app_state.g_search_len]));
+    return if (rank == 0) 1 else rank;
+}
+
+fn paletteRowIsArchived(target: usize) bool {
+    return target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64;
+}
+
+fn paletteWorkspaceRank(target: usize) u8 {
+    if (target < SEARCH_CUSTOMCMD_OFFSET or target >= SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
+    const idx = target - SEARCH_CUSTOMCMD_OFFSET;
+    if (idx >= app_state.g_custom_cmds_count) return 0;
+    return if (app_state.g_custom_cmds[idx].workspace_len > 0) 1 else 0;
+}
+
+fn paletteTargetIsDestructive(target: usize) bool {
+    return target == SEARCH_QUIT_OFFSET or
+        target == SEARCH_CLOSEWIN_OFFSET or
+        target == SEARCH_ARCHIVE_OFFSET or
+        target == SEARCH_END_TMUX_OFFSET or
+        target == SEARCH_CLOSETAB_OFFSET or
+        target == SEARCH_CLOSE_DISCONNECTED_OFFSET or
+        target == SEARCH_TABCTX_CLOSE_DISCONNECTED or
+        target == SEARCH_WORKSPACE_DELETE_MENU_OFFSET or
+        target == SEARCH_SYNC_SIGNOUT_OFFSET;
+}
+
+fn paletteFrecencyAt(usage: PaletteUsage, now: u64) u16 {
+    if (usage.count == 0 or usage.last_used == 0) return 0;
+    const ticks_per_hour: u64 = 36_000_000_000;
+    const age = now -| usage.last_used;
+    const recency: u16 = if (age < ticks_per_hour)
+        96
+    else if (age < 24 * ticks_per_hour)
+        80
+    else if (age < 7 * 24 * ticks_per_hour)
+        64
+    else if (age < 30 * 24 * ticks_per_hour)
+        48
+    else if (age < 90 * 24 * ticks_per_hour)
+        32
+    else
+        0;
+    var frequency: u16 = 0;
+    var remaining = usage.count;
+    while (remaining > 1 and frequency < 15) : (frequency += 1) remaining >>= 1;
+    return recency + frequency;
+}
+
+test "palette recency bands cannot be overpowered by lifetime frequency" {
+    const hour: u64 = 36_000_000_000;
+    const now: u64 = 120 * 24 * hour;
+    const six_days_old = PaletteUsage{ .count = 1, .last_used = now - 6 * 24 * hour };
+    const eight_days_old_maxed = PaletteUsage{ .count = std.math.maxInt(u32), .last_used = now - 8 * 24 * hour };
+    try std.testing.expect(paletteFrecencyAt(six_days_old, now) > paletteFrecencyAt(eight_days_old_maxed, now));
+
+    const same_band_once = PaletteUsage{ .count = 1, .last_used = now - 2 * 24 * hour };
+    const same_band_often = PaletteUsage{ .count = 8, .last_used = now - 2 * 24 * hour };
+    try std.testing.expect(paletteFrecencyAt(same_band_often, now) > paletteFrecencyAt(same_band_once, now));
+}
+
+fn paletteQueryPrefersDeleteSession(target: usize) bool {
+    if (target != SEARCH_TABCTX_END_TMUX) return false;
+    const label = "delete session";
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    if (query.len < 3 or query.len > label.len) return false;
+    for (query, 0..) |qc, i| {
+        const lc: u16 = label[i];
+        if (u16ToLower(qc) != lc) return false;
+    }
+    return true;
+}
+
+fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, now: u64) bool {
+    if (key_kind != prev_kind) return key_kind < prev_kind;
+    if (app_state.g_search_len > 0) {
+        const key_match = paletteQueryRank(key);
+        const prev_match = paletteQueryRank(prev);
+        if (key_match != prev_match) return key_match > prev_match;
+        const key_delete = paletteQueryPrefersDeleteSession(key);
+        const prev_delete = paletteQueryPrefersDeleteSession(prev);
+        if (key_delete != prev_delete) return key_delete;
+        const key_open = key < app_state.shell_count;
+        const prev_open = prev < app_state.shell_count;
+        if (key_open != prev_open and (paletteRowIsArchived(key) or paletteRowIsArchived(prev))) return key_open;
+        const key_workspace = paletteWorkspaceRank(key);
+        const prev_workspace = paletteWorkspaceRank(prev);
+        if (key_workspace != prev_workspace) return key_workspace > prev_workspace;
+    } else {
+        const key_safe = !paletteTargetIsDestructive(key);
+        const prev_safe = !paletteTargetIsDestructive(prev);
+        if (key_safe != prev_safe) return key_safe;
+    }
+    const key_usage = paletteUsageFor(key);
+    const prev_usage = paletteUsageFor(prev);
+    const key_frecency = paletteFrecencyAt(key_usage, now);
+    const prev_frecency = paletteFrecencyAt(prev_usage, now);
+    if (key_frecency != prev_frecency) return key_frecency > prev_frecency;
+    return key_usage.last_used > prev_usage.last_used;
+}
+
+fn sortSearchResultsByRank() void {
+    const now = nowFileTime();
+    var kinds: [app_state.g_search_results.len]u8 = undefined;
+    for (app_state.g_search_results[0..app_state.g_search_result_count], 0..) |target, i| {
+        kinds[i] = 0;
+        if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) {
+            const index = target - SEARCH_WORKSPACE_OFFSET;
+            if (index < app_state.g_workspace_count) {
+                const workspace = &app_state.g_workspaces[index];
+                kinds[i] = if (@import("workspaces.zig").workspaceIsLiveAnywhere(workspace.id[0..workspace.id_len])) 1 else 2;
+            }
+        }
+    }
+    var i: u32 = 1;
+    while (i < app_state.g_search_result_count) : (i += 1) {
+        const key = app_state.g_search_results[i];
+        const key_kind = kinds[i];
+        var j = i;
+        while (j > 0) {
+            const prev = app_state.g_search_results[j - 1];
+            if (!paletteResultOutranks(key, prev, key_kind, kinds[j - 1], now)) break;
+            app_state.g_search_results[j] = prev;
+            kinds[j] = kinds[j - 1];
+            j -= 1;
+        }
+        app_state.g_search_results[j] = key;
+        kinds[j] = key_kind;
+    }
+}
+
+test "session and workspace ranking beats exact matches and frecency" {
+    const old_shell_name = app_state.shells[0].name;
+    const old_shell_name_len = app_state.shells[0].name_len;
+    const old_shell_count = app_state.shell_count;
+    var old_workspaces: [2 * @sizeOf(app_state.WorkspaceEntry)]u8 = undefined;
+    @memcpy(&old_workspaces, std.mem.sliceAsBytes(app_state.g_workspaces[0..2]));
+    const old_workspace_count = app_state.g_workspace_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_single = app_state.g_single_window;
+    const old_lws_count = app_state.g_lws_count;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    defer {
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_lws_count;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.shells[0].name = old_shell_name;
+        app_state.shells[0].name_len = old_shell_name_len;
+        app_state.shell_count = old_shell_count;
+        @memcpy(std.mem.sliceAsBytes(app_state.g_workspaces[0..2]), &old_workspaces);
+        app_state.g_workspace_count = old_workspace_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+    }
+    app_state.shell_count = 1;
+    for ("Funeralprints", 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = 13;
+    app_state.g_workspace_count = 2;
+    for (0..2) |i| {
+        app_state.g_workspaces[i] = std.mem.zeroes(app_state.WorkspaceEntry);
+        @memcpy(app_state.g_workspaces[i].name[0..4], "fune");
+        app_state.g_workspaces[i].name_len = 4;
+    }
+    for ("fune", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 4;
+    app_state.g_palette_usage_count = 1;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_SOUND_OFFSET, .count = 1000, .last_used = 100 };
+    const live = SEARCH_WORKSPACE_OFFSET;
+    const closed = live + 1;
+    app_state.g_single_window = true;
+    app_state.g_lws_count = 1;
+    @memcpy(app_state.g_ws_ids[0][0..12], "fixture-live");
+    app_state.g_ws_id_len[0] = 12;
+    @memcpy(app_state.g_workspaces[0].id[0..12], "fixture-live");
+    app_state.g_workspaces[0].id_len = 12;
+    app_state.g_workspaces[1].id_len = 0;
+    try std.testing.expect(paletteUsageKey(live) == null);
+    try std.testing.expect(paletteUsageKey(closed) == null);
+    try std.testing.expect(paletteQueryRank(closed) > paletteQueryRank(0));
+    @memcpy(app_state.g_search_results[0..3], &[_]usize{ closed, live, 0 });
+    app_state.g_search_result_count = 3;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ 0, live, closed }, app_state.g_search_results[0..3]);
+    try std.testing.expect(paletteResultOutranks(0, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(0, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(!paletteResultOutranks(closed, 0, 2, 0, 100));
+    app_state.g_search_len = 0;
+    @memcpy(app_state.g_search_results[0..4], &[_]usize{ closed, live, 0, SEARCH_SOUND_OFFSET });
+    app_state.g_search_result_count = 4;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ SEARCH_SOUND_OFFSET, 0, live, closed }, app_state.g_search_results[0..4]);
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, 0, 0, 100));
+    try std.testing.expect(!paletteResultOutranks(SEARCH_THEME_MENU_OFFSET, SEARCH_SOUND_OFFSET, 0, 0, 100));
+}
+
+test "SOFT-2355 typing del ranks Delete session before Delete workspace" {
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_shell_count = app_state.shell_count;
+    defer {
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.shell_count = old_shell_count;
+    }
+    app_state.shell_count = 0;
+    for ("del", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 3;
+    app_state.g_palette_usage_count = 1;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_WORKSPACE_DELETE_MENU_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) };
+    app_state.g_search_results[0] = SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+    app_state.g_search_results[1] = SEARCH_TABCTX_END_TMUX;
+    app_state.g_search_result_count = 2;
+    sortSearchResultsByRank();
+    try std.testing.expectEqual(SEARCH_TABCTX_END_TMUX, app_state.g_search_results[0]);
+    try std.testing.expectEqual(SEARCH_WORKSPACE_DELETE_MENU_OFFSET, app_state.g_search_results[1]);
+}
+
+fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
+    var found: ?usize = null;
+    for (results, 0..) |result, i| {
+        if (result == target) {
+            found = i;
+            break;
+        }
+    }
+    const from = found orelse return false;
+    if (from == 0) return true;
+    var i = from;
+    while (i > 0) : (i -= 1) results[i] = results[i - 1];
+    results[0] = target;
+    return true;
+}
+
+pub const PALETTE_MOST_USED_ROWS: usize = 10;
+pub const PALETTE_GROUP_SESSIONS: u8 = 0;
+pub const palette_header_names = [PALETTE_HEADER_COUNT][]const u8{ "Most used", "Sessions", "Workspaces and windows", "Sidebar and tabs", "Look and settings", "Debug and repair", "Browser", "Account and usage", "Chat View" };
+
+pub fn paletteHeaderIndex(target: usize) ?usize {
+    if (target >= SEARCH_PALETTE_HEADER_OFFSET and target < SEARCH_PALETTE_HEADER_OFFSET + PALETTE_HEADER_COUNT) return target - SEARCH_PALETTE_HEADER_OFFSET;
+    return null;
+}
+
+pub fn paletteRowIsHeader(target: usize) bool {
+    return paletteHeaderIndex(target) != null;
+}
+
+fn paletteRowIsSession(target: usize) bool {
+    return target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS;
+}
+
+pub fn roomPaletteAllowed(target: usize) bool {
+    if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return true;
+    if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
+    if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return !app_state.g_search_ws_move_mode and !app_state.g_search_workspace_delete_mode;
+    switch (target) {
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET,
+        SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
+        else => {},
+    }
+    if (target == SEARCH_FULLWIDTH_OFFSET) return false;
+    const group = paletteGroupOf(target) orelse return false;
+    return group == 3 or group == 6;
+}
+
+pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == SEARCH_PI_MODELS_MENU_OFFSET or target == SEARCH_PI_MODELS_BACK_OFFSET or (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS)) return 7;
+    if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
+    if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
+    if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
+    if (target == app_state.SEARCH_SERVERS_OFFSET) return 3;
+    if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
+    if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
+    if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
+    if (paletteRowIsSession(target)) return 0;
+    if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+        target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
+        target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
+        (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
+    if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
+    if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) return 0;
+    if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
+    if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
+    if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
+    if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET or target == SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
+    return switch (target) {
+        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_REOPEN_SERVER_SHELL_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
+        SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
+        SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
+        SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
+        SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
+        SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        else => null,
+    };
+}
+
+const PaletteOrderRow = struct {
+    target: usize,
+    order: u16,
+    group: u8,
+    command: bool,
+    safe: bool,
+    used: bool,
+    usage: PaletteUsage,
+    label: []const u8,
+};
+
+var g_palette_order_rows: [app_state.g_search_results.len]PaletteOrderRow = undefined;
+var g_palette_order_out: [app_state.g_search_results.len]usize = undefined;
+var g_palette_order_pick: [app_state.g_search_results.len]usize = undefined;
+
+fn paletteUsageOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bool {
+    if (a.usage.count != b.usage.count) return a.usage.count > b.usage.count;
+    if (a.usage.last_used != b.usage.last_used) return a.usage.last_used > b.usage.last_used;
+    return std.ascii.lessThanIgnoreCase(a.label, b.label);
+}
+
+fn paletteOrderOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bool {
+    if (a.order != b.order) {
+        if (a.order == 0) return false;
+        if (b.order == 0) return true;
+        return a.order < b.order;
+    }
+    if (a.safe != b.safe) return a.safe;
+    return paletteUsageOutranks(a, b);
+}
+
+fn sortPaletteOrderPick(pick: []usize) void {
+    var i: usize = 1;
+    while (i < pick.len) : (i += 1) {
+        const key = pick[i];
+        var j = i;
+        while (j > 0 and paletteOrderOutranks(&g_palette_order_rows[key], &g_palette_order_rows[pick[j - 1]])) : (j -= 1) pick[j] = pick[j - 1];
+        pick[j] = key;
+    }
+}
+
+fn groupEmptyPaletteResults(lead: usize) void {
+    const total: usize = app_state.g_search_result_count;
+    if (lead >= total or total + PALETTE_HEADER_COUNT > app_state.g_search_results.len) return;
+    const rows = g_palette_order_rows[0 .. total - lead];
+    for (rows, 0..) |*row, i| {
+        const target = app_state.g_search_results[lead + i];
+        const command = !paletteRowIsSession(target);
+        row.* = .{
+            .target = target,
+            .order = newSessionRowOrder(target),
+            .group = paletteGroupOf(target) orelse PALETTE_GROUP_SESSIONS,
+            .command = command,
+            .safe = !paletteTargetIsDestructive(target),
+            .used = target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES,
+            .usage = if (command) paletteUsageFor(target) else .{},
+            .label = (if (command) palettePrimaryLabel(target) else null) orelse "",
+        };
+    }
+    var band_len: usize = 0;
+    while (band_len < PALETTE_MOST_USED_ROWS) : (band_len += 1) {
+        var best: ?usize = null;
+        for (rows, 0..) |*row, i| {
+            if (!row.command or row.used or row.usage.count == 0) continue;
+            if (best == null or paletteUsageOutranks(row, &rows[best.?])) best = i;
+        }
+        const chosen = best orelse break;
+        rows[chosen].used = true;
+        g_palette_order_pick[band_len] = chosen;
+    }
+    var out_len: usize = 0;
+    for (app_state.g_search_results[0..lead]) |target| {
+        g_palette_order_out[out_len] = target;
+        out_len += 1;
+    }
+    if (band_len > 0) {
+        sortPaletteOrderPick(g_palette_order_pick[0..band_len]);
+        g_palette_order_out[out_len] = SEARCH_PALETTE_HEADER_OFFSET;
+        out_len += 1;
+        for (g_palette_order_pick[0..band_len]) |i| {
+            g_palette_order_out[out_len] = rows[i].target;
+            out_len += 1;
+        }
+    }
+    for (0..PALETTE_HEADER_COUNT - 1) |group| {
+        var pick_len: usize = 0;
+        for (rows, 0..) |*row, i| {
+            if (row.group != group or row.used or !row.command) continue;
+            g_palette_order_pick[pick_len] = i;
+            pick_len += 1;
+        }
+        sortPaletteOrderPick(g_palette_order_pick[0..pick_len]);
+        for (rows, 0..) |*row, i| {
+            if (row.group != group or row.used or row.command) continue;
+            g_palette_order_pick[pick_len] = i;
+            pick_len += 1;
+        }
+        if (pick_len == 0) continue;
+        g_palette_order_out[out_len] = SEARCH_PALETTE_HEADER_OFFSET + 1 + group;
+        out_len += 1;
+        for (g_palette_order_pick[0..pick_len]) |i| {
+            g_palette_order_out[out_len] = rows[i].target;
+            out_len += 1;
+        }
+    }
+    for (rows) |row| {
+        if (row.target < SEARCH_WORKSPACE_OFFSET or row.target >= SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) continue;
+        g_palette_order_out[out_len] = row.target;
+        out_len += 1;
+    }
+    @memcpy(app_state.g_search_results[0..out_len], g_palette_order_out[0..out_len]);
+    app_state.g_search_result_count = @intCast(out_len);
+}
+
+fn nextSelectablePaletteRow(from: u32, backward: bool, wrap: bool) ?u32 {
+    const count = app_state.g_search_result_count;
+    if (count == 0) return null;
+    var sel = @min(from, count - 1);
+    var steps: u32 = 0;
+    while (paletteRowIsHeader(app_state.g_search_results[sel])) : (steps += 1) {
+        if (steps >= count) return null;
+        if (backward) {
+            if (sel > 0) {
+                sel -= 1;
+            } else if (wrap) {
+                sel = count - 1;
+            } else return null;
+        } else {
+            if (sel + 1 < count) {
+                sel += 1;
+            } else if (wrap) {
+                sel = 0;
+            } else return null;
+        }
+    }
+    return sel;
+}
+
+pub fn stepOverPaletteHeaders(backward: bool, wrap: bool) void {
+    if (app_state.g_search_result_count == 0) return;
+    if (nextSelectablePaletteRow(app_state.g_search_sel, backward, wrap) orelse nextSelectablePaletteRow(app_state.g_search_sel, !backward, false)) |sel| app_state.g_search_sel = sel;
+}
+
+fn expectGroupedPalette(input: []const usize, lead: usize, expected: []const usize) !void {
+    @memcpy(app_state.g_search_results[0..input.len], input);
+    app_state.g_search_result_count = @intCast(input.len);
+    groupEmptyPaletteResults(lead);
+    try std.testing.expectEqualSlices(usize, expected, app_state.g_search_results[0..app_state.g_search_result_count]);
+}
+
+test "empty Ctrl K lists most used commands first, then job groups with safe commands first" {
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    defer {
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    const H = SEARCH_PALETTE_HEADER_OFFSET;
+    app_state.g_palette_usage[0] = .{ .key = 2004, .count = 9, .last_used = 10 };
+    app_state.g_palette_usage[1] = .{ .key = SEARCH_SOUND_OFFSET, .count = 5, .last_used = 30 };
+    app_state.g_palette_usage[2] = .{ .key = SEARCH_THEME_MENU_OFFSET, .count = 5, .last_used = 20 };
+    app_state.g_palette_usage[3] = .{ .key = SEARCH_CLOSEWIN_OFFSET, .count = 7, .last_used = 5 };
+    app_state.g_palette_usage_count = 4;
+    try expectGroupedPalette(
+        &.{ 2000, 2004, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_CLOSEWIN_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_SHELL_DIAG_OFFSET },
+        0,
+        &.{ H, 2004, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_CLOSEWIN_OFFSET, H + 1, 2000, H + 5, SEARCH_SHELL_DIAG_OFFSET, H + 8, SEARCH_CHAT_VIEW_OFFSET },
+    );
+    app_state.g_palette_usage_count = 0;
+    try expectGroupedPalette(
+        &.{ SEARCH_CLOSEWIN_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_CHANGELOG_OFFSET },
+        0,
+        &.{ H + 2, SEARCH_CREATEWS_OFFSET, SEARCH_CLOSEWIN_OFFSET, H + 4, SEARCH_CHANGELOG_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_UI_BIGGER_OFFSET },
+    );
+    try expectGroupedPalette(
+        &.{ 3, 7, 2000, SEARCH_SHELL_DIAG_OFFSET },
+        1,
+        &.{ 3, H + 1, 2000, 7, H + 5, SEARCH_SHELL_DIAG_OFFSET },
+    );
+    try expectGroupedPalette(
+        &.{ SEARCH_WORKSPACE_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
+        0,
+        &.{ H + 4, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
+    );
+}
+
+test "Ctrl K arrow keys step over group headers" {
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_sel = app_state.g_search_sel;
+    defer {
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_search_sel = old_sel;
+    }
+    const H = SEARCH_PALETTE_HEADER_OFFSET;
+    const rows = [_]usize{ H, 2004, H + 1, 2000 };
+    @memcpy(app_state.g_search_results[0..rows.len], &rows);
+    app_state.g_search_result_count = rows.len;
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(false, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    app_state.g_search_sel = 2;
+    stepOverPaletteHeaders(false, false);
+    try std.testing.expectEqual(@as(u32, 3), app_state.g_search_sel);
+    app_state.g_search_sel = 2;
+    stepOverPaletteHeaders(true, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(true, true);
+    try std.testing.expectEqual(@as(u32, 3), app_state.g_search_sel);
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(true, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+}
+
+fn appendPaletteRowsTrace(out: []u8) []const u8 {
+    var pos: usize = 0;
+    const head = std.fmt.bufPrint(out, "[palette] rows chars={d} count={d} ids=", .{ app_state.g_search_len, app_state.g_search_result_count }) catch return "[palette] rows overflow";
+    pos = head.len;
+    const shown = @min(app_state.g_search_result_count, 48);
+    for (app_state.g_search_results[0..shown], 0..) |target, i| {
+        const part = if (paletteHeaderIndex(target)) |header|
+            std.fmt.bufPrint(out[pos..], "{s}h{d}", .{ if (i == 0) "" else " ", header }) catch break
+        else
+            std.fmt.bufPrint(out[pos..], "{s}{d}", .{ if (i == 0) "" else " ", target }) catch break;
+        pos += part.len;
+    }
+    return out[0..pos];
+}
+
+fn pickRecentSessions(last_viewed: []const u64, eligible: []const bool, exclude: usize, first: ?usize, out: []usize) usize {
+    var n: usize = 0;
+    if (first) |f| {
+        if (f < last_viewed.len and f != exclude and eligible[f] and out.len > 0) {
+            out[0] = f;
+            n = 1;
+        }
+    }
+    const lead = n;
+    for (last_viewed, 0..) |lv, i| {
+        if (i == exclude or !eligible[i] or lv == 0) continue;
+        if (lead == 1 and i == out[0]) continue;
+        var pos = n;
+        while (pos > lead and last_viewed[out[pos - 1]] < lv) pos -= 1;
+        if (pos >= out.len) continue;
+        const end = if (n < out.len) n else out.len - 1;
+        var k = end;
+        while (k > pos) : (k -= 1) out[k] = out[k - 1];
+        out[pos] = i;
+        if (n < out.len) n += 1;
+    }
+    return n;
+}
+
+test "pickRecentSessions orders by recency, leads with previous, skips active and ineligible" {
+    const lv = [_]u64{ 50, 90, 70, 0, 80, 60, 95 };
+    const ok = [_]bool{ true, true, true, true, true, false, true };
+    var out: [3]usize = undefined;
+    try std.testing.expectEqual(@as(usize, 3), pickRecentSessions(&lv, &ok, 6, null, &out));
+    try std.testing.expectEqualSlices(usize, &.{ 1, 4, 2 }, &out);
+    try std.testing.expectEqual(@as(usize, 3), pickRecentSessions(&lv, &ok, 6, 0, &out));
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 4 }, &out);
+    try std.testing.expectEqual(@as(usize, 3), pickRecentSessions(&lv, &ok, 6, 6, &out));
+    try std.testing.expectEqualSlices(usize, &.{ 1, 4, 2 }, &out);
+    try std.testing.expectEqual(@as(usize, 3), pickRecentSessions(&lv, &ok, 6, 5, &out));
+    try std.testing.expectEqualSlices(usize, &.{ 1, 4, 2 }, &out);
+    var big: [8]usize = undefined;
+    try std.testing.expectEqual(@as(usize, 4), pickRecentSessions(&lv, &ok, 6, null, &big));
+    try std.testing.expectEqualSlices(usize, &.{ 1, 4, 2, 0 }, big[0..4]);
+}
+
+test "Ctrl K previous-session promotion preserves every other result" {
+    var results = [_]usize{ 7000, 3, 7001, 8 };
+    try std.testing.expect(promoteSearchTargetToFront(results[0..], 8));
+    try std.testing.expectEqualSlices(usize, &[_]usize{ 8, 7000, 3, 7001 }, results[0..]);
+    try std.testing.expect(!promoteSearchTargetToFront(results[0..], 99));
+    try std.testing.expectEqualSlices(usize, &[_]usize{ 8, 7000, 3, 7001 }, results[0..]);
+}
+
+pub fn asciiEqualsCI(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, 0..) |c, i| {
+        if (u16ToLower(c) != u16ToLower(b[i])) return false;
+    }
+    return true;
+}
+
+fn customCmdVisibleInWorkspace(idx: usize, ws: u8) bool {
+    const c = &app_state.g_custom_cmds[idx];
+    if (c.workspace_len == 0) return true;
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(ws, &ws_buf);
+    return asciiEqualsCI(ws_name, c.workspace[0..c.workspace_len]);
+}
+
+fn folderEntryIndexFor(ws_name: []const u8) ?usize {
+    var found: ?usize = null;
+    var i: usize = 0;
+    while (i < app_state.g_custom_cmds_count) : (i += 1) {
+        const c = &app_state.g_custom_cmds[i];
+        if (!c.is_default or c.workspace_len == 0 or c.cwd_len == 0) continue;
+        if (c.kind != .vps and c.kind != .vps2) continue;
+        if (!remotePathSafeForShell(c.cwd[0..c.cwd_len])) continue;
+        if (!asciiEqualsCI(ws_name, c.workspace[0..c.workspace_len])) continue;
+        found = i;
+    }
+    return found;
+}
+
+pub fn activeWorkspaceSlot() u8 {
+    return if (app_state.g_single_window) app_state.g_active_workspace else 0;
+}
+
+pub fn workspaceColorSlot() ?u8 {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return null;
+    if (app_state.g_account_locked or app_state.g_restoring or app_state.g_account_applying) return null;
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) return null;
+    if (app_state.g_search_from_inbox) {
+        const kind = @import("frequent.zig").splitKind(app_state.g_inbox_tab);
+        if (kind != .workspace or kind.workspace >= app_state.g_inbox_ws_count) return null;
+        const inbox_ws = app_state.g_inbox_ws[kind.workspace];
+        if (app_state.g_main_hwnd == null or inbox_ws.hwnd != @intFromPtr(app_state.g_main_hwnd)) return null;
+        if (inbox_ws.workspace_entry) {
+            if (inbox_ws.id_len == 0 or inbox_ws.id_len > inbox_ws.id.len) return null;
+            return findMyWorkspaceSlot(inbox_ws.id[0..inbox_ws.id_len]);
+        }
+        if (app_state.g_single_window) return null;
+        return if (app_state.g_lws_count > 0) 0 else null;
+    }
+    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_all_sessions_active) return null;
+    const slot = activeWorkspaceSlot();
+    return if (slot < app_state.g_lws_count and slot < app_state.MAX_LWS) slot else null;
+}
+
+pub fn workspaceColorTargetSlot() ?u8 {
+    const target = app_state.g_workspace_color_target orelse return null;
+    return findMyWorkspaceSlot(target.id[0..target.id_len]);
+}
+
+pub fn workspaceFolderCurrent(ws: u8, out: *[256]u8, out_len: *u32) bool {
+    loadCustomCommandsIfChanged();
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(ws, &ws_buf);
+    const idx = folderEntryIndexFor(ws_name) orelse return false;
+    const c = &app_state.g_custom_cmds[idx];
+    if (c.cwd_len > out.len) return false;
+    @memcpy(out[0..c.cwd_len], c.cwd[0..c.cwd_len]);
+    out_len.* = @intCast(c.cwd_len);
+    return true;
+}
+
+fn workspaceConfiguredTerminalFolder(ws: u8, out_host: *u8, out_path: *[256]u8, out_len: *u32, out_program: *[128]u8, out_program_len: *u32) bool {
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(ws, &ws_buf);
+    if (@import("workspaces.zig").isOtherWorkspaceName(ws_name)) return false;
+    loadCustomCommandsIfChanged();
+    const idx = folderEntryIndexFor(ws_name) orelse return false;
+    const c = &app_state.g_custom_cmds[idx];
+    const cwd = c.cwd[0..c.cwd_len];
+    if (cwd.len > out_path.len) return false;
+    @memcpy(out_path[0..cwd.len], cwd);
+    out_len.* = @intCast(cwd.len);
+    out_host.* = if (c.folder_host != 0) c.folder_host else if (c.kind == .vps2) 1 else 0;
+    out_program_len.* = c.alt_t_len;
+    @memcpy(out_program[0..c.alt_t_len], c.alt_t[0..c.alt_t_len]);
+    return true;
+}
+
+fn repoPathMatchesQuery(path: []const u8, query: []const u16) bool {
+    var words = std.mem.tokenizeAny(u16, query, &.{ ' ', '\t', '\n', '\r', 0x0b, 0x0c });
+    while (words.next()) |word| {
+        if (word.len > path.len) return false;
+        var start: usize = 0;
+        var found = false;
+        while (start + word.len <= path.len) : (start += 1) {
+            var matched = true;
+            for (word, 0..) |q, k| {
+                if (u16ToLower(q) != u16ToLower(@as(u16, path[start + k]))) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+fn folderLeaf(path: []const u8) []const u8 {
+    const trimmed = std.mem.trimEnd(u8, path, "/\\");
+    const cut = std.mem.lastIndexOfAny(u8, trimmed, "/\\") orelse return trimmed;
+    return trimmed[cut + 1 ..];
+}
+
+fn sessionFolderLeaf(shell: anytype) []const u8 {
+    return folderLeaf(if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else shell.cached_cwd[0..shell.cached_cwd_len]);
+}
+
+fn sessionFolderMatchesQuery(shell: anytype, query: []const u16) bool {
+    const leaf = sessionFolderLeaf(shell);
+    return leaf.len > 0 and repoPathMatchesQuery(leaf, query);
+}
+
+fn repoRowMatchesQuery(row: *const RepoRow, query: []const u16) bool {
+    var host_wide: [128]u16 = undefined;
+    const host_len = std.unicode.utf8ToUtf16Le(&host_wide, row.host_name[0..row.host_name_len]) catch 0;
+    var words = std.mem.tokenizeAny(u16, query, &.{ ' ', '\t', '\n', '\r', 0x0b, 0x0c });
+    while (words.next()) |word| {
+        var found = false;
+        if (word.len <= host_len) {
+            for (0..host_len - word.len + 1) |i| {
+                var equal = true;
+                for (word, 0..) |c, j| if (u16ToLower(c) != u16ToLower(host_wide[i + j])) {
+                    equal = false;
+                    break;
+                };
+                if (equal) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found and !repoPathMatchesQuery(row.path[0..row.path_len], word)) return false;
+    }
+    return true;
+}
+
+var g_presented_repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+var g_presented_repo_count: u32 = 0;
+var g_repo_scan_rows: [REPO_SCAN_ROWS]RepoRow = undefined;
+
+pub fn pickRepoPresentedRows() []const RepoRow {
+    return g_presented_repo_rows[0..g_presented_repo_count];
+}
+
+pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
+    const all = &g_repo_scan_rows;
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    const active = app_state.g_search_pick_repo_host;
+    var count: u32 = 0;
+    for ([_]bool{ true, false }) |name_match| {
+        for (0..3) |offset| {
+            const host: u8 = @intCast((@as(usize, active) + offset) % 3);
+            const total = repoRowsForHost(host, all[0..]);
+            for (all[0..total]) |row| {
+                if (count >= out.len) return count;
+                const path = row.path[0..row.path_len];
+                const name_start = if (std.mem.lastIndexOfAny(u8, path, "/\\")) |index| index + 1 else 0;
+                if (repoPathMatchesQuery(path[name_start..], query) != name_match) continue;
+                if (!repoRowMatchesQuery(&row, query)) continue;
+                out[count] = row;
+                count += 1;
+            }
+        }
+    }
+    return count;
+}
+
+pub fn workspaceHostForNewTab(ws: u8) u8 {
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if ((!app_state.g_single_window or shell.workspace == ws) and shell.tmux_session_len > 0) return shell.tmux_host;
+    }
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (app_state.g_single_window and shell.workspace != ws) continue;
+        if (shell.tmux_session_len == 0) continue;
+        return shell.tmux_host;
+    }
+    return 0;
+}
+
+pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8, plain_claude: bool) void {
+    app_state.g_search_snippet_mode = false;
+    app_state.g_search_shells_mode = false;
+    app_state.g_search_open_session_mode = false;
+    app_state.g_search_pick_repo_mode = true;
+    app_state.g_search_pick_repo_folder_mode = for_folder;
+    app_state.g_search_pick_repo_with_agent = with_agent;
+    app_state.g_search_pick_repo_plain_claude = plain_claude;
+    app_state.g_search_pick_repo_host = host;
+}
+
+pub fn closePickRepo() void {
+    app_state.g_search_pick_repo_mode = false;
+    app_state.g_search_pick_repo_folder_mode = false;
+    app_state.g_search_pick_repo_plain_claude = false;
+}
+
+fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
+    for (text) |c| {
+        if (pos.* + 2 >= out.len) return false;
+        switch (c) {
+            '"', '\\' => {
+                out[pos.*] = '\\';
+                out[pos.* + 1] = c;
+                pos.* += 2;
+            },
+            else => {
+                out[pos.*] = c;
+                pos.* += 1;
+            },
+        }
+    }
+    return true;
+}
+
+fn appendJsonLiteral(out: []u8, pos: *usize, text: []const u8) bool {
+    if (pos.* + text.len > out.len) return false;
+    @memcpy(out[pos.* .. pos.* + text.len], text);
+    pos.* += text.len;
+    return true;
+}
+
+pub fn buildFolderEntry(out: []u8, host: u8, workspace: []const u8, path: []const u8) ?[]const u8 {
+    var pos: usize = 0;
+    var host_buf: [4]u8 = undefined;
+    const host_text = std.fmt.bufPrint(&host_buf, "{d}", .{host}) catch return null;
+    if (!appendJsonLiteral(out, &pos, "{\"label\":\"Folder\",\"kind\":\"vps\",\"folder_host\":\"")) return null;
+    if (!appendJsonLiteral(out, &pos, host_text)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"cwd\":\"")) return null;
+    if (!appendJsonEscaped(out, &pos, path)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"workspace\":\"")) return null;
+    if (!appendJsonEscaped(out, &pos, workspace)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"default\":true}")) return null;
+    return out[0..pos];
+}
+
+pub fn insertCommandEntry(text: []const u8, entry: []const u8, out: []u8) ?[]const u8 {
+    const key = std.mem.indexOf(u8, text, "\"commands\"") orelse return null;
+    const close = std.mem.lastIndexOfScalar(u8, text, ']') orelse return null;
+    if (key > close) return null;
+    var last = close;
+    while (last > 0 and std.ascii.isWhitespace(text[last - 1])) : (last -= 1) {}
+    const needs_comma = last > 0 and text[last - 1] != '[';
+    const tail_len = text.len - close;
+    const head_len = close;
+    if (head_len + entry.len + tail_len + 2 > out.len) return null;
+    var pos: usize = 0;
+    @memcpy(out[pos .. pos + head_len], text[0..head_len]);
+    pos += head_len;
+    if (needs_comma) {
+        out[pos] = ',';
+        pos += 1;
+    }
+    @memcpy(out[pos .. pos + entry.len], entry);
+    pos += entry.len;
+    @memcpy(out[pos .. pos + tail_len], text[close..]);
+    pos += tail_len;
+    return out[0..pos];
+}
+
+fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
+    ensureCommandsJsonStarter();
+    var path_buf: [512]u8 = undefined;
+    const file = getCommandsJsonPath(&path_buf) orelse return false;
+    const h = win32OpenRead(file) orelse return false;
+    var text_buf: [16384]u8 = undefined;
+    const n = win32ReadAll(h, &text_buf);
+    _ = CloseHandle(h);
+    if (n == 0 or n >= text_buf.len) return false;
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(activeWorkspaceSlot(), &ws_buf);
+    var entry_buf: [512]u8 = undefined;
+    const entry = buildFolderEntry(&entry_buf, host, ws_name, path) orelse return false;
+    var out_buf: [18432]u8 = undefined;
+    const next = insertCommandEntry(text_buf[0..n], entry, &out_buf) orelse return false;
+    const wh = win32OpenWrite(file) orelse return false;
+    win32WriteAll(wh, next);
+    _ = CloseHandle(wh);
+    loadCustomCommands();
+    return true;
+}
+
+pub fn pickRepoChoose(target: usize) bool {
+    const for_folder = app_state.g_search_pick_repo_folder_mode;
+    const with_agent = app_state.g_search_pick_repo_with_agent;
+    const plain_claude = app_state.g_search_pick_repo_plain_claude;
+    closePickRepo();
+    g_pick_row_gone = false;
+    g_pick_repo_offline = false;
+    g_start_fail = .none;
+    if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+        g_pick_row_gone = true;
+        @import("diagnostics.zig").debugLog("[pick] chosen row is outside the repo list");
+        return false;
+    }
+    const rows = pickRepoPresentedRows();
+    const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
+    if (idx >= rows.len) {
+        g_pick_row_gone = true;
+        @import("diagnostics.zig").debugLog("[pick] chosen row is no longer in the repo list");
+        return false;
+    }
+    if (!@import("vps.zig").repoRowAvailable(&rows[idx])) {
+        @import("diagnostics.zig").debugLog("[repo] selection rejected");
+        g_pick_repo_offline = true;
+        return false;
+    }
+    const path = rows[idx].path[0..rows[idx].path_len];
+    const host = rows[idx].host;
+    if (for_folder) {
+        const saved = saveWorkspaceFolder(host, path);
+        if (!saved) @import("diagnostics.zig").debugLog("[pick] workspace folder could not be saved");
+        return saved;
+    }
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    var slot_host: u8 = 0;
+    if (workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &slot_host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {}
+    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent, plain_claude);
+}
+
+fn customCmdMatchesQuery(idx: usize, query: []const u16) bool {
+    const c = &app_state.g_custom_cmds[idx];
+    var kw: [240]u8 = undefined;
+    var n: usize = 0;
+    for (c.label[0..c.label_len]) |ch| {
+        if (n < kw.len) {
+            kw[n] = ch;
+            n += 1;
+        }
+    }
+    const kind_words: []const u8 = switch (c.kind) {
+        .vps => " vps host1 de ssh remote",
+        .vps2 => " vps host2 uk ssh remote",
+        .pwsh => " pwsh powershell local",
+        else => " cmd local",
+    };
+    for (kind_words) |ch| {
+        if (n < kw.len) {
+            kw[n] = ch;
+            n += 1;
+        }
+    }
+    for (" new custom command spawn") |ch| {
+        if (n < kw.len) {
+            kw[n] = ch;
+            n += 1;
+        }
+    }
+    if (c.workspace_len > 0) {
+        if (n < kw.len) {
+            kw[n] = ' ';
+            n += 1;
+        }
+        for (c.workspace[0..c.workspace_len]) |ch| {
+            if (n < kw.len) {
+                kw[n] = ch;
+                n += 1;
+            }
+        }
+    }
+    var wstart: usize = 0;
+    var qp: usize = 0;
+    while (qp <= query.len) : (qp += 1) {
+        const at_end = (qp == query.len);
+        if (at_end or query[qp] == ' ') {
+            if (qp > wstart) {
+                if (!asciiContainsQueryInsensitive(kw[0..n], query[wstart..qp])) return false;
+            }
+            wstart = qp + 1;
+        }
+    }
+    return true;
+}
+
+pub fn spawnCustomCmd(idx: usize) bool {
+    if (idx >= app_state.g_custom_cmds_count) return false;
+    const c = &app_state.g_custom_cmds[idx];
+    var ok = false;
+    switch (c.kind) {
+        .vps, .vps2 => {
+            const host: u8 = if (c.kind == .vps2) 1 else 0;
+            const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
+            if (c.startup_cmd_len > 0 and commandCreatesAgentWorkload(c.startup_cmd[0..c.startup_cmd_len]) and
+                !capacityAdmitNewAgent(host, workspace, .user, c.label[0..c.label_len]))
+                return false;
+            if (c.startup_cmd_len > 0) {
+                const n = @min(@as(usize, c.startup_cmd_len), app_state.g_pending_spawn_cmd.len);
+                @memcpy(app_state.g_pending_spawn_cmd[0..n], c.startup_cmd[0..n]);
+                app_state.g_pending_spawn_cmd_len = @intCast(n);
+            }
+            ok = spawnShellWithSession(c.kind, null, null, null);
+            app_state.g_pending_spawn_cmd_len = 0;
+        },
+        else => {
+            const cmd_slice: ?[]const u8 = if (c.startup_cmd_len > 0) c.startup_cmd[0..c.startup_cmd_len] else null;
+            const cwd_slice: ?[]const u8 = if (c.cwd_len > 0) c.cwd[0..c.cwd_len] else null;
+            ok = spawnShellWithSession(c.kind, null, cwd_slice, cmd_slice);
+        },
+    }
+    if (ok and c.label_len > 0 and app_state.shell_count > 0) {
+        const ns = app_state.shell_count - 1;
+        setShellName(&app_state.shells[ns], c.label[0..c.label_len]);
+        if (c.kind != .vps and c.kind != .vps2) app_state.shells[ns].name_source = .manual;
+    }
+    return ok;
+}
+
+fn remotePathSafeForShell(path: []const u8) bool {
+    if (path.len == 0 or path.len > 220) return false;
+    for (path) |c| {
+        const ok =
+            (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '/' or c == '_' or c == '-' or c == '.' or c == '~';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+fn buildWorkspaceTmuxLaunchCmd(out: []u8, session: []const u8, cwd: []const u8, program: []const u8) ?[]const u8 {
+    if (!remotePathSafeForShell(cwd) or (program.len > 0 and !altTProgramSafe(program))) return null;
+    var len: usize = 0;
+    if (!appendAsciiBuf(out, &len, "tmux new-session -d -s ")) return null;
+    if (!appendAsciiBuf(out, &len, session)) return null;
+    if (!appendAsciiBuf(out, &len, " -c ")) return null;
+    if (!appendAsciiBuf(out, &len, cwd)) return null;
+    if (program.len > 0) {
+        if (!appendAsciiBuf(out, &len, " 2>/dev/null; tmux send-keys -t ")) return null;
+        if (!appendAsciiBuf(out, &len, session)) return null;
+        if (!appendAsciiBuf(out, &len, " 'cd ")) return null;
+        if (!appendAsciiBuf(out, &len, cwd)) return null;
+        if (!appendAsciiBuf(out, &len, " && ")) return null;
+        if (!appendAsciiBuf(out, &len, program)) return null;
+        if (!appendAsciiBuf(out, &len, "' Enter; tmux attach -t ")) return null;
+    } else if (!appendAsciiBuf(out, &len, " 2>/dev/null; tmux attach -t ")) return null;
+    if (!appendAsciiBuf(out, &len, session)) return null;
+    return out[0..len];
+}
+
+fn buildWorkspaceTmuxSessionName(out: *[64]u8) []const u8 {
+    return std.fmt.bufPrint(out, "term-{x}", .{GetTickCount64()}) catch "term";
+}
+
+fn buildLiveChatSessionName(out: *[64]u8) []const u8 {
+    return std.fmt.bufPrint(out, "live-{x}", .{GetTickCount64()}) catch "live";
+}
+
+pub fn newTabOpensChatView(program: []const u8) bool {
+    return @import("agent_host.zig").eligible(program);
+}
+
+test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as terminals" {
+    try std.testing.expect(newTabOpensChatView("claude"));
+    try std.testing.expect(newTabOpensChatView("claude-code"));
+    try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("", true)));
+    try std.testing.expect(!newTabOpensChatView(""));
+    try std.testing.expect(!newTabOpensChatView("codex"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(newTabOpensChatView("cursor"));
+    try std.testing.expect(newTabOpensChatView("agent"));
+    try std.testing.expect(!newTabOpensChatView("bash"));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
+    var out: [64]u8 = undefined;
+    try std.testing.expect(std.mem.startsWith(u8, buildLiveChatSessionName(&out), "live-"));
+}
+
+test "workspace tmux program runs after shell startup and neutral fallback stays unchanged" {
+    var out: [512]u8 = undefined;
+    const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/project", "claude") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/project 2>/dev/null; tmux send-keys -t term-test 'cd ~/project && claude' Enter; tmux attach -t term-test", launched);
+    const neutral = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/projects 2>/dev/null; tmux attach -t term-test", neutral);
+    try std.testing.expect(buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "claude; exit") == null);
+}
+
+pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []const u8, host_sid: ?[]const u8,
+    host_out: []u8, command_out: []u8) ?[]const u8
+{
+    const agent_host = @import("agent_host.zig");
+    if (host_sid) |sid| {
+        const provider = agent_host.hostedWorkspaceProvider(program) orelse return null;
+        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid);
+    }
+    return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
+}
+
+test "IGSH-1447 a new Claude session spawns exactly the terminal launch command" {
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const spawned = workspaceLaunchCommand("claude", "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var expected_buf: [1024]u8 = undefined;
+    const expected = @import("agent_host.zig").launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(expected, spawned);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
+
+    const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex'") != null);
+    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
+    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
+
+    const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
+}
+
+test "IGSH-1266 a repo path at the launch cap still starts a workspace session" {
+    var cwd_buf: [220]u8 = undefined;
+    const head: []const u8 = "/srv/projects/";
+    @memcpy(cwd_buf[0..head.len], head);
+    @memset(cwd_buf[head.len..], 'x');
+    const cwd = cwd_buf[0..];
+    try std.testing.expect(remotePathSafeForShell(cwd));
+
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    var term_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+
+    const hosted = workspaceLaunchCommand("claude", "term-13dcf6f", cwd, sid, &host_buf, &term_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(hosted.len <= app_state.g_pending_tmux_cmd.len);
+
+    const typed = workspaceLaunchCommand("", "term-13dcf6f", cwd, null, &host_buf, &term_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(typed.len <= app_state.g_pending_tmux_cmd.len);
+    try std.testing.expect(std.mem.indexOf(u8, typed, cwd) != null);
+}
+
+test "IGSH-1266 a refused pick says which step refused it" {
+    g_start_fail = .none;
+    g_pick_row_gone = false;
+    try std.testing.expect(!pickRepoChoose(SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS));
+    try std.testing.expect(g_pick_row_gone);
+}
+
+fn finishAdoptHostJob(job: *AdoptHostJob) void {
+    job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
+}
+
+fn adoptHostThread(job: *AdoptHostJob) void {
+    defer finishAdoptHostJob(job);
+    const a = std.heap.page_allocator;
+    var buf: [512]u8 = undefined;
+    const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(a);
+    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
+        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
+    } else {
+        const notice = a.dupeZ(u8, "Move chat: the session did not move, see the tab") catch return;
+        if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+    }
+}
+
+pub fn startAdoptHost(tab: usize) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    const job = std.heap.page_allocator.create(AdoptHostJob) catch return false;
+    var cwd: [256]u8 = undefined;
+    var cwd_len: usize = 0;
+    for (shell.cached_cwd[0..shell.cached_cwd_len], 0..) |c, i| {
+        if (i >= cwd.len) break;
+        cwd[i] = c;
+        cwd_len = i + 1;
+    }
+    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .sid_len = @intCast(@min(shell.claude_sid_len, 36)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
+    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, adoptHostThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn finishMoveChatJob(job: *MoveChatJob) void {
+    job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
+}
+
+fn moveChatThread(job: *MoveChatJob) void {
+    defer finishMoveChatJob(job);
+    const a = std.heap.page_allocator;
+    var buf: [512]u8 = undefined;
+    const target: @import("agent_host.zig").MoveTarget = if (job.target == 1) .terminal else .chat;
+    const request = @import("agent_host.zig").moveRequest(&buf, target, job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len]) orelse return;
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(a);
+    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    if (@import("agent_host.zig").movedReply(response.items)) {
+        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(job.id), @intCast(job.target));
+    } else {
+        const notice = a.dupeZ(u8, "Move chat: the chat did not move, see the tab") catch return;
+        if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+    }
+}
+
+pub fn canMoveHostChat(ai_agent: u8, claude_sid_len: usize, tmux_len: usize) bool {
+    return ai_agent == 1 and claude_sid_len == 36 and tmux_len > 0;
+}
+
+test "IGSH-1447 a finished move chat job is released without a write after the release" {
+    const job = try std.heap.page_allocator.create(MoveChatJob);
+    job.* = .{};
+    finishMoveChatJob(job);
+}
+
+test "IGSH-1447 a finished adopt job is released without a write after the release" {
+    const job = try std.heap.page_allocator.create(AdoptHostJob);
+    job.* = .{};
+    finishAdoptHostJob(job);
+}
+
+test "IGSH-1266 only a Claude chat with a session and a terminal can move between the two" {
+    try std.testing.expect(canMoveHostChat(1, 36, 12));
+    try std.testing.expect(!canMoveHostChat(0, 36, 12));
+    try std.testing.expect(!canMoveHostChat(2, 36, 12));
+    try std.testing.expect(!canMoveHostChat(1, 0, 12));
+    try std.testing.expect(!canMoveHostChat(1, 36, 0));
+}
+
+pub fn startMoveChat(tab: usize, target: u8) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    if (!canMoveHostChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) return false;
+    const job = std.heap.page_allocator.create(MoveChatJob) catch return false;
+    var cwd: [256]u8 = undefined;
+    var cwd_len: usize = 0;
+    for (shell.cached_cwd[0..shell.cached_cwd_len], 0..) |c, i| {
+        if (i >= cwd.len) break;
+        cwd[i] = c;
+        cwd_len = i + 1;
+    }
+    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .target = target, .sid_len = @intCast(@min(shell.claude_sid_len, 40)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
+    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, moveChatThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+pub fn canAdoptHostTab(ai_agent: u8, claude_sid_len: usize, tmux_len: usize, working: bool) bool {
+    return ai_agent == 1 and claude_sid_len > 0 and tmux_len > 0 and !working;
+}
+
+pub fn canRestartChat(ai_agent: u8, sid_len: u32, tmux_len: u32) bool {
+    return ai_agent != 0 and sid_len > 0 and tmux_len > 0;
+}
+
+fn liveChatTab(tab: u32) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    return canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len);
+}
+
+test "IGSH-1921 a live chat with a session and a chat name can restart" {
+    try std.testing.expect(canRestartChat(1, 36, 12));
+    try std.testing.expect(canRestartChat(7, 36, 12));
+    try std.testing.expect(!canRestartChat(0, 36, 12));
+    try std.testing.expect(!canRestartChat(1, 0, 12));
+    try std.testing.expect(!canRestartChat(1, 36, 0));
+}
+
+fn switchAiVisible(agent: u8, target: u8) bool {
+    return agent >= 1 and agent <= 3 and agent != target;
+}
+
+fn switchAiTab(tab: u32, target: u8) bool {
+    if (!liveChatTab(tab)) return false;
+    return switchAiVisible(app_state.shells[tab].ai_agent, target);
+}
+
+fn finishRestartChatJob(job: *RestartChatJob) void {
+    job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
+}
+
+fn restartChatNotice(text: []const u8) void {
+    const a = std.heap.page_allocator;
+    const notice = a.dupeZ(u8, text) catch return;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+}
+
+fn switchAiName(target: u8) []const u8 {
+    return switch (target) {
+        1 => "claude",
+        2 => "codex",
+        3 => "pi",
+        else => "",
+    };
+}
+
+fn switchAgentId(name: []const u8) ?u8 {
+    if (std.mem.eql(u8, name, "claude")) return 1;
+    if (std.mem.eql(u8, name, "codex")) return 2;
+    if (std.mem.eql(u8, name, "pi")) return 3;
+    return null;
+}
+
+fn switchSidOk(sid: []const u8) bool {
+    if (sid.len == 0 or sid.len > 40) return false;
+    for (sid) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '-' or c == '_')) return false;
+    }
+    return true;
+}
+
+const SwitchEnvelope = struct {
+    status: []const u8 = "",
+    provider: []const u8 = "",
+    sid: []const u8 = "",
+    reason: []const u8 = "",
+    result: struct {
+        status: []const u8 = "",
+        provider: []const u8 = "",
+        sid: []const u8 = "",
+        reason: []const u8 = "",
+    } = .{},
+};
+
+fn switchEnvelopeFields(value: SwitchEnvelope) struct { status: []const u8, provider: []const u8, sid: []const u8, reason: []const u8 } {
+    const nested = value.result.status.len != 0 or value.result.provider.len != 0 or value.result.sid.len != 0 or value.result.reason.len != 0;
+    if (nested) return .{ .status = value.result.status, .provider = value.result.provider, .sid = value.result.sid, .reason = value.result.reason };
+    return .{ .status = value.status, .provider = value.provider, .sid = value.sid, .reason = value.reason };
+}
+
+pub fn adoptShellAgent(agent: *u8, sid: []u8, sid_len: *u32, next_agent: u8, next_sid: []const u8) bool {
+    if (next_agent < 1 or next_agent > 3 or !switchSidOk(next_sid) or next_sid.len > sid.len) return false;
+    agent.* = next_agent;
+    @memset(sid, 0);
+    @memcpy(sid[0..next_sid.len], next_sid);
+    sid_len.* = @intCast(next_sid.len);
+    return true;
+}
+
+pub fn adoptedSwitch(allocator: std.mem.Allocator, body: []const u8, sid_out: []u8) ?struct { agent: u8, sid_len: usize } {
+    const parsed = std.json.parseFromSlice(SwitchEnvelope, allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const fields = switchEnvelopeFields(parsed.value);
+    if (!std.mem.eql(u8, fields.status, "switched")) return null;
+    const agent = switchAgentId(fields.provider) orelse return null;
+    if (!switchSidOk(fields.sid) or fields.sid.len > sid_out.len) return null;
+    @memcpy(sid_out[0..fields.sid.len], fields.sid);
+    return .{ .agent = agent, .sid_len = fields.sid.len };
+}
+
+fn switchAiRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, to: []const u8) ?[]const u8 {
+    if (provider.len == 0 or sid.len == 0 or to.len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ id, host, provider, sid, to }) catch null;
+}
+
+test "IGSH-2280 a switch reply replaces the shell provider and sid" {
+    const old = "11111111-2222-4333-8444-555555555555";
+    const bare = "{\"status\":\"switched\",\"provider\":\"pi\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"tmux\":\"same-chat\",\"start\":\"started\"}";
+    var sid_buf: [40]u8 = undefined;
+    const adopted = adoptedSwitch(std.testing.allocator, bare, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 3), adopted.agent);
+    var agent: u8 = 1;
+    var shell_sid: [40]u8 = std.mem.zeroes([40]u8);
+    @memcpy(shell_sid[0..old.len], old);
+    var shell_sid_len: u32 = @intCast(old.len);
+    try std.testing.expect(adoptShellAgent(&agent, &shell_sid, &shell_sid_len, adopted.agent, sid_buf[0..adopted.sid_len]));
+    try std.testing.expect(switchAiVisible(agent, 1));
+    try std.testing.expect(!switchAiVisible(agent, 3));
+    try std.testing.expect(!switchAiVisible(1, 1));
+    var buf: [256]u8 = undefined;
+    const request = switchAiRequest(&buf, 4, 0, switchAiName(agent), shell_sid[0..shell_sid_len], "claude") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"pi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, old) == null);
+    const wrapped = "{\"id\":4,\"message_protocol\":1,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff\"}}";
+    const again = adoptedSwitch(std.testing.allocator, wrapped, &sid_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), again.agent);
+    try std.testing.expectEqualStrings("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff", sid_buf[0..again.sid_len]);
+    try std.testing.expect(adoptedSwitch(std.testing.allocator, "{\"status\":\"busy\",\"reason\":\"chat_busy\"}", &sid_buf) == null);
+}
+
+fn switchAiDone(target: u8) []const u8 {
+    return switch (target) {
+        1 => "Chat switched to Claude",
+        2 => "Chat switched to Codex",
+        3 => "Chat switched to Pi",
+        else => "Chat switched",
+    };
+}
+
+const SwitchAiAdopt = struct {
+    shell_id: u32,
+    agent: u8,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    notice: [64]u8 = std.mem.zeroes([64]u8),
+    notice_len: u8 = 0,
+};
+
+fn postSwitchAdopt(shell_id: u32, agent: u8, sid: []const u8) bool {
+    const notice = switchAiDone(agent);
+    if (notice.len > 64 or !switchSidOk(sid)) return false;
+    const result = std.heap.page_allocator.create(SwitchAiAdopt) catch return false;
+    result.* = .{ .shell_id = shell_id, .agent = agent, .sid_len = @intCast(sid.len), .notice_len = @intCast(notice.len) };
+    @memcpy(result.sid[0..sid.len], sid);
+    @memcpy(result.notice[0..notice.len], notice);
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_SWITCH_AI, 0, @bitCast(@intFromPtr(result))) == 0) {
+        std.heap.page_allocator.destroy(result);
+        return false;
+    }
+    return true;
+}
+
+pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
+    if (lp == 0) return;
+    const result: *SwitchAiAdopt = @ptrFromInt(@as(usize, @bitCast(lp)));
+    defer std.heap.page_allocator.destroy(result);
+    const index = findShellById(result.shell_id) orelse {
+        if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+        return;
+    };
+    const shell = &app_state.shells[index];
+    if (adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, result.agent, result.sid[0..result.sid_len])) {
+        shell.hook_capable = true;
+        saveSession();
+        if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
+    }
+    if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
+}
+
+fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
+    if (job.switch_to != 0) {
+        const parsed = std.json.parseFromSlice(SwitchEnvelope, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+            restartChatNotice("Switch AI failed: the server did not answer");
+            return;
+        };
+        defer parsed.deinit();
+        const fields = switchEnvelopeFields(parsed.value);
+        if (std.mem.eql(u8, fields.status, "switched")) {
+            const agent = switchAgentId(fields.provider) orelse {
+                restartChatNotice(switchAiDone(job.switch_to));
+                return;
+            };
+            if (!postSwitchAdopt(job.ids[0], agent, fields.sid)) restartChatNotice(switchAiDone(agent));
+            return;
+        }
+        restartChatNotice(if (std.mem.eql(u8, fields.status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
+        return;
+    }
+    if (job.fresh) {
+        const Reply = struct { result: struct { status: []const u8 = "", reason: []const u8 = "" } = .{} };
+        const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+            restartChatNotice("Fresh start failed: the server did not answer");
+            return;
+        };
+        defer parsed.deinit();
+        const status = parsed.value.result.status;
+        if (std.mem.eql(u8, status, "started") or std.mem.eql(u8, status, "already")) return;
+        restartChatNotice(if (std.mem.eql(u8, status, "busy")) "Fresh start: wait for this reply to finish" else "Fresh start failed: this live chat is unavailable");
+        return;
+    }
+    const agent_host = @import("agent_host.zig");
+    const waiting = if (job.all) agent_host.restartAllWaiting(body) else agent_host.restartWaitingReply(body);
+    const nothing = job.all and agent_host.restartAllNothing(body);
+    const restarted = if (job.all) agent_host.restartAllAnswered(body) and !waiting and !nothing else agent_host.restartedReply(body);
+    const restarting = !job.all and agent_host.restartingReply(body);
+    if (restarted) {
+        restartChatNotice(if (job.all) "Every idle live chat restarted on the newest version" else "Chat restarted on the newest version");
+    } else if (waiting) {
+        restartChatNotice(if (job.all) "Live chats restart when their replies end" else "Chat restarts when this reply ends");
+    } else if (restarting) {
+        restartChatNotice("Chat is restarting on the newest version");
+    } else if (nothing) {
+        restartChatNotice("No live chat was running to restart");
+    } else if (agent_host.restartRefusedReply(body)) {
+        restartChatNotice("Chat restart: this chat has no live host to restart");
+    }
+}
+
+fn restartChatThread(job: *RestartChatJob) void {
+    defer finishRestartChatJob(job);
+    const a = std.heap.page_allocator;
+    const agent_host = @import("agent_host.zig");
+    var buf: [512]u8 = undefined;
+    var answered = false;
+    if (job.all) {
+        for (job.hosts[0..job.count], job.ids[0..job.count]) |host_index, id| {
+            const request = agent_host.restartAllRequest(&buf, id, host_index) orelse continue;
+            var response: std.ArrayList(u8) = .empty;
+            defer response.deinit(a);
+            if (!@import("chat_session.zig").chatHistoryPersistent(host_index, id, request, 65536, &response, null)) continue;
+            answered = true;
+            restartChatReply(job, response.items);
+        }
+    } else {
+        const request = if (job.switch_to != 0)
+            switchAiRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to)) orelse return
+        else if (job.fresh)
+            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
+        else
+            agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+        var response: std.ArrayList(u8) = .empty;
+        defer response.deinit(a);
+        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
+            restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+            return;
+        }
+        answered = true;
+        restartChatReply(job, response.items);
+    }
+    if (!answered) restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+}
+
+pub fn startRestartChat(all: bool) bool {
+    return startChatJob(all, false, 0, app_state.active_shell);
+}
+
+pub fn startSwitchAi(tab: u32, target: u8) bool {
+    if (target < 1 or target > 3) return false;
+    return startChatJob(false, false, target, tab);
+}
+
+pub fn startFreshChat(tab: u32) bool {
+    return startChatJob(false, true, 0, tab);
+}
+
+fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
+    const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
+    job.* = .{ .all = all, .fresh = fresh, .switch_to = switch_to };
+    if (all) {
+        for (0..app_state.shell_count) |i| {
+            if (job.count >= RESTART_HOSTS) break;
+            const shell = &app_state.shells[i];
+            if (!canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) continue;
+            var seen = false;
+            for (job.hosts[0..job.count]) |known| {
+                if (known == shell.tmux_host) seen = true;
+            }
+            if (seen) continue;
+            job.hosts[job.count] = shell.tmux_host;
+            job.ids[job.count] = shell.shell_id;
+            job.count += 1;
+        }
+        if (job.count == 0) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+    } else {
+        if (!liveChatTab(tab)) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+        const shell = &app_state.shells[tab];
+        const key = @import("chat_session.zig").chatFileIdentityForShell(tab);
+        const provider = key.provider();
+        if (provider.len > job.provider.len or key.sid[0] == 0 or key.tmux[0] == 0) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+        job.count = 1;
+        job.hosts[0] = shell.tmux_host;
+        job.ids[0] = shell.shell_id;
+        job.provider_len = @intCast(provider.len);
+        @memcpy(job.provider[0..provider.len], provider);
+        job.sid_len = @intCast(@min(shell.claude_sid_len, 40));
+        @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+        job.tmux_len = @intCast(@min(shell.tmux_session_len, 64));
+        @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    }
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, restartChatThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+pub fn adoptHostRequest(id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8, out: []u8) ?[]const u8 {
+    if (sid.len == 0 or sid.len > 80 or tmux.len == 0 or tmux.len > 80) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_adopt\",\"id\":{d},\"host\":{d},\"provider\":\"claude\",\"sid\":\"{s}\",\"tmux\":\"{s}\",\"cwd\":\"{s}\"}}", .{ id, host, sid, tmux, cwd }) catch null;
+}
+
+test "IGSH-1266 moving a chat to the new mode needs an idle old-style Claude tab" {
+    try std.testing.expect(canAdoptHostTab(1, 36, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 36, 12, true));
+    try std.testing.expect(!canAdoptHostTab(2, 36, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 0, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 36, 0, false));
+    var buf: [512]u8 = undefined;
+    const request = adoptHostRequest(7, 0, "ffffffff-ffff-4fff-bfff-ffffffffffff", "term-abc", "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"op\":\"host_adopt\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", request);
+    try std.testing.expect(adoptHostRequest(7, 0, "", "term-abc", "/home/x/proj", &buf) == null);
+}
+
+pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
+    if (!with_agent) return "";
+    return if (configured.len > 0) configured else "claude";
+}
+
+test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
+    try std.testing.expectEqualStrings("claude", workspaceSessionProgram("", true));
+    try std.testing.expectEqualStrings("codex", workspaceSessionProgram("codex", true));
+    try std.testing.expectEqualStrings("", workspaceSessionProgram("", false));
+    try std.testing.expectEqualStrings("", workspaceSessionProgram("claude", false));
+
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    var sid_buf: [36]u8 = undefined;
+    const randomness = [_]u8{0xff} ** 16;
+    const agent_host = @import("agent_host.zig");
+    const sid = agent_host.formatSessionId(&sid_buf, &randomness);
+    const spawned = workspaceLaunchCommand(workspaceSessionProgram("", true), "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var expected_buf: [1024]u8 = undefined;
+    const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(expected, spawned);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
+
+    const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
+}
+
+pub fn spawnWorkspaceTmuxSession() bool {
+    return spawnWorkspaceSession(true, false);
+}
+
+pub fn spawnWorkspacePlainClaudeSession() bool {
+    return spawnWorkspaceSession(true, true);
+}
+
+pub fn spawnWorkspaceTerminalSession() bool {
+    return spawnWorkspaceSession(false, false);
+}
+
+fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {
+    g_start_fail = .none;
+    var host: u8 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    const workspace = activeWorkspaceSlot();
+    if (workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
+        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent, plain_claude);
+    }
+    @import("diagnostics.zig").debugLog("[pick] no workspace folder, opening repo picker");
+    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace), plain_claude);
+    return false;
+}
+
+pub const WORKSPACE_HOST_LAUNCH_MAX: usize = 1536;
+pub const WORKSPACE_TERM_LAUNCH_MAX: usize = 1024;
+
+pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
+
+pub var g_start_fail: StartFail = .none;
+pub var g_pick_row_gone: bool = false;
+pub var g_pick_repo_offline: bool = false;
+
+fn workspaceHomeCandidate(configured: []const u8, known: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, configured, "~/") or !std.mem.startsWith(u8, known, "/home/")) return null;
+    const end = std.mem.indexOfScalarPos(u8, known, 6, '/') orelse return null;
+    if (end == 6 or std.mem.eql(u8, known[6..end], ".") or std.mem.eql(u8, known[6..end], "..")) return null;
+    var known_parts = std.mem.splitScalar(u8, known[1..], '/');
+    while (known_parts.next()) |part| {
+        if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    const suffix = configured[1..];
+    if (!std.mem.startsWith(u8, known[end..], suffix)) return null;
+    if (known.len > end + suffix.len and known[end + suffix.len] != '/') return null;
+    var parts = std.mem.splitScalar(u8, configured[2..], '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    return known[0..end];
+}
+
+test "workspace home candidates require the configured folder" {
+    try std.testing.expectEqualStrings("/home/owner", workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/sample/sub") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/samples") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/../sample", "/home/owner/projects/../sample") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/srv/projects/sample") == null);
+}
+
+fn resolveWorkspaceLiveCwd(workspace: u8, host: u8, cwd: []const u8, out: *[256]u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, cwd, "~/")) return cwd;
+    var home: ?[]const u8 = null;
+    var ambiguous = false;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.workspace != workspace) continue;
+        if ((@import("capacity.zig").remoteHostForShell(shell) orelse continue) != host) continue;
+        const live = std.mem.startsWith(u8, shell.tmux_session[0..shell.tmux_session_len], "live-") or std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], "live");
+        const reported = if (shell.claude_cwd_len > 0) workspaceHomeCandidate(cwd, shell.claude_cwd[0..shell.claude_cwd_len]) else null;
+        const candidate = reported orelse if (live) continue else blk: {
+            const known = @import("vps.zig").shellKnownRemotePath(shell, host) orelse continue;
+            break :blk workspaceHomeCandidate(cwd, known) orelse continue;
+        };
+        if (i == app_state.active_shell) return std.fmt.bufPrint(out, "{s}{s}", .{ candidate, cwd[1..] }) catch null;
+        if (home) |previous| {
+            if (!std.mem.eql(u8, previous, candidate)) ambiguous = true;
+        } else home = candidate;
+    }
+    if (ambiguous) return cwd;
+    const selected = home orelse return cwd;
+    return std.fmt.bufPrint(out, "{s}{s}", .{ selected, cwd[1..] }) catch null;
+}
+
+test "workspace live cwd selects matching terminal and leaves ambiguity to the host" {
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_cache_count = app_state.g_tmux_cache_count;
+    const saved_cache = app_state.g_tmux_cache[0];
+    defer {
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_tmux_cache_count = saved_cache_count;
+        app_state.g_tmux_cache[0] = saved_cache;
+    }
+    app_state.g_tmux_cache_count = 0;
+    app_state.shell_count = 3;
+    for (0..3) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].kind = .vps;
+        app_state.shells[i].workspace = 1;
+    }
+    const paths = [_][]const u8{ "/home/one/projects/sample", "/home/two/projects/sample/sub", "/home/other/projects/sample" };
+    for (paths, 0..) |path, i| {
+        @memcpy(app_state.shells[i].cached_cwd[0..path.len], path);
+        app_state.shells[i].cached_cwd_len = @intCast(path.len);
+    }
+    app_state.shells[2].workspace = 2;
+    var out: [256]u8 = undefined;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/two/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.active_shell = 2;
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].kind = .vps2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 2, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].kind = .tmux;
+    app_state.shells[1].tmux_host = 0;
+    const failed_path = "/home/reader/projects/sample";
+    @memcpy(app_state.shells[1].cached_cwd[0..failed_path.len], failed_path);
+    app_state.shells[1].cached_cwd_len = failed_path.len;
+    @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
+    app_state.shells[1].tmux_session_len = 8;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    const reported = "/home/owner/projects/sample/sub";
+    @memcpy(app_state.shells[1].claude_cwd[0..reported.len], reported);
+    app_state.shells[1].claude_cwd_len = reported.len;
+    app_state.g_tmux_cache[0] = .{ .name = @splat(0), .name_len = 8, .activity = 0, .host = 0 };
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "live-bad");
+    @memcpy(app_state.g_tmux_cache[0].path[0..failed_path.len], failed_path);
+    app_state.g_tmux_cache[0].path_len = failed_path.len;
+    app_state.g_tmux_cache_count = 1;
+    try std.testing.expectEqualStrings("/home/owner/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    @memcpy(app_state.shells[1].tmux_session[0..8], "terminal");
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "terminal");
+    app_state.shells[1].cached_cwd_len = 0;
+    try std.testing.expectEqualStrings("/home/owner/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    const unrelated = "/home/owner/projects/other";
+    @memcpy(app_state.shells[1].claude_cwd[0..unrelated.len], unrelated);
+    app_state.shells[1].claude_cwd_len = unrelated.len;
+    try std.testing.expectEqualStrings(failed_path, resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    @memcpy(app_state.shells[1].claude_cwd[0..reported.len], reported);
+    app_state.shells[1].claude_cwd_len = reported.len;
+    @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "live-bad");
+    try std.testing.expectEqualStrings("/home/explicit/projects/sample", resolveWorkspaceLiveCwd(1, 0, "/home/explicit/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.active_shell = 2;
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].tmux_host = 2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].tmux_host = 0;
+    app_state.shells[1].workspace = 2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shell_count = 0;
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+}
+
+fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
+    g_start_fail = .none;
+    const workspace = activeWorkspaceSlot();
+    const program = workspaceSessionProgram(configured_program, with_agent);
+    if (program.len > 0 and commandCreatesAgentWorkload(program) and
+        !capacityAdmitNewAgent(host, workspace, .user, "new workspace session"))
+    {
+        g_start_fail = .capacity;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: host capacity");
+        return false;
+    }
+
+    const agent_host = @import("agent_host.zig");
+    var sid_buf: [36]u8 = undefined;
+    const hosted = agent_host.hostedWorkspaceProvider(program);
+    const host_sid: ?[]const u8 = if (!plain_claude and hosted != null) agent_host.mintSessionId(&sid_buf) else null;
+    if (!plain_claude and newTabOpensChatView(program) and host_sid == null) {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: session identity unavailable");
+        return false;
+    }
+    const live_chat = host_sid != null and newTabOpensChatView(program);
+    var resolved_cwd: [256]u8 = undefined;
+    const cwd = if (live_chat) resolveWorkspaceLiveCwd(workspace, host, input_cwd, &resolved_cwd) orelse {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: workspace home ambiguous or path too long");
+        return false;
+    } else input_cwd;
+    var session_buf: [64]u8 = undefined;
+    const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
+    var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: launch command does not fit");
+        return false;
+    };
+    if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: pending command buffer too small");
+        return false;
+    }
+    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
+    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
+    app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = false;
+    const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
+    app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_tmux_cmd_len = 0;
+    if (!ok) {
+        g_start_fail = .spawn_shell;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: shell spawn");
+    }
+
+    if (ok and app_state.shell_count > 0) {
+        const ns: usize = app_state.shell_count - 1;
+        if (hosted) |provider| {
+            setShellName(&app_state.shells[ns], provider.label());
+            app_state.shells[ns].ai_agent = provider.aiAgent();
+        } else {
+            setShellName(&app_state.shells[ns], "Terminal");
+            app_state.shells[ns].ai_agent = 0;
+        }
+        app_state.shells[ns].name_source = .default;
+        if (host_sid) |sid| {
+            const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
+            @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
+            app_state.shells[ns].claude_sid_len = @intCast(sid_len);
+        }
+        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
+        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
+        app_state.shells[ns].cached_cwd_len = @intCast(n);
+        if (live_chat) {
+            const live = @import("chat_live.zig");
+            const shell = &app_state.shells[ns];
+            shell.chat_view_on = true;
+            const started = live.starting(shell.shell_id, host, host_sid.?);
+            if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, host_sid.?);
+            if (app_state.active_shell == ns) {
+                if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+                app_state.g_chat_screen_working = live.running(shell.shell_id);
+                shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, app_state.g_chat_screen_working, GetTickCount64());
+                @import("window_layout.zig").chatWorkingIndicatorSync();
+                if (!started) @import("console.zig").showHeaderNoticeAscii("Could not monitor chat startup", 5000, true);
+            }
+        }
+        publishInboxState();
+        saveSession();
+    }
+    return ok;
+}
+
+fn workspaceFolderForNewChat(out_host: *u8, out_path: *[256]u8, out_len: *u32) bool {
+    out_host.* = 0;
+    out_len.* = 0;
+    if (activeRemoteContextForCodexTmux(out_host, out_path, out_len)) return true;
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    if (!workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), out_host, out_path, out_len, &program_buf, &program_len)) return false;
+    return remotePathSafeForShell(out_path[0..out_len.*]);
+}
+
+pub fn activeRemoteContextForCodexTmux(out_host: *u8, out_cwd: *[256]u8, out_cwd_len: *u32) bool {
+    out_host.* = 0;
+    out_cwd_len.* = 0;
+    if (!focusedSessionFolder(out_host, out_cwd, out_cwd_len)) return false;
+    return remotePathSafeForShell(out_cwd[0..@as(usize, @intCast(out_cwd_len.*))]);
+}
+
+fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
+    const agent_host = @import("agent_host.zig");
+    var host: u8 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
+    const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
+    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
+    const reason = switch (provider) {
+        .codex => "new Codex session",
+        .pi => "new Pi session",
+        .cursor => "new Cursor session",
+        .claude => "new Claude session",
+    };
+    if (!capacityAdmitNewAgent(host, workspace, .user, reason)) return false;
+
+    var sid_buf: [36]u8 = undefined;
+    const sid = agent_host.mintSessionId(&sid_buf) orelse return false;
+    var session_buf: [64]u8 = undefined;
+    const session = buildLiveChatSessionName(&session_buf);
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid) orelse return false;
+    if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) return false;
+
+    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
+    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
+    app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = false;
+    const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
+    app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_tmux_cmd_len = 0;
+
+    if (ok and app_state.shell_count > 0) {
+        const ns: usize = app_state.shell_count - 1;
+        const ts_len = @min(session.len, app_state.shells[ns].tmux_session.len - 1);
+        @memcpy(app_state.shells[ns].tmux_session[0..ts_len], session[0..ts_len]);
+        app_state.shells[ns].tmux_session_len = @intCast(ts_len);
+        app_state.shells[ns].tmux_host = host;
+        app_state.shells[ns].ai_agent = provider.aiAgent();
+        setShellName(&app_state.shells[ns], provider.label());
+        app_state.shells[ns].name_source = .default;
+        const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
+        @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
+        app_state.shells[ns].claude_sid_len = @intCast(sid_len);
+        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
+        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
+        app_state.shells[ns].cached_cwd_len = @intCast(n);
+        const live = @import("chat_live.zig");
+        const shell = &app_state.shells[ns];
+        shell.chat_view_on = true;
+        const started = live.starting(shell.shell_id, host, sid);
+        if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, sid);
+        if (app_state.active_shell == ns) {
+            if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+            app_state.g_chat_screen_working = live.running(shell.shell_id);
+            shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, app_state.g_chat_screen_working, GetTickCount64());
+            @import("window_layout.zig").chatWorkingIndicatorSync();
+            if (!started) @import("console.zig").showHeaderNoticeAscii("Could not monitor chat startup", 5000, true);
+        }
+        publishInboxState();
+        saveSession();
+    }
+
+    return ok;
+}
+
+pub fn spawnCodexTmuxSession() bool {
+    return spawnHostedChatSession(.codex);
+}
+
+pub fn spawnPiTmuxSession() bool {
+    return spawnHostedChatSession(.pi);
+}
+
+pub fn spawnCursorTmuxSession() bool {
+    return spawnHostedChatSession(.cursor);
+}
+
+test "IGSH-1546 Codex and Pi chats are live chats that never type into a terminal" {
+    const agent_host = @import("agent_host.zig");
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    var session_buf: [64]u8 = undefined;
+    const session = buildLiveChatSessionName(&session_buf);
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(pi.len <= app_state.g_pending_tmux_cmd.len);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(!agent_host.eligible("pi"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
+}
+
+fn clampSearchSelectionAndScroll() void {
+    if (app_state.g_search_result_count == 0) {
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+        return;
+    }
+
+    if (app_state.g_search_sel >= app_state.g_search_result_count) {
+        app_state.g_search_sel = app_state.g_search_result_count - 1;
+    }
+
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+    const max_scroll = app_state.g_search_result_count - visible_rows;
+    if (app_state.g_search_scroll > max_scroll) {
+        app_state.g_search_scroll = max_scroll;
+    }
+}
+
+pub fn keepSearchSelectionVisible() void {
+    clampSearchSelectionAndScroll();
+    if (app_state.g_search_result_count == 0) return;
+    stepOverPaletteHeaders(false, false);
+
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+    if (app_state.g_search_sel < app_state.g_search_scroll) {
+        app_state.g_search_scroll = app_state.g_search_sel;
+    } else if (app_state.g_search_sel >= app_state.g_search_scroll + visible_rows) {
+        app_state.g_search_scroll = app_state.g_search_sel + 1 - visible_rows;
+    }
+    if (app_state.g_search_sel > 0 and app_state.g_search_sel == app_state.g_search_scroll and paletteRowIsHeader(app_state.g_search_results[app_state.g_search_sel - 1])) {
+        app_state.g_search_scroll = app_state.g_search_sel - 1;
+    }
+    clampSearchSelectionAndScroll();
+}
+
+fn appendWorkspaceMovePills() void {
+    var mwi: usize = 0;
+    while (mwi < app_state.g_lws_count) : (mwi += 1) {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (app_state.g_ws_snoozed[mwi]) continue;
+        var name_buf: [32]u8 = undefined;
+        const name = workspaceDisplayName(@intCast(mwi), &name_buf);
+        if (!labelsMatchQuery(&.{name}, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WSMOVE_OFFSET + mwi;
+        app_state.g_search_result_count += 1;
+    }
+}
+
+fn preferFirstFilteredResultAfterBack() void {
+    if (app_state.g_search_len > 0 and app_state.g_search_result_count > 1) {
+        var i: u32 = 2;
+        while (i < app_state.g_search_result_count) : (i += 1) {
+            const target = app_state.g_search_results[i];
+            var j = i;
+            while (j > 1 and paletteQueryRank(target) > paletteQueryRank(app_state.g_search_results[j - 1])) : (j -= 1)
+                app_state.g_search_results[j] = app_state.g_search_results[j - 1];
+            app_state.g_search_results[j] = target;
+        }
+        app_state.g_search_sel = 1;
+        app_state.g_search_scroll = 0;
+    }
+}
+
+test "workspace destination query selects exact Wazig before partial matches and keeps target identity" {
+    const old_count = app_state.g_lws_count;
+    const old_names = app_state.g_ws_names;
+    const old_lengths = app_state.g_ws_name_len;
+    const old_query = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_sel = app_state.g_search_sel;
+    const old_scroll = app_state.g_search_scroll;
+    defer {
+        app_state.g_lws_count = old_count;
+        app_state.g_ws_names = old_names;
+        app_state.g_ws_name_len = old_lengths;
+        app_state.g_search_buf = old_query;
+        app_state.g_search_len = old_len;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_search_sel = old_sel;
+        app_state.g_search_scroll = old_scroll;
+    }
+    app_state.g_lws_count = 6;
+    for ([_][]const u8{ "Example Product", "Wazig archive", "Old Wazig", "Other", "Wazig", "Wazig notes" }, 0..) |name, i| {
+        @memcpy(app_state.g_ws_names[i][0..name.len], name);
+        app_state.g_ws_name_len[i] = @intCast(name.len);
+    }
+    @memcpy(app_state.g_search_buf[0..5], L("wazig")[0..5]);
+    app_state.g_search_len = 5;
+    app_state.g_search_results[0] = SEARCH_WORKSPACE_BACK_OFFSET;
+    app_state.g_search_result_count = 1;
+    appendWorkspaceMovePills();
+    preferFirstFilteredResultAfterBack();
+    try std.testing.expectEqualSlices(usize, &.{ SEARCH_WORKSPACE_BACK_OFFSET, SEARCH_WSMOVE_OFFSET + 4, SEARCH_WSMOVE_OFFSET + 1, SEARCH_WSMOVE_OFFSET + 5, SEARCH_WSMOVE_OFFSET + 2 }, app_state.g_search_results[0..app_state.g_search_result_count]);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_search_scroll);
+    @memcpy(app_state.g_search_buf[0..7], L("missing")[0..7]);
+    app_state.g_search_len = 7;
+    app_state.g_search_result_count = 1;
+    app_state.g_search_sel = 0;
+    appendWorkspaceMovePills();
+    preferFirstFilteredResultAfterBack();
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_result_count);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_search_sel);
+    app_state.g_search_len = 0;
+    appendWorkspaceMovePills();
+    app_state.g_search_sel = 4;
+    preferFirstFilteredResultAfterBack();
+    try std.testing.expectEqual(@as(u32, 7), app_state.g_search_result_count);
+    try std.testing.expectEqual(@as(u32, 4), app_state.g_search_sel);
+    for (0..6) |i| try std.testing.expectEqual(SEARCH_WSMOVE_OFFSET + i, app_state.g_search_results[i + 1]);
+}
+
+fn appendGroupPaletteResults() void {
+    for (0..app_state.SEARCH_GROUPCTX_COUNT) |action| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (!@import("rename.zig").groupPaletteActionAvailable(action)) continue;
+        var label: [192]u16 = undefined;
+        const len = @import("rename.zig").groupPaletteLabel(action, &label);
+        if (app_state.g_search_len > 0 and !u16ContainsInsensitive(label[0..len], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_GROUPCTX_BASE + action;
+        app_state.g_search_result_count += 1;
+    }
+}
+
+fn appendPinnedPageResults(shell_id: u32) void {
+    if (findShellById(shell_id) == null) return;
+    const words = @import("ui_words.zon");
+    for ([_]usize{ app_state.SEARCH_TABCTX_PIN_PAGE, app_state.SEARCH_TABCTX_UNPIN_PAGE }, [_][]const u8{ words.browser_pin_page, words.browser_unpin_page }) |id, label| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (app_state.g_search_len != 0 and !labelsMatchQuery(&.{ label, "pin page", "pinned page", "unpin page" }, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = id;
+        app_state.g_search_result_count += 1;
+    }
+}
+
+fn paletteShellIsActive(index: usize) bool {
+    if (index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[index];
+    if (shell.inbox_archived and !shell.needs_attention) return false;
+    return !@import("workspaces.zig").workspaceSlotArchived(shell.workspace);
+}
+
+fn appendPaletteShellRows() void {
+    for (0..app_state.shell_count) |i| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (!paletteShellIsActive(i)) continue;
+        if (app_state.g_search_len == 0) {
+            app_state.g_search_results[app_state.g_search_result_count] = i;
+            app_state.g_search_result_count += 1;
+            continue;
+        }
+        const q = app_state.g_search_buf[0..app_state.g_search_len];
+        const remote_host: ?u8 = switch (app_state.shells[i].kind) {
+            .tmux => app_state.shells[i].tmux_host,
+            .vps => 0,
+            .vps2 => 1,
+            else => null,
+        };
+        if (u16ContainsInsensitive(app_state.shells[i].name[0..app_state.shells[i].name_len], q) or
+            (if (app_state.shells[i].last_title_len > 0) u16ContainsInsensitive(app_state.shells[i].last_title[0..@intCast(app_state.shells[i].last_title_len)], q) else false) or
+            kindMatchesQuery(app_state.shells[i].kind, q) or
+            sessionFolderMatchesQuery(&app_state.shells[i], q) or
+            (if (remote_host) |host| tmuxHostMatchesQuery(host, q) else false))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = i;
+            app_state.g_search_result_count += 1;
+        }
+    }
+}
+
+test "SOFT-2444 Ctrl+K session rows keep active sessions and drop archived ones" {
+    const saved_count = app_state.shell_count;
+    const saved_shells = [4]app_state.Shell{ app_state.shells[0], app_state.shells[1], app_state.shells[2], app_state.shells[3] };
+    const saved_len = app_state.g_search_len;
+    const saved_buf = app_state.g_search_buf;
+    const saved_results = app_state.g_search_results;
+    const saved_result_count = app_state.g_search_result_count;
+    const saved_ws_count = app_state.g_workspace_count;
+    const saved_workspaces = app_state.g_workspaces;
+    const saved_lws = app_state.g_lws_count;
+    const saved_ids = app_state.g_ws_ids;
+    const saved_id_lens = app_state.g_ws_id_len;
+    defer {
+        app_state.shell_count = saved_count;
+        inline for (0..4) |i| app_state.shells[i] = saved_shells[i];
+        app_state.g_search_len = saved_len;
+        app_state.g_search_buf = saved_buf;
+        app_state.g_search_results = saved_results;
+        app_state.g_search_result_count = saved_result_count;
+        app_state.g_workspace_count = saved_ws_count;
+        app_state.g_workspaces = saved_workspaces;
+        app_state.g_lws_count = saved_lws;
+        app_state.g_ws_ids = saved_ids;
+        app_state.g_ws_id_len = saved_id_lens;
+    }
+
+    app_state.g_lws_count = 2;
+    app_state.g_ws_ids[0] = std.mem.zeroes([32]u8);
+    app_state.g_ws_ids[1] = std.mem.zeroes([32]u8);
+    @memcpy(app_state.g_ws_ids[0][0..4], "live");
+    app_state.g_ws_id_len[0] = 4;
+    @memcpy(app_state.g_ws_ids[1][0..3], "old");
+    app_state.g_ws_id_len[1] = 3;
+    app_state.g_workspace_count = 2;
+    app_state.g_workspaces[0] = std.mem.zeroes(app_state.WorkspaceEntry);
+    app_state.g_workspaces[1] = std.mem.zeroes(app_state.WorkspaceEntry);
+    @memcpy(app_state.g_workspaces[0].id[0..4], "live");
+    app_state.g_workspaces[0].id_len = 4;
+    @memcpy(app_state.g_workspaces[1].id[0..3], "old");
+    app_state.g_workspaces[1].id_len = 3;
+    app_state.g_workspaces[1].archived = true;
+
+    app_state.shell_count = 4;
+    inline for (0..4) |i| app_state.shells[i] = app_state.empty_shell;
+    const names = [_][]const u8{ "Triage LC", "Triage LC", "Ping", "Broadcast" };
+    for (names, 0..) |name, i| {
+        app_state.shells[i].name_len = @intCast(name.len);
+        for (name, 0..) |c, j| app_state.shells[i].name[j] = c;
+    }
+    app_state.shells[1].inbox_archived = true;
+    app_state.shells[2].inbox_archived = true;
+    app_state.shells[2].needs_attention = true;
+    app_state.shells[3].workspace = 1;
+
+    app_state.g_search_len = 0;
+    app_state.g_search_result_count = 0;
+    appendPaletteShellRows();
+    try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, app_state.g_search_results[0..app_state.g_search_result_count]);
+
+    const query = "tri";
+    for (query, 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = @intCast(query.len);
+    app_state.g_search_result_count = 0;
+    appendPaletteShellRows();
+    try std.testing.expectEqualSlices(usize, &.{0}, app_state.g_search_results[0..app_state.g_search_result_count]);
+
+    app_state.shells[1].inbox_archived = false;
+    app_state.g_workspaces[1].archived = false;
+    app_state.g_search_len = 0;
+    app_state.g_search_result_count = 0;
+    appendPaletteShellRows();
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 2, 3 }, app_state.g_search_results[0..app_state.g_search_result_count]);
+
+    app_state.g_search_len = @intCast(query.len);
+    app_state.g_search_result_count = 0;
+    appendPaletteShellRows();
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1 }, app_state.g_search_results[0..app_state.g_search_result_count]);
+}
+
+pub fn updateSearchResults() void {
+    app_state.g_search_revision +%= 1;
+    if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
+    @import("room_frontend.zig").resetPaletteRooms();
+    defer {
+        if (app_state.g_search_active) {
+            var trace: [128]u8 = undefined;
+            const target = if (app_state.g_search_sel < app_state.g_search_result_count) app_state.g_search_results[app_state.g_search_sel] else 0;
+            var rows_trace: [640]u8 = undefined;
+            @import("diagnostics.zig").debugLog(appendPaletteRowsTrace(&rows_trace));
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[palette] ready chars={d} count={d} target={d}", .{ app_state.g_search_len, app_state.g_search_result_count, target }) catch "[palette] trace overflow");
+        }
+    }
+    app_state.g_search_result_count = 0;
+    if (app_state.g_search_len == 0) app_state.g_multiprompt_logged_in = hasMultipromptLogin();
+    if (app_state.g_search_rename_input_mode) {
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+        return;
+    }
+    if (app_state.g_browser_url_mode) {
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+        return;
+    }
+    if (app_state.g_search_pick_repo_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        g_presented_repo_count = pickRepoFilteredRows(g_presented_repo_rows[0..]);
+        const filtered = g_presented_repo_count;
+        var traced = [_]bool{false} ** 3;
+        for (g_presented_repo_rows[0..filtered]) |row| {
+            if (row.host >= traced.len or traced[row.host]) continue;
+            traced[row.host] = true;
+            var trace: [64]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[repo] {s} host={d}", .{ if (row.available) "online" else "offline", row.host }) catch "[repo] trace overflow");
+        }
+        var i: u32 = 0;
+        while (i < filtered) : (i += 1) {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_ROW_OFFSET + i;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_remind_input_mode) {
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+        return;
+    }
+
+    if (app_state.g_search_pi_models_mode) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        const available = pi_models.models();
+        const limit = @min(available.len, MAX_PI_MODELS);
+        for (available[0..limit], 0..) |model, mi| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len > 0 and
+                !asciiContainsQueryInsensitive(model.nameText(), app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive(model.providerText(), app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive(model.detailText(), app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODEL_ROW_OFFSET + mi;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_skills_mode) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILLS_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        const limit = @min(app_state.g_palette_skills.len, MAX_PALETTE_SKILLS);
+        for (app_state.g_palette_skills[0..limit], 0..) |skill, si| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len > 0 and
+                !asciiContainsQueryInsensitive(skill.name, app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive(skill.description, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILL_ROW_OFFSET + si;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_remind_preset_mode) {
+        if (app_state.g_remind_ws_id_len > 0 and labelsMatchQuery(&.{"Archive workspace"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSEWIN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        var now_st: SYSTEMTIME = undefined;
+        GetLocalTime(&now_st);
+        var pi: usize = 0;
+        while (pi < REMIND_PRESET_COUNT) : (pi += 1) {
+            if (pi == REMIND_PRESET_EVENING and now_st.hour >= 16) continue;
+            if (!labelsMatchQuery(&.{remindPresetLabel(pi)}, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMIND_PRESET_OFFSET + pi;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_len > 0) {
+            appendGroupPaletteResults();
+            sortSearchResultsByRank();
+            app_state.g_search_sel = 0;
+            app_state.g_search_scroll = 0;
+        }
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_ws_snoozed_mode) {
+        loadRemindersIfNeeded();
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        for (0..app_state.g_reminder_count) |ri| {
+            const e = &app_state.g_reminders[ri];
+            if (!e.workspace_marker or findMyWorkspaceSlot(e.workspace_id[0..e.workspace_id_len]) == null or !reminderMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_SNOOZED_ROW_OFFSET + ri;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_reminders_mode) {
+        loadRemindersIfNeeded();
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        var ri: u32 = 0;
+        while (ri < app_state.g_reminder_count and app_state.g_search_result_count < app_state.g_search_results.len) : (ri += 1) {
+            if (app_state.g_reminders[ri].workspace_marker or app_state.g_reminders[ri].batch_due != 0 or !reminderMatchesSearch(&app_state.g_reminders[ri], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMINDER_ROW_OFFSET + ri;
+            app_state.g_search_result_count += 1;
+        }
+        for (0..app_state.g_reminder_count) |marker_ri| {
+            if (!app_state.g_reminders[marker_ri].workspace_marker or !reminderMatchesSearch(&app_state.g_reminders[marker_ri], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_SNOOZED_ROW_OFFSET + marker_ri;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_session_overview_mode) {
+        buildSessionOverviewRows();
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        var ri: u32 = 0;
+        while (ri < app_state.g_session_overview_count and ri < @as(u32, MAX_SESSION_OVERVIEW_SEARCH_ROWS) and app_state.g_search_result_count < app_state.g_search_results.len) : (ri += 1) {
+            if (!sessionOverviewRowMatches(&app_state.g_session_overview_rows.items[ri], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SESSION_OVERVIEW_ROW_OFFSET + ri;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or sessionOverviewCommandMatches(app_state.g_search_buf[0..app_state.g_search_len]))) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_unarchive_hidden = (app_state.g_search_len == 0);
+        if (!show_unarchive_hidden) {
+            const hidden_labels = [_][]const u8{
+                "restore workspace waiting sessions",
+                "restore waiting sessions",
+                "waiting sessions",
+                "Unarchive Hidden (Alt+E) Sessions",
+                "unarchive hidden sessions",
+                "unarchive hidden",
+                "alt e sessions",
+                "restore hidden sessions",
+                "show hidden sessions",
+            };
+            for (hidden_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_unarchive_hidden = true;
+                    break;
+                }
+            }
+        }
+        if (show_unarchive_hidden) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UNARCHIVE_HIDDEN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_unarchive_unattached = (app_state.g_search_len == 0);
+        if (!show_unarchive_unattached) {
+            const unattached_labels = [_][]const u8{
+                "unarchive unattached sessions",
+                "unarchive unattached",
+                "ctrl w sessions",
+                "attach workspace sessions",
+                "restore unattached sessions",
+                "restore disconnected workspace sessions",
+                "disconnected workspace sessions",
+                "unarchive unattached (ctrl+w) sessions",
+            };
+            for (unattached_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_unarchive_unattached = true;
+                    break;
+                }
+            }
+        }
+        if (show_unarchive_unattached) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UNARCHIVE_UNATTACHED_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_archived_view = (app_state.g_search_len == 0);
+        if (!show_archived_view) {
+            const archived_view_labels = [_][]const u8{ "archived sessions", "archive", "archived", "Unarchive Killed (Alt+X) Sessions", "unarchive killed sessions", "unarchive killed", "killed sessions", "alt x", "dissolve", "dissolved", "resurrect" };
+            for (archived_view_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_archived_view = true;
+                    break;
+                }
+            }
+        }
+        if (show_archived_view) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ARCHIVED_VIEW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_snippet_mode) {
+        app_state.g_search_result_count = 0;
+        loadSnippetsIfChanged();
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        for (0..app_state.g_snippet_count) |si| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (snippetMatchesQuery(si, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_OFFSET + si;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "create snippet", "new snippet", "snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_CREATE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_shells_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        for (SHELL_ROWS) |row| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!keywordsMatchAll(row.keywords, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row.target;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_open_session_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        appendTmuxCacheRows();
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_openall_host_mode) {
+        app_state.g_search_result_count = 0;
+        buildFilteredTmux();
+        const ids = [_]usize{
+            SEARCH_OPENALL_HOST_BACK_OFFSET,
+        };
+        const labels = [_][]const u8{
+            "back",
+        };
+        for (ids, labels) |id, label| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (id == SEARCH_OPENALL_HOST_BACK_OFFSET or app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = id;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_theme_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_THEME_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+
+        const theme_ids = [_]usize{ SEARCH_THEME_SYSTEM_OFFSET, SEARCH_THEME_DARK_OFFSET, SEARCH_THEME_MID_OFFSET, SEARCH_THEME_LIGHT_OFFSET, SEARCH_THEME_AMOLED_OFFSET, SEARCH_THEME_EDGE_GRAY_OFFSET, SEARCH_THEME_MULTIPROMPT_OFFSET };
+        const theme_labels = [_][]const u8{ "system windows automatic follow appearance light dark", "dark", "mid", "light", "amoled", "edge grey edge gray native edge 333333", "multi bot multiprompt midnight violet website landing" };
+        for (theme_ids, theme_labels) |theme_id, label| {
+            if (!IS_DEV and theme_id >= SEARCH_THEME_DEV_BLUE_OFFSET and theme_id != SEARCH_THEME_MULTIPROMPT_OFFSET) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = theme_id;
+                app_state.g_search_result_count += 1;
+            }
+        }
+
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_ws_sort_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        var wsi: usize = 0;
+        while (wsi < app_state.g_lws_count) : (wsi += 1) {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WSSORT_OFFSET + wsi;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_ws_move_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        appendWorkspaceMovePills();
+        mergeWorkspaceRegistryFromDisk();
+        scanLiveWorkspaceWindows(false);
+        for (0..app_state.g_workspace_count) |wi| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!workspaceCanMoveIntoClosedStandalone(@intCast(wi))) continue;
+            if (!workspaceMatchesSearch(&app_state.g_workspaces[wi], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_OFFSET + wi;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{"move to new workspace"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WSMOVE_NEW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_group_move_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        var gi: usize = 0;
+        while (gi < app_state.group_count) : (gi += 1) {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len > 0 and !u16ContainsInsensitive(app_state.groups[gi].name[0..app_state.groups[gi].name_len], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_GROUP_OFFSET + gi;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and app_state.group_count < MAX_GROUPS and labelsMatchQuery(&.{"new group"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_NEW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{"no group"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_NONE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_groupctx_mode) {
+        appendGroupPaletteResults();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_workspace_color_target != null and workspaceColorTargetSlot() == null) {
+        app_state.g_workspace_color_target = null;
+        app_state.g_search_len = 0;
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+    }
+    if (app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) {
+        app_state.g_search_results[0] = SEARCH_TABCTX_BACK;
+        app_state.g_search_result_count = 1;
+        if (app_state.g_bot_look_mode == .face) {
+            const words = @import("ui_words.zon");
+            for ([_]usize{ app_state.SEARCH_BOT_PHOTO_UPLOAD, app_state.SEARCH_BOT_PHOTO_RESET }, [_][]const u8{ words.bot_photo_upload, words.bot_photo_reset }) |id, label| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (!asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = id;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        const labels: []const []const u8 = if (app_state.g_bot_look_mode == .face) &@import("bot_look.zig").faces else &@import("bot_look.zig").colors;
+        const offset = if (app_state.g_bot_look_mode == .face) app_state.SEARCH_BOT_FACE_OFFSET else app_state.SEARCH_BOT_COLOR_OFFSET;
+        for (labels, 0..) |label, i| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = offset + i;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+    if (app_state.g_search_tabctx_mode) {
+        app_state.g_search_result_count = 0;
+        if (findShellById(app_state.g_tabctx_sid)) |index| {
+            if (app_state.g_search_len > 0) appendExtendedChatActions(index);
+            appendChatActions(index);
+        }
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_workspace_mode) {
+        app_state.g_search_result_count = 0;
+        mergeWorkspaceRegistryFromDisk();
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+
+        for (0..app_state.g_workspace_count) |wi| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            const e = &app_state.g_workspaces[wi];
+            if (!app_state.g_search_workspace_delete_mode) {
+                const archived = app_state.g_search_workspace_action == .restore;
+                if (e.archived != archived) continue;
+            }
+            if (app_state.g_search_workspace_action == .archive and !@import("workspaces.zig").workspaceCanArchive(@intCast(wi))) continue;
+            if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
+                if (app_state.g_ws_snoozed[slot] and !app_state.g_search_workspace_delete_mode) continue;
+            }
+            if (app_state.g_search_len == 0 or workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = if (app_state.g_search_workspace_delete_mode)
+                    SEARCH_WORKSPACE_DELETE_OFFSET + wi
+                else
+                    SEARCH_WORKSPACE_OFFSET + wi;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_workspace_delete_mode) {
+            var visible: [768]u8 = undefined;
+            const head = "[palette] delete-visible ";
+            @memcpy(visible[0..head.len], head);
+            var pos: usize = head.len;
+            for (app_state.g_search_results[0..app_state.g_search_result_count]) |target| {
+                if (target < SEARCH_WORKSPACE_DELETE_OFFSET or target >= SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) continue;
+                const wi = target - SEARCH_WORKSPACE_DELETE_OFFSET;
+                if (wi >= @as(usize, app_state.g_workspace_count) or pos >= visible.len) continue;
+                const name = app_state.g_workspaces[wi].name[0..app_state.g_workspaces[wi].name_len];
+                if (pos != head.len and pos < visible.len) {
+                    visible[pos] = '|';
+                    pos += 1;
+                }
+                const room = visible.len - pos;
+                const n = @min(name.len, room);
+                @memcpy(visible[pos..][0..n], name[0..n]);
+                pos += n;
+            }
+            @import("diagnostics.zig").debugLog(visible[0..pos]);
+        }
+
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    appendPinnedPageResults(app_state.g_search_pin_sid);
+    if (app_state.g_nextunread_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_nu = (app_state.g_search_len == 0);
+        if (!show_nu) {
+            const nu_labels = [_][]const u8{ "unread", "next", "inbox" };
+            for (nu_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_nu = true;
+                    break;
+                }
+            }
+        }
+        if (show_nu) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEXTUNREAD_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var host: u8 = 0;
+        var cwd_buf: [256]u8 = undefined;
+        var cwd_len: u32 = 0;
+        const remote_folder = workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len);
+        if (keywordsMatchAll("new claude session chat terminal tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new codex chat session openai codec codecs", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CODEX_TMUX_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new pi chat session", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_PI_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new cursor chat session agent cli", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CURSOR_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new terminal shell plain", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_TERMINAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_len == 0) {
+            const vps_shells = [_]usize{ SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4 };
+            for (vps_shells) |vps_shell| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                app_state.g_search_results[app_state.g_search_result_count] = vps_shell;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("pick repo choose repository folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("set workspace folder declare workspace folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SET_FOLDER_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_len > 0) {
+            for (SHELL_ROWS) |row| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (row.target >= SEARCH_OPENALL_OFFSET) continue;
+                if (!keywordsMatchAll(row.keywords, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = row.target;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (workspaceColorSlot() != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ @import("ui_words.zon").workspace_color, "workspace colour", "default bot color" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_WORKSPACE_COLOR_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "settings", "preferences", "look and settings", "keys", "about" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SETTINGS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and app_state.g_search_len > 0 and
+        labelsMatchQuery(&.{ @import("ui_words.zon").settings_servers, "ssh", "ssh key", "add server", "remove server", "test server" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_SERVERS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    var show_sound_toggle = (app_state.g_search_len == 0);
+    if (!show_sound_toggle) {
+        const sound_labels = [_][]const u8{ "notification sounds", "notification sound", "notifications", "notify", "sound", "sounds", "audio", "alert", "beep", "silent", "quiet" };
+        for (sound_labels) |label| {
+            if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                show_sound_toggle = true;
+                break;
+            }
+        }
+    }
+    if (show_sound_toggle and app_state.g_search_result_count < app_state.g_search_results.len) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SOUND_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_len == 0) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MOBILE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    } else {
+        const mob_labels = [_][]const u8{ "mobile", "mobile latency mode: off", "mobile latency mode: on", "mobile latency: off", "mobile latency: on" };
+        if (labelsStartWithQuery(&mob_labels, app_state.g_search_buf[0..app_state.g_search_len]) and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MOBILE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_themes = (app_state.g_search_len == 0);
+        if (!show_themes) {
+            const theme_labels = [_][]const u8{ "theme", "themes", "dark", "mid", "light", "edge", "edge grey", "edge gray", "333333", "native edge", "blue", "dev blue", "edit theme", "reload theme" };
+            for (theme_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_themes = true;
+                    break;
+                }
+            }
+        }
+        if (show_themes) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_THEME_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_open_workspace = (app_state.g_search_len == 0);
+        if (!show_open_workspace) {
+            const open_workspace_labels = [_][]const u8{ "open", "open workspace", "workspace", "workspaces", "past workspaces", "history", "window", "windows" };
+            for (open_workspace_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_open_workspace = true;
+                    break;
+                }
+            }
+        }
+        if (show_open_workspace) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACES_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_len > 0) {
+        for (0..app_state.g_workspace_count) |wi| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            const e = &app_state.g_workspaces[wi];
+            if (e.archived) continue;
+            if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
+                if (app_state.g_ws_snoozed[slot]) continue;
+            }
+            if (workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_OFFSET + wi;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{"Archived workspaces", "restore workspace"}, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_delete_workspace = (app_state.g_search_len == 0);
+        if (!show_delete_workspace) {
+            const delete_workspace_labels = [_][]const u8{ "delete", "delete workspace", "remove workspace", "old workspace", "cleanup workspace" };
+            for (delete_workspace_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_delete_workspace = true;
+                    break;
+                }
+            }
+        }
+        if (show_delete_workspace) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_rename_workspace = (app_state.g_search_len == 0);
+        if (!show_rename_workspace) {
+            const rename_workspace_labels = [_][]const u8{ "rename", "rename workspace", "rename current", "rename window", "current workspace", "window name", "rename current workspace" };
+            for (rename_workspace_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_rename_workspace = true;
+                    break;
+                }
+            }
+        }
+        if (show_rename_workspace) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RENAMEWIN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_quit = (app_state.g_search_len == 0);
+        if (!show_quit) {
+            const quit_labels = [_][]const u8{ "quit", "quit multi bot", "quit multiprompt", "quit zigshell", "exit", "shutdown", "close all", "restore workspaces" };
+            for (quit_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_quit = true;
+                    break;
+                }
+            }
+        }
+        if (show_quit) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_QUIT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_restart = (app_state.g_search_len == 0);
+        if (!show_restart) {
+            const restart_labels = [_][]const u8{ "restart", "relaunch", "reboot", "restart app", "reload app", "restart multi bot", "restart multiprompt", "restart zigshell" };
+            for (restart_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_restart = true;
+                    break;
+                }
+            }
+        }
+        if (show_restart) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RESTART_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_update = app_state.g_update_ver_len > 0 and app_state.g_search_len == 0;
+        if (!show_update and app_state.g_search_len > 0) {
+            const update_labels = [_][]const u8{ "update", "restart to update", "relaunch", "new version", "upgrade" };
+            for (update_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_update = true;
+                    break;
+                }
+            }
+        }
+        if (show_update and !@import("main.zig").IS_DEV) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UPDATE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and app_state.shell_count > 0) {
+        var show_fullwidth = (app_state.g_search_len == 0);
+        if (!show_fullwidth) {
+            const fullwidth_labels = [_][]const u8{ "full", "full width", "fullwidth", "fullscreen", "full screen", "wide", "width", "maximize" };
+            for (fullwidth_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_fullwidth = true;
+                    break;
+                }
+            }
+        }
+        if (show_fullwidth) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FULLWIDTH_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_shortcuts = (app_state.g_search_len == 0);
+        if (!show_shortcuts) {
+            const shortcuts_labels = [_][]const u8{ "shortcut", "shortcuts", "keyboard shortcuts", "keys", "hotkeys", "keybindings", "help", "cheatsheet" };
+            for (shortcuts_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_shortcuts = true;
+                    break;
+                }
+            }
+        }
+        if (show_shortcuts) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHORTCUTS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_changelog = (app_state.g_search_len == 0);
+        if (!show_changelog) {
+            const changelog_labels = [_][]const u8{ "changelog", "version", "whatsnew", "updates", "release", "changes" };
+            for (changelog_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_changelog = true;
+                    break;
+                }
+            }
+        }
+        if (show_changelog) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHANGELOG_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "reconnect ai usage accounts",
+            "login ai usage",
+            "fix stale telemetry",
+            "claude telemetry login",
+            "refresh claude login",
+            "usage account login",
+            "reconnect claude primary",
+            "owner@example.com",
+            "primary claude account",
+            "usage: sign in to primary claude account",
+            "reconnect claude: primary",
+            "reconnect claude primary telemetry",
+            "secondary@example.com",
+            "second claude account",
+            "usage: sign in to secondary claude account",
+            "reconnect claude: secondary",
+            "reconnect claude secondary telemetry",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if ((app_state.g_account_locked or app_state.g_account_reauth) and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "sign in to multiprompt",
+            "multiprompt login",
+            "desktop sync login",
+            "reconnect multiprompt",
+            "account sync",
+            "oidc pkce",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MULTIPROMPT_LOGIN_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "account: sign out",
+            "sign out of multiprompt",
+            "multiprompt sign out",
+            "desktop sync sign out",
+            "forget multiprompt account",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SYNC_SIGNOUT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "account: devices",
+            "sync status",
+            "am i signed in to multiprompt",
+            "vault status",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SYNC_STATUS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Reply to latest agent message", "quote reply" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_REPLY_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.ISSUE_268_CHAT_FIND and app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Find in conversation", "ctrl f", "search whole conversation" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FIND_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view toggle CLEAN chat", "messages only", "hide read receipts queued status" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLEAN_CHAT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TOOL_STEPS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_NEWEST_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Resync chat", "reload refresh repair messages" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESYNC_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        liveChatTab(app_state.active_shell) and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart this chat on the newest version", "relaunch update latest version restart chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        liveChatTab(app_state.active_shell) and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FRESH_START_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    const switch_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
+        .{ .id = SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, .target = 1, .name = "Chat View: Switch AI to Claude" },
+        .{ .id = SEARCH_CHAT_SWITCH_CODEX_OFFSET, .target = 2, .name = "Chat View: Switch AI to Codex" },
+        .{ .id = SEARCH_CHAT_SWITCH_PI_OFFSET, .target = 3, .name = "Chat View: Switch AI to Pi" },
+    };
+    for (switch_rows) |sw| {
+        if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+            switchAiTab(app_state.active_shell, sw.target) and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_ALL_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: More Menu", "three dots options approve stop rename history archive model" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MORE_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Plus Menu", "plus attach file model effort permission level mode bypass" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_PLUS_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TODO_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_CODE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DICTATION_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Attach File", "attach file", "pdf", "zip", "log", "document", "image", "upload image", "add image", "picture", "photo", "screenshot", "ctrl v", "drop", "drag" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ATTACH_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and app_state.g_chat_sel_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_selection_menu, "selection quote add to chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECTION_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_expand_table, "expand table full screen enlarge zoom read wide table" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EXPAND_TABLE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view select all", "select all text", "ctrl a" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        for ([_]struct { target: usize, label: []const u8 }{
+            .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
+            .{ .target = SEARCH_CHAT_MODE_MANUAL_OFFSET, .label = "chat permission mode: ask" },
+            .{ .target = SEARCH_CHAT_MODE_EDITS_OFFSET, .label = "chat permission mode: accept edits" },
+            .{ .target = SEARCH_CHAT_MODE_BYPASS_OFFSET, .label = "chat permission mode: bypass" },
+        }) |row| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!labelsMatchQuery(&.{ row.label, "permissions" }, query)) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row.target;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view insert command or skill", "browse commands", "browse skills", "ctrl slash", "autocomplete" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_AC_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        app_state.active_shell < app_state.shell_count and
+        pi_models.isPiAgent(app_state.shells[app_state.active_shell].ai_agent) and
+        labelsMatchQuery(&[_][]const u8{
+            "pi model",
+            "change model",
+            "pick model",
+            "switch model",
+            "model list",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "skills",
+            "use skill",
+            "chat view skills",
+            "coding harness skills",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILLS_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_closewin = (app_state.g_search_len == 0);
+        if (!show_closewin) {
+            const closewin_labels = [_][]const u8{ "archive workspace", "archive old workspace", "hide workspace" };
+            for (closewin_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_closewin = true;
+                    break;
+                }
+            }
+        }
+        if (show_closewin) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSEWIN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (!app_state.g_search_from_inbox and app_state.active_shell < app_state.shell_count and @import("bot_look.zig").eligible(app_state.active_shell)) {
+        const words = @import("ui_words.zon");
+        for ([_]usize{ app_state.SEARCH_TABCTX_BOT_FACE, app_state.SEARCH_TABCTX_BOT_COLOR }, [_][]const u8{ words.bot_face, words.bot_color }) |id, label| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len != 0 and !asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = id;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_singlewin = (app_state.g_search_len == 0);
+        if (!show_singlewin) {
+            const singlewin_labels = [_][]const u8{ "single window", "single-window", "multi window", "multi-window", "window mode", "workspace mode", "single", "mode", "one window" };
+            for (singlewin_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_singlewin = true;
+                    break;
+                }
+            }
+        }
+        if (show_singlewin) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SINGLEWIN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{ "Go to Starred workspace", "favorites", "alt 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_STARRED_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_goinbox = (app_state.g_search_len == 0);
+        if (!show_goinbox) {
+            const goinbox_labels = [_][]const u8{ "inbox", "go to inbox", "goto inbox", "open inbox", "triage", "unread", "messages" };
+            for (goinbox_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_goinbox = true;
+                    break;
+                }
+            }
+        }
+        if (show_goinbox) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GOINBOX_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "use snippets", "snippets", "snippet", "paste snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPETS_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"manage snippets"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "create snippet", "new snippet", "snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_CREATE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_single_window and app_state.g_lws_count > 1 and app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_wssort = (app_state.g_search_len == 0);
+        if (!show_wssort) {
+            const wssort_labels = [_][]const u8{ "sort", "sort workspaces", "order", "reorder", "arrange", "move workspace" };
+            for (wssort_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_wssort = true;
+                    break;
+                }
+            }
+        }
+        if (show_wssort) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WSSORT_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+
+    if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_groupmove = (app_state.g_search_len == 0);
+        if (!show_groupmove) {
+            const groupmove_labels = [_][]const u8{ "move", "move to group", "group", "organize session" };
+            for (groupmove_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_groupmove = true;
+                    break;
+                }
+            }
+        }
+        if (show_groupmove) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_expand = (app_state.g_search_len == 0);
+        var show_collapse = (app_state.g_search_len == 0);
+        var show_hide_sb = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const expand_labels = [_][]const u8{ "sidebar", "sidebar expand", "expand", "show sidebar", "open sidebar" };
+            const collapse_labels = [_][]const u8{ "sidebar", "sidebar collapse", "collapse", "narrow" };
+            const hide_labels = [_][]const u8{ "sidebar", "sidebar hide", "hide sidebar", "focus", "zen", "hide" };
+            for (expand_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_expand = true;
+                    break;
+                }
+            }
+            for (collapse_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_collapse = true;
+                    break;
+                }
+            }
+            for (hide_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_hide_sb = true;
+                    break;
+                }
+            }
+        }
+        if (show_expand and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIDESIDEBAR_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_hpills = (app_state.g_search_len == 0);
+        if (!show_hpills) {
+            const hpills_labels = [_][]const u8{ "pills", "workspace switcher", "switcher", "hide pills", "show pills", "hide switcher", "show switcher", "ux" };
+            for (hpills_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_hpills = true;
+                    break;
+                }
+            }
+        }
+        if (show_hpills) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIDEPILLS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_ts_inbox = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const tab_sort_labels = [_][]const u8{ "tab order", "sort tabs", "sort", "order", "tabs", "inbox", "manual", "auto sort", "auto" };
+            for (tab_sort_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_ts_inbox = true;
+                    break;
+                }
+            }
+        }
+        if (show_ts_inbox and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABSORT_INBOX_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View off everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    {
+        var show_power = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const power_labels = [_][]const u8{ "power saver", "power", "saver", "battery", "energy saver", "idle" };
+            for (power_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_power = true;
+                    break;
+                }
+            }
+        }
+        if (show_power) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_POWER_AUTO_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "usage and servers / collapsed status cards", "ai usage / collapsed status cards", "ai usage", "status cards", "server status", "app version" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_AI_USAGE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    {
+        var show_ladder = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            for ([_][]const u8{ "token ladder", "ladder", "burn", "claude", "codex", "subscription", "plan", "usage" }) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_ladder = true;
+                    break;
+                }
+            }
+        }
+        if (show_ladder and app_state.g_search_result_count + 2 <= app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_LADDER_AUTO_OFFSET;
+            app_state.g_search_results[app_state.g_search_result_count + 1] = SEARCH_LADDER_DASH_OFFSET;
+            app_state.g_search_result_count += 2;
+        }
+    }
+
+    {
+        var show_voice = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const voice_labels = [_][]const u8{ "voice mode", "voice", "speak", "listen", "hands free", "hands-free" };
+            for (voice_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_voice = true;
+                    break;
+                }
+            }
+        }
+        if (show_voice) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_MODE_ON_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_MODE_OFF_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    {
+        var show_voice_stop = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const voice_stop_labels = [_][]const u8{ "voice stop", "stop speaking", "voice", "stop", "speaking", "mute" };
+            for (voice_stop_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_voice_stop = true;
+                    break;
+                }
+            }
+        }
+        if (show_voice_stop and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_STOP_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_voice_speed = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const voice_speed_labels = [_][]const u8{ "voice speed", "voice", "speed", "faster", "slower" };
+            for (voice_speed_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_voice_speed = true;
+                    break;
+                }
+            }
+        }
+        if (show_voice_speed and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_SPEED_100_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_voice_replay = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const voice_replay_labels = [_][]const u8{ "voice", "read", "repeat", "replay", "last reply" };
+            for (voice_replay_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_voice_replay = true;
+                    break;
+                }
+            }
+        }
+        if (show_voice_replay and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_REPLAY_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_uo = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const uo_labels = [_][]const u8{ "unread only", "filter", "unread", "only", "dots", "focus" };
+            for (uo_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_uo = true;
+                    break;
+                }
+            }
+        }
+        if (show_uo and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UNREADONLY_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_eta = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const eta_labels = [_][]const u8{ "eta", "estimate", "countdown", "progress", "accuracy", "session eta" };
+            for (eta_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_eta = true;
+                    break;
+                }
+            }
+        }
+        if (show_eta) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ETA_NUMBERS_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ETA_ACCURACY_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (IS_DEV) {
+        var show_tt = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const tt_labels = [_][]const u8{ "thread title", "title", "header", "subject", "band" };
+            for (tt_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_tt = true;
+                    break;
+                }
+            }
+        }
+        if (show_tt and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_THREADTITLE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        const target_ws: u8 = if (app_state.g_search_spawn_ws != 0xFF and app_state.g_search_spawn_ws < app_state.g_lws_count and !app_state.g_ws_snoozed[app_state.g_search_spawn_ws])
+            app_state.g_search_spawn_ws
+        else
+            app_state.g_active_workspace;
+        var cci: usize = 0;
+        while (cci < app_state.g_custom_cmds_count) : (cci += 1) {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!customCmdVisibleInWorkspace(cci, target_ws)) continue;
+            if (app_state.g_search_len > 0 and !customCmdMatchesQuery(cci, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CUSTOMCMD_OFFSET + cci;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_cc = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const cc_labels = [_][]const u8{ "commands", "custom command", "commands.json", "edit commands", "reload commands" };
+            for (cc_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_cc = true;
+                    break;
+                }
+            }
+        }
+        if (show_cc and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CUSTOMCMD_EDIT_OFFSET;
+            app_state.g_search_result_count += 1;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.active_shell < app_state.shell_count) {
+        var show_diag = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const diag_labels = [_][]const u8{ "copy shell diagnostics", "shell diagnostics", "diagnostic", "diagnostics", "shell status", "copy status", "debug shell", "session state", "copy session diagnostics", "session diagnostics" };
+            for (diag_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_diag = true;
+                    break;
+                }
+            }
+        }
+        if (show_diag and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHELL_DIAG_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        appendChatActions(app_state.active_shell);
+    }
+
+    if (app_state.g_single_window) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Workspace: Snooze...", "snooze workspace", "hide clients" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_SNOOZE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        loadRemindersIfNeeded();
+        _ = ensureSnoozeMarkers();
+        var has_snoozed = false;
+        for (0..app_state.g_reminder_count) |ri| {
+            const e = &app_state.g_reminders[ri];
+            if (e.workspace_marker and findMyWorkspaceSlot(e.workspace_id[0..e.workspace_id_len]) != null) has_snoozed = true;
+        }
+        for (0..app_state.g_lws_count) |wi| {
+            if (!app_state.g_ws_snoozed[wi]) continue;
+            const mi = snoozedWorkspaceIndex(@intCast(wi)) orelse continue;
+            var wake_label: [96]u8 = undefined;
+            const wake_text = std.fmt.bufPrint(&wake_label, "Workspace: Wake {s}", .{app_state.g_reminders[mi].name[0..app_state.g_reminders[mi].name_len]}) catch continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len or !labelsMatchQuery(&.{ wake_text, "wake workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_SNOOZED_ROW_OFFSET + mi;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Workspace: Bring Back All Sessions", "bring back sessions", "reattach tmux sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_BRINGBACK_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (has_snoozed and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Workspace: Snoozed...", "wake workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WS_SNOOZED_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].tmux_session_len > 0) {
+        var show_remind = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const remind_labels = [_][]const u8{ "remind me", "reminder", "snooze", "snooze session", "later" };
+            for (remind_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_remind = true;
+                    break;
+                }
+            }
+        }
+        if (show_remind and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMIND_ME_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+    }
+
+    {
+        var show_reminders = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const reminder_labels = [_][]const u8{ "reminders", "snoozed", "snoozed sessions", "reminder list", "snooze list" };
+            for (reminder_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_reminders = true;
+                    break;
+                }
+            }
+        }
+        if (show_reminders and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMINDERS_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_closed_count > 0) {
+        var show_reopen = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const reopen_labels = [_][]const u8{ "reopen closed tab", "reopen", "closed", "restore", "undo" };
+            for (reopen_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_reopen = true;
+                    break;
+                }
+            }
+        }
+        if (show_reopen and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REOPEN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_DISCONNECTED_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.active_shell < app_state.shell_count) {
+        if (@import("capacity.zig").remoteHostForShell(&app_state.shells[app_state.active_shell])) |host| {
+            buildFilteredTmux();
+            if (@import("vps.zig").inactiveTmuxCountForHost(host) > 0 and
+                app_state.g_search_result_count < app_state.g_search_results.len and
+                labelsMatchQuery(&.{ "reopen server shell", "server shell", "detached session", "detached tmux" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REOPEN_SERVER_SHELL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (app_state.shell_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{ "Mute Tab", "Unmute Tab", "Mute Activity", "Unmute Activity", "silence", "notifications" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MUTETAB_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Favorite: Toggle", "unfavorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FAVORITE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len) {
+        const label = if (app_state.shells[app_state.active_shell].inbox_excluded) "Inbox: Show This Session Again" else "Inbox: Never Show This Session";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "inbox", "exclude" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_INBOX_EXCLUDE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.shell_count > 0) {
+        var show_chat_view = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const chat_labels = [_][]const u8{ "chat view", "chat overlay", "conversation", "composer", "terminal transcript", "alt c", "live chat", "switch to terminal" };
+            for (chat_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_chat_view = true;
+                    break;
+                }
+            }
+        }
+        if (show_chat_view and app_state.active_shell < app_state.shell_count and
+            @import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]) and
+            app_state.g_search_result_count < app_state.g_search_results.len)
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (@import("chat_session.zig").chatSettingsEligible() and @import("chat_session.zig").chatSettingsCodex()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sol", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SOL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Terra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_TERRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Luna", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_LUNA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Astra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_ASTRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ALLOW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ALWAYS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DENY_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (if (app_state.ISSUE_265_WORKING_BAR) app_state.active_shell < app_state.shell_count else app_state.g_chat_active) {
+            var show_chat_stop = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const stop_labels = [_][]const u8{ (if (app_state.ISSUE_265_WORKING_BAR) "Chat View: Stop the agent" else "stop agent"), "stop agent", "interrupt", "ctrl c", "cancel response" };
+                for (stop_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_chat_stop = true;
+                        break;
+                    }
+                }
+            }
+            if (show_chat_stop and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_STOP_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].ai_agent == 3) {
+            var show_pi_login = app_state.g_search_len == 0;
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const login_labels = [_][]const u8{ "Log in", "login", "pi login", "sign in" };
+                for (login_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_pi_login = true;
+                        break;
+                    }
+                }
+            }
+            if (show_pi_login and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_LOGIN_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+
+        if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TAB_URL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESET_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        var show_queue_send = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const queue_labels = [_][]const u8{ "send queued", "queued messages", "offline queue", "outbox", "flush queue" };
+            for (queue_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_queue_send = true;
+                    break;
+                }
+            }
+        }
+        if (show_queue_send and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_QUEUE_SEND_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        const has_unsent = app_state.active_shell < app_state.shell_count and chatEchoCountNotSentForShell(app_state.active_shell) > 0;
+        if (has_unsent and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        var show_edit_queued = false;
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            show_edit_queued = asciiContainsQueryInsensitive("edit queued messages", q) or asciiContainsQueryInsensitive("queued messages edit", q);
+        }
+        if (show_edit_queued and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EDIT_QUEUED_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].tmux_session_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_TOGGLE_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (@import("computer_pane.zig").selected()) {
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "take control", "give back", "view only" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_CONTROL_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "retry", "reconnect" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_RETRY_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+        var show_browser_toggle = (app_state.g_search_len == 0);
+        if (app_state.active_shell < app_state.shell_count and
+            @import("browser_pane.zig").browserProfileToken(app_state.active_shell).len > 0 and
+            app_state.g_search_result_count < app_state.g_search_results.len and
+            labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
+            app_state.g_search_result_count += 1;
+        }
+
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const browser_labels = [_][]const u8{ "browser", "web", "edge", "pane", "open browser", "show browser", "recover browser", "retry browser", "retry browser pane", "close browser pane", "alt a", "alt b" };
+            for (browser_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_browser_toggle = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser_toggle and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_TOGGLE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        var show_browser_url = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const browser_url_labels = [_][]const u8{ "browser url", "open url in browser", "navigate", "web", "goto", "edge url" };
+            for (browser_url_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_browser_url = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser_url and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_URL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        if (activeShellHasShotUrlPane()) {
+            var show_browser_shoturl = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const shoturl_labels = [_][]const u8{ "browser screenshot", "screenshot", "shot", "capture", "link", "shell", "browser", "ctrl shift s" };
+                for (shoturl_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_shoturl = true;
+                        break;
+                    }
+                }
+            }
+            if (show_browser_shoturl and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_SHOTURL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+
+        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
+            var show_browser_focus_url = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const focus_url_labels = [_][]const u8{ "zigbrowser focus address bar", "browser address", "address bar", "focus address", "browser url bar", "edge address", "browser: focus address bar", "zigbrowser: focus address bar" };
+                for (focus_url_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_focus_url = true;
+                        break;
+                    }
+                }
+            }
+            if (show_browser_focus_url and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_FOCUS_URL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+
+        if (browserPaneActive()) {
+            var show_browser_back = (app_state.g_search_len == 0);
+            var show_browser_forward = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const back_labels = [_][]const u8{ "browser back", "zigbrowser back", "history back", "back", "alt left" };
+                for (back_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_back = true;
+                        break;
+                    }
+                }
+                const forward_labels = [_][]const u8{ "browser forward", "zigbrowser forward", "history forward", "forward", "alt right" };
+                for (forward_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_forward = true;
+                        break;
+                    }
+                }
+            }
+            if (show_browser_back and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_BACK_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (show_browser_forward and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_FORWARD_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+
+            var show_browser_focus_toggle = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const focus_toggle_labels = [_][]const u8{ "zigbrowser jump", "browser focus", "jump browser", "toggle browser focus", "shell browser", "alt f", "alt m", "ctrl shift m", "browser: switch focus between terminal and pane", "zigbrowser: jump to/from browser pane" };
+                for (focus_toggle_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_focus_toggle = true;
+                        break;
+                    }
+                }
+            }
+            if (show_browser_focus_toggle and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+
+            var show_browser_mode = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const mode_labels = [_][]const u8{ "browser mode", "native chrome", "native edge", "custom url bar", "edge chrome", "omnibox", "tabs omnibox", "browser: use app address bar", "browser: use browser address bar and tabs", "zigbrowser: switch to custom url bar", "zigbrowser: switch to native browser chrome" };
+                for (mode_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_browser_mode = true;
+                        break;
+                    }
+                }
+            }
+            if (show_browser_mode and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_MODE_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+
+        var show_browser_instruct = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const instruct_labels = [_][]const u8{ "browser", "control", "pane", "instructions", "multiprompt-browser", "zsb", "bridge", "browser: insert agent instructions", "insert agent instructions", "insert browser-control instructions" };
+            for (instruct_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_browser_instruct = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser_instruct and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_INSTRUCT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        if (app_state.active_shell < app_state.shell_count and isRemoteShellKind(app_state.shells[app_state.active_shell].kind) and app_state.shells[app_state.active_shell].browser_enabled) {
+            var show_zsb_rebind = (app_state.g_search_len == 0);
+            if (app_state.g_search_len > 0) {
+                const q = app_state.g_search_buf[0..app_state.g_search_len];
+                const zsb_labels = [_][]const u8{ "multiprompt-browser", "zsb", "rebind", "bind", "browser bind", "pane bind", "force browser", "zsb rebind", "fix zsb", "browser: repair agent connection", "repair agent connection", "multiprompt-browser: rebind active pane" };
+                for (zsb_labels) |label| {
+                    if (asciiContainsQueryInsensitive(label, q)) {
+                        show_zsb_rebind = true;
+                        break;
+                    }
+                }
+            }
+            if (show_zsb_rebind and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ZSB_REBIND_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    {
+        var show_browser_autosuspend = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const autosuspend_labels = [_][]const u8{ "zigbrowser auto suspend", "browser suspend", "auto suspend", "autosuspend", "idle browser", "save ram", "ram", "browser: auto-suspend idle panes", "zigbrowser: auto-suspend idle panes" };
+            for (autosuspend_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_browser_autosuspend = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser_autosuspend and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "External Browser Links When Pane Off", "desktop browser", "default browser", "open links" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes", "close all browsers", "close browser windows", "free browser memory" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    {
+        var show_ui = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const ui_labels = [_][]const u8{ "ui", "size", "zoom", "scale", "interface", "chrome", "bigger", "smaller" };
+            for (ui_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_ui = true;
+                    break;
+                }
+            }
+        }
+        if (show_ui and app_state.g_search_result_count + 3 <= app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UI_BIGGER_OFFSET;
+            app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UI_SMALLER_OFFSET;
+            app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UI_RESET_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    const room = @import("room_frontend.zig");
+    if (room.enabled) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "new room", "create room" }, query))) {
+            app_state.g_search_results[app_state.g_search_result_count] = room.new_room_target;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "edit room", "room members", "rename room" }, query)) and room.capturePaletteEdit()) {
+            app_state.g_search_results[app_state.g_search_result_count] = room.edit_room_target;
+            app_state.g_search_result_count += 1;
+        }
+        for (room.catalog(), 0..) |row, index| {
+            if (index >= app_state.MAX_ROOM_PALETTE_ROWS or app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var wide_name: [256]u16 = undefined;
+            const len = std.unicode.utf8ToUtf16Le(&wide_name, row.name) catch continue;
+            if (query.len > 0 and !u16ContainsInsensitive(wide_name[0..len], query)) continue;
+            if (!room.capturePaletteRoom(index)) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_ROOM_ROW_OFFSET + index;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    appendPaletteShellRows();
+
+    if (app_state.g_search_len > 0) appendTmuxCacheRows();
+
+    if (app_state.g_search_len > 0) appendGroupPaletteResults();
+    if (@import("room_frontend.zig").isActive()) {
+        var kept: usize = 0;
+        for (app_state.g_search_results[0..app_state.g_search_result_count]) |target| {
+            if (!roomPaletteAllowed(target)) continue;
+            app_state.g_search_results[kept] = target;
+            kept += 1;
+        }
+        app_state.g_search_result_count = @intCast(kept);
+    }
+    sortSearchResultsByRank();
+
+    if (app_state.g_search_len == 0) {
+        var lv: [MAX_SHELLS]u64 = undefined;
+        var ok: [MAX_SHELLS]bool = undefined;
+        for (0..app_state.shell_count) |rsi| {
+            lv[rsi] = app_state.shells[rsi].last_viewed;
+            ok[rsi] = !app_state.g_ws_snoozed[app_state.shells[rsi].workspace] and
+                !(app_state.shells[rsi].inbox_archived and !app_state.shells[rsi].needs_attention);
+        }
+        const prev_idx: ?usize = if (app_state.g_previous_shell_sid == 0) null else if (findShellById(app_state.g_previous_shell_sid)) |p| @as(usize, p) else null;
+        var recent: [RECENT_SESSION_ROWS]usize = undefined;
+        const rn = pickRecentSessions(lv[0..app_state.shell_count], ok[0..app_state.shell_count], app_state.active_shell, prev_idx, &recent);
+        var rj: usize = rn;
+        var lead: usize = 0;
+        while (rj > 0) {
+            rj -= 1;
+            if (promoteSearchTargetToFront(app_state.g_search_results[0..app_state.g_search_result_count], recent[rj])) lead += 1;
+        }
+        groupEmptyPaletteResults(lead);
+    }
+
+    if (app_state.g_search_result_count > 0) {
+        keepSearchSelectionVisible();
+    } else {
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+    }
+}
+
+fn appendExtendedChatActions(tc_idx: ?u32) void {
+    appendPinnedPageResults(if (tc_idx) |ti| app_state.shells[ti].shell_id else 0);
+    if (tc_idx) |ti| {
+        if (@import("bot_look.zig").eligible(ti)) {
+            const words = @import("ui_words.zon");
+            for ([_]usize{ app_state.SEARCH_TABCTX_BOT_FACE, app_state.SEARCH_TABCTX_BOT_COLOR }, [_][]const u8{ words.bot_face, words.bot_color }) |id, label| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (app_state.g_search_len != 0 and !asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = id;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    const sel_count = selectedTabCount();
+    const sel_mode = sel_count > 0;
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (tc_idx) |ti| {
+            if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
+                app_state.g_search_result_count < app_state.g_search_results.len and
+                labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
+        const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
+        const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_pinned = if (tc_idx) |ti| @import("sidebar.zig").effPinnedTop(ti) else false;
+        const pin_str: []const u8 = if (tc_pinned) "Unpin from Top" else "Pin to Top";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ pin_str, "pin", "pinned", "unpin", "top", "sidebar top" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_PIN_TOP;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLOSE_DISCONNECTED;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len) {
+        const browser_labels = [_][]const u8{ "browser", "web", "pane", "show browser", "hide browser", "open browser pane", "close browser pane", "show browser pane", "hide browser pane" };
+        var show_browser = (app_state.g_search_len == 0);
+        if (!show_browser) {
+            for (browser_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_browser = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BROWSER;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (tc_idx) |ti| {
+        if (app_state.shells[ti].tmux_session_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_COMPUTER;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
+            if (@import("chat_view.zig").canToggle(app_state.shells[ti].tmux_session[0..app_state.shells[ti].tmux_session_len]) and
+                (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
+        app_state.g_search_result_count += 1;
+    }
+    const switch_tab_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_CLAUDE, .target = 1, .name = "Switch AI to Claude" },
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_CODEX, .target = 2, .name = "Switch AI to Codex" },
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_PI, .target = 3, .name = "Switch AI to Pi" },
+    };
+    for (switch_tab_rows) |sw| {
+        if (tc_idx != null and switchAiTab(tc_idx.?, sw.target) and app_state.g_search_result_count < app_state.g_search_results.len and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALLOW;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALWAYS;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_DENY;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.ISSUE_265_WORKING_BAR and tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.shells[tc_idx.?].ai_stopped and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Restart the AI", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESTART_AI;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move to Workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_WSMOVE;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to Group...", "move to group", "group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    const tc_grouped = if (tc_idx) |ti| (@import("sidebar.zig").tabGroupId(ti) != 0) else false;
+    if (sel_mode) {
+        if (app_state.group_count < MAX_GROUPS) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            }
+        }
+        if (selectedTabsIncludeGrouped()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            }
+        }
+        for (0..app_state.group_count) |gi| {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var glbuf: [72]u8 = undefined;
+            var gli: usize = 0;
+            for ("Add selected to group: ") |c| {
+                if (gli >= glbuf.len) break;
+                glbuf[gli] = c;
+                gli += 1;
+            }
+            for (0..app_state.groups[gi].name_len) |j| {
+                if (gli >= glbuf.len - 1) break;
+                glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
+                gli += 1;
+            }
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    } else if (tc_grouped) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "New chat in this group", "new tab in group", "new claude chat in group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW_TAB_IN;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        }
+    } else {
+        if (app_state.group_count < MAX_GROUPS) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        }
+        if (sel_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+}
+
+pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
+    .{ .target = SEARCH_TABCTX_PIN_TOP, .label = "Pin" },
+    .{ .target = SEARCH_TABCTX_WSMOVE, .label = "Move to workspace" },
+    .{ .target = app_state.SEARCH_TABCTX_UNREAD, .label = "Mark as unread" },
+    .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
+    .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
+    .{ .target = SEARCH_TABCTX_ARCHIVE, .label = "Archive chat" },
+    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete session" },
+};
+
+pub fn chatActionLabel(target: usize, pinned: bool) ?[]const u8 {
+    for (chat_actions) |action| if (action.target == target) {
+        return if (target == SEARCH_TABCTX_PIN_TOP and pinned) "Unpin" else action.label;
+    };
+    return null;
+}
+
+fn appendChatActions(index: usize) void {
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    for (chat_actions) |action| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        const label = chatActionLabel(action.target, @import("sidebar.zig").effPinnedTop(index)).?;
+        if (!labelsMatchQuery(&.{label}, query) and !(action.target == SEARCH_TABCTX_PIN_TOP and labelsMatchQuery(&.{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" }, query)) and !(action.target == SEARCH_TABCTX_ARCHIVE and labelsMatchQuery(&.{ "close tab", "hide from sidebar", "hide" }, query)) and !(action.target == app_state.SEARCH_TABCTX_RENAME and labelsMatchQuery(&.{ "rename session", "rename tab" }, query))) continue;
+        if (std.mem.indexOfScalar(usize, app_state.g_search_results[0..app_state.g_search_result_count], action.target) != null) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = action.target;
+        app_state.g_search_result_count += 1;
+    }
+}
+
+pub fn u16ToLower(c: u16) u16 {
+    if (c >= 'A' and c <= 'Z') return c + 32;
+    return c;
+}
+
+pub fn u16ContainsInsensitive(haystack: []const u16, needle: []const u16) bool {
+    if (needle.len == 0) return true;
+    if (haystack.len < needle.len) return false;
+    const limit = haystack.len - needle.len + 1;
+    for (0..limit) |start| {
+        var match = true;
+        for (0..needle.len) |j| {
+            if (u16ToLower(haystack[start + j]) != u16ToLower(needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+pub fn asciiContainsQueryInsensitive(haystack: []const u8, needle: []const u16) bool {
+    if (needle.len == 0) return true;
+    if (haystack.len < needle.len) return false;
+    const limit = haystack.len - needle.len + 1;
+    for (0..limit) |start| {
+        var match = true;
+        for (0..needle.len) |j| {
+            const hc: u16 = if (haystack[start + j] >= 'A' and haystack[start + j] <= 'Z') haystack[start + j] + 32 else haystack[start + j];
+            if (hc != u16ToLower(needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+pub fn reductionSearchChar(vk: u32, shift: bool) u16 {
+    if (vk >= 0x41 and vk <= 0x5A) return @intCast(if (shift) vk else vk + 32);
+    if (vk >= 0x30 and vk <= 0x39) return @intCast(vk);
+    return switch (vk) {
+        0x20 => ' ',
+        0xBD => if (shift) '_' else '-',
+        0xBE => '.',
+        0xBF => if (shift) '?' else '/',
+        else => 0,
+    };
+}
+
+fn labelsStartWithQuery(labels: []const []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    for (labels) |label| {
+        if (query.len > label.len) continue;
+        var ok = true;
+        for (query, 0..) |qc, j| {
+            const lc: u16 = if (label[j] >= 'A' and label[j] <= 'Z') label[j] + 32 else label[j];
+            if (u16ToLower(qc) != lc) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) return true;
+    }
+    return false;
+}
+
+fn keywordsMatchAll(keywords: []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    var wstart: usize = 0;
+    var qp: usize = 0;
+    while (qp <= query.len) : (qp += 1) {
+        const at_end = (qp == query.len);
+        if (at_end or query[qp] == ' ') {
+            if (qp > wstart) {
+                const wlen = qp - wstart;
+                var found = false;
+                if (wlen <= keywords.len) {
+                    var ksi: usize = 0;
+                    while (ksi + wlen <= keywords.len) : (ksi += 1) {
+                        var ok = true;
+                        for (0..wlen) |j| {
+                            const qc = u16ToLower(query[wstart + j]);
+                            const kc = keywords[ksi + j];
+                            const lc: u16 = if (kc >= 'A' and kc <= 'Z') kc + 32 else kc;
+                            if (qc != lc) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (ok) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) return false;
+            }
+            wstart = qp + 1;
+        }
+    }
+    return true;
+}
+
+test "IGSH-1266 old new-tab words still reach the rows" {
+    const words = [_]u16{ 'p', 'o', 'w', 'e', 'r', 's', 'h', 'e', 'l', 'l' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &words));
+    const more = [_]u16{ 'm', 'o', 'r', 'e' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &more));
+    const cmd = [_]u16{ 'c', 'm', 'd' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &cmd));
+    const nope = [_]u16{ 'z', 's', 'h' };
+    try std.testing.expect(!keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &nope));
+}
+
+fn appendTmuxCacheRows() void {
+    buildFilteredTmux();
+    var ti: u32 = 0;
+    while (ti < app_state.g_inactive_filtered_count) : (ti += 1) {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        const cache_idx = app_state.g_inactive_filtered[ti];
+        const sess = app_state.g_tmux_cache[cache_idx];
+        const sname = sess.name[0..sess.name_len];
+
+        if (app_state.g_search_session_host_filter != app_state.SESSION_HOST_FILTER_OFF and sess.host != app_state.g_search_session_host_filter) continue;
+
+        if (app_state.g_search_len > 0) {
+            const query = app_state.g_search_buf[0..app_state.g_search_len];
+            var all_words_match = true;
+            var wstart: usize = 0;
+            var qp: usize = 0;
+            while (qp <= query.len) : (qp += 1) {
+                const at_end = (qp == query.len);
+                if (at_end or query[qp] == ' ') {
+                    if (qp > wstart) {
+                        const word = query[wstart..qp];
+                        var name_w: [64]u16 = undefined;
+                        for (sname, 0..) |c, ni| name_w[ni] = @intCast(c);
+                        const name_hit = u16ContainsInsensitive(name_w[0..sess.name_len], word);
+                        var title_hit = false;
+                        if (!name_hit and sess.title_len > 0) {
+                            var title_w: [80]u16 = undefined;
+                            for (sess.title[0..sess.title_len], 0..) |c, tci| title_w[tci] = @intCast(c);
+                            title_hit = u16ContainsInsensitive(title_w[0..sess.title_len], word);
+                        }
+                        const host_hit = !name_hit and !title_hit and tmuxHostMatchesQuery(sess.host, word);
+                        if (!name_hit and !title_hit and !host_hit) {
+                            all_words_match = false;
+                            break;
+                        }
+                    }
+                    wstart = qp + 1;
+                }
+            }
+            if (!all_words_match) continue;
+        }
+
+        if (tmuxCacheEntryAlreadyOpen(&sess)) continue;
+
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TMUX_OFFSET + cache_idx;
+        app_state.g_search_result_count += 1;
+    }
+}
+
+fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    for (labels) |label| {
+        if (asciiContainsQueryInsensitive(label, query)) return true;
+    }
+    return false;
+}
+
+fn sessionOverviewCommandMatches(query: []const u16) bool {
+    const labels = [_][]const u8{
+        "show all sessions",
+        "show all sessions from this workspace repo folder",
+        "show repo sessions",
+        "show workspace sessions",
+        "repo sessions",
+        "workspace repo sessions",
+        "workspace sessions",
+        "session overview",
+        "sessions overview",
+        "all sessions",
+        "all tmux sessions",
+        "tmux overview",
+        "recover sessions",
+    };
+    return labelsMatchQuery(&labels, query);
+}
+
+fn workspaceMatchesSearch(e: *const WorkspaceEntry, query: []const u16) bool {
+    if (query.len == 0) return true;
+    var name_w: [64]u16 = undefined;
+    const nl = @min(e.name_len, name_w.len);
+    for (0..nl) |i| name_w[i] = @intCast(e.name[i]);
+    if (u16ContainsInsensitive(name_w[0..nl], query)) return true;
+
+    var id_w: [64]u16 = undefined;
+    const il = @min(e.id_len, id_w.len);
+    for (0..il) |i| id_w[i] = @intCast(e.id[i]);
+    if (u16ContainsInsensitive(id_w[0..il], query)) return true;
+
+    const labels = [_][]const u8{ "workspace", "window", "open workspace", "open window" };
+    for (labels) |label| {
+        if (asciiContainsQueryInsensitive(label, query)) return true;
+    }
+    return false;
+}
+
+pub fn tmuxHostMatchesQuery(host: u8, query: []const u16) bool {
+    if (host == TMUX_HOST_UK) {
+        const labels = [_][]const u8{ "uk", "host2", "vps uk", "vps host2", "tmux uk", "tmux host2", "uk-tmx" };
+        for (labels) |label| {
+            if (asciiContainsQueryInsensitive(label, query)) return true;
+        }
+    } else if (host == TMUX_HOST_INNE) {
+        const labels = [_][]const u8{ "secondary", "secondary cro", "remote-3", "vps secondary", "tmux secondary", "secondary-tmx" };
+        for (labels) |label| {
+            if (asciiContainsQueryInsensitive(label, query)) return true;
+        }
+    } else {
+        const labels = [_][]const u8{ "de", "host1", "vps de", "vps host1", "tmux de", "tmux host1", "de-tmx" };
+        for (labels) |label| {
+            if (asciiContainsQueryInsensitive(label, query)) return true;
+        }
+    }
+    return false;
+}
+
+fn kindMatchesQuery(kind: ShellKind, query: []const u16) bool {
+    const tag: []const u8 = switch (kind) {
+        .cmd => "CMD",
+        .pwsh => "PWS",
+        .vps => "VPS",
+        .tmux => "TMX",
+        .vps2 => "VPS",
+        .bash => "BSH",
+        .gitbash => "GIT",
+    };
+    if (query.len > tag.len) return false;
+    for (0..query.len) |j| {
+        const qc = u16ToLower(query[j]);
+        const tc: u16 = if (tag[j] >= 'A' and tag[j] <= 'Z') tag[j] + 32 else tag[j];
+        if (qc != tc) return false;
+    }
+    return true;
+}
+
+test "IGSH-1266 declared folder wins and a later entry for the same workspace replaces it" {
+    app_state.g_custom_cmds_count = 0;
+    defer app_state.g_custom_cmds_count = 0;
+    var first = CustomCmd{};
+    first.is_default = true;
+    first.kind = .vps;
+    std.mem.copyForwards(u8, first.workspace[0..4], "main");
+    first.workspace_len = 4;
+    std.mem.copyForwards(u8, first.cwd[0..20], "/home/x/projects/old");
+    first.cwd_len = 20;
+    app_state.g_custom_cmds[0] = first;
+    app_state.g_custom_cmds_count = 1;
+    const only = folderEntryIndexFor("main") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), only);
+    var second = CustomCmd{};
+    second.is_default = true;
+    second.kind = .vps;
+    second.folder_host = 1;
+    std.mem.copyForwards(u8, second.workspace[0..4], "main");
+    second.workspace_len = 4;
+    std.mem.copyForwards(u8, second.cwd[0..24], "/home/x/projects/repo-new");
+    second.cwd_len = 24;
+    app_state.g_custom_cmds[1] = second;
+    app_state.g_custom_cmds_count = 2;
+    const saved = folderEntryIndexFor("main") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 1), saved);
+    try std.testing.expect(folderEntryIndexFor("other") == null);
+    try std.testing.expect(folderEntryIndexFor("") == null);
+}
+
+test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" {
+    app_state.g_custom_cmds_count = 0;
+    defer closePickRepo();
+    try std.testing.expect(!spawnWorkspaceSession(false, false));
+    try std.testing.expect(app_state.g_search_pick_repo_mode);
+    try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
+}
+
+test "IGSH-1447 new picker uses the active remote host only in its workspace" {
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_workspace = [3]u8{ app_state.shells[0].workspace, app_state.shells[1].workspace, app_state.shells[2].workspace };
+    const saved_host = [3]u8{ app_state.shells[0].tmux_host, app_state.shells[1].tmux_host, app_state.shells[2].tmux_host };
+    const saved_len = .{ app_state.shells[0].tmux_session_len, app_state.shells[1].tmux_session_len, app_state.shells[2].tmux_session_len };
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        inline for (0..3) |i| {
+            app_state.shells[i].workspace = saved_workspace[i];
+            app_state.shells[i].tmux_host = saved_host[i];
+            app_state.shells[i].tmux_session_len = saved_len[i];
+        }
+    }
+    app_state.shell_count = 3;
+    app_state.active_shell = 2;
+    app_state.g_single_window = true;
+    app_state.shells[0].workspace = 1;
+    app_state.shells[0].tmux_host = 1;
+    app_state.shells[1].workspace = 0;
+    app_state.shells[1].tmux_host = 0;
+    app_state.shells[2].workspace = 0;
+    app_state.shells[2].tmux_host = 2;
+    for (0..3) |i| app_state.shells[i].tmux_session_len = 1;
+    try std.testing.expectEqual(@as(u8, 1), workspaceHostForNewTab(1));
+    try std.testing.expectEqual(@as(u8, 2), workspaceHostForNewTab(0));
+}
+
+test "repo picker keeps terminal intent only for its current request" {
+    defer closePickRepo();
+    pickRepoOpen(true, false, 0, true);
+    try std.testing.expect(app_state.g_search_pick_repo_plain_claude);
+    closePickRepo();
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+    pickRepoOpen(true, false, 0, true);
+    pickRepoOpen(true, false, 0, false);
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+}
+
+test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
+    pickRepoOpen(true, true, 0, false);
+    const before = app_state.shell_count;
+    closePickRepo();
+    try std.testing.expect(!app_state.g_search_pick_repo_mode);
+    try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
+    try std.testing.expectEqual(before, app_state.shell_count);
+}
+
+test "IGSH-1266 pick repo starts the session in the picked folder" {
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var neutral_buf: [512]u8 = undefined;
+    const neutral = buildWorkspaceTmuxLaunchCmd(&neutral_buf, "term-pick", "/home/x/projects/picked", "") orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, picked, "-c /home/x/projects/picked") != null);
+    try std.testing.expect(std.mem.indexOf(u8, neutral, "-c /home/x/projects/picked") != null);
+    try std.testing.expect(std.mem.startsWith(u8, picked, "tmux new-session -d -s term-pick"));
+}
+
+test "IGSH-1266 saved folder is written into commands.json so the next start uses it" {
+    var entry_buf: [512]u8 = undefined;
+    const entry = buildFolderEntry(&entry_buf, 1, "main", "/home/x/projects/picked") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"label\":\"Folder\",\"kind\":\"vps\",\"folder_host\":\"1\",\"cwd\":\"/home/x/projects/picked\",\"workspace\":\"main\",\"default\":true}", entry);
+    var out_buf: [4096]u8 = undefined;
+    const empty = "{\n  \"commands\": [\n  ]\n}\n";
+    const with_one = insertCommandEntry(empty, entry, &out_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, with_one, "\"cwd\":\"/home/x/projects/picked\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_one, "[,") == null);
+    var second_buf: [8192]u8 = undefined;
+    var second_entry_buf: [512]u8 = undefined;
+    const other = buildFolderEntry(&second_entry_buf, 0, "other", "/home/x/projects/other") orelse return error.TestUnexpectedResult;
+    const with_two = insertCommandEntry(with_one, other, &second_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, with_two, "},{\"label\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_two, "/home/x/projects/other") != null);
+    try std.testing.expect(insertCommandEntry("no commands here", entry, &out_buf) == null);
+}
+
+test "palette finds an open session by its folder name" {
+    const query = [_]u16{ 'f', 'u', 'n', 'e', 'r', 'a', 'l' };
+    try std.testing.expectEqualStrings("funeralprints", folderLeaf("/home/x/projects/funeralprints"));
+    try std.testing.expectEqualStrings("funeralprints", folderLeaf("/home/x/projects/funeralprints/"));
+    try std.testing.expectEqualStrings("site", folderLeaf("C:\\work\\site"));
+    try std.testing.expectEqualStrings("", folderLeaf(""));
+    var shell = struct {
+        claude_cwd: [192]u8 = std.mem.zeroes([192]u8),
+        claude_cwd_len: u32 = 0,
+        cached_cwd: [512]u8 = std.mem.zeroes([512]u8),
+        cached_cwd_len: u32 = 0,
+    }{};
+    try std.testing.expect(!sessionFolderMatchesQuery(&shell, query[0..]));
+    const cwd = "/home/x/projects/funeralprints";
+    @memcpy(shell.claude_cwd[0..cwd.len], cwd);
+    shell.claude_cwd_len = cwd.len;
+    try std.testing.expect(sessionFolderMatchesQuery(&shell, query[0..]));
+    const home = [_]u16{ 'h', 'o', 'm', 'e' };
+    try std.testing.expect(!sessionFolderMatchesQuery(&shell, home[0..]));
+}
+
+test "palette ranks the open chat in a folder ahead of an archived shell with the folder name" {
+    const old_shell = app_state.shells[0];
+    const old_shell_count = app_state.shell_count;
+    const old_archived = app_state.g_archived;
+    const old_archived_count = app_state.g_archived_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    var archived: std.ArrayList(app_state.ArchivedEntry) = .empty;
+    defer {
+        archived.deinit(std.testing.allocator);
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_shell_count;
+        app_state.g_archived = old_archived;
+        app_state.g_archived_count = old_archived_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    app_state.shell_count = 1;
+    for ("Claude", 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = 6;
+    const cwd = "/home/x/projects/funeralprints";
+    @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
+    app_state.shells[0].claude_cwd_len = cwd.len;
+    var entry = app_state.ArchivedEntry{};
+    @memcpy(entry.name[0..13], "Funeralprints");
+    entry.name_len = 13;
+    try archived.append(std.testing.allocator, entry);
+    app_state.g_archived = archived;
+    app_state.g_archived_count = 1;
+    for ([_][]const u8{ "fune", "funeralprints" }) |query| {
+        for (query, 0..) |c, i| app_state.g_search_buf[i] = c;
+        app_state.g_search_len = @intCast(query.len);
+        @memcpy(app_state.g_search_results[0..2], &[_]usize{ SEARCH_ARCHIVED_OFFSET, 0 });
+        app_state.g_search_result_count = 2;
+        sortSearchResultsByRank();
+        try std.testing.expectEqualSlices(usize, &.{ 0, SEARCH_ARCHIVED_OFFSET }, app_state.g_search_results[0..2]);
+    }
+}
+
+test "IGSH-1266 pick repo typing filters paths case insensitively" {
+    const query = [_]u16{ 'M', 'U', 'L', 'T', 'I' };
+    try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..]));
+    try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..0]));
+    try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
+}
+
+fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
+    app_state.g_custom_cmds_count = 0;
+    var entry = CustomCmd{};
+    entry.is_default = true;
+    entry.kind = .vps;
+    std.mem.copyForwards(u8, entry.workspace[0..name.len], name);
+    entry.workspace_len = @intCast(name.len);
+    std.mem.copyForwards(u8, entry.cwd[0..path.len], path);
+    entry.cwd_len = @intCast(path.len);
+    app_state.g_custom_cmds[0] = entry;
+    app_state.g_custom_cmds_count = 1;
+}
+
+fn seedWorkspaceName(slot: u8, name: []const u8) void {
+    app_state.g_ws_names[slot] = std.mem.zeroes([32]u8);
+    std.mem.copyForwards(u8, app_state.g_ws_names[slot][0..name.len], name);
+    app_state.g_ws_name_len[slot] = @intCast(name.len);
+}
+
+test "IGSH-1527 the catch-all Other workspace never takes a saved folder" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_custom_cmds_count = 0;
+    }
+    seedWorkspaceName(0, "Other");
+    seedWorkspaceFolder("Other", "/home/x/projects");
+    var host: u8 = 0;
+    var path: [256]u8 = undefined;
+    var len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    try std.testing.expect(!workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
+    try std.testing.expect(folderEntryIndexFor("Other") != null);
+}
+
+test "IGSH-1527 the catch-all Other workspace asks for the repo before it starts" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    const saved_single = app_state.g_single_window;
+    const saved_active = app_state.g_active_workspace;
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_active;
+        app_state.g_custom_cmds_count = 0;
+        closePickRepo();
+    }
+    app_state.g_single_window = false;
+    app_state.g_active_workspace = 0;
+    seedWorkspaceName(0, "Other");
+    seedWorkspaceFolder("Other", "/home/x/projects");
+    const before = app_state.shell_count;
+    try std.testing.expect(!spawnWorkspaceSession(false, false));
+    try std.testing.expect(app_state.g_search_pick_repo_mode);
+    try std.testing.expectEqual(before, app_state.shell_count);
+}
+
+test "IGSH-1527 a named workspace keeps its saved folder" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_custom_cmds_count = 0;
+    }
+    seedWorkspaceName(0, "Main");
+    seedWorkspaceFolder("Main", "/home/x/projects/repo-new");
+    var host: u8 = 0;
+    var path: [256]u8 = undefined;
+    var len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    try std.testing.expect(workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
+    try std.testing.expectEqualStrings("/home/x/projects/repo-new", path[0..len]);
+}

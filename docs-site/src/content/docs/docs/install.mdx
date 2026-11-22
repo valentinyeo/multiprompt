@@ -1,0 +1,49 @@
+---
+title: Download and install
+description: Install multiprompt on Windows and Android, add the Chrome extension, and report problems.
+---
+
+multiprompt is a small Windows app that runs many AI coding agents (Claude Code, Codex, Pi) side by side in one window of vertical tabs, and tells you which one needs you. Every tab is a real native shell, so ten agents use about 30 MB instead of the 300 to 500 MB a terminal app needs.
+
+## Windows
+
+Requires Windows 10 or 11. No installer is needed.
+
+1. Open the [releases page](https://github.com/valentinyeo/multiprompt/releases/latest).
+2. Download the file for your PC:
+   - `multiprompt-x64.exe` for most PCs (Intel or AMD).
+   - `multiprompt-arm64.exe` for Snapdragon laptops.
+3. Put it in a folder of your choice, rename it to `multiprompt.exe` and run it.
+
+For the docked browser pane, also download `zigshell-bridge-x64.exe` or `zigshell-bridge-arm64.exe`, rename it to `zigshell-bridge.exe` and put it next to `multiprompt.exe`.
+
+## Android
+
+The Android companion app lets you follow and prompt your sessions from a phone.
+
+1. On the phone, download [multiprompt-companion.apk](https://github.com/valentinyeo/multiprompt-android/releases/download/android-latest/multiprompt-companion.apk).
+2. Open it and allow installing from this source when Android asks.
+3. Later versions show up on the app's **Update** screen.
+
+## Chrome extension
+
+The extension connects Chrome to the browser pane, so agents can open and read pages next to their shell. It is optional.
+
+1. Download the source code (`.zip`) from the [releases page](https://github.com/valentinyeo/multiprompt/releases/latest) and unzip it.
+2. In Chrome, open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and pick the `extension` folder.
+
+Use the extension from the same release as the app. After an update, click the reload icon on the extension card.
+
+## Report a problem
+
+Open an issue on GitHub:
+
+- Windows app and Chrome extension: [github.com/valentinyeo/multiprompt/issues](https://github.com/valentinyeo/multiprompt/issues/new/choose)
+- Android app: [github.com/valentinyeo/multiprompt-android/issues](https://github.com/valentinyeo/multiprompt-android/issues/new)
+
+Include the version from the title bar and the steps that lead to the problem.
+
+## Build from source
+
+See [Getting Started](/docs/getting-started/) to build the app yourself with Zig.

@@ -1,0 +1,36 @@
+{
+ "source": "HT Product Lead outbox entry from the PC and the two user turns of that session, copied 2026-10-17: the two queued chat messages were submitted as one turn, so the first one is a prefix of the delivered text",
+ "outbox": {
+  "key": "tmux:1:project-10",
+  "messages": [
+   {
+    "t": "Compare pstack (https://github.com/cursor/plugins/tree/main/pstack, MIT) with our runner setup and adopt only what we lack.\n1. Read pstack's actual files: skills/poteto-mode/playbooks/*.md and skills/principle-*/SKILL.md. Read our .claude/skills/INDEX.md, the /ship skill and the 69 tagged corrections from ISSUE-435.\n2. Map every pstack playbook and principle to take, skip or already have, one line of reason each. Skip anything that changes model routing (we follow the token ladder) or bypasses ship-check.\n3. Port the \"take\" items into our own skills in ht-skills-live (one PR per item), crediting pstack.\n4. Prove each: rerun the ISSUE-435 blind replay on the same 10 tickets (baseline 3/10) and report the new score; ship-check and ship-gates tests stay green.\nDone when the mapping, the PRs and the replay scores are on the ticket.",
+    "s": 2,
+    "a": 1792268455248,
+    "w": 1792268464375,
+    "c": 22,
+    "n": 1,
+    "x": 1,
+    "r": 1
+   }
+  ]
+ },
+ "transcript": [
+  {
+   "type": "user",
+   "timestamp": "2026-10-17T20:20:55.248Z",
+   "message": {
+    "role": "user",
+    "content": "i think the /bro command to explain stuff is probably not a bad idea\ni think the /bro command to explain stuff is probably not a bad ideacant see which time frame selecte and preselct 24 pls"
+   }
+  },
+  {
+   "type": "user",
+   "timestamp": "2026-10-17T20:28:15.365Z",
+   "message": {
+    "role": "user",
+    "content": "\n\n<pasted_content id=\"cd80\">\nCompare pstack (https://github.com/cursor/plugins/tree/main/pstack, MIT) with our runner setup and adopt only what we lack.\n1. Read pstack's actual files: skills/poteto-mode/playbooks/*.md and skills/principle-*/SKILL.md. Read our .claude/skills/INDEX.md, the /ship skill and the 69 tagged corrections from ISSUE-435.\n2. Map every pstack playbook and principle to take, skip or already have, one line of reason each. Skip anything that changes model routing (we follow the token ladder) or bypasses ship-check.\n3. Port the \"take\" items into our own skills in ht-skills-live (one PR per item), crediting pstack.\n4. Prove each: rerun the ISSUE-435 blind replay on the same 10 tickets (baseline 3/10) and report the new score; ship-check and ship-gates tests stay green.\nDone when the mapping, the PRs and the replay scores are on the ticket.\n</pasted_content id=\"cd80\">\n\ncant see which time frame selecte and preselct 24 pls"
+   }
+  }
+ ]
+}

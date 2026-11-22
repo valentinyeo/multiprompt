@@ -1,0 +1,30 @@
+{
+  "refreshSeconds": 600,
+  "accounts": [
+    {
+      "id": "claude-primary",
+      "provider": "claude",
+      "label": "Primary Claude email",
+      "email": "you@example.com",
+      "configDir": "~/.claude"
+    },
+    {
+      "id": "claude-project",
+      "provider": "claude",
+      "label": "Second Claude email",
+      "email": "other@example.com",
+      "configDir": "~/.claude-account-2"
+    },
+    {
+      "id": "codex",
+      "provider": "codex",
+      "label": "Codex"
+    },
+    {
+      "id": "kimi",
+      "provider": "kimi",
+      "label": "Kimi",
+      "configFile": "~/.kimi/config.toml"
+    }
+  ]
+}

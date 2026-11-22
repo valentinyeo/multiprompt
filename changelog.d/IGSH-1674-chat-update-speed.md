@@ -1,0 +1,1 @@
+Long chats update faster.

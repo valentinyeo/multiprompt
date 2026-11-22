@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "multiprompt browser theme - Dark",
+  "version": "1.0.0",
+  "theme": {
+    "colors": {
+      "bookmark_text": [255, 255, 255],
+      "button_background": [36, 36, 36, 1],
+      "frame": [36, 36, 36],
+      "frame_inactive": [36, 36, 36],
+      "ntp_background": [36, 36, 36],
+      "ntp_link": [140, 180, 255],
+      "ntp_text": [255, 255, 255],
+      "tab_background_text": [210, 210, 210],
+      "tab_text": [255, 255, 255],
+      "toolbar": [36, 36, 36]
+    },
+    "tints": { "buttons": [0, 0, 0.86] }
+  }
+}

@@ -1,0 +1,387 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+
+function assertCardNotes(source) {
+  assert.match(source, /for \(0\.\.shown\)/);
+  assert.match(source, /card_notes\.line\(i\)/);
+  assert.match(source, /DrawTextW/);
+  assert.match(source, /card_notes\.more\(&more_buf, false\)/);
+  assert.match(source, /\[update\] card view=\{s\} n=\{d\} first=\{s\}/);
+  assert.match(source, /\[update\] card note \{d\}=\{s\}/);
+  assert.match(source, /\[update\] card remaining=/);
+  assert.match(source, /\[update\] more row=\{d\},\{d\}/);
+  assert.match(source, /if \(cardHasToggle\(\) and ptInRect\(updateCardMoreRect\(card\), x, y\)\) return 4/);
+}
+
+test('release asset includes every historical version, plain lines only, and the offered version rather than embedded-only notes', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = read('src/changelog.zig');
+  const versions = [...source.matchAll(/\.ver = "(\d+\.\d+\.\d+)"/g)].map(match => match[1]);
+  const notes = releaseNotes(source, `v${versions[0]}`);
+  assert.deepEqual(notes.releases.map(release => release.version), versions);
+  assert.ok(Buffer.byteLength(JSON.stringify(notes)) < 1024 * 1024);
+  assert.ok(notes.releases.every(release => release.changes.every(line => /^IGSH-[1-9]\d* \S/.test(line))));
+  assert.ok(notes.releases[0].changes.length > 0);
+  assert.equal(notes.version, versions[0]);
+  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes, no visible change/);
+  assert.throws(() => releaseNotes(source, 'v99.0.0'), /offered version/);
+});
+
+test('filler cannot be published as a ticket title', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = `pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.1400", .items = &.{
+        .{ .text = "IGSH-1300 Checks and fixes, no visible change", .ticket = "IGSH-1300" },
+    } },
+};`;
+  assert.throws(() => releaseNotes(source, 'v0.28.1400'), /title/);
+});
+
+test('historical and current lines use the same authoritative title', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const files = {
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1266" },\n    } },\n};\n',
+  };
+  const titles = { 'IGSH-1266': 'A title with café and "quotes"' };
+  const source = buildChangelog(files, 'v0.28.1341', [], [{ sha: 'new', subject: 'IGSH-1266: Keep the real line' }], titles);
+  const notes = releaseNotes(source, 'v0.28.1341');
+  assert.deepEqual(notes.releases.map(release => release.changes), [['IGSH-1266 A title with café and "quotes"'], ['IGSH-1266 A title with café and "quotes"']]);
+});
+
+test('existing release workflow signs the versioned history alongside the update bundle', () => {
+  const workflow = read('.github/workflows/release.yml');
+  assert.match(workflow, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" release-notes\.json/);
+  const release = workflow.slice(workflow.indexOf('\n  release:\n'));
+  const signedNotesInOrder = text => {
+    const notes = text.indexOf('cp release-notes.json dist/release-notes.json');
+    const manifest = text.indexOf('sha256sum -- *.exe *.zip release-notes.json > SHA256SUMS.txt');
+    const signature = text.indexOf('node tools/sign-release.mjs');
+    const publication = text.indexOf('gh release create "$TAG" dist/*');
+    return notes >= 0 && notes < manifest && manifest < signature && signature < publication;
+  };
+  assert.ok(signedNotesInOrder(release));
+  const unsigned = release.replace('sha256sum -- *.exe *.zip release-notes.json > SHA256SUMS.txt', 'sha256sum -- *.exe *.zip > SHA256SUMS.txt');
+  assert.equal(signedNotesInOrder(unsigned), false);
+  assert.match(workflow, /gh release create "\$TAG" dist\/\*/);
+});
+
+test('updater stages checksum-verified notes before publishing ready, without a new network host', () => {
+  const ps = read('src/update_release.ps1');
+  const save = ps.slice(ps.indexOf('function Save-Update'), ps.indexOf('function Start-UpdatedApp'));
+  assert.match(save, /Get-ReleaseAsset \$release 'release-notes.json'/);
+  assert.match(save, /Assert-Update "\$dir\/notes.tmp" "\$dir\/SHA256SUMS.txt" 'release-notes.json' \$Target/);
+  assert.ok(save.indexOf('Assert-Manifest') < save.indexOf('Assert-Update "$dir/notes.tmp"'));
+  assert.ok(save.indexOf('Assert-Update "$dir/notes.tmp"') < save.indexOf('-Destination "$dir/release-notes.json"'));
+  assert.ok(save.indexOf('-Destination "$dir/release-notes.json"') < save.indexOf('-Destination "$dir/ready.txt"'));
+  assert.match(save, /Release notes version mismatch/);
+  assert.match(save, /Release notes too large/);
+  assert.deepEqual([...new Set([...ps.matchAll(/https:\/\/([^/'"\s]+)/g)].map(match => match[1]))].sort(), ['api.github.com', 'github.com']);
+  assert.match(save, /Remove-Item -LiteralPath "\$dir\/release-notes.json"/);
+  const zig = read('src/update_release.zig');
+  assert.match(zig, /readFileAllocWin32\(path, 1024 \* 1024 \+ 1\)/);
+  assert.match(zig, /parseFromSlice\(@import\("update_notes.zig"\)\.Document/);
+  assert.match(zig, /pick\(parsed.value.releases, APP_VERSION, offered\)/);
+  assert.match(zig, /defer parsed.deinit\(\)/);
+  assert.doesNotMatch(zig, /@import\("changelog.zig"\)/);
+});
+
+test('existing card uses the same growing rectangle for layout and hits, with three Unicode note rows, an expandable full list and remaining count', () => {
+  const card = read('src/update_card.zig');
+  assertCardNotes(card);
+  assert.equal((card.match(/update_release.cardNotes\(/g) || []).length, 2);
+  assert.match(card, /const desired = base \+ notes_height/);
+  assert.match(card, /return updateCardHeight\(\) \+ @import\("window_layout.zig"\).paneGap\(\)/);
+  assert.match(card, /const bottom = client.bottom - uiScaled\(8\);\s+return \.\{ \.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\)/);
+  assert.match(card, /const card = updateCardRect\(\)/);
+  assert.match(card, /utf8ToUtf16Le\(&note_wide, card_notes.line\(i\)\)/);
+  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('var more_buf:', card.indexOf('pub fn paintSidebarUpdateCard')));
+  assert.match(painter, /DrawTextW\(hdc, &note_wide, @intCast\(n\), &note, DT_WORDBREAK \| DT_NOPREFIX\)/);
+  assert.doesNotMatch(painter, /DT_SINGLELINE|DT_END_ELLIPSIS/);
+  assert.match(card, /DT_WORDBREAK \| DT_NOPREFIX \| @import\("win32.zig"\).DT_CALCRECT/);
+  assert.match(card, /IntersectClipRect\(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom\)/);
+  assert.match(card, /card_scroll = std.math.clamp/);
+  assert.match(card, /const bottom = card.bottom - uiScaled\(38\)/);
+  assert.match(read('src/main.zig'), /if \(pt\.x >= 0 and pt\.x < SIDEBAR_W\(\) and pt\.y >= 0\) \{\s+const delta: i16 = @bitCast\(@as\(u16, @truncate\(wp >> 16\)\)\);\s+if \(@import\("update_card\.zig"\)\.updateCardScroll\(pt\.x, pt\.y, delta\)\) return 0/);
+  const notes = read('src/update_notes.zig');
+  for (const name of [
+    'ticket titles and skipped releases retain newest-first order',
+    'invalid notes and filler are not displayed',
+    'collapsed and expanded counts retain omitted items',
+  ]) assert.ok(notes.includes(`test "${name}"`));
+  assert.match(notes, /lines: \[16\]\[512\]u8/);
+  assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
+  assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
+  assert.match(notes, /"and \{d\} more", \.\{rest\}/);
+  const rect = card.slice(card.indexOf('pub fn updateCardRect()'), card.indexOf('fn updateCardButtonRect('));
+  assert.match(rect, /\.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\), \.right = @import\("browser_pane.zig"\).SIDEBAR_W\(\) - uiScaled\(8\), \.bottom = bottom/);
+  const hit = card.slice(card.indexOf('pub fn updateCardHit('), card.indexOf('var release_ready'));
+  assert.match(hit, /const card = updateCardRect\(\);\s+if \(!ptInRect\(card, x, y\)\) return 0/);
+  assert.match(card.slice(card.indexOf('pub fn paintSidebarUpdateCard')), /const card = updateCardRect\(\)/);
+});
+
+test('master painter fails the exact card-note observability contract required by the new journey', () => {
+  assert.throws(() => assertCardNotes(read('tools/fixtures/IGSH-728/master-update-card.zig')), assert.AssertionError);
+  assertCardNotes(read('src/update_card.zig'));
+});
+
+test('safe-updates journey requires painted multi-version notes and screenshot from the real branch app', () => {
+  const suite = read('tools/update-release.test.ps1');
+  assert.match(suite, /Copy-Item -LiteralPath \$Verifier -Destination \$cardExe/);
+  assert.match(suite, /Save-Update \$cardExe '0.0.0' 'x64'/);
+  assert.match(suite, /Start-Process \$cardExe -ArgumentList "--update-ready \$cardEventName"/);
+  assert.match(suite, /\$cardMutex.WaitOne\(\)/);
+  assert.match(suite, /Staged notes differ from the signed release/);
+  assert.match(suite, /\$observedNotes\[\$i\] -ceq \$expectedNotes\[\$i\]/);
+  assert.match(suite, /GetClientRect\(\$cardProcess.MainWindowHandle/);
+  assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
+  assert.match(suite, /\$collapsed \| ConvertTo-Json/);
+  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'and 1 more'/);
+  assert.match(suite, /Click-CardMore \$collapsed/);
+  assert.match(suite, /'update-card-expanded\.png'/);
+  assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
+  assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
+  assert.match(suite, /Tampered notes accepted/);
+  assert.match(suite, /ticket-title staged notes retain title and ticket link/);
+  assert.match(suite, /Ticket title is missing or changed/);
+  assert.match(suite, /Ticket link is missing or changed/);
+  assert.match(suite, /Ticket-title update marker missing/);
+  assert.match(suite, /update-card-ticket-title\.png/);
+  assert.match(suite, /Restored update marker missing/);
+  assert.match(suite, /\$installedNotes\.version = \$newVersion/);
+  assert.match(suite, /restart card reopens newer native app with session restored/);
+  const journey = read('tools/update-release-journey.ps1');
+  assert.match(journey, /signed staged notes retain expected data/);
+  assert.match(journey, /zig test src\/update_notes\.zig/);
+  assert.match(journey, /Missing update card screenshot/);
+  assert.match(read('.claude/skills/verify-multiprompt/features/safe-updates.md'), /update-card-notes.png/);
+  const fixture = read('tools/update-release-fixtures.mjs');
+  for (const version of ['9.8.0', '9.9.0', '9.10.0', '10.0.0']) assert.ok(fixture.includes(version));
+  assert.match(fixture, /version: '9.9.0', changes: \['IGSH-2 Middle change'\]/);
+  assert.match(fixture, /names.push\('release-notes.json'\)/);
+});
+
+test('unidentified legacy lines cannot be published', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = `pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.901", .items = &.{
+        .{ .text = "Unidentified legacy note", .ticket = "" },
+    } },
+};`;
+  assert.throws(() => releaseNotes(source, 'v0.28.901'), /unidentified/);
+});
+
+test('changed implementation is comment-free and leaves no error log', async () => {
+  const { tokenize, languageFor } = await import('./strip-comments.mjs');
+  for (const file of [
+    'src/update_notes.zig', 'src/update_card.zig', 'src/update_release.zig', 'src/update_release.ps1',
+    'tools/release-notes.mjs', 'tools/version-stamp.mjs', 'tools/update-release-fixtures.mjs',
+    'tools/update-release.test.ps1', 'tools/update-release-journey.ps1',
+    'tools/update-card-notes.test.js', 'tools/soft-2995-update-card.test.js', 'tools/changelog-fragments.test.js',
+    'tools/changelog-entry.test.js', 'tools/version-stamp.test.mjs',
+    'tools/fixtures/IGSH-728/master-update-card.zig',
+    '.github/workflows/release.yml', '.github/workflows/test.yml',
+  ]) assert.deepEqual(tokenize(read(file), languageFor(file)).comments.filter(comment => !comment.reason), [], file);
+  const files = fs.readdirSync(root, { recursive: true, withFileTypes: true });
+  assert.equal(files.some(file => file.isFile() && file.name === 'error.log'), false);
+  assert.match(read('changelog.d/README.md'), /No ticket ids, file names, paths, code names or PR numbers/);
+});
+
+
+test('IGSH-1090 published executable paints its own published notes, with no binary edits', {
+  skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
+  timeout: 180000,
+}, async t => {
+  const os = require('node:os');
+  const { createHash } = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'released-card-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const response = await fetch('https://api.github.com/repos/valentinyeo/multiprompt/releases/latest');
+  assert.equal(response.status, 200);
+  let release = await response.json();
+  const historyAsset = release.assets.find(asset => asset.name === 'release-notes.json');
+  assert.ok(historyAsset);
+  const historyResponse = await fetch(historyAsset.browser_download_url);
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  const feature = history.releases.find(item => item.changes.some(change => change.startsWith('IGSH-1090 ') || change === 'Update cards explain each change, without generic messages.'));
+  assert.ok(feature, 'Feature must be published before its release-card proof');
+  assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
+  const assets = {};
+  for (const name of ['multiprompt-x64.exe', 'release-notes.json']) {
+    const asset = release.assets.find(asset => asset.name === name);
+    assert.ok(asset, name);
+    assert.match(asset.browser_download_url, /^https:\/\/github\.com\/valentinyeo\/multiprompt\/releases\/download\//);
+    const download = await fetch(asset.browser_download_url);
+    assert.equal(download.status, 200);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, asset.digest);
+    assets[name] = path.join(directory, name);
+    fs.writeFileSync(assets[name], bytes);
+  }
+  const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
+  assert.equal(notes.version, release.tag_name.slice(1));
+  assert.ok(notes.releases.some(item => item.changes.some(change => change.startsWith('IGSH-1090 ') || change === 'Update cards explain each change, without generic messages.')));
+  const proof = spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
+    '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(proof.status, 0, proof.stdout + proof.stderr);
+  assert.match(proof.stdout, /RELEASE_CARD_RECEIPT=/);
+  assert.match(proof.stdout, /RELEASE_CARD_PNG=/);
+  console.log(proof.stdout);
+});
+
+test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejects the old released painter', {
+  skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
+  timeout: 300000,
+}, async t => {
+  const os = require('node:os');
+  const { createHash } = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-card-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fragment = 'Update notes wrap in full, with scrolling for longer lists.';
+  const api = async endpoint => {
+    const response = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/${endpoint}`);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const download = async (release, name, destination) => {
+    const asset = release.assets.find(item => item.name === name);
+    assert.ok(asset, name);
+    const response = await fetch(asset.browser_download_url);
+    assert.equal(response.status, 200);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, asset.digest);
+    fs.writeFileSync(destination, bytes);
+  };
+  const latest = await api('releases/latest');
+  const notes = path.join(directory, 'notes.json');
+  await download(latest, 'release-notes.json', notes);
+  const history = JSON.parse(fs.readFileSync(notes, 'utf8'));
+  const shipped = history.releases.find(release => release.changes.some(change => change.startsWith('IGSH-1118 ') || change === fragment));
+  let exe = path.join(root, 'zig-out/bin/multiprompt.exe');
+  if (shipped) {
+    const release = shipped.version === latest.tag_name.slice(1) ? latest : await api(`releases/tags/v${shipped.version}`);
+    exe = path.join(directory, 'released.exe');
+    await download(release, 'multiprompt-x64.exe', exe);
+    history.version = shipped.version;
+    fs.writeFileSync(notes, JSON.stringify(history));
+  }
+  const old = await api('releases/tags/v0.28.983');
+  const before = path.join(directory, 'before.exe');
+  await download(old, 'multiprompt-x64.exe', before);
+  const proof = (binary, label) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', notes,
+    '-Evidence', path.join(directory, label), '-Wrapped'],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+  const red = proof(before, 'red');
+  assert.notEqual(red.status, 0, red.stdout + red.stderr);
+  assert.match(red.stdout + red.stderr, /Card did not expose wrapped note bounds/);
+  console.log('WRAPPED_CARD_RED v0.28.983 rejects the unwrapped painter');
+  const green = proof(exe, 'green');
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /WRAPPED_CARD_RECEIPT=/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-normal:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-minimum:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-scrolled:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-collapsed:/);
+  console.log(green.stdout);
+});
+
+test('release contains one linked authoritative line for each commit ticket', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const files = {
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-2-chat.md')]: 'Chats open sooner.\nDrafts stay visible.\n',
+  };
+  const titles = { 'IGSH-1': 'Earlier title', 'IGSH-2': 'Chat title', 'IGSH-3': 'Checks title' };
+  const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
+  const generated = buildChangelog(files, 'v0.28.1100', [], commits, titles);
+  const latest = releaseNotes(generated, 'v0.28.1100').releases[0];
+  assert.deepEqual(latest.changes, ['IGSH-2 Chat title', 'IGSH-3 Checks title']);
+  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2', 'https://app.hypertask.ai/detail/project-2060/3']);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }], titles), /bad123.*leading ticket ID/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [], titles), /fragment has no matching commit ticket/);
+  assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /unidentified/);
+});
+
+test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.1446";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1446", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-1610-device.md')]: 'Devices can be approved when one host is offline.\n',
+  };
+  const commits = [
+    { sha: '8f52c2a6cf81d617d61bf6c439ec29719d850062', subject: 'Add AGENTS.md pointing every agent at CLAUDE.md (#737)' },
+    { sha: '246972c5', subject: 'IGSH-1610: Approve a device even when one SSH host is unreachable (#738)' },
+  ];
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits, { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' }); });
+  const latest = releaseNotes(generated, 'v0.28.1448').releases[0];
+  assert.ok(latest.changes.some(line => line.startsWith('IGSH-1610 ')));
+  assert.ok(latest.changes.some(line => line.startsWith('IGSH-1615 ')));
+  assert.match(generated, /\.ticket = "IGSH-1615"/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1448', [], [{ sha: '8f52c2a6', subject: commits[0].subject }, commits[1]]), /8f52c2a6.*leading ticket ID/);
+});
+
+test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => {
+  const { execFileSync } = require('node:child_process');
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const tags = [1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039, 1040, 1042, 1043, 1044, 1045, 1046, 1047, 1048].map(n => `v0.28.${n}`);
+  const source = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+  };
+  const history = [{ tag: 'v0.28.1026', files: source }];
+  for (const tag of tags) {
+    const names = git('diff', '--name-only', '--diff-filter=AM', 'v0.28.1026', tag, '--', 'changelog.d/').split('\n').filter(Boolean);
+    const fragments = Object.fromEntries(names.map(name => [name, git('show', `${tag}:${name}`)]));
+    history.push({ tag, files: { ...source, ...fragments }, sha: git('rev-parse', `${tag}^{commit}`) });
+  }
+  const files = { ...history.at(-1).files, [path.posix.join('changelog.d', 'IGSH-1243-notes.md')]: 'Changelog ticket links now open their tickets.\n' };
+  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }], { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' });
+  const notes = releaseNotes(generated, 'v0.28.1100');
+  for (const tag of tags) {
+    const release = notes.releases.find(item => item.version === tag.slice(1));
+    assert.ok(release, tag);
+    assert.equal(release.changes.length, release.tickets.length, tag);
+    assert.ok(release.tickets.every(ticket => /^https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+$/.test(ticket)), tag);
+  }
+  assert.ok(notes.releases.some(release => release.changes.length > 0));
+  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
+  assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
+  const release1038 = notes.releases.find(item => item.version === '0.28.1038');
+  const actualFragment = 'IGSH-1238 ' + JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json'))['IGSH-1238'];
+  const fragmentIndex = release1038.tickets.indexOf('https://app.hypertask.ai/detail/project-2060/1238');
+  assert.equal(release1038.changes[fragmentIndex], actualFragment);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);
+});
+
+test('a board 2060 commit numbered SOFT releases its IGSH fragment', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const files = {
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-2272-clear-live-chat.md')]: 'Cleared chats keep their new replies.\n',
+  };
+  const titles = { 'IGSH-1': 'Earlier title', 'IGSH-2272': 'Check clear works in live chats' };
+  let generated = null;
+  try {
+    generated = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'aaa', subject: 'SOFT-2272: Keep cleared chats replying' }], titles);
+  } catch (error) {
+    generated = { error: error.message };
+  }
+  assert.equal(typeof generated, 'string', `release notes build: ${generated?.error}`);
+  assert.match(generated, /IGSH-2272/);
+});

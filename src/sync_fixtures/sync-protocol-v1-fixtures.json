@@ -1,0 +1,188 @@
+{
+  "protocol": "multiprompt-sync-v1",
+  "note": "Synthetic cross-language cryptographic test vectors. All keys and passphrases are public test inputs, never credentials.",
+  "vectors": [
+    {
+      "name": "single-record",
+      "passphrase": "correct horse battery staple",
+      "salt": "Y++RlP8cUziAvaYDoMuL0Q==",
+      "vaultKey": "/ZYZhQZidIeSytjbKLOIqgK1lbaq3Bdchyfe0pQdXcw=",
+      "wrapIv": "09WaEObdyPMEi3ZQ",
+      "kdf": {
+        "memoryKiB": 65536,
+        "iterations": 3,
+        "parallelism": 1
+      },
+      "records": [
+        {
+          "id": "hosts",
+          "iv": "e16TCCRC3p/Da01F",
+          "plaintextUtf8": "{\"hosts\":[{\"id\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"label\":\"host1\",\"hostname\":\"host1.example.com\",\"port\":22,\"username\":\"user\",\"keySecretId\":\"key-3f7c1b2e\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Zk5tVQ8m5r4Ykqz9Xw2C1bN7vJ3hG8sD0aF6uT4iQ2o\"}]}",
+          "ct": "d6+CPV4vjsjHGq8fY9b8NX9R91WtpXw/mNr70WXmGnswCrVgtv4ILhO64uy18kt37B5TzIm6VHUXupKPZOV258Ms28T93Km7Zqc2Yv5Xa7VPvo3nVTVd65qkmBEU8fbNO2v5eRilFPjBZlFUU85TZvbfL0T0NgZFc2QemFZ7vMWE1pWW6F7fDUBTKhETNjrH4eODHIqozry/9/ZfIh+O0gL3b6fO4s6/ucLoQFSENOyG4OGSYCZ8qyOTjZ9Bo9f8pNHxK1XTpZFu7yvbrrigKDc6d7+KCkSCIUeZjxes+IJzDWhHwG7GkpMLSMMzL7Hs03z5Rm3Yq9BjuhyfZgiqVPV2+Abg8KEcEZEnlUhanRL1qZPSKR+4v6IVwGfQWJdufkLZeIc0/sYuWjv0oQ=="
+        }
+      ],
+      "kek": "DCA1BJZdQXTT7L1cXnd6Gd13WirAMa0OIOPjFsE1jDM=",
+      "wrapCt": "/WpvUM/am1oNsYyfq7e13PrpZ6Gd797SmpOAnwfbcvEuAv5BS/50B/CRZRLd5PMh",
+      "envelopeJson": "{\"v\":1,\"kdf\":{\"alg\":\"argon2id\",\"version\":19,\"memoryKiB\":65536,\"iterations\":3,\"parallelism\":1,\"salt\":\"Y++RlP8cUziAvaYDoMuL0Q==\"},\"wrap\":{\"alg\":\"AES-256-GCM\",\"iv\":\"09WaEObdyPMEi3ZQ\",\"ct\":\"/WpvUM/am1oNsYyfq7e13PrpZ6Gd797SmpOAnwfbcvEuAv5BS/50B/CRZRLd5PMh\"},\"records\":{\"hosts\":{\"iv\":\"e16TCCRC3p/Da01F\",\"ct\":\"d6+CPV4vjsjHGq8fY9b8NX9R91WtpXw/mNr70WXmGnswCrVgtv4ILhO64uy18kt37B5TzIm6VHUXupKPZOV258Ms28T93Km7Zqc2Yv5Xa7VPvo3nVTVd65qkmBEU8fbNO2v5eRilFPjBZlFUU85TZvbfL0T0NgZFc2QemFZ7vMWE1pWW6F7fDUBTKhETNjrH4eODHIqozry/9/ZfIh+O0gL3b6fO4s6/ucLoQFSENOyG4OGSYCZ8qyOTjZ9Bo9f8pNHxK1XTpZFu7yvbrrigKDc6d7+KCkSCIUeZjxes+IJzDWhHwG7GkpMLSMMzL7Hs03z5Rm3Yq9BjuhyfZgiqVPV2+Abg8KEcEZEnlUhanRL1qZPSKR+4v6IVwGfQWJdufkLZeIc0/sYuWjv0oQ==\"}}}",
+      "envelopeSha256": "3d18c0f904b0d8a19050abcf2cc82a664c679d7dbf77dcaac82e6e8038ca6d65"
+    },
+    {
+      "name": "multi-record-sorted",
+      "passphrase": "multiprompt sync v1 passphrase",
+      "salt": "w3OOspF6NfAa2tdDxwBHew==",
+      "vaultKey": "1M0RyVORDep4eafLm8oBTtbAct2564ukkgcdPkZPU3k=",
+      "wrapIv": "zg08B0NFygiwGYZg",
+      "kdf": {
+        "memoryKiB": 65536,
+        "iterations": 3,
+        "parallelism": 1
+      },
+      "records": [
+        {
+          "id": "workspaces",
+          "iv": "TbGQ6s0ITZfSDuWe",
+          "plaintextUtf8": "{\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"multiprompt\",\"hostId\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"remotePath\":\"~/projects/multiprompt-android\"}]}",
+          "ct": "f521Iq77tTTIj0ytIGWa2mg/2fqDUdgmBxRoNARyu3qP4Mw7OxEBDtT3nV9AECnlDDpe+wNd6umHokQ2Fl8tZrUEropvDClmICq4ZEh/xElGh6mw00CgW36j6mlGkHmn04uKM8O7zcFnLbcyfrYfZXZlb8y6rfLfIVDbtjjzSvkI5LxkFslUQ1tujceuTYS7RfYLywQ7eLWNx6u+OVLtOrA="
+        },
+        {
+          "id": "hosts",
+          "iv": "NixDoKWXz4wtR/ZW",
+          "plaintextUtf8": "{\"hosts\":[{\"id\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"label\":\"host1\",\"hostname\":\"host1.example.com\",\"port\":22,\"username\":\"user\",\"keySecretId\":\"key-3f7c1b2e\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Zk5tVQ8m5r4Ykqz9Xw2C1bN7vJ3hG8sD0aF6uT4iQ2o\"}]}",
+          "ct": "+cS9ZAC+droul2J981eNUbtjMdpmkn6LgJ6fJRVOAhlmD6yR25O9ALJ3bR4kx7FWw4LTQQGX+Inug1Hq3Vwg0M03KaDsKql7vGAS0V5pBOPS+4DqDz1Aif0iC/O59xlYnIHE+H7RJHbl2BMgLy+SSDS8I45SPAWvjpSm9VU/NiWAtfj2xWFxd2SIkuJV5uPwfOGQbHBOP/NzlyQv0pMfvJ5X63seLT4XUANBJaWTy6lJ8LoEu44bxXz+S5nGw5d9gSQTcP2pmprg+UMTopfiuCo4NyYzRAVwvRLLtK5HLk007r/g0eNZaGP6gfoCNKcEkB0OAT1ZFo/59VmZu57PFfK0OevFC3aZQC/+YNSI6F803JOf3rgeagHovkh2p8oWlmXPSbzraYpozkMeAQ=="
+        }
+      ],
+      "kek": "1VkDPkH9ITbidlRIxQ1Y93TbwlbmCKhT+GyKVe+2NnY=",
+      "wrapCt": "oGJ2zLC98uI4J8DSJJpA2hjpKrGoEnIA7L3nD4qrL6fvrTlVqlx865FLnStqn88c",
+      "envelopeJson": "{\"v\":1,\"kdf\":{\"alg\":\"argon2id\",\"version\":19,\"memoryKiB\":65536,\"iterations\":3,\"parallelism\":1,\"salt\":\"w3OOspF6NfAa2tdDxwBHew==\"},\"wrap\":{\"alg\":\"AES-256-GCM\",\"iv\":\"zg08B0NFygiwGYZg\",\"ct\":\"oGJ2zLC98uI4J8DSJJpA2hjpKrGoEnIA7L3nD4qrL6fvrTlVqlx865FLnStqn88c\"},\"records\":{\"hosts\":{\"iv\":\"NixDoKWXz4wtR/ZW\",\"ct\":\"+cS9ZAC+droul2J981eNUbtjMdpmkn6LgJ6fJRVOAhlmD6yR25O9ALJ3bR4kx7FWw4LTQQGX+Inug1Hq3Vwg0M03KaDsKql7vGAS0V5pBOPS+4DqDz1Aif0iC/O59xlYnIHE+H7RJHbl2BMgLy+SSDS8I45SPAWvjpSm9VU/NiWAtfj2xWFxd2SIkuJV5uPwfOGQbHBOP/NzlyQv0pMfvJ5X63seLT4XUANBJaWTy6lJ8LoEu44bxXz+S5nGw5d9gSQTcP2pmprg+UMTopfiuCo4NyYzRAVwvRLLtK5HLk007r/g0eNZaGP6gfoCNKcEkB0OAT1ZFo/59VmZu57PFfK0OevFC3aZQC/+YNSI6F803JOf3rgeagHovkh2p8oWlmXPSbzraYpozkMeAQ==\"},\"workspaces\":{\"iv\":\"TbGQ6s0ITZfSDuWe\",\"ct\":\"f521Iq77tTTIj0ytIGWa2mg/2fqDUdgmBxRoNARyu3qP4Mw7OxEBDtT3nV9AECnlDDpe+wNd6umHokQ2Fl8tZrUEropvDClmICq4ZEh/xElGh6mw00CgW36j6mlGkHmn04uKM8O7zcFnLbcyfrYfZXZlb8y6rfLfIVDbtjjzSvkI5LxkFslUQ1tujceuTYS7RfYLywQ7eLWNx6u+OVLtOrA=\"}}}",
+      "envelopeSha256": "15eaa680235b9c9da5424e72fcb9af064c33070ae16ef510d5c38260ce4bb982"
+    },
+    {
+      "name": "empty-record-body",
+      "passphrase": "edge: empty record body",
+      "salt": "2WSdECYhkOAHvJHtCrbGrw==",
+      "vaultKey": "z9Mctj/Vy+KC/T7Vvqfvq8Gku52QVmDI3Zzpk2fvUsE=",
+      "wrapIv": "44nzQSOfksX5hXYN",
+      "kdf": {
+        "memoryKiB": 65536,
+        "iterations": 3,
+        "parallelism": 1
+      },
+      "records": [
+        {
+          "id": "sessionState",
+          "iv": "Cl4ruu62JOq61DmO",
+          "plaintextUtf8": "",
+          "ct": "FmRrnDMMHPWuVs4eUGymKQ=="
+        }
+      ],
+      "kek": "2AvqpEHvlVoaxqrJXCdf9o+wpBT99VeLST2CgM7dTJI=",
+      "wrapCt": "25+CW1vBmk/j45zMMEtF1SXBv32q6m1dLJntILUergojhjOQRQX6baEmoMUogsj4",
+      "envelopeJson": "{\"v\":1,\"kdf\":{\"alg\":\"argon2id\",\"version\":19,\"memoryKiB\":65536,\"iterations\":3,\"parallelism\":1,\"salt\":\"2WSdECYhkOAHvJHtCrbGrw==\"},\"wrap\":{\"alg\":\"AES-256-GCM\",\"iv\":\"44nzQSOfksX5hXYN\",\"ct\":\"25+CW1vBmk/j45zMMEtF1SXBv32q6m1dLJntILUergojhjOQRQX6baEmoMUogsj4\"},\"records\":{\"sessionState\":{\"iv\":\"Cl4ruu62JOq61DmO\",\"ct\":\"FmRrnDMMHPWuVs4eUGymKQ==\"}}}",
+      "envelopeSha256": "bf6d546fcee8a8031fd5dbaa4f74df8dc6b73196c8ee4d5aa24287ec681abfe1"
+    }
+  ],
+  "entityVectors": [
+    {
+      "name": "entity-host-row",
+      "recordId": "hosts",
+      "entityId": "3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31",
+      "accountId": "acc-test",
+      "revision": 1,
+      "schemaVersion": 1,
+      "vaultKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "iv": "y5YTKT5X3S46Jqbg",
+      "plaintextUtf8": "{\"hosts\":[{\"id\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"label\":\"host1\",\"hostname\":\"host1.example.com\",\"port\":22,\"username\":\"user\",\"keySecretId\":\"key-3f7c1b2e\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Zk5tVQ8m5r4Ykqz9Xw2C1bN7vJ3hG8sD0aF6uT4iQ2o\"}]}",
+      "ct": "UF1TQ9Btsg4gCDWOW/MVQsCxZ6ZB5KF3I7xiwN3vnt+kCxEEH8YBtQQy3f/hktC/+0MEjBnRl242HL/ika50kVILmwlQ6tKjqGgSYHkvdfT8CE1QEiIAFCDCwWmTt2B1TfVl0PQ2TffGhWS/UlZUoQY0NHpOvD3zfK4Ec2695GVVubCsVgnFsTMSmvPNLBy0j6PPtn95nQJV8vds/nzY0+aG0/EhIWpL/e6C9dLXwekw9ngGeVoQ1kESvkC7xiIYVL23IZCyQhftIfaXFHe7dAMqE54uRzS20ryce0KQqMJCxlva4lKVSe+5SHq6hU0CnJUAGaM6pQvJC/B9ZcVisvqtxQobeql/q3ZnwzJVcriz2aD+en3HIbNbyqj/+7hh4JC2h/GmE49/GR2dTg==",
+      "payloadJson": "{\"v\":1,\"recordId\":\"hosts\",\"entityId\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"iv\":\"y5YTKT5X3S46Jqbg\",\"ct\":\"UF1TQ9Btsg4gCDWOW/MVQsCxZ6ZB5KF3I7xiwN3vnt+kCxEEH8YBtQQy3f/hktC/+0MEjBnRl242HL/ika50kVILmwlQ6tKjqGgSYHkvdfT8CE1QEiIAFCDCwWmTt2B1TfVl0PQ2TffGhWS/UlZUoQY0NHpOvD3zfK4Ec2695GVVubCsVgnFsTMSmvPNLBy0j6PPtn95nQJV8vds/nzY0+aG0/EhIWpL/e6C9dLXwekw9ngGeVoQ1kESvkC7xiIYVL23IZCyQhftIfaXFHe7dAMqE54uRzS20ryce0KQqMJCxlva4lKVSe+5SHq6hU0CnJUAGaM6pQvJC/B9ZcVisvqtxQobeql/q3ZnwzJVcriz2aD+en3HIbNbyqj/+7hh4JC2h/GmE49/GR2dTg==\"}",
+      "payloadSha256": "a60b03761fc44f53b3fb85238fbdf0e1df6878e801dbf7b7060372ddfcc6cc22"
+    },
+    {
+      "name": "entity-session-state-encoded-key",
+      "recordId": "sessionState",
+      "entityId": "3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31--my-session",
+      "accountId": "acc-test",
+      "revision": 1,
+      "schemaVersion": 1,
+      "vaultKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "iv": "klfRsrR14PoqDkbY",
+      "plaintextUtf8": "{\"unread\":true,\"lastReadAt\":1757500000}",
+      "ct": "j2bTRKlb4z4WJasCFpiA3uPb0WEHr8D3HIgMtxyNOlrJKW89ZKH+xLlINDrnGwwjhNSnSYxgFw==",
+      "payloadJson": "{\"v\":1,\"recordId\":\"sessionState\",\"entityId\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31--my-session\",\"iv\":\"klfRsrR14PoqDkbY\",\"ct\":\"j2bTRKlb4z4WJasCFpiA3uPb0WEHr8D3HIgMtxyNOlrJKW89ZKH+xLlINDrnGwwjhNSnSYxgFw==\"}",
+      "payloadSha256": "7398c0343d5d2973a8a920fcff0f309551016c61d06a975005e7373132205890"
+    }
+  ],
+  "schemaVectors": [
+    {
+      "name": "schema-hosts-sorted-by-label",
+      "recordId": "hosts",
+      "inputDescription": "two hosts whose labels differ only by case; sorted case-insensitively by label, then id",
+      "canonicalBodyJson": "{\"hosts\":[{\"id\":\"0aa1f4c2-5b8e-4d7f-9c3a-2e6b8d0f1a42\",\"label\":\"alpha\",\"hostname\":\"alpha.example.com\",\"port\":22,\"username\":\"user\",\"keySecretId\":\"key-alpha\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Ii9Jj0Kk1Ll2Mm3Nn4Oo\"},{\"id\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"label\":\"Beta\",\"hostname\":\"beta.example.com\",\"port\":2222,\"username\":\"user\",\"keySecretId\":\"key-beta\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Zk5tVQ8m5r4Ykqz9Xw2C1bN7vJ3hG8sD0aF6uT4iQ2o\"}]}",
+      "canonicalBodySha256": "d4cfafb2c07495b764c1e1beeac8daf1f8e95d5e9c9401910c279c92ac47bc0b"
+    },
+    {
+      "name": "schema-workspaces-sorted-by-name",
+      "recordId": "workspaces",
+      "inputDescription": "two workspaces sorted case-insensitively by name",
+      "canonicalBodyJson": "{\"workspaces\":[{\"id\":\"ws-2\",\"name\":\"Archive stuff\",\"hostId\":\"0a4df4c2-8a4d-4d7f-9c3a-2e6b8d0f1a42\",\"remotePath\":\"~/archive\"},{\"id\":\"ws-1\",\"name\":\"multiprompt\",\"hostId\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"remotePath\":\"~/projects/multiprompt-android\"}]}",
+      "canonicalBodySha256": "b3501adc511558ce854174470bd4dd894ed29e1538abad3ee8ff32eb42adcad8"
+    },
+    {
+      "name": "schema-session-state-archived-with-resume",
+      "recordId": "sessionState",
+      "inputDescription": "archived session with resumeAt and lastRead watermark; unread derived, never stored",
+      "canonicalBodyJson": "{\"lastReadAt\":1757500000,\"archivedAt\":1757410000,\"resumeAt\":1757600000}",
+      "canonicalBodySha256": "04ba77c848688b40e016182285a085997784b78f5b5dd05d165641243d125215"
+    },
+    {
+      "name": "schema-session-state-active",
+      "recordId": "sessionState",
+      "inputDescription": "active session: archive keys null, optional fontScaleScope omitted",
+      "canonicalBodyJson": "{\"lastReadAt\":1757500000,\"archivedAt\":null,\"resumeAt\":null}",
+      "canonicalBodySha256": "430048927b517f4453f25fcbcea068a24eb500badf6e05644a5bc5ab43369e19"
+    }
+  ],
+  "recoveryVectors": [
+    {
+      "name": "envelope-with-recovery",
+      "passphrase": "correct horse battery staple",
+      "salt": "jb261IRNtbqiCDWoJ7h/CA==",
+      "vaultKey": "KoBEqtQcor8xHDyYJSi3vzzOzPHEC+VSjpGmyaCJJOg=",
+      "wrapIv": "hHgkDqJ8AVi6i/bS",
+      "kdf": {
+        "memoryKiB": 65536,
+        "iterations": 3,
+        "parallelism": 1
+      },
+      "records": [
+        {
+          "id": "hosts",
+          "iv": "hKR9OJ+jwfYfHLXR",
+          "plaintextUtf8": "{\"hosts\":[{\"id\":\"3f7c1b2e-8a4d-4c6e-9b2f-1d5a7c9e0b31\",\"label\":\"host1\",\"hostname\":\"host1.example.com\",\"port\":22,\"username\":\"user\",\"keySecretId\":\"key-3f7c1b2e\",\"passphraseSecretId\":null,\"hostKeyType\":\"ed25519\",\"hostKeyFingerprint\":\"SHA256:Zk5tVQ8m5r4Ykqz9Xw2C1bN7vJ3hG8sD0aF6uT4iQ2o\"}]}",
+          "ct": "nUH3BYwkWNSbFsYe5IR4facTDxJy1bcKu2ZsHUvPV3Dhy+V+120wlvj3grdb4rmW4yvfGl6Y2tIL1JOkgRHjQjGmcWXJKU0i0+bOHYbBjuLHytMqSLzgwMLZNxTXrMADSdB58Ov4tN7EZlh9IHTzF0KRcfJyYdDfK0vNlaS2/x7ZjkNWszWaQCe00mirmrbeM71jD/na3+n2sdHnw5Dbix53OwTBIF0BOFVobTWmvgFbTqyW3dQNL5Ybty/OGmRWxUjDenEXkkOIzKk19uX5xmOCDPTsBTPL4HKb0n3FhtnIVHcP+v2VA3ZHnA4hjYiVrGYiEmRejT4xgmllu9lzSLEVjLUhheLeFSguVGee22rh6xQkjugjHFvipV82kV0v2C7u+GXxgsIfiWLPDA=="
+        }
+      ],
+      "kek": "dQV3kSACQZrqWzgsAG/aJ1sm0wSjex5i/F0E71P4Kok=",
+      "wrapCt": "FjVODztIyZXYlzSQ7LvfmaBiJ/egdSXUxz8savcmiFl7e2CsFlK3T7/CQkMxHERf",
+      "recoveryKeyBytes": "gPC5kTQL5wPP5LcORDhJNXBXsJ3c5q4bLbWaz8mzTTo=",
+      "recoveryKeyString": "G3RB-K49M-1FKG-7KZ4-PW74-8E29-6NR5-FC4X-VKKA-W6SD-PPDC-ZJDK-9MX0-V9EG",
+      "recoverySalt": "tKDauYrBAUIMjMYsQujJ1g==",
+      "recoveryIv": "dlbb3K6iwjPU0rYo",
+      "recoveryKek": "wTgOSUtCQd4JWn8KILDa1/V3aiN9hqYr3gxco3O7B0E=",
+      "recoveryCt": "PQLjCND/C7p420Pv1I3/l5Ao/oaVQaGadHgyJ0bYmJOoj+SiJeUtVgam0CeWCa2X",
+      "envelopeJson": "{\"v\":1,\"kdf\":{\"alg\":\"argon2id\",\"version\":19,\"memoryKiB\":65536,\"iterations\":3,\"parallelism\":1,\"salt\":\"jb261IRNtbqiCDWoJ7h/CA==\"},\"wrap\":{\"alg\":\"AES-256-GCM\",\"iv\":\"hHgkDqJ8AVi6i/bS\",\"ct\":\"FjVODztIyZXYlzSQ7LvfmaBiJ/egdSXUxz8savcmiFl7e2CsFlK3T7/CQkMxHERf\"},\"recoveryKdf\":{\"alg\":\"hkdf-sha256\",\"info\":\"multiprompt-sync-v1 recovery\",\"salt\":\"tKDauYrBAUIMjMYsQujJ1g==\"},\"recovery\":{\"alg\":\"AES-256-GCM\",\"iv\":\"dlbb3K6iwjPU0rYo\",\"ct\":\"PQLjCND/C7p420Pv1I3/l5Ao/oaVQaGadHgyJ0bYmJOoj+SiJeUtVgam0CeWCa2X\"},\"records\":{\"hosts\":{\"iv\":\"hKR9OJ+jwfYfHLXR\",\"ct\":\"nUH3BYwkWNSbFsYe5IR4facTDxJy1bcKu2ZsHUvPV3Dhy+V+120wlvj3grdb4rmW4yvfGl6Y2tIL1JOkgRHjQjGmcWXJKU0i0+bOHYbBjuLHytMqSLzgwMLZNxTXrMADSdB58Ov4tN7EZlh9IHTzF0KRcfJyYdDfK0vNlaS2/x7ZjkNWszWaQCe00mirmrbeM71jD/na3+n2sdHnw5Dbix53OwTBIF0BOFVobTWmvgFbTqyW3dQNL5Ybty/OGmRWxUjDenEXkkOIzKk19uX5xmOCDPTsBTPL4HKb0n3FhtnIVHcP+v2VA3ZHnA4hjYiVrGYiEmRejT4xgmllu9lzSLEVjLUhheLeFSguVGee22rh6xQkjugjHFvipV82kV0v2C7u+GXxgsIfiWLPDA==\"}}}",
+      "envelopeSha256": "982726f0eddef5c1a5c495118587f35d78a399d0d2eb4171b33f1e176c47ee2b"
+    }
+  ],
+  "recoveryKeyStringVectors": [
+    {
+      "name": "recovery-key-roundtrip",
+      "keyBytes": "TdQKLgWd/3o402SCuv3f1cjveLKMwyA4yFerRgp9TRY=",
+      "encoded": "9QA0-MBG5-KQZQ-ME6K-CJ1B-NZEZ-TQ4E-YY5J-HK1J-0E68-AYNM-C2KX-9MB0-X400"
+    },
+    {
+      "name": "recovery-key-bad-checksum",
+      "keyBytes": "TdQKLgWd/3o402SCuv3f1cjveLKMwyA4yFerRgp9TRY=",
+      "encoded": "0QA0-MBG5-KQZQ-ME6K-CJ1B-NZEZ-TQ4E-YY5J-HK1J-0E68-AYNM-C2KX-9MB0-X400"
+    }
+  ]
+}

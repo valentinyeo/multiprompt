@@ -1,0 +1,66 @@
+name: Click-through journeys
+run-name: click-through ${{ github.head_ref || github.ref_name }}
+
+on:
+  schedule:
+    - cron: '4 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      features: ${{ steps.diff.outputs.features }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const { touchedJourneysForDiff } = require('./tools/touched-journeys.cjs');
+          const journeys = ['chat-browser-shortcut', 'chat-browser-autoload', 'chat-model', 'chat-not-sent-remove'];
+          (async () => {
+            const mapped = process.env.EVENT === 'pull_request' ? await touchedJourneysForDiff(process.env.BASE, process.env.HEAD) : { features: journeys };
+            console.log(`features=${JSON.stringify(journeys.filter(feature => mapped.features.includes(feature)))}`);
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+  journeys:
+    needs: changes
+    if: needs.changes.outputs.features != '[]'
+    uses: ./.github/workflows/verify.yml
+    with:
+      features: ${{ needs.changes.outputs.features }}
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+  click-through:
+    name: click-through
+    needs: [changes, journeys]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every touched click-through journey
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          FEATURES: ${{ needs.changes.outputs.features }}
+          JOURNEYS: ${{ needs.journeys.result }}
+        run: |
+          [ "$CHANGES" = success ] || exit 1
+          if [ "$FEATURES" = '[]' ]; then
+            [ "$JOURNEYS" = skipped ] || exit 1
+            echo 'No click-through feature changed; journeys skipped.'
+          else
+            [ "$JOURNEYS" = success ] || exit 1
+          fi

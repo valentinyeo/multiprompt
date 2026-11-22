@@ -1,0 +1,1 @@
+{"tabs":[{"kind":"cmd","name":"Local","pid":42},{"kind":"tmux","name":"Cloud","manual":true,"tmux_session":"claude-old","cwd":"/home/user","claude_session":true,"keep_alive":true,"tmux_host":1,"csid":"old-sid"}],"sound_enabled":true,"console_font_h":18,"groups":[{"id":7,"name":"Legacy","collapsed":true}]}

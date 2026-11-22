@@ -1,0 +1,99 @@
+# Chats talk to each other
+
+Agent sessions on the server, Claude, Codex, Pi, hax or Cursor, can list the live chats by the name shown in the desktop app, read a chat's last answer and put a message into another live chat. Every chat gets the same tool: `mp-send` has `list`, `read` and `--to`. Use it only when Valentin asks.
+
+## Install
+
+Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py`, `mp_helper.py`, `mp_shell.py`, `multibot_feedback.py` and `mp-layout.mjs` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multibot-feedback` and `mp-layout` wrappers into `~/.local/bin`. Run it again after a release to update.
+
+Every server account that runs chats needs its own copy, because `~/.local/bin` and `~/.multiprompt-runtime` belong to one account. `--user` repeats the install for another account on the same server and needs password-free sudo:
+
+```sh
+sudo tools/install-mp-talk.sh --user inne --user valentin
+```
+
+`--check` prints each tool as `ok`, `missing` or `broken` for the accounts you name and exits 1 when one is not usable:
+
+```sh
+sudo tools/install-mp-talk.sh --check --user inne --user valentin
+```
+
+The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multibot-feedback`, `mp-layout` and `mp-zsb` into `~/.multiprompt-runtime` for the account that runs the runtime, so an account whose chats use the runtime copy needs no install step. An account on the same server that has no `~/.multiprompt-runtime` gets the tools from the install step above and nothing else.
+
+## List chats
+
+```sh
+mp-send list
+mp-send list --json
+mp-sessions
+```
+
+Each row has the name, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. A chat counts as live when its host process runs and its terminal session exists. A chat whose name has not been published yet shows `(no name yet)` and can still be reached by its terminal session.
+
+## Read the last answer
+
+```sh
+mp-send read "Pi Helper"
+```
+
+Prints the newest assistant answer of a Claude, Codex or Pi chat. Names match as for `--to`. A chat with no answer yet exits 3. hax and Cursor chats can be listed and messaged but not read.
+
+## Send a message
+
+```sh
+mp-send --to "Multi Bot Opus Lead" "Can you check the release build?"
+mp-send --to "multi bot" --wait "short prefix works when it is unique"
+mp-send --to "@Multi Bot Opus Lead{live-308b1fc}" "mention form from the @ pill"
+```
+
+- Matching ignores case. An exact name wins, then a unique prefix. Two matches stop with an error that lists them.
+- `{live-...}` is the terminal session the @ pill appends. It is an exact key and needs no name.
+- The text sent starts with `From <your chat name>:`. The sender is found from `MULTIPROMPT_TAB`, then `TMUX_PANE`. Outside a chat, pass `--from NAME`.
+- A busy chat queues the message and takes it when its turn ends. `--wait` waits for acceptance. `--json` prints machine output.
+- Sending to your own chat is refused.
+- Loop cap: one chat takes at most 6 messages from other chats in a minute, and one sender sends at most 12 in a minute. Past a cap `mp-send` prints `slow down` and exits 5.
+
+The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
+
+## Helper chats
+
+A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The desktop also publishes its own zsb wrapper there as `mp-zsb`, and `mp-helper` uses that copy first, then `zsb` on the PATH, then `~/.local/bin/zsb`. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group. A `reply_timeout` from `session-open` is checked against `workspace-list` for the helper's tab and counts as success when the tab is there. `mp-zsb` is kept identical to `tools/vps-multiprompt-browser.sh`.
+
+```sh
+mp-helper start --name "Research A" --model sonnet --effort high --task "Find why the build fails"
+mp-helper start --name "Research B" --model haiku --folder ~/projects/other --task - < brief.md
+mp-helper list
+mp-helper read "Research A" --wait
+mp-helper send "Research A" "Also check the release log"
+mp-helper close "Research A"
+```
+
+- `start` runs from inside a chat. That chat is the parent. The helper tab opens right below the parent's tab, in the same workspace and group.
+- `--model` is opus, sonnet, haiku or fable. `--effort` is low, medium or high. Both default to the server's Claude defaults. `--folder` defaults to the current folder.
+- The same name under the same parent is the same helper. A repeat start reuses it and the same first task is not sent twice.
+- The helper runs with bypassPermissions, like other server-started chats. Use trusted folders only.
+- `read` prints the helper's reply to its latest prompt. `--wait` waits until its turn ends (default 600 seconds). `--json` prints name, state and reply.
+- `send` puts a message into the helper, starting with `From <parent name>:`.
+- `list` and `close` see only the calling chat's helpers. `close` stops the helper and closes its tab. The desktop refuses to close the tab you are looking at; the helper still stops.
+- When the parent tab is not open on a desktop, the helper still runs and `start` reports `"visible":false`.
+
+## Server shell tabs
+
+From a live chat, `mp-shell` asks the signed-in desktop app to open a server shell tab. It uses the same zsb bridge as `mp-helper`, not the account layout API. When the desktop is offline the command exits with a plain error.
+
+```sh
+mp-shell open
+mp-shell open --attach projects-2
+mp-shell open --attach projects-2 --folder ~/projects/foo
+mp-shell open --run "tmux new -A -s work"
+mp-shell open --workspace Research --group Ops --host remote-1 --name "VPS shell"
+```
+
+- `open` with no options opens a plain VPS shell on the chat's host, placed below the chat tab (or in its group when `--after-tab` is unavailable).
+- `--attach` attaches a named tmux session on the server. `--folder` runs `cd` before attach or `--run`.
+- `--run` sets the remote startup command. When omitted with `--attach`, the desktop runs a normal `tmux attach`.
+- `--workspace`, `--group`, `--host`, and `--after-tab` work without a parent chat when you name the placement explicitly.
+
+## Where names come from
+
+The desktop publishes each live chat's tab name to the server through the reader (`chat_names` request). The reader merges them into `~/.local/state/multiprompt/chat-names.json`, keyed by terminal session. The desktop sends the list when tabs, names or workspaces change. Until a desktop with this feature has connected, chats show without names.

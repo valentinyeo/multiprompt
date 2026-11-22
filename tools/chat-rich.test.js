@@ -1,0 +1,287 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
+const fs = require('node:fs');
+const path = require('node:path');
+const src = require('./app-source').readAppSource();
+const build = fs.readFileSync('build.zig', 'utf8');
+const docs = fs.readFileSync('openwiki/operations/keyboard-shortcuts.md', 'utf8');
+function body(name) {
+  const start = src.indexOf(`fn ${name}(`);
+  assert.notEqual(start, -1, name);
+  const end = src.indexOf('\nfn ', start + 1);
+  return src.slice(start, end < 0 ? src.length : end);
+}
+
+test('conversation IO is off the UI thread and independent of the autocomplete channel', () => {
+  assert.match(body('chatFileRequestForDelivery'), /std\.Thread\.spawn\([^]*chatFileFetchThread/);
+  assert.match(body('chatFileFetchThread'), /chatHistoryFetch\(key/);
+  assert.match(body('chatFileFetchThread'), /ready\.store\(true, \.release\)/);
+  assert.match(body('chatFileOnReady'), /ready\.swap\(false, \.acq_rel\)/);
+  assert.doesNotMatch(body('chatFileOnReady'), /fetchAcPersistent|sshOneShotCapture|Sleep\(/);
+});
+test('stable session identity gates results, backoff and local console fallback remain available', () => {
+  assert.match(body('chatFileIdentity'), /chatFileIdentityForShell\(active_shell\)/);
+  assert.match(body('chatFileIdentityForShell'), /key\.tmux/);
+  assert.match(body('chatFileOnReady'), /sameSession\(key, entry\.key\)/);
+  assert.match(body('refreshChatBlockCache'), /captureChatTranscript\(active_shell, &g_chat_screen, false\)/);
+  assert.match(body('refreshChatBlockCache'), /chatHistoryEntry\(key\)/);
+  assert.match(body('refreshChatBlockCache'), /chatClassifyBlocks/);
+  assert.match(body('chatFileFailed'), /retryDelay/);
+  assert.match(body('chatFileOnReady'), /refreshChatTranscript\(false\)/);
+});
+test('markdown measurement paint and link hit test share the same layout', () => {
+  for (const name of ['chatMeasureProjectedBlockRect', 'chatPaintProjectedBlock', 'chatTranscriptLinkAt']) {
+    assert.match(body(name), /chatFlowBlock/);
+  }
+  const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
+  assert.match(render, /fn chatTableLayout\([^]*chatTableLayoutIn\(/);
+  assert.match(render, /fn chatTableLayoutIn\([^]*cache\.layout\(/);
+  assert.match(body('chatFlowBlock'), /block\.kind == \.list/);
+  assert.match(body('chatRichText'), /chat_markdown\.inlineSpans/);
+  assert.match(body('chatRichFont'), /uiScaled\(g_chat_font_pt \+ extra\)/);
+  assert.match(body('chatRichText'), /g_light_theme/);
+  assert.match(body('resetFontCache'), /g_chat_rich_fonts/);
+});
+test('role paint and hit testing omit sender headers and timestamps', () => {
+  assert.match(body('chatMeasureProjectedBlockRect'), /chat_style\.headerHeight/);
+  assert.match(body('chatMeasureProjectedBlockRect'), /chat_style\.bubbleWidth/);
+  assert.doesNotMatch(body('chatPaintBlock'), /chatPaintAgentHeader/);
+  assert.match(body('chatTranscriptLinkAt'), /chat_style\.headerHeight/);
+  assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
+  assert.match(body('chatUserBubbleColor'), /chat_style\.bubbleColors/);
+  assert.match(body('chatRelayout'), /chat_style\.bubblePositions/);
+  assert.match(body('chatPaintProjectedBlock'), /fillBubbleStyled/);
+  assert.match(body('fillBubbleStyled'), /fillBubbleAA/);
+  assert.match(body('chatTranscriptCharAt'), /chat_style\.topInset/);
+  assert.doesNotMatch(body('chatPaintTime'), /block\.time|block\.zone/);
+  assert.match(docs, /Chat View message styles/);
+});
+test('pure parser tests are wired and existing Alt+C discovers automatic formatting', () => {
+  for (const path of ['src/chat_markdown.zig', 'src/chat_transcript.zig']) assert.ok(build.includes(path));
+  assert.match(docs, /Chat View formatting: Alt\+C/);
+  assert.match(src, /\.ticket = ""/);
+});
+
+test('copy has button, keyboard, native-control fallback, palette label/results/draw/click and documentation', () => {
+  assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362/);
+  assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block/);
+  assert.match(src, /g_search_results\[g_search_result_count\] = SEARCH_CHAT_COPY_CODE_OFFSET/);
+  assert.match(src, /else if \(is_chat_copy\)/);
+  assert.match(src, /if \(target == SEARCH_CHAT_COPY_CODE_OFFSET\)/);
+  assert.match(src, /\.a = "Ctrl\+Shift\+D in Chat View"/);
+  assert.match(docs, /Ctrl\+Shift\+D in Chat View/);
+  assert.match(body('keyboardHookProc'), /chat_code\.copyKey/);
+  assert.match(body('chatComposerSubclassCore'), /chatCopyCodeKeyDown/);
+  assert.match(body('chatTranscriptWndProc'), /chatCopyCodeKeyDown/);
+  assert.match(body('chatTranscriptWndProc'), /chatTranscriptCopyAt[\s\S]*chatCopyBlockToClipboard\(index\)/);
+  assert.match(body('chatTranscriptCopyAt'), /chat_code\.copyButton/);
+  assert.match(body('chatPaintCodeHeader'), /chat_code\.copyButton/);
+  assert.match(body('chatTranscriptLinkAt'), /CHAT_CODE_PAD \+ CHAT_CODE_HEADER/);
+  assert.match(body('chatFlowText'), /chat_code\.Iterator/);
+  assert.match(body('chatFlowText'), /chatCodeTokenColor/);
+  assert.match(build, /src\/chat_code\.zig/);
+});
+
+test('copy palette offset is exclusive in the complete draw classification chain', () => {
+  const constants = {};
+  for (const m of src.matchAll(/^const (\w+)(?:: [\w.]+)? = (\d+);/gm)) constants[m[1]] = Number(m[2]);
+  const start = src.indexOf('const is_skills_menu = result_idx');
+  const end = src.indexOf('const ry =', start);
+  assert.ok(start > 0 && end > start);
+  const declarations = [...src.slice(start, end).matchAll(/const (is_\w+) = ([^;]+);/g)];
+  function classify(offset) {
+    const env = { ...constants, result_idx: offset, g_search_ws_move_mode: false, IS_DEV: false };
+    for (const [, name, raw] of declarations) {
+      const expr = raw.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||');
+      assert.match(expr, /^[\w\s!<>=&|()+.\-]+$/);
+      const names = [...new Set(expr.match(/[A-Za-z_]\w*/g) || [])].filter(n => n !== 'true' && n !== 'false');
+      for (const n of names) assert.ok(n in env, `unknown classifier ${n}`);
+      env[name] = Function(...names, `return (${expr})`)(...names.map(n => env[n]));
+    }
+    return Object.keys(env).filter(k => k.startsWith('is_') && env[k]);
+  }
+  assert.deepEqual(classify(constants.SEARCH_CHAT_COPY_CODE_OFFSET), ['is_chat_copy', 'is_chat_action', 'is_skill_action']);
+  assert.deepEqual(classify(constants.SEARCH_CHAT_AC_OFFSET), ['is_chat_ac', 'is_chat_action', 'is_skill_action']);
+  assert.ok(classify(constants.SEARCH_ADDFAVICON_OFFSET).includes('is_addfavicon'));
+});
+
+test('file attachment and inline image previews ship on every surface (issue)', () => {
+  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET: usize = 6372/);
+  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file/);
+  assert.match(src, /is_chat_copy or is_chat_attach or/);
+  assert.match(src, /L\("Chat View: Attach File"\)/);
+  assert.match(src, /target == SEARCH_CHAT_ATTACH_OFFSET/);
+  assert.match(src, /\.a = "\+ button \/ Ctrl\+V in Chat View"/);
+  assert.match(docs, /\+ button \/ Ctrl\+V in Chat View/);
+  assert.match(docs, /Chat View: Attach File/);
+  assert.ok(build.includes('src/chat_image.zig'));
+  assert.ok(build.includes('comdlg32'));
+  assert.match(body('chatButtonAt'), /attach_btn/);
+  assert.match(body('chatMeasureProjectedBlockRect'), /chatImgMeasure/);
+  assert.match(body('chatRelayout'), /chatImgFirstBlock/);
+  assert.match(body('chatImgWorker'), /chatImgLoadThumb/);
+});
+
+
+test('tool lines toggle before links and selection and expose all palette surfaces', () => {
+  const click = body('chatTranscriptWndProc').split('WM_LBUTTONDOWN => {')[1].split('WM_LBUTTONUP => {')[0];
+  assert.match(click, /if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptLinkAt('));
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptMouseDown('));
+  assert.match(body('chatToolAt'), /role != \.tool/);
+  assert.match(body('chatToggleAllTools'), /block\.role == \.tool[^]*?block\.tool_open = open/);
+  assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
+  assert.match(src, /SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps/);
+  assert.match(src, /target == SEARCH_CHAT_TOOL_STEPS_OFFSET/);
+  assert.match(src, /L\("Chat View: Open or fold all tool steps"\)/);
+  assert.match(docs, /Chat View: Open or fold all tool steps/);
+});
+
+
+test('IGSH-404 every Chat View copy path owns selection-sized storage and reports failures', () => {
+  assert.doesNotMatch(src, /g_chat_sel_text/);
+  assert.match(body('chatCopyCapacity'), /std\.math\.mul\(usize, selected_len, 2\)/);
+  assert.match(body('chatCopyCapacity'), /block_count -\| 1, 4/);
+  const allocate = body('chatCopyTextAlloc');
+  assert.match(allocate, /try chatCopyCapacity\(selected_len/);
+  assert.match(allocate, /try allocator\.alloc\(u16, capacity\)/);
+  assert.match(allocate, /errdefer allocator\.free\(out\)/);
+  assert.match(allocate, /try chatCopyBlockText/);
+  assert.match(allocate, /try chatSelectionToClipboard/);
+  assert.match(allocate, /allocator\.realloc\(out, n\)/);
+  for (const name of ['chatCopySelection', 'chatCopyBlockToClipboard']) {
+    const copy = body(name);
+    assert.match(copy, /chatCopyTextAlloc\(std\.heap\.page_allocator,/);
+    assert.match(copy, /catch \{\s*showHeaderNoticeAscii\("Could not copy text; try again", 2500, true\);\s*return;/);
+    assert.match(copy, /defer std\.heap\.page_allocator\.free\(text\)/);
+    assert.match(copy, /chatCopyTextToClipboard\(text\)/);
+  }
+  const menu = body('chatMessageMenu');
+  assert.match(menu, /const selection_text = chatCopyTextAlloc/);
+  assert.match(menu, /const message_text: \[\]u16 = if \(block_at\) \|idx\| chatMessageTextAlloc/);
+  assert.match(menu, /defer std\.heap\.page_allocator\.free\(selection_text\)/);
+  assert.match(menu, /defer std\.heap\.page_allocator\.free\(message_text\)/);
+  assert.match(body('chatCopyTextToClipboard'), /else if \(setUnicodeClipboardTextWithRetry\(text\)\) \{\s*showHeaderNoticeAscii\("Copied"/);
+  assert.match(body('chatCopyTextToClipboard'), /else \{\s*showHeaderNoticeAscii\("Could not copy to clipboard; try again", 2500, true\)/);
+  assert.match(body('chatCopyRichText'), /else try std\.heap\.page_allocator\.alloc/);
+  assert.match(body('chatCopyBlockText'), /try chat_markdown\.parseTable/);
+  for (const name of ['chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatSelectionToClipboard']) {
+    assert.match(body(name), /error\.NoSpaceLeft/);
+  }
+  assert.match(build, /"node", "--test", "tools\/chat-view-gaps\.test\.js"/);
+  assert.match(build, /test_step\.dependOn\(&chat_view_gaps_tests\.step\)/);
+});
+
+test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlighting and copying', () => {
+  const display = body('chatSelectionDisplay');
+  assert.match(display, /chatDisplayForIndex/);
+  assert.match(display, /g_chat_echo_layout_ids/);
+  assert.match(display, /chatOutboxIndexById/);
+  assert.match(display, /chat_hit\.pending_selection_base/);
+  for (const name of ['chatSelectAll', 'chatSelectionToClipboard', 'chatTranscriptSelectionBlockAt']) {
+    assert.match(body(name), /g_chat_block_count \+ g_chat_echo_layout_count/);
+    assert.match(body(name), /chatSelectionDisplay/);
+  }
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionDisplay/);
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
+  assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
+  assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, body_display\.text, text_rc, false, true, null, body_display\.offset,/);
+  assert.match(body('chatPaintTranscriptContent'), /chatPaintEcho\([^;]*display\.start\)/);
+  assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
+  assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
+  assert.match(body('chatRelayout'), /old_echo_ids[^]*chatSelectionClear\(\)/);
+});
+
+test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () => {
+  const check = source => {
+    assert.doesNotMatch(source, /fn chatEchoRetryAt\(|fn chatEchoRetryHover\(|fn chatEchoActionRect\(/);
+    const hit = source.slice(source.indexOf('fn chatEchoAt('), source.indexOf('\n}', source.indexOf('fn chatEchoAt(')) + 2);
+    assert.match(hit, /pointInRect\(app_state\.g_chat_echo_layout\[i\], x, content_y\)/);
+    assert.doesNotMatch(hit, /chatEchoActionRect/);
+    const up = source.slice(source.indexOf('        WM_LBUTTONUP => {'), source.indexOf('        WM_LBUTTONDBLCLK => {'));
+    assert.match(up, /if \(app_state.g_chat_sel_dragging\) \{[^]*const selected = chatSelRange\(\);/);
+    assert.match(up, /if \(selected == null and app_state.g_chat_sel_click_count == 1\) \{\s*if \(chatEchoAt\(GET_X\(lp\), GET_Y\(lp\)\)\) \|id\| \{\s*if \(chatOutboxIndexById\(id\)\) \|ei\| \{\s*const entry = app_state.g_chat_outbox.items\[ei\];\s*if \(entry.state == .delivered and !entry.channel_sent\) chatEchoPushQueuedNowForId\(entry.id\);/);
+    assert.doesNotMatch(up, /chatEchoRetryAt\(|chatEchoRetryHover\(|chatEchoActionRect\(|chatEchoSendAgain\(|chatEchoRemove\(/);
+    assert.match(up, /\[chat\] selection chars=\{d\}/);
+    assert.match(up, /if \(!app_state.g_chat_sel_active\) \{\s*app_state.g_chat_sel_transcript_focus = false/);
+  };
+  const chat = fs.readFileSync('src/chat_render.zig', 'utf8');
+  check(chat);
+  assert.throws(() => check(chat + '\nfn chatEchoRetryAt(x: i32, y: i32) bool {\n    return false;\n}\n'));
+  assert.throws(() => check(chat.replace('selected == null and app_state.g_chat_sel_click_count == 1', 'true')));
+});
+
+test('IGSH-717 driver proves painted selection before Enter and retains strict quote checks', () => {
+  const control = readControlSource();
+  const pixels = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static List<int[]> GreyButtonPixels('));
+  const expression = pixels.match(/if \((\(c.R ==[^]*?)\) count\+\+;/)?.[1];
+  assert.ok(expression);
+  const selected = Function('c', `return ${expression}`);
+  const brush = body('chatSelBrush');
+  const colours = [...brush.matchAll(/RGB\((\d+), (\d+), (\d+)\)/g)].map(([, R, G, B]) => ({ R: +R, G: +G, B: +B }));
+  assert.equal(colours.length, 3);
+  for (const colour of colours) assert.equal(selected(colour), true);
+  for (const value of [0, 35, 88, 255]) assert.equal(selected({ R: value, G: value, B: value }), false);
+  assert.match(pixels, /WindowFromPoint\(points\[0\]\) != hwnd \|\| WindowFromPoint\(points\[1\]\) != hwnd/);
+  assert.match(pixels, /graphics.CopyFromScreen\(points\[0\].X, points\[0\].Y - pad/);
+  const journey = control.slice(control.indexOf("Record 'IGSH-717: genuine SendInput drag"), control.indexOf("Press @(0x1B) 'Esc: cancel the selection reply quote'"));
+  assert.match(journey, /SelectTranscriptText[^]*Snapshot 'selection-enter-reply-selected'[^]*Wait-Until \{\s*\$selectionCheck.selectionPixels = \[VerifyNative\]::TranscriptSelectionPixels[^]*\$selectionCheck.selectionPixels -ge \(\$selectionCheck.points\[1\].X - \$selectionCheck.points\[0\].X\)[^]*before Enter'\s*Press @\(0x0D\)/);
+  assert.match(journey, /\$quoteLines.Count -ne \$quoteLinesBefore \+ 1/);
+  assert.match(journey, /\$quoteChars -le 0 -or \$quoteChars -ge \$message.Length/);
+  assert.match(journey, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
+  assert.match(journey, /\.Length -ne \$stdinBytesBeforeReply/);
+});
+
+test('IGSH-567 fixed pending regions retain selections across compatible capture refreshes', () => {
+  const hit = fs.readFileSync('src/chat_hit.zig', 'utf8');
+  assert.match(hit, /pub const pending_selection_base: usize = std\.math\.maxInt\(usize\) \/ 2 \+ 1;/);
+  assert.match(hit, /test "IGSH-567 pending and mixed selections survive streaming but not changed transcript prefixes or shells"/);
+  const refresh = body('refreshChatBlockCache');
+  assert.match(refresh, /keepDisplaySelection\([^]*g_chat_capture\[0\.\.g_chat_last_len\],[^]*source,\s*g_chat_sel_anchor,\s*g_chat_sel_caret,/);
+  const policy = hit.match(/pub fn keepDisplaySelection\([^]*?\) bool \{([^]*?)\n\}/);
+  assert.ok(policy);
+  const translated = policy[1]
+    .replace('if (end >= pending_selection_base) @min(end, before.len) else end', '(end >= pending_selection_base ? Math.min(end, before.length) : end)')
+    .replaceAll('@min(', 'Math.min(')
+    .replaceAll('@max(', 'Math.max(');
+  const keep = Function('same_shell', 'before', 'after', 'anchor', 'caret', 'pending_selection_base', 'keepSelection', translated);
+  const prefix = hit.match(/pub fn keepSelection\([^]*?\) bool \{\s*return ([^]*?);\s*\}/);
+  assert.ok(prefix);
+  const keepPrefix = Function('same_shell', 'before', 'after', 'end', `return ${prefix[1]
+    .replaceAll(' and ', ' && ')
+    .replaceAll('.len', '.length')
+    .replace('std.mem.eql(u16, before[0..end], after[0..end])', 'before.slice(0, end).every((value, i) => value === after[i])')};`);
+  const pending = 2 ** 31;
+  const before = [1, 2];
+  const appended = [1, 2, 3];
+  const replaced = [1, 3, 4];
+  const cases = [
+    [true, appended, pending, pending + 2, true],
+    [true, replaced, pending + 2, pending, true],
+    [true, appended, 1, pending + 2, true],
+    [true, appended, pending + 2, 1, true],
+    [true, replaced, 1, pending + 2, false],
+    [true, [1], pending + 2, 1, false],
+    [false, appended, pending, pending + 2, false],
+    [false, appended, 1, pending + 2, false],
+    [true, appended, 0, 2, true],
+    [true, replaced, 0, 2, false],
+    [true, appended, 0, 3, false],
+  ];
+  for (const [same, after, anchor, caret, expected] of cases) {
+    assert.equal(keep(same, before, after, anchor, caret, pending, keepPrefix), expected);
+  }
+  assert.equal(keepPrefix(true, before, appended, pending + 2), false);
+});
+
+test('IGSH-567 selection allocation counts display intersections instead of the reserved offset gap', () => {
+  const allocate = body('chatCopyTextAlloc');
+  assert.match(allocate, /chatSelectionDisplay\(i\)/);
+  assert.match(allocate, /mapped\.displayBoundary\(sel\.end\) -\| mapped\.displayBoundary\(sel\.start\)/);
+  assert.match(allocate, /std.math.add\(usize, selected_len, mapped\.displayBoundary/);
+  assert.doesNotMatch(allocate, /sel.end - sel.start/);
+  assert.match(body('chatRelayout'), />= chat_hit\.pending_selection_base/);
+});

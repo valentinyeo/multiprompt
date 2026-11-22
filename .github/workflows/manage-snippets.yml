@@ -1,0 +1,20 @@
+name: Manage snippets keyboard proof
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '24 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manage-snippets-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snippets:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: command-palette
+      tag: ${{ github.event.client_payload.tag || '' }}

@@ -1,0 +1,8 @@
+{
+  "workload": "windows-30-synthetic-ssh-v1",
+  "sessionCount": 30,
+  "baselineTag": "v0.28.1563",
+  "resources": { "memoryToleranceBytes": 16777216, "cardinalityGrowth": 0 },
+  "latency": { "sendPaintMs": 300, "typingMs": 50 },
+  "targets": { "workingSetBytes": 52428800, "syntheticSshProcessesPerServer": 1, "hiddenConsolesPerSession": 0, "idleCpu": "near zero" }
+}

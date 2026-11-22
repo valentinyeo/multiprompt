@@ -1,0 +1,132 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = path.join(__dirname, '..');
+const source = fs.readFileSync(process.env.CHANGELOG_SOURCE || path.join(root, 'src/changelog.zig'), 'utf8');
+function between(start, end) {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a + start.length);
+  assert.ok(a >= 0 && b > a, start);
+  return source.slice(a, b);
+}
+
+test('production changelog geometry measures and caches wrapped notes', () => {
+  assert.match(source, /var changelog_ranges:/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-layout-'));
+  const harness = `const std = @import("std");
+const HANDLE = ?*anyopaque;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const ChangelogEntryRange = struct { top: i32, h: i32 };
+const ChangelogLayout = struct { card: RECT, header: RECT, close: RECT, viewport: RECT, scrollbar: RECT, rows: RECT, action: RECT, footer: RECT, footer_keys: [3]RECT, footer_labels: [3]RECT, compact: bool, view_h: i32, max_scroll: i32 };
+var measurements: usize = 0;
+var fake_scale: i32 = 100;
+var window_width: i32 = 1200;
+const app_state = struct {
+    pub const ChangelogSelection = struct { entry: usize, item: ?usize };
+    var g_main_hwnd: HANDLE = @ptrFromInt(1);
+    var g_changelog_scroll: i32 = 0;
+    var g_changelog_sel: ?ChangelogSelection = null;
+    var g_chat_active = false;
+};
+const Selection = app_state.ChangelogSelection;
+fn uiScaled(n: i32) i32 { return @divTrunc(n * fake_scale, 100); }
+fn paneRect() RECT { return .{ .left = 0, .top = 0, .right = window_width, .bottom = 900 }; }
+fn GetClientRect(_: HANDLE, rc: *RECT) i32 { rc.* = .{ .left = 0, .top = 0, .right = window_width, .bottom = 900 }; return 1; }
+fn DrawTextW(_: HANDLE, _: [*]const u16, n: i32, _: *RECT, _: u32) i32 { return n; }
+const win = struct {
+    const DT_WORDBREAK: u32 = 16;
+    const DT_CALCRECT: u32 = 1024;
+    fn GetDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
+    fn ReleaseDC(_: HANDLE, _: HANDLE) i32 { return 1; }
+};
+const DT_NOPREFIX: u32 = 0x800;
+fn bodyFont() HANDLE { return @ptrFromInt(1); }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return @ptrFromInt(1); }
+fn changeText(_: HANDLE, text: []const u8, rc: *RECT, _: u32) void { measurements += 1; rc.bottom = @as(i32, @intCast((text.len / 20) + 1)) * 18; }
+` + between('const ChangelogBullet =', 'pub const CHANGELOG =') +
+    between('const SOURCE_CHANGELOG =', '\ncomptime {') + '\nvar CHANGELOG = SOURCE_CHANGELOG;\n' +
+    between('fn rowHeight()', '\nfn contains(')
+      .replaceAll('@import("win32.zig")', 'win')
+      .replaceAll('@import("chat_composer.zig").chatViewLayout().pane', 'paneRect()')
+      .replaceAll('@import("window_layout.zig").activePaneRects(client).primary', 'paneRect()') + `
+test "row geometry covers every entry and its notes" {
+    prepareChangelogLayout(600, false);
+    try std.testing.expectEqual(@as(i32, 0), changelog_row_tops[0]);
+    try std.testing.expect(CHANGELOG.len > 0);
+    for (CHANGELOG, 0..) |_, idx| {
+        if (noteCount(idx) == 0) {
+            try std.testing.expectEqual(changelog_row_tops[idx], changelog_row_tops[idx + 1]);
+            continue;
+        }
+        try std.testing.expect(changelog_row_tops[idx + 1] > changelog_row_tops[idx]);
+        try std.testing.expectEqual(@as(?usize, idx), changelogIndexAtContentY(changelog_row_tops[idx]));
+        try std.testing.expectEqual(@as(?usize, idx), changelogIndexAtContentY(changelog_row_tops[idx + 1] - 1));
+        const row = selectionRange(noteSelection(idx, 0));
+        try std.testing.expectEqual(changelog_row_tops[idx] + rowHeight(), row.top);
+        try std.testing.expect(row.h >= rowHeight());
+    }
+    try std.testing.expectEqual(@as(?usize, null), changelogIndexAtContentY(-1));
+    try std.testing.expectEqual(@as(?usize, null), changelogIndexAtContentY(changelog_row_tops[CHANGELOG.len]));
+    try std.testing.expect(measurements > 0);
+}
+test "layout caches measurements and clamps scroll to its own maximum" {
+    const initial = calcChangelogLayout();
+    try std.testing.expect(initial.view_h > 0);
+    try std.testing.expect(initial.max_scroll > 0);
+    const measured = measurements;
+    try std.testing.expect(measured > 0);
+    const half = @divTrunc(initial.max_scroll, 2);
+    app_state.g_changelog_scroll = half;
+    const scrolled = calcChangelogLayout();
+    try std.testing.expectEqual(half, app_state.g_changelog_scroll);
+    try std.testing.expectEqual(initial.max_scroll, scrolled.max_scroll);
+    app_state.g_changelog_scroll = std.math.maxInt(i32);
+    const clamped = calcChangelogLayout();
+    try std.testing.expectEqual(initial.max_scroll, app_state.g_changelog_scroll);
+    try std.testing.expectEqual(initial.max_scroll, clamped.max_scroll);
+    try std.testing.expectEqual(measured, measurements);
+}
+`;
+  try {
+    const file = path.join(dir, 'layout.zig');
+    fs.writeFileSync(file, harness);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, [result.stdout, result.stderr, result.signal, result.error?.message].filter(Boolean).join("\n"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('font resets invalidate layout and paint visits only visible rows', () => {
+  const drawing = fs.readFileSync(process.env.CHANGELOG_DRAWING_SOURCE || path.join(root, 'src/drawing.zig'), 'utf8');
+  assert.match(drawing, /pub fn resetFontCache\(\) void \{\s*@import\("usage_card\.zig"\)\.resetFooterFonts\(\);\s*@import\("changelog\.zig"\)\.resetChangelogLayout\(\);/);
+  const paint = source.slice(source.indexOf('pub fn paintChangelogOverlay('));
+  assert.match(paint, /if \(!app_state\.g_changelog_active\) return;/);
+  assert.match(paint, /const first = changelogIndexAtContentY\(app_state\.g_changelog_scroll\) orelse 0;/);
+  assert.match(paint, /for \(first\.\.CHANGELOG\.len\)/);
+  assert.match(paint, /if \(top >= layout\.viewport\.bottom\) break;/);
+  assert.doesNotMatch(paint, /changelogEntryHeightWithHdc\(|changelogBulletHeightWithHdc\(/);
+  const hit = between('pub fn changelogHitTest(', 'pub fn moveChangelogSelection(');
+  assert.doesNotMatch(hit, /changelogBulletHeightWithHdc\(|GetDC\(/);
+});
+test('existing command palette speed journey measures real input through changed screen pixels', () => {
+  const control = readControlSource();
+  const method = control.slice(control.indexOf('    public static double MeasureChangelogKey('), control.indexOf('    static void ReadPatch('));
+  assert.match(method, /Stopwatch.StartNew\(\);\s+if \(SendInput\(2,/);
+  assert.match(method, /ReadPatch\(x, y, pixels, graphics\);/);
+  assert.match(method, /before\[row \* 24 \+ col\] != pixels.GetPixel/);
+  assert.match(method, /if \(changed >= 8\) \{ ChangelogResponse\(owner\); return timer.Elapsed.TotalMilliseconds; \}/);
+  assert.doesNotMatch(method, /::Chord|DwmFlush|Thread.Sleep\(250\)/);
+  const journey = control.slice(control.indexOf("        'command-palette' {"), control.indexOf("        'chat-switch-speed' {"));
+  for (const key of ['0x0D', '0x22', '0x1B']) assert.ok(journey.includes(`MeasureChangelogKey($script:window, ${key})`));
+  assert.match(journey, /Invoke-JourneyCommand 'Changelog' -SelectOnly/);
+  assert.match(journey, /\$sample -lt 5/);
+  assert.match(journey, /Save-Json \$changelogSpeed 'changelog-speed.json'/);
+  assert.match(journey, /Maximum -ge \$limit/);
+  assert.match(journey, /open_ms = 200/);
+});

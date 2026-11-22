@@ -1,0 +1,9 @@
+{
+  "revision": "7260d1b5a977af1baa6062f70bfa175c34527ec9",
+  "source": "src/; composer subclass procedures and main control-color arm are exact excerpts; painter is the complete source",
+  "sha256": {
+    "chat_composer.zig": "498253585a6823b5fb59ca1dd20c79b7fc375c57891a1405985a6dca795ff138",
+    "chat_composer_text.zig": "5ab341114d23dc29c7af09c32d5309ecb3d61eea780161af384e9af90ead2fff",
+    "main.zig": "00ed0192b924a69821afc471d1097bfa31821cc75d4f35a2f11a7abb5f5abbc3"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/valentinyeo/multiprompt",
+  "tag": "v0.28.1660",
+  "commit": "b478d292eac251b5204bbd235bfdc2dde20ca637",
+  "source": "src/update_release.ps1",
+  "sourceSha256": "dce82ace605e3a7b749cb230730664fa1e71448733ecf4e773e7668f0474ce5e",
+  "lines": "5-18",
+  "fixture": "legacy-asset-check.ps1"
+}

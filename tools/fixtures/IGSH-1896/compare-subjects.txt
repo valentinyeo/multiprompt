@@ -1,0 +1,6 @@
+IGSH-1901: Keep a message the host holds from showing Not sent (#891)
+IGSH-1896: Test every release on the Z16 laptop automatically
+Merge pull request #890 from ceo/IGSH-1894
+Tweak wording
+IGSH-1901: Follow up on the same ticket
+IGSH-1234 and IGSH-1900: Two tickets in one commit

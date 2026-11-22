@@ -1,0 +1,18 @@
+pub const Step = enum {
+    read_marker,
+    draft_bind,
+    save_session,
+    chat_history,
+    console_shown,
+    hide_prev_browser,
+    park,
+    browser_visible,
+    arm_settle,
+    position,
+    focus,
+    reposition,
+    browser_swp,
+    browser_show,
+    browser_launch,
+    browser_wake,
+};

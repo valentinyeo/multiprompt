@@ -1,0 +1,2 @@
+tab=14 kind=tmux host=host2 pid=26384 shell_id=14 keep_alive=0 muted=0 name="BTOP" tmux="term-138427ce" cwd=""
+WM_APP_SHELL_EXITED kind=tmux idx=40 in_window=0 window_remaining_ms=0

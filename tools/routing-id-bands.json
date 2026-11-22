@@ -1,0 +1,117 @@
+[
+  {
+    "name": "tmux",
+    "base": "SEARCH_TMUX_OFFSET",
+    "size": "MAX_TMUX_SESSIONS"
+  },
+  {
+    "name": "new",
+    "base": "SEARCH_NEW_OFFSET",
+    "size": "NUM_BUTTONS"
+  },
+  {
+    "name": "skills",
+    "base": "SEARCH_SKILL_ROW_OFFSET",
+    "size": "MAX_PALETTE_SKILLS"
+  },
+  {
+    "name": "snippets",
+    "base": "SEARCH_SNIPPET_OFFSET",
+    "size": "MAX_SNIPPETS"
+  },
+  {
+    "name": "workspace_delete",
+    "base": "SEARCH_WORKSPACE_DELETE_OFFSET",
+    "size": "MAX_WORKSPACES"
+  },
+  {
+    "name": "workspace_sort",
+    "base": "SEARCH_WSSORT_OFFSET",
+    "size": "MAX_LWS"
+  },
+  {
+    "name": "workspace_move",
+    "base": "SEARCH_WSMOVE_OFFSET",
+    "size": "MAX_LWS"
+  },
+  {
+    "name": "workspace",
+    "base": "SEARCH_WORKSPACE_OFFSET",
+    "size": "MAX_WORKSPACES"
+  },
+  {
+    "name": "tab_context_group_add",
+    "base": "SEARCH_TABCTX_GROUP_ADD_OFFSET",
+    "size": "MAX_GROUPS"
+  },
+  {
+    "name": "bot_face_choices",
+    "base": "SEARCH_BOT_FACE_OFFSET",
+    "size": "BOT_FACE_COUNT"
+  },
+  {
+    "name": "bot_color_choices",
+    "base": "SEARCH_BOT_COLOR_OFFSET",
+    "size": "BOT_COLOR_COUNT"
+  },
+  {
+    "name": "custom_command",
+    "base": "SEARCH_CUSTOMCMD_OFFSET",
+    "size": "MAX_CUSTOM_CMDS"
+  },
+  {
+    "name": "archived",
+    "base": "SEARCH_ARCHIVED_OFFSET",
+    "size": 64
+  },
+  {
+    "name": "reminder",
+    "base": "SEARCH_REMINDER_ROW_OFFSET",
+    "size": "MAX_REMINDERS"
+  },
+  {
+    "name": "session_overview",
+    "base": "SEARCH_SESSION_OVERVIEW_ROW_OFFSET",
+    "size": "MAX_SESSION_OVERVIEW_SEARCH_ROWS"
+  },
+  {
+    "name": "group_context",
+    "base": "SEARCH_GROUPCTX_BASE",
+    "size": "SEARCH_GROUPCTX_COUNT"
+  },
+  {
+    "name": "group_move",
+    "base": "SEARCH_GROUPMOVE_GROUP_OFFSET",
+    "size": "MAX_GROUPS"
+  },
+  {
+    "name": "reminder_preset",
+    "base": "SEARCH_REMIND_PRESET_OFFSET",
+    "size": "REMIND_PRESET_COUNT"
+  },
+  {
+    "name": "snoozed_workspace",
+    "base": "SEARCH_WS_SNOOZED_ROW_OFFSET",
+    "size": "MAX_REMINDERS"
+  },
+  {
+    "name": "palette_header",
+    "base": "SEARCH_PALETTE_HEADER_OFFSET",
+    "size": "PALETTE_HEADER_COUNT"
+  },
+  {
+    "name": "room_catalog",
+    "base": "SEARCH_ROOM_ROW_OFFSET",
+    "size": "MAX_ROOM_PALETTE_ROWS"
+  },
+  {
+    "name": "pick_repo",
+    "base": "SEARCH_PICK_REPO_ROW_OFFSET",
+    "size": "MAX_REPO_ROWS"
+  },
+  {
+    "name": "pi_models",
+    "base": "SEARCH_PI_MODEL_ROW_OFFSET",
+    "size": "MAX_PI_MODELS"
+  }
+]

@@ -1,0 +1,5 @@
+Here is an example of the decision list, not a permission request:
+
+Do you want to proceed?
+> 1. Yes
+  2. No

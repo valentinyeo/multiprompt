@@ -1,0 +1,14 @@
+{
+  "host": "Z16-TEST",
+  "version": "0.28.899",
+  "expected": "0.28.900",
+  "at": "2026-11-09T18:30:00.0000000Z",
+  "checks": [
+    { "name": "install", "ok": false, "detail": "installed 0.28.899, expected 0.28.900" },
+    { "name": "start", "ok": true, "detail": "1 process, window 'ZigShell' 'multiprompt v0.28.899'" },
+    { "name": "chats", "ok": true, "detail": "2 tabs published in inbox-default.json" },
+    { "name": "computer-view", "ok": false, "detail": "bridge status no response" },
+    { "name": "sync", "ok": true, "detail": "no account signed in on this laptop" },
+    { "name": "memory", "ok": false, "detail": "3900 MB working set, cap 3000 MB" }
+  ]
+}

@@ -1,0 +1,133 @@
+---
+title: Activity Indicators
+description: Canonical semantics for spinners, blue dots, and agent glyphs.
+---
+
+This page is the source of truth for spinner and blue-dot behavior.
+
+## Spinner
+
+A spinner means an agent is actively working in that tab.
+
+The authoritative source is the agent lifecycle hook:
+
+```text
+ACTIVE:<tmux-session>
+DONE:<tmux-session>
+```
+
+`ACTIVE` starts the spinner. `DONE` stops the spinner.
+
+Remote tmux hooks write those events to the VPS loopback port `19548`.
+multiprompt owns that port through a dedicated per-host reverse-SSH tunnel
+keeper. The keeper starts before interactive shells, runs in a kill-on-close
+job, and retries after disconnects; interactive tabs must not compete for the
+forward themselves.
+
+tmux `session_activity` is not a valid semantic spinner source. It changes for redraws, status updates, terminal output, and other non-agent events.
+
+## Blue Dot
+
+A blue dot means the tab likely needs the user’s attention.
+
+Common case:
+
+1. User is not viewing a tab.
+2. The tab receives a `DONE` lifecycle event.
+3. multiprompt marks it idle and sets the blue dot.
+
+The blue dot is cleared when the user views the tab.
+
+Blue-dot attention is durable user state. Every `ACTIVE` or `DONE` transition
+is saved immediately, and a pending dot survives app restart, workspace export,
+and local-shell reconnect. A filed `Alt+E` session with a saved dot must remain
+visible in the sidebar and Inbox until the user opens or explicitly files it;
+restart must never turn it into a silently hidden session.
+
+## Agent Glyph
+
+Agent identity is separate from activity.
+
+| Glyph state | Meaning |
+| --- | --- |
+| Claude | Claude Code was detected in the session |
+| Codex | Codex was detected in the session |
+| Pi | Pi was detected in the session |
+| Kimi | Kimi Code CLI was detected in the session |
+| None | No known agent detected |
+
+Agent glyph metadata may come from tmux metadata, process scanning, screen signatures, or explicit `AGENT:` notifications. It must not imply active work.
+
+## Missed DONE Fallback
+
+Remote hooks can miss `DONE` because of tunnel drops, interrupted commands, or identity mismatches.
+
+If multiprompt sees a tab marked active but the visible agent TUI is clearly
+idle, it may recover the missing transition. Recovery requires all of the
+following:
+
+- A real preceding `ACTIVE` lifecycle event for that exact session.
+- A recognized idle input prompt in the current visible console buffer.
+- No recognized working/status marker in that buffer.
+
+Current idle prompt signatures include:
+
+- `new task? /clear to save`
+- `press up to edit queued messages`
+
+The recovered transition follows the same attention rule as real `DONE`: a
+background session becomes idle and receives a durable blue dot; the currently
+viewed session only becomes idle. This is what returns an `Alt+E`-filed session
+to the sidebar/Inbox when its Stop hook was lost. Diagnostics record the reason
+as `DONE idle-prompt fallback`.
+
+This fallback exists only to recover from missed `DONE`; it must not restart
+spinners or manufacture attention without `ACTIVE` provenance.
+
+## Hidden-session Watchdog
+
+`Alt+E` is a stronger user contract than an ordinary background tab: the user
+has explicitly filed a recognized coding-agent session until it finishes.
+That durable filed state therefore supplies the provenance that an app restart
+would otherwise erase.
+
+For a filed background agent with no existing blue dot, multiprompt samples
+the visible console buffer during its normal metadata poll. Two consecutive
+polls must show a recognized idle prompt and no working marker. The watchdog
+then leaves the session filed, sets a durable blue dot, and republishes it into
+the sidebar and Inbox. Diagnostics record `DONE hidden-idle watchdog`.
+
+The watchdog excludes foreground, muted, disconnected, unrecognized, already
+attention-marked, and visibly working sessions. Real `DONE` hooks remain the
+fast path, and the exact-`ACTIVE` missed-DONE fallback remains the one-poll
+recovery path. The watchdog is specifically the restart/hibernate backstop for
+filed work whose current-process lifecycle history no longer exists.
+
+## Bad States
+
+These are bugs:
+
+- Spinner on a tab where Claude is visibly idle.
+- Spinner started from tmux activity alone.
+- Blue dot on the active tab.
+- A filed session losing its blue dot and remaining hidden after restart.
+- A filed recognized agent sitting at its idle prompt for multiple polls without returning with a blue dot.
+- Activity from one tmux session applied to a prefix-matching session.
+- Muted tabs staying sorted at the top because they are noisy.
+
+## Verification
+
+Use the published inbox snapshot:
+
+```powershell
+$inbox = Get-Content "$env:APPDATA\ZigShell\inbox-default.json" -Raw | ConvertFrom-Json
+$inbox.shells | Where-Object { $_.act -eq 1 -or $_.att -eq 1 } |
+  Select-Object name,sub,act,att,pv
+```
+
+Use visible titles first when reporting to the user. Put tmux ids in parentheses only when needed.
+
+The full shell diagnostics also expose `notify_bound_port`,
+`tunnel_inbound_port`, `tunnel_keeper_de_alive`, and
+`tunnel_keeper_uk_alive`. A refusal from VPS `localhost:19548` means the
+reverse tunnel is down.

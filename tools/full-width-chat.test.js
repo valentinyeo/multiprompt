@@ -1,0 +1,212 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
+const source = require('./app-source').readAppSource();
+
+function body(text, name) {
+  const start = text.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, name);
+  return text.slice(start, text.indexOf('\n}', start) + 2);
+}
+
+function toggle(text) {
+  const start = text.indexOf('        WM_APP_TOGGLE_FULLWIDTH => {');
+  assert.ok(start >= 0);
+  const end = text.indexOf('\n        WM_APP_RECONNECT =>', start);
+  assert.ok(end > start);
+  return text.slice(start, end).replace('WM_APP_TOGGLE_FULLWIDTH => {', 'fn toggleFullWidth(hwnd: HANDLE) i32 {').replace(/},\s*$/, '}').replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
+}
+
+function content(text) {
+  const layout = body(text, 'chatViewLayout');
+  return layout.slice(layout.indexOf('    const content ='), layout.indexOf('    const content_top ='));
+}
+
+function harness(handler, geometry = content(source)) {
+  return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+const chat_style = @import("chat_style.zig");
+const app_state = @This();
+var computer_selected = false;
+var computer_width_changes: usize = 0;
+const computer = struct {
+    fn selected() bool { return computer_selected; }
+    fn toggleFullWidth() void { computer_width_changes += 1; }
+};
+const HANDLE = ?usize;
+const ISSUE_440_FULL_WIDTH_CHAT = true;
+const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
+var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, pinned_top: bool = false }{ .{}, .{} };
+var active_shell: u32 = 0;
+var shell_count: u32 = 2;
+var g_chat_active = false;
+var resizes: usize = 0;
+var saves: usize = 0;
+var layouts: usize = 0;
+var browser = false;
+fn applyBlackConsoleBackground(_: u32) void { resizes += 1; }
+fn repositionActive() void { layouts += 1; }
+fn saveSession() void { saves += 1; }
+fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
+fn browserSlotReserved() bool { return browser; }
+fn browserSplitPermilleForActiveShell() u16 { return 350; }
+var scale: i32 = 100;
+fn uiScaled(value: i32) i32 { return @divTrunc(value * scale, 100); }
+${body(source, 'fullWidthShouldResizeConsole')}
+${handler}
+test "IGSH-1087 Computer full width leaves console width and saved browser state alone" {
+    computer_selected = true;
+    defer computer_selected = false;
+    const width = shells[active_shell].full_width;
+    const before_resizes = resizes;
+    const before_saves = saves;
+    const before_changes = computer_width_changes;
+    _ = toggleFullWidth(null);
+    try std.testing.expectEqual(before_changes + 1, computer_width_changes);
+    try std.testing.expectEqual(width, shells[active_shell].full_width);
+    try std.testing.expectEqual(before_resizes, resizes);
+    try std.testing.expectEqual(before_saves, saves);
+}
+fn chatColumn(width: i32) struct { left: i32, width: i32 } {
+    const slot = .{ .left = @as(i32, 220), .right = 220 + width };
+${geometry}
+    return .{ .left = left, .width = right - left };
+}
+test "production reading column caps at 960 and stays centered inside the shared pane" {
+    for ([_]i32{100, 150}) |dpi| {
+        scale = dpi;
+        for ([_]bool{false, true}) |docked| {
+            browser = docked;
+            for ([_]i32{0, 1, 40, 600, 960, 961, 1700, 3000}) |width| {
+                shells[0].full_width = true;
+                const full = chatColumn(width);
+                const want = @min(width, uiScaled(960));
+                try std.testing.expectEqual(220 + @divTrunc(width - want, 2), full.left);
+                try std.testing.expectEqual(want, full.width);
+                shells[0].full_width = false;
+                const normal = chatColumn(width);
+                try std.testing.expectEqual(want, normal.width);
+                try std.testing.expectEqual(220 + @divTrunc(width - want, 2), normal.left);
+                try std.testing.expect(normal.left >= full.left and normal.left + normal.width <= full.left + full.width);
+            }
+        }
+    }
+}
+test "IGSH-898 narrow messages expand while wide messages retain the 60 percent cap" {
+    for ([_]i32{1, 40, 300, 550, 600, 720, 721, 960, 1440}) |width| {
+        const percent: i32 = if (width <= 720) 9 else 6;
+        const cap = @max(1, @divTrunc(width * percent, 10));
+        try std.testing.expectEqual(cap, chat_style.bubbleMaxWidth(width, 720));
+        try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width, 720));
+        try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12, 720));
+        try std.testing.expect(width - cap >= 0);
+    }
+}
+test "IGSH-898 narrow breakpoint follows display scale" {
+    for ([_]i32{100, 150, 200}) |dpi| {
+        for ([_]i32{550, 960, 1920}) |logical| {
+            const width = @divTrunc(logical * dpi, 100);
+            const narrow = @divTrunc(720 * dpi, 100);
+            const cap = @divTrunc(width * @as(i32, if (logical == 550) 9 else 6), 10);
+            try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width, narrow));
+            try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12, narrow));
+        }
+    }
+}
+test "ISSUE-440 production toggle changes only width and saves twice" {
+    for ([_]bool{ false, true }) |pinned| {
+        for ([_]bool{ false, true }) |remembered| {
+            g_chat_active = chatViewShouldShowForTab(remembered);
+            const chat = g_chat_active;
+            shells[0].full_width = false;
+            shells[0].full_width_pending_console_resize = false;
+            shells[1].full_width_pending_console_resize = false;
+            shells[0].pinned_top = pinned;
+            shells[1].full_width = true;
+            resizes = 0;
+            saves = 0;
+            layouts = 0;
+            try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
+            try std.testing.expect(shells[0].full_width);
+            try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
+            try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
+            try std.testing.expect(!shells[0].full_width);
+            try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
+            try std.testing.expect(!shells[1].full_width_pending_console_resize);
+            try std.testing.expectEqual(if (chat) @as(usize, 0) else 2, resizes);
+            try std.testing.expectEqual(@as(usize, 2), saves);
+            try std.testing.expectEqual(@as(usize, 2), layouts);
+            try std.testing.expectEqual(chat, g_chat_active);
+            try std.testing.expectEqual(pinned, shells[0].pinned_top);
+            try std.testing.expect(shells[1].full_width);
+        }
+    }
+    shells[0].pid = 0;
+    resizes = 0;
+    _ = toggleFullWidth(null);
+    try std.testing.expectEqual(@as(usize, 0), resizes);
+}
+
+`;
+}
+
+test('ISSUE-440 executes the production toggle without resetting the Chat View console', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh440-'));
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
+  try {
+    copyZig(['chat_style.zig', 'chat_view.zig'], dir);
+    const file = path.join(dir, 'test.zig');
+    const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
+    function run(handler, geometry) {
+      fs.writeFileSync(file, (harness(handler, geometry)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+      return spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    }
+    const result = run(toggle(source));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All \d+ tests passed/);
+    const oldHandler = toggle(source).replace('fullWidthShouldResizeConsole(g_chat_active)', 'true');
+    assert.notEqual(oldHandler, toggle(source));
+    const old = run(oldHandler);
+    assert.notEqual(old.status, 0);
+    assert.match(old.stderr, /production toggle[^]*FAIL/);
+    const unbounded = run(toggle(source), content(source).replace('uiScaled(960)', 'slot.right - slot.left'));
+    assert.notEqual(unbounded.status, 0);
+    assert.match(unbounded.stderr, /production reading column[^]*FAIL/);
+    const styleFile = path.join(dir, 'chat_style.zig');
+    const style = fs.readFileSync(styleFile, 'utf8');
+    const oldStyle = style.replace('if (width <= narrow_width) 9 else 6', 'if (width <= narrow_width) 6 else 6');
+    assert.notEqual(oldStyle, style);
+    fs.writeFileSync(styleFile, oldStyle);
+    const thin = run(toggle(source));
+    assert.notEqual(thin.status, 0);
+    assert.match(thin.stderr, /IGSH-898 narrow messages[^]*FAIL/);
+    console.log('IGSH-898 old narrow 60 percent bubbles rejected; geometry passed');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ISSUE-440 palette, restoration and terminal return retain the same independent view and width state', () => {
+  const confirmAt = source.indexOf('WM_APP_SEARCH_CONFIRM => {');
+  const palette = source.slice(source.indexOf('if (target == SEARCH_FULLWIDTH_OFFSET)', confirmAt), source.indexOf('if (target == SEARCH_HIDESIDEBAR_OFFSET)', confirmAt));
+  assert.match(palette, /showActiveShellAfterOverlay\(\);[^]*WM_APP_TOGGLE_FULLWIDTH/);
+  assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_view_lock\s*=/);
+  const restore = body(source, 'restoreBrowserStateFromSavedTab');
+  for (const field of ['chat_view_on = @import("chat_view.zig").forSession(shells[idx].tmux_session[0..shells[idx].tmux_session_len], tab.cv)', 'full_width = tab.fw']) assert.ok(restore.includes(field));
+  const close = body(source, 'closeChatView');
+  assert.match(close, /if \(ISSUE_440_FULL_WIDTH_CHAT and shells\[active_shell\]\.full_width_pending_console_resize\)/);
+  assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);
+  assert.ok(close.indexOf('applyBlackConsoleBackground') < close.indexOf('showShellConsole'));
+  assert.match(body(source, 'respawnShellInPlace'), /\.full_width = saved_full_width/);
+  assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('activePaneContentRect(rc)'));
+  assert.match(body(source, 'chatViewLayout'), /activePaneContentRect\(rc\)/);
+});

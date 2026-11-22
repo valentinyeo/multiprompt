@@ -1,0 +1,3592 @@
+const list_input = @import("list_input.zig");
+const app_state = @import("app_state.zig");
+const std = @import("std");
+const tokens = @import("design_tokens.zig");
+const draft_model = @import("chat_drafts.zig");
+const skill_model = @import("skills.zig");
+const chat_complete = @import("chat_complete.zig");
+const chat_reply = @import("chat_reply.zig");
+const chat_history = @import("chat_history.zig");
+const chat_style = @import("chat_style.zig");
+const chat_shell_sync = @import("chat_shell_sync.zig");
+const chat_transcript = @import("chat_transcript.zig");
+const dictation_live = @import("dictation_live.zig");
+const WINAPI = @import("win32.zig").WINAPI;
+const BOOL = @import("win32.zig").BOOL;
+const DWORD = @import("win32.zig").DWORD;
+const UINT = @import("win32.zig").UINT;
+const WPARAM = @import("win32.zig").WPARAM;
+const LPARAM = @import("win32.zig").LPARAM;
+const LRESULT = @import("win32.zig").LRESULT;
+const HANDLE = @import("win32.zig").HANDLE;
+const WS_VISIBLE = @import("win32.zig").WS_VISIBLE;
+const WS_CHILD = @import("win32.zig").WS_CHILD;
+const WS_CLIPSIBLINGS = @import("win32.zig").WS_CLIPSIBLINGS;
+const SWP_NOZORDER = @import("win32.zig").SWP_NOZORDER;
+const SWP_NOMOVE = @import("win32.zig").SWP_NOMOVE;
+const SWP_NOSIZE = @import("win32.zig").SWP_NOSIZE;
+const SWP_NOACTIVATE = @import("win32.zig").SWP_NOACTIVATE;
+const SWP_SHOWWINDOW = @import("win32.zig").SWP_SHOWWINDOW;
+const WM_KILLFOCUS = @import("win32.zig").WM_KILLFOCUS;
+const HWND_TOP = @import("win32.zig").HWND_TOP;
+const WM_PAINT = @import("win32.zig").WM_PAINT;
+const WM_LBUTTONDOWN = @import("win32.zig").WM_LBUTTONDOWN;
+const WM_LBUTTONUP = @import("win32.zig").WM_LBUTTONUP;
+const WM_MOUSEMOVE = @import("win32.zig").WM_MOUSEMOVE;
+const SW_SHOW = @import("win32.zig").SW_SHOW;
+const SW_HIDE = @import("win32.zig").SW_HIDE;
+const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
+const DT_VCENTER = @import("win32.zig").DT_VCENTER;
+const DT_RIGHT = @import("win32.zig").DT_RIGHT;
+const DT_WORDBREAK = @import("win32.zig").DT_WORDBREAK;
+const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
+const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
+const DT_CALCRECT = @import("win32.zig").DT_CALCRECT;
+const TRANSPARENT = @import("win32.zig").TRANSPARENT;
+const ES_MULTILINE = @import("win32.zig").ES_MULTILINE;
+const ES_AUTOVSCROLL = @import("win32.zig").ES_AUTOVSCROLL;
+const ES_WANTRETURN = @import("win32.zig").ES_WANTRETURN;
+const WS_TABSTOP = @import("win32.zig").WS_TABSTOP;
+const WM_KEYDOWN = @import("win32.zig").WM_KEYDOWN;
+const WM_KEYUP = @import("win32.zig").WM_KEYUP;
+const WM_APP_SEARCH_OPEN = @import("win32.zig").WM_APP_SEARCH_OPEN;
+const WM_APP_SEARCH_CLOSE = @import("win32.zig").WM_APP_SEARCH_CLOSE;
+const WM_APP_CHAT_AC_READY = @import("win32.zig").WM_APP_CHAT_AC_READY;
+const WM_APP_CHAT_SEND = @import("win32.zig").WM_APP_CHAT_SEND;
+const WM_ERASEBKGND = @import("win32.zig").WM_ERASEBKGND;
+const WM_MOUSEWHEEL = @import("win32.zig").WM_MOUSEWHEEL;
+const TIMER_CHAT_REFRESH = @import("win32.zig").TIMER_CHAT_REFRESH;
+const TIMER_CHAT_AC_DEBOUNCE = @import("win32.zig").TIMER_CHAT_AC_DEBOUNCE;
+const TIMER_CHAT_BROWSER_SWAP = @import("win32.zig").TIMER_CHAT_BROWSER_SWAP;
+const TIMER_CHAT_DRAFT = @import("win32.zig").TIMER_CHAT_DRAFT;
+const WNDCLASSEXW = @import("win32.zig").WNDCLASSEXW;
+const RECT = @import("win32.zig").RECT;
+const PAINTSTRUCT = @import("win32.zig").PAINTSTRUCT;
+const RegisterClassExW = @import("win32.zig").RegisterClassExW;
+const CreateWindowExW = @import("win32.zig").CreateWindowExW;
+const GetFocus = @import("win32.zig").GetFocus;
+const IsWindowVisible = @import("win32.zig").IsWindowVisible;
+const GetWindowRect = @import("win32.zig").GetWindowRect;
+const DefWindowProcW = @import("win32.zig").DefWindowProcW;
+const GetClientRect = @import("win32.zig").GetClientRect;
+const MoveWindow = @import("win32.zig").MoveWindow;
+const BeginDeferWindowPos = @import("win32.zig").BeginDeferWindowPos;
+const DeferWindowPos = @import("win32.zig").DeferWindowPos;
+const EndDeferWindowPos = @import("win32.zig").EndDeferWindowPos;
+const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
+const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
+const LoadCursorW = @import("win32.zig").LoadCursorW;
+const InvalidateRect = @import("win32.zig").InvalidateRect;
+const BeginPaint = @import("win32.zig").BeginPaint;
+const EndPaint = @import("win32.zig").EndPaint;
+const GetDC = @import("win32.zig").GetDC;
+const ReleaseDC = @import("win32.zig").ReleaseDC;
+const scroll_ui = @import("chat_scrollbar.zig");
+const FillRect = @import("win32.zig").FillRect;
+const DrawTextW = @import("win32.zig").DrawTextW;
+const chatDrawText = @import("dwrite_text.zig").draw;
+const GetWindowTextW = @import("win32.zig").GetWindowTextW;
+const GetWindowTextLengthW = @import("win32.zig").GetWindowTextLengthW;
+const SetWindowTextW = @import("win32.zig").SetWindowTextW;
+const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
+const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
+const GetKeyState = @import("win32.zig").GetKeyState;
+const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
+const DeleteObject = @import("win32.zig").DeleteObject;
+const SetBkMode = @import("win32.zig").SetBkMode;
+const SetTextColor = @import("win32.zig").SetTextColor;
+const SelectObject = @import("win32.zig").SelectObject;
+const chatLineHeight = @import("fonts.zig").chatLineHeight;
+const Sleep = @import("win32.zig").Sleep;
+const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
+const CloseHandle = @import("win32.zig").CloseHandle;
+const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
+const DeleteFileW = @import("win32.zig").DeleteFileW;
+const CreateFileW = @import("win32.zig").CreateFileW;
+const FlushFileBuffers = @import("win32.zig").FlushFileBuffers;
+const WriteFile = @import("win32.zig").WriteFile;
+const GENERIC_WRITE = @import("win32.zig").GENERIC_WRITE;
+const CREATE_ALWAYS = @import("win32.zig").CREATE_ALWAYS;
+const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
+const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const SendMessageW = @import("win32.zig").SendMessageW;
+const CallWindowProcW = @import("win32.zig").CallWindowProcW;
+const L = @import("startup.zig").L;
+const RGB = @import("startup.zig").RGB;
+const GET_X = @import("startup.zig").GET_X;
+const GET_Y = @import("startup.zig").GET_Y;
+const SetCapture = @import("win32.zig").SetCapture;
+const ReleaseCapture = @import("win32.zig").ReleaseCapture;
+const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
+const customColorOr = @import("themes.zig").customColorOr;
+const themeConsoleBg = @import("themes.zig").themeConsoleBg;
+const themeConsoleFg = @import("themes.zig").themeConsoleFg;
+const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
+const DEV_TOP_PAD = @import("app_state.zig").DEV_TOP_PAD;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
+const PostMessageW = @import("focus.zig").PostMessageW;
+const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
+const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
+const SetFocus = @import("focus.zig").SetFocus;
+const ShowWindow = @import("focus.zig").ShowWindow;
+const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
+const SetWindowPos = @import("focus.zig").SetWindowPos;
+const isCtrlDown = @import("focus.zig").isCtrlDown;
+const CHAT_AC_ENTER_SENDS = @import("app_state.zig").CHAT_AC_ENTER_SENDS;
+const win32WidePath = @import("file_io.zig").win32WidePath;
+const win32WriteAll = @import("file_io.zig").win32WriteAll;
+const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
+const win32MoveReplace = @import("file_io.zig").win32MoveReplace;
+const win32MakePath = @import("file_io.zig").win32MakePath;
+const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
+const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
+const debugLog = @import("diagnostics.zig").debugLog;
+const altqLog = @import("diagnostics.zig").altqLog;
+const altqPtr = @import("diagnostics.zig").altqPtr;
+const saveSession = @import("session.zig").saveSession;
+const appendSshExe = @import("console.zig").appendSshExe;
+const tmuxSshTarget = @import("console.zig").tmuxSshTarget;
+const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
+const fetchAcPersistent = @import("vps.zig").fetchAcPersistent;
+const sshOneShotCaptureInput = @import("vps.zig").sshOneShotCaptureInput;
+const TMUX_HOST_DE = @import("app_state.zig").TMUX_HOST_DE;
+const VK_MENU = @import("app_state.zig").VK_MENU;
+const focusActiveShell = @import("focus.zig").focusActiveShell;
+const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
+const ConsoleColumn = @import("app_state.zig").ConsoleColumn;
+const browserSlotReserved = @import("browser_pane.zig").browserSlotReserved;
+const browserSplitPermilleForActiveShell = @import("browser_pane.zig").browserSplitPermilleForActiveShell;
+const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
+const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
+const closeWebView2 = @import("browser_pane.zig").closeWebView2;
+const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
+const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
+const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
+const chat_keynav = @import("chat_keynav.zig");
+const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
+const DragAcceptFiles = @import("win32.zig").DragAcceptFiles;
+const ChangeWindowMessageFilterEx = @import("win32.zig").ChangeWindowMessageFilterEx;
+const chatDropFiles = @import("chat_render.zig").chatDropFiles;
+const chatImagePasteIntercept = @import("chat_render.zig").chatImagePasteIntercept;
+const chatCopyLatestCode = @import("chat_render.zig").chatCopyLatestCode;
+const chatCopyCodeKeyDown = @import("chat_render.zig").chatCopyCodeKeyDown;
+const ensureChatTranscriptClassRegistered = @import("chat_render.zig").ensureChatTranscriptClassRegistered;
+const CHAT_COMPOSER_MAX_LINES = @import("app_state.zig").CHAT_COMPOSER_MAX_LINES;
+const ChatAcRequest = @import("app_state.zig").ChatAcRequest;
+const CHAT_BUNDLED_SKILLS = @import("app_state.zig").CHAT_BUNDLED_SKILLS;
+const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
+const chatOutboxLegacyKeyForShell = @import("chat_send.zig").chatOutboxLegacyKeyForShell;
+const chatOutboxShellForKey = @import("chat_send.zig").chatOutboxShellForKey;
+const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
+const CHAT_DRAFT_SAVE_MS = @import("app_state.zig").CHAT_DRAFT_SAVE_MS;
+const insertTextIntoChatComposer = @import("voice.zig").insertTextIntoChatComposer;
+const repositionActive = @import("window_layout.zig").repositionActive;
+const chatWorkingIndicatorH = @import("window_layout.zig").chatWorkingIndicatorH;
+const drawAscii = @import("drawing.zig").drawAscii;
+const uiScaled = @import("drawing.zig").uiScaled;
+const WM_SYSKEYDOWN = @import("app_state.zig").WM_SYSKEYDOWN;
+const SetTimer = @import("win32.zig").SetTimer;
+const KillTimer = @import("win32.zig").KillTimer;
+
+fn chatComposerLineH() i32 {
+    const dc = GetDC(null);
+    if (dc == null) return uiScaled(20);
+    defer _ = ReleaseDC(null, dc);
+    const old_font = SelectObject(dc, ensureChatFont());
+    defer _ = SelectObject(dc, old_font);
+    var one = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
+    _ = DrawTextW(dc, L("Ag"), -1, &one, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    return @max(uiScaled(14), chatLineHeight(one.bottom - one.top));
+}
+fn chatComposerBaseCardH() i32 {
+    return @max(uiScaled(44), chatComposerTopPad() + chatComposerLineH() + chatComposerBottomPad());
+}
+fn chatComposerTopPad() i32 {
+    return uiScaled(12);
+}
+fn chatComposerBottomPad() i32 {
+    return uiScaled(10);
+}
+fn chatComposerBaseEditH() i32 {
+    return chatComposerBaseCardH() - chatComposerTopPad() - chatComposerBottomPad();
+}
+fn chatComposerMaxEditH() i32 {
+    return chatComposerBaseEditH() * CHAT_COMPOSER_MAX_LINES;
+}
+
+pub const DictationState = enum { idle, listening, finishing };
+pub var chat_dictation_state: DictationState = .idle;
+var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
+
+pub const DICTATION_WAVE_BARS = 8;
+pub var chat_dictation_started_ms: u64 = 0;
+pub var chat_dictation_wave: [DICTATION_WAVE_BARS]u8 = [_]u8{0} ** DICTATION_WAVE_BARS;
+
+pub fn chatDictationElapsedText(buf: *[8]u16, elapsed_ms: u64) []const u16 {
+    const total: u64 = elapsed_ms / 1000;
+    var tmp: [8]u8 = undefined;
+    const text: []const u8 = std.fmt.bufPrint(&tmp, "{d}:{d:0>2}", .{ total / 60, total % 60 }) catch "0:00";
+    for (text, 0..) |ch, i| buf[i] = ch;
+    return buf[0..text.len];
+}
+
+pub fn chatDictationLevelBar(level: u32) u8 {
+    const capped: u32 = @min(level, 4000);
+    return @intCast((capped * 255) / 4000);
+}
+
+pub fn chatDictationElapsedNow() u64 {
+    if (chat_dictation_started_ms == 0) return 0;
+    return @import("win32.zig").GetTickCount64() -| chat_dictation_started_ms;
+}
+
+pub fn chatDictationWaveTick() void {
+    if (chat_dictation_state == .idle) return;
+    if (chat_dictation_state == .listening) {
+        std.mem.copyForwards(u8, chat_dictation_wave[0 .. DICTATION_WAVE_BARS - 1], chat_dictation_wave[1..DICTATION_WAVE_BARS]);
+        chat_dictation_wave[DICTATION_WAVE_BARS - 1] = chatDictationLevelBar(app_state.g_dictation_level.load(.acquire));
+    }
+    if (app_state.g_main_hwnd != null) {
+        const rc = chatViewLayout().mic_btn;
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+    }
+}
+
+pub fn chatDictationMicWidth(state: DictationState) i32 {
+    return if (state == .idle) uiScaled(32) else uiScaled(116);
+}
+
+fn chatDictationMicFit(wanted: i32, room: i32) i32 {
+    if (wanted <= chatDictationMicWidth(.idle)) return wanted;
+    return @min(wanted, @max(uiScaled(80), room - uiScaled(60)));
+}
+
+pub fn chatDictationSync() void {
+    const next: DictationState = if (app_state.g_dictation_draft_owner_len == 0 or !app_state.g_dictation_running.load(.acquire))
+        .idle
+    else if (app_state.g_dictation_recording.load(.acquire))
+        .listening
+    else
+        .finishing;
+    if (next == chat_dictation_state) return;
+    const was_idle = chat_dictation_state == .idle;
+    chat_dictation_state = next;
+    if (was_idle and next != .idle) {
+        chat_dictation_started_ms = @import("win32.zig").GetTickCount64();
+        chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
+    } else if (next == .idle) {
+        chat_dictation_started_ms = 0;
+        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+    }
+    chatComposerButtonsRefresh();
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub fn chatDictationToggle() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
+    chat_dictation_engine_toggle();
+    chatDictationSync();
+}
+
+pub fn chatSendOrFinishDictation() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
+    const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+    const dictating = dictated.len > 0 and app_state.g_dictation_running.load(.acquire) and
+        std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+    if (!dictating) {
+        @import("chat_send.zig").sendChatPrompt();
+        return;
+    }
+    if (app_state.g_dictation_recording.load(.acquire)) {
+        chatDictationToggle();
+        if (app_state.g_dictation_recording.load(.acquire)) return;
+    }
+    app_state.g_dictation_send_queued.store(true, .release);
+}
+
+pub fn chatDictationSendFlush(queued: bool) void {
+    if (!queued or !@import("room_frontend.zig").privateActionsAllowed()) return;
+    const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+    if (!std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) return;
+    @import("chat_send.zig").sendChatPrompt();
+}
+
+fn chatDictationKey(msg: UINT, wp: WPARAM, lp: LPARAM, ctrl: bool, shift: bool, alt: bool) bool {
+    if (msg == WM_KEYDOWN and wp == 0x44 and ctrl and !shift and !alt) {
+        if ((lp & 0x40000000) == 0) chatDictationToggle();
+        return true;
+    }
+    if (msg == 0x0102 and wp == 0x04 and ctrl and !shift and !alt) return true;
+    if (msg == 0x0102 and wp == 0x0D and !shift and chat_dictation_state == .listening) {
+        chatDictationToggle();
+        return true;
+    }
+    return false;
+}
+
+pub fn chatDictationClick(x: i32, y: i32) bool {
+    if (!chatViewOwnsInput() or !pointInRect(chatViewLayout().mic_btn, x, y)) return false;
+    chatDictationToggle();
+    return true;
+}
+
+pub fn chatViewLayout() ChatViewLayout {
+    var rc: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    const gap = uiScaled(14);
+    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
+    const slot = @import("window_layout.zig").activePaneContentRect(rc);
+    const content = chat_style.contentColumn(slot.left, slot.right - slot.left, uiScaled(960));
+    const left = content.left;
+    const right = left + content.width;
+    const content_top = slot.top + threadTitleHeight();
+    const bottom = @min(slot.bottom, rc.bottom);
+    const send_size = uiScaled(32);
+    const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
+    const composer_card = RECT{
+        .left = left + send_size + uiScaled(8),
+        .top = bottom - composer_h,
+        .right = right,
+        .bottom = bottom,
+    };
+    const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
+    const send_btn = slots.send;
+    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + uiScaled(14)));
+    const mic_btn = RECT{
+        .left = slots.left - uiScaled(6) - mic_w,
+        .top = send_btn.top,
+        .right = slots.left - uiScaled(6),
+        .bottom = send_btn.bottom,
+    };
+    const attach_btn = RECT{
+        .left = left,
+        .top = send_btn.top,
+        .right = left + send_size,
+        .bottom = send_btn.bottom,
+    };
+    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
+    return .{
+        .pane = slot,
+        .transcript = .{
+            .left = left,
+            .top = content_top,
+            .right = right,
+            .bottom = transcript_bottom,
+        },
+        .transcript_window = .{
+            .left = left,
+            .top = slot.top,
+            .right = right,
+            .bottom = composer_card.bottom,
+        },
+        .composer_card = composer_card,
+        .composer = .{
+            .left = composer_card.left + uiScaled(14),
+            .top = composer_card.top + chatReplyBarH() + uiScaled(12),
+            .right = mic_btn.left - uiScaled(12),
+            .bottom = composer_card.bottom - uiScaled(10),
+        },
+        .send_btn = send_btn,
+        .attach_btn = attach_btn,
+        .mic_btn = mic_btn,
+        .stop_btn = slots.stop,
+        .send_shown = slots.send_shown,
+        .stop_shown = slots.stop_shown,
+    };
+}
+
+pub fn chatNewMessagesHeight() i32 {
+    return if (app_state.g_chat_new_messages.count() != 0) uiScaled(30) else 0;
+}
+
+pub fn chatNewMessagesRect() ?RECT {
+    if (!app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)) return null;
+    const layout = chatViewLayout();
+    var digits: i32 = 1;
+    var remaining = app_state.g_chat_new_messages.count();
+    while (remaining >= 10) : (remaining /= 10) digits += 1;
+    const width = @min(layout.transcript.right - layout.transcript.left, uiScaled(220 + digits * 8));
+    const left = layout.transcript.left + @divTrunc(layout.transcript.right - layout.transcript.left - width, 2);
+    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + uiScaled(2), .bottom = layout.transcript.bottom + uiScaled(28) };
+}
+
+pub fn chatNewMessagesChanged(had_messages: bool) void {
+    if (had_messages != (app_state.g_chat_new_messages.count() != 0)) layoutChatControls();
+    @import("window_layout.zig").chatWorkingIndicatorInvalidate();
+    if (verboseLoggingEnabled()) {
+        const rc = chatNewMessagesRect() orelse std.mem.zeroes(RECT);
+        var log: [200]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] new messages count={d} visible={d} up={d} rect={d},{d},{d},{d}", .{
+            app_state.g_chat_new_messages.count(),
+            @intFromBool(app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)),
+            @intFromBool(app_state.g_chat_scrolled_up),
+            rc.left,
+            rc.top,
+            rc.right,
+            rc.bottom,
+        }) catch return);
+    }
+}
+
+pub fn chatNewMessagesDismiss() void {
+    const had_messages = app_state.g_chat_new_messages.count() != 0;
+    app_state.g_chat_new_messages.dismiss();
+    chatNewMessagesChanged(had_messages);
+}
+
+pub fn chatSendSlots(card: RECT, size: i32, margin: i32, working: bool, has_text: bool) struct { send: RECT, stop: RECT, send_shown: bool, stop_shown: bool, left: i32 } {
+    const slot = RECT{ .left = card.right - margin - size, .top = card.bottom - margin - size, .right = card.right - margin, .bottom = card.bottom - margin };
+    const stop_only = working and !has_text;
+    return .{ .send = slot, .stop = slot, .send_shown = !stop_only, .stop_shown = stop_only, .left = slot.left };
+}
+
+test "IGSH-909 send and stop share one slot so the composer never shows more than two buttons" {
+    const card = RECT{ .left = 100, .top = 500, .right = 900, .bottom = 560 };
+    const idle = chatSendSlots(card, 32, 14, false, true);
+    try std.testing.expect(idle.send_shown and !idle.stop_shown);
+    try std.testing.expectEqual(RECT{ .left = 854, .top = 514, .right = 886, .bottom = 546 }, idle.send);
+    try std.testing.expectEqual(idle.send.left, idle.left);
+    try std.testing.expectEqual(idle.send, chatSendSlots(card, 32, 14, false, false).send);
+    const empty = chatSendSlots(card, 32, 14, true, false);
+    try std.testing.expect(!empty.send_shown and empty.stop_shown);
+    try std.testing.expectEqual(idle.send, empty.stop);
+    try std.testing.expectEqual(@as(i32, 32), empty.stop.right - empty.stop.left);
+    try std.testing.expectEqual(@as(i32, 32), empty.stop.bottom - empty.stop.top);
+    try std.testing.expectEqual(empty.stop.left, empty.left);
+    const typed = chatSendSlots(card, 32, 14, true, true);
+    try std.testing.expect(typed.send_shown and !typed.stop_shown);
+    try std.testing.expectEqual(idle.send, typed.send);
+    try std.testing.expectEqual(typed.send.left, typed.left);
+    for ([_]bool{ false, true }) |working| {
+        for ([_]bool{ false, true }) |has_text| {
+            const s = chatSendSlots(card, 32, 14, working, has_text);
+            try std.testing.expectEqual(@as(u8, 1), @as(u8, @intFromBool(s.send_shown)) + @as(u8, @intFromBool(s.stop_shown)));
+        }
+    }
+    for ([_]RECT{ idle.send, empty.stop, typed.send }) |rc| {
+        try std.testing.expect(rc.left >= card.left and rc.top >= card.top and rc.right <= card.right and rc.bottom <= card.bottom);
+    }
+}
+
+test "IGSH-965 send while dictating stops the recording and queues one send" {
+    const Engine = struct {
+        var toggles: u32 = 0;
+        fn toggle() void {
+            toggles += 1;
+            app_state.g_dictation_recording.store(false, .release);
+        }
+    };
+    const saved = .{
+        .owner_len = app_state.g_dictation_draft_owner_len,
+        .owner = app_state.g_dictation_draft_owner,
+        .chat_owner_len = app_state.g_chat_draft_owner_len,
+        .chat_owner = app_state.g_chat_draft_owner,
+        .running = app_state.g_dictation_running.load(.acquire),
+        .recording = app_state.g_dictation_recording.load(.acquire),
+        .queued = app_state.g_dictation_send_queued.load(.acquire),
+        .toggle = chat_dictation_engine_toggle,
+        .state = chat_dictation_state,
+        .chat = app_state.g_chat_active,
+    };
+    defer {
+        app_state.g_dictation_draft_owner_len = saved.owner_len;
+        app_state.g_dictation_draft_owner = saved.owner;
+        app_state.g_chat_draft_owner_len = saved.chat_owner_len;
+        app_state.g_chat_draft_owner = saved.chat_owner;
+        app_state.g_dictation_running.store(saved.running, .release);
+        app_state.g_dictation_recording.store(saved.recording, .release);
+        app_state.g_dictation_send_queued.store(saved.queued, .release);
+        chat_dictation_engine_toggle = saved.toggle;
+        chat_dictation_state = saved.state;
+        app_state.g_chat_active = saved.chat;
+    }
+    app_state.g_chat_active = false;
+    chat_dictation_engine_toggle = Engine.toggle;
+    Engine.toggles = 0;
+    app_state.g_dictation_send_queued.store(false, .release);
+    app_state.g_dictation_draft_owner[0] = 'a';
+    app_state.g_dictation_draft_owner_len = 1;
+    app_state.g_chat_draft_owner[0] = 'b';
+    app_state.g_chat_draft_owner_len = 1;
+    app_state.g_dictation_running.store(true, .release);
+    app_state.g_dictation_recording.store(true, .release);
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+    app_state.g_chat_draft_owner[0] = 'a';
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
+    app_state.g_dictation_send_queued.store(false, .release);
+    app_state.g_dictation_running.store(false, .release);
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+}
+
+pub fn chatComposerHasText() bool {
+    return app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
+}
+
+fn chatComposerButtonsRefresh() void {
+    if (!app_state.g_chat_active or app_state.g_main_hwnd == null) return;
+    layoutChatControls();
+    const layout = chatViewLayout();
+    var rc = RECT{ .left = layout.attach_btn.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
+    _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+}
+
+pub fn chatStopSlotSync() void {
+    const shown = app_state.g_chat_active and @import("window_layout.zig").chatStopVisible();
+    if (shown == app_state.g_chat_stop_shown) return;
+    app_state.g_chat_stop_shown = shown;
+    if (!shown) app_state.g_chat_stop_hover = false;
+    chatComposerButtonsRefresh();
+}
+
+pub fn chatReplyBarH() i32 {
+    return if (app_state.g_chat_reply_len > 0) uiScaled(36) else 0;
+}
+
+pub fn chatReplyCancelRect() RECT {
+    const card = chatViewLayout().composer_card;
+    return .{ .left = card.right - uiScaled(36), .right = card.right - uiScaled(4), .top = card.top + uiScaled(2), .bottom = card.top + chatReplyBarH() };
+}
+
+pub fn clearChatReply() void {
+    app_state.g_chat_reply_len = 0;
+    app_state.g_chat_reply_preview_len = 0;
+    layoutChatControls();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+fn chatReplyRefreshPreview() void {
+    const a = std.heap.page_allocator;
+    const text = chat_reply.preview(a, app_state.g_chat_reply[0..app_state.g_chat_reply_len]) catch return;
+    defer a.free(text);
+    const wide = std.unicode.utf8ToUtf16LeAlloc(a, text) catch return;
+    defer a.free(wide);
+    var n = @min(wide.len, app_state.g_chat_reply_preview.len);
+    if (n > 0 and std.unicode.utf16IsHighSurrogate(wide[n - 1])) n -= 1;
+    @memcpy(app_state.g_chat_reply_preview[0..n], wide[0..n]);
+    app_state.g_chat_reply_preview_len = n;
+}
+
+pub fn selectChatReply(text: []const u16) bool {
+    if (app_state.g_chat_composer_hwnd == null) return false;
+    const bytes = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text) catch return false;
+    defer std.heap.page_allocator.free(bytes);
+    if (bytes.len > app_state.g_chat_reply.len) {
+        showHeaderNoticeAscii("This message is too large to quote", 3500, true);
+        return false;
+    }
+    @memcpy(app_state.g_chat_reply[0..bytes.len], bytes);
+    app_state.g_chat_reply_len = bytes.len;
+    chatReplyRefreshPreview();
+    var log_buf: [80]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log_buf, "[chat] reply quote chars={d}", .{text.len}) catch "[chat] reply quote");
+    chatAcClose();
+    layoutChatControls();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    _ = SetFocus(app_state.g_chat_composer_hwnd);
+    return true;
+}
+
+pub fn pointInRect(rc: RECT, x: i32, y: i32) bool {
+    return x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom;
+}
+
+pub fn chatViewOwnsInput() bool {
+    return @import("room_frontend.zig").privateActionsAllowed() and app_state.g_chat_active and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and
+        !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_all_sessions_active and !app_state.g_snippet_create_active;
+}
+
+pub fn chatComposerFocusAllowed() bool {
+    if (app_state.g_chat_find_open) return false;
+    if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) altqLog("composer_block pending={} handoff_left={} chat_owns={} fg={X}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), chatViewOwnsInput(), altqPtr(GetForegroundWindow()) });
+    if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) return false;
+    return chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and app_state.g_edit_hwnd == null and GetForegroundWindow() == app_state.g_main_hwnd;
+}
+
+pub fn chatFocusDrifted() bool {
+    const f = GetFocus();
+    return f == null or f == app_state.g_main_hwnd or f == app_state.g_chat_transcript_hwnd;
+}
+
+pub fn chatComposerOwnsKey(wp: WPARAM, vkCode: DWORD, ctrl: bool, alt: bool, flags: DWORD) bool {
+    if (wp != WM_KEYDOWN and wp != WM_SYSKEYDOWN) return false;
+    if (ctrl and (flags & 0x20) != 0) return true;
+    if (alt and !ctrl) return false;
+    if (wp != WM_KEYDOWN) return false;
+    if (vkCode == 0x70 or vkCode == 0x71) return false;
+    if (!ctrl) return true;
+    return switch (vkCode) {
+        0x41, 0x43, 0x44, 0x56, 0x58, 0x59, 0x5A => true,
+        0xBF => true,
+        0x25, 0x27 => true,
+        0x08, 0x2E => true,
+        else => false,
+    };
+}
+
+pub fn chatPaletteToggleKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool) bool {
+    return vk == 0x4B and ctrl and !shift and !alt;
+}
+
+pub fn chatPaletteToggleKeyDown(vk: WPARAM) bool {
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    return chatPaletteToggleKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
+}
+
+pub fn paletteAcceptsChar(ch: WPARAM) bool {
+    return ch >= 0x20 and ch != 0x7F and ch <= 0xFFFF;
+}
+
+pub fn postPaletteToggle() void {
+    if (app_state.g_main_hwnd == null) return;
+    _ = PostMessageW(app_state.g_main_hwnd, if (app_state.g_search_active) WM_APP_SEARCH_CLOSE else WM_APP_SEARCH_OPEN, 0, 0);
+}
+
+pub fn chatButtonAt(x: i32, y: i32) u8 {
+    if (!app_state.g_chat_active) return 0;
+    const layout = chatViewLayout();
+    if (chatNewMessagesRect()) |pill| {
+        if (pointInRect(pill, x, y)) return if (x >= pill.right - uiScaled(28)) 11 else 10;
+    }
+    if (app_state.g_chat_reply_len > 0 and pointInRect(chatReplyCancelRect(), x, y)) return 9;
+    if (layout.stop_shown and pointInRect(layout.stop_btn, x, y)) return 5;
+    if (layout.send_shown and pointInRect(layout.send_btn, x, y)) return 3;
+    if (pointInRect(layout.attach_btn, x, y)) return 4;
+    if (pointInRect(layout.mic_btn, x, y)) return 10;
+    return 0;
+}
+
+pub fn ensureChatFont() HANDLE {
+    if (app_state.g_chat_font == null) {
+        app_state.g_chat_font = @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt), false, false, false, .{});
+    }
+    return app_state.g_chat_font;
+}
+
+pub fn refreshChatBrushes() void {
+    const bg = themeConsoleBg();
+    const input = customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(255, 255, 255) else tokens.ReaderControl);
+    if (app_state.g_chat_bg_brush == null or app_state.g_chat_bg_color != bg) {
+        if (app_state.g_chat_bg_brush != null) _ = DeleteObject(app_state.g_chat_bg_brush);
+        app_state.g_chat_bg_brush = CreateSolidBrush(bg);
+        app_state.g_chat_bg_color = bg;
+    }
+    if (app_state.g_chat_input_brush == null or app_state.g_chat_input_color != input) {
+        if (app_state.g_chat_input_brush != null) _ = DeleteObject(app_state.g_chat_input_brush);
+        app_state.g_chat_input_brush = CreateSolidBrush(input);
+        app_state.g_chat_input_color = input;
+    }
+}
+
+fn clampComposerHeight(content_h: i32, base_h: i32) i32 {
+    if (base_h <= 0) return content_h;
+    const max_h = base_h * CHAT_COMPOSER_MAX_LINES;
+    if (content_h < base_h) return base_h;
+    if (content_h > max_h) return max_h;
+    return content_h;
+}
+
+test "clampComposerHeight stays within one line and the max line count" {
+    try std.testing.expectEqual(@as(i32, 40), clampComposerHeight(0, 40));
+    try std.testing.expectEqual(@as(i32, 40), clampComposerHeight(10, 40));
+    try std.testing.expectEqual(@as(i32, 40), clampComposerHeight(40, 40));
+    try std.testing.expectEqual(@as(i32, 90), clampComposerHeight(90, 40));
+    try std.testing.expectEqual(@as(i32, 200), clampComposerHeight(200, 40));
+    try std.testing.expectEqual(@as(i32, 40 * CHAT_COMPOSER_MAX_LINES), clampComposerHeight(5000, 40));
+}
+
+fn chatComposerMeasureContentH(width_hint: i32) i32 {
+    if (app_state.g_chat_composer_hwnd == null) return 0;
+    if (GetWindowTextLengthW(app_state.g_chat_composer_hwnd) == 0) return 0;
+    const lines = SendMessageW(app_state.g_chat_composer_hwnd, 0x00BA, 0, 0);
+    if (lines > 0) return @as(i32, @intCast(@min(lines, 100000))) * chatComposerLineH();
+    return chatComposerMeasureContentDrawText(width_hint);
+}
+
+fn chatComposerMeasureContentDrawText(width_hint: i32) i32 {
+    if (app_state.g_chat_composer_hwnd == null) return 0;
+    var fmt: RECT = std.mem.zeroes(RECT);
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B2, 0, @bitCast(@intFromPtr(&fmt)));
+    const width = if (fmt.right - fmt.left > 0) fmt.right - fmt.left else width_hint;
+    if (width <= 0) return 0;
+    var text: [16384]u16 = undefined;
+    const len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
+    const len: usize = if (len_i > 0) @intCast(len_i) else 0;
+    if (len == 0) return 0;
+    const dc = GetDC(app_state.g_chat_composer_hwnd);
+    if (dc == null) return 0;
+    defer _ = ReleaseDC(app_state.g_chat_composer_hwnd, dc);
+    const old_font = SelectObject(dc, ensureChatFont());
+    defer _ = SelectObject(dc, old_font);
+    var calc = RECT{ .left = 0, .top = 0, .right = width, .bottom = 0 };
+    _ = DrawTextW(dc, @ptrCast(&text), @intCast(len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    var h = calc.bottom - calc.top;
+    if (text[len - 1] == '\n') {
+        var one = RECT{ .left = 0, .top = 0, .right = width, .bottom = 0 };
+        _ = DrawTextW(dc, L("Ag"), -1, &one, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+        h += one.bottom - one.top;
+    }
+    return h;
+}
+
+fn chatComposerAutoGrow() void {
+    if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null) return;
+    const layout = chatViewLayout();
+    const content_h = chatComposerMeasureContentH(layout.composer.right - layout.composer.left);
+    const new_extra = clampComposerHeight(content_h, chatComposerBaseEditH()) - chatComposerBaseEditH();
+    if (new_extra != app_state.g_chat_composer_extra_h) {
+        layoutChatControls();
+    } else {
+        chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
+        chatComposerKeepCaretVisible();
+    }
+}
+
+fn chatComposerSetScrollBar(show: bool) void {
+    if (show == app_state.g_chat_composer_scroll_shown or app_state.g_chat_composer_hwnd == null) return;
+    app_state.g_chat_composer_scroll_shown = show;
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
+}
+
+const EM_GETLINECOUNT: UINT = 0x00BA;
+const EM_LINEINDEX: UINT = 0x00BB;
+const EM_LINEFROMCHAR: UINT = 0x00C9;
+const EM_GETFIRSTVISIBLELINE: UINT = 0x00CE;
+const EM_POSFROMCHAR: UINT = 0x00D6;
+const EM_LINESCROLL: UINT = 0x00B6;
+
+const ComposerLines = struct { first: i32, visible: i32, total: i32 };
+
+fn chatComposerCharY(hwnd: HANDLE, index: isize) ?i32 {
+    const packed_point: u32 = @truncate(@as(usize, @bitCast(SendMessageW(hwnd, EM_POSFROMCHAR, @intCast(@max(0, index)), 0))));
+    if (packed_point == 0xffffffff) return null;
+    return @as(i16, @bitCast(@as(u16, @truncate(packed_point >> 16))));
+}
+
+fn chatComposerNativeLineH(hwnd: HANDLE, total: isize) i32 {
+    if (total >= 2) {
+        const y0 = chatComposerCharY(hwnd, SendMessageW(hwnd, EM_LINEINDEX, 0, 0));
+        const y1 = chatComposerCharY(hwnd, SendMessageW(hwnd, EM_LINEINDEX, 1, 0));
+        if (y0 != null and y1 != null and y1.? > y0.?) return y1.? - y0.?;
+    }
+    return chatComposerLineH();
+}
+
+fn chatComposerLines(hwnd: HANDLE) ComposerLines {
+    var rect: RECT = std.mem.zeroes(RECT);
+    _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@intFromPtr(&rect)));
+    const total = SendMessageW(hwnd, EM_GETLINECOUNT, 0, 0);
+    const line_h = @max(1, chatComposerNativeLineH(hwnd, total));
+    return .{
+        .first = @intCast(SendMessageW(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0)),
+        .visible = @max(1, @divTrunc(rect.bottom - rect.top, line_h)),
+        .total = @intCast(@min(total, 100000)),
+    };
+}
+
+fn chatComposerScrollLines(hwnd: HANDLE, delta: i32) void {
+    if (delta == 0) return;
+    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, EM_LINESCROLL, 0, @as(isize, delta));
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+fn chatComposerKeepCaretVisible() void {
+    const hwnd = app_state.g_chat_composer_hwnd;
+    if (hwnd == null) return;
+    var start: u32 = 0;
+    var end: u32 = 0;
+    _ = SendMessageW(hwnd, 0x00B0, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+    const caret: i32 = @intCast(SendMessageW(hwnd, EM_LINEFROMCHAR, end, 0));
+    const lines = chatComposerLines(hwnd);
+    chatComposerScrollLines(hwnd, scroll_ui.caretScrollLines(lines.first, lines.visible, lines.total, caret));
+}
+
+fn chatComposerEditMessage(msg: UINT, wp: WPARAM) bool {
+    if (msg == WM_KEYDOWN) return !(wp >= 0x10 and wp <= 0x12) and !(wp >= 0xA0 and wp <= 0xA5);
+    return msg == 0x0102 or msg == 0x000C or msg == 0x00C2 or msg == 0x0300 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304 or msg == 0x00C7;
+}
+
+fn chatComposerThumb(hwnd: HANDLE, track_h: i32) ?scroll_ui.Span {
+    const lines = chatComposerLines(hwnd);
+    return scroll_ui.fixedThumb(lines.total, lines.visible, lines.first, track_h, uiScaled(scroll_ui.THUMB_HEIGHT_PX));
+}
+
+fn chatComposerPaintScroll(hwnd: HANDLE, dc: HANDLE, client: RECT) void {
+    const span = chatComposerThumb(hwnd, client.bottom - client.top) orelse return;
+    const width = uiScaled(scroll_ui.THUMB_WIDTH_PX);
+    const x = client.right - uiScaled(scroll_ui.THUMB_MARGIN_PX) - width;
+    const thumb = RECT{ .left = x, .top = client.top + span.top, .right = x + width, .bottom = client.top + span.top + span.height };
+    @import("chat_render.zig").fillRoundRectAA(dc, thumb, @divTrunc(width, 2), chat_style.scrollThumbColor(app_state.g_chat_input_color));
+}
+
+var chat_composer_scroll_grab: ?i32 = null;
+
+fn chatComposerScrollDragTo(hwnd: HANDLE, y: i32, grab: i32) void {
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(hwnd, &client) == 0) return;
+    const track = client.bottom - client.top;
+    const span = chatComposerThumb(hwnd, track) orelse return;
+    const lines = chatComposerLines(hwnd);
+    const target = scroll_ui.scrollForThumbTop(lines.total, lines.visible, track, span.height, y - grab);
+    chatComposerScrollLines(hwnd, scroll_ui.clampedLineScroll(lines.first, target - lines.first, lines.visible, lines.total));
+}
+
+fn chatComposerScrollMouse(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
+    if (hwnd != app_state.g_chat_composer_hwnd) return false;
+    switch (msg) {
+        0x020A => {
+            const lines = chatComposerLines(hwnd);
+            if (lines.total <= lines.visible) return false;
+            const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+            chatComposerScrollLines(hwnd, scroll_ui.clampedLineScroll(lines.first, scroll_ui.wheelLines(delta, 3), lines.visible, lines.total));
+            return true;
+        },
+        0x0201 => {
+            var client: RECT = std.mem.zeroes(RECT);
+            if (GetClientRect(hwnd, &client) == 0) return false;
+            if (GET_X(lp) < client.right - uiScaled(16)) return false;
+            const track = client.bottom - client.top;
+            const span = chatComposerThumb(hwnd, track) orelse return false;
+            const y = GET_Y(lp);
+            const grab = if (y >= span.top and y < span.top + span.height) y - span.top else @divTrunc(span.height, 2);
+            chat_composer_scroll_grab = grab;
+            _ = SetCapture(hwnd);
+            chatComposerScrollDragTo(hwnd, y, grab);
+            return true;
+        },
+        0x0200 => {
+            const grab = chat_composer_scroll_grab orelse return false;
+            chatComposerScrollDragTo(hwnd, GET_Y(lp), grab);
+            return true;
+        },
+        0x0202 => {
+            if (chat_composer_scroll_grab == null) return false;
+            chat_composer_scroll_grab = null;
+            _ = ReleaseCapture();
+            return true;
+        },
+        else => return false,
+    }
+}
+var chat_frame_logged: [12]i32 = @splat(std.math.minInt(i32));
+
+fn logChatFrame(layout: ChatViewLayout) void {
+    if (!verboseLoggingEnabled()) return;
+    const now = [_]i32{ layout.transcript.left, layout.transcript.top, layout.transcript.right, layout.transcript.bottom, layout.composer.left, layout.composer.top, layout.composer.right, layout.composer.bottom, layout.composer_card.left, layout.composer_card.top, layout.composer_card.right, layout.composer_card.bottom };
+    if (std.mem.eql(i32, &now, &chat_frame_logged)) return;
+    chat_frame_logged = now;
+    var log: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] frame transcript {d},{d},{d},{d} edit {d},{d},{d},{d} card {d},{d},{d},{d}", .{ now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11] }) catch "");
+}
+
+pub fn layoutChatControls() void {
+    if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null) return;
+    app_state.g_chat_layout_browser_reserved = browserSlotReserved();
+    var layout = chatViewLayout();
+    const font = ensureChatFont();
+    if (SendMessageW(app_state.g_chat_composer_hwnd, 0x0031, 0, 0) != @as(isize, @bitCast(@intFromPtr(font))))
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(font), 1);
+    const base_h = chatComposerBaseEditH();
+    const content_h = chatComposerMeasureContentH(layout.composer.right - layout.composer.left);
+    const new_extra = clampComposerHeight(content_h, base_h) - base_h;
+    if (new_extra != app_state.g_chat_composer_extra_h) {
+        app_state.g_chat_composer_extra_h = new_extra;
+        layout = chatViewLayout();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    }
+    const status_h = @import("chat_render.zig").chatStatusHeight(layout.transcript.bottom - layout.transcript.top);
+    if (app_state.g_chat_status_hwnd != null) {
+        _ = MoveWindow(app_state.g_chat_status_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, status_h, 0);
+        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and chatViewOwnsInput()) SW_SHOW else SW_HIDE);
+        _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
+    }
+    const win = layout.transcript_window;
+    const new_pad = @import("chat_render.zig").chatTopPad() + status_h;
+    const new_inset = win.bottom - layout.transcript.bottom;
+    if (new_pad != app_state.g_chat_top_pad) @import("chat_render.zig").chatSetTopPad(new_pad);
+    if (new_inset != app_state.g_chat_bottom_inset) {
+        app_state.g_chat_bottom_inset = new_inset;
+        app_state.g_chat_layout_dirty = true;
+    }
+    var batch = BeginDeferWindowPos(2);
+    if (batch != null and app_state.g_chat_transcript_hwnd != null)
+        batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, win.left, win.top, win.right - win.left, win.bottom - win.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (batch != null)
+        batch = DeferWindowPos(batch, app_state.g_chat_composer_hwnd, null, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (batch == null or EndDeferWindowPos(batch) == 0) {
+        if (app_state.g_chat_transcript_hwnd != null)
+            _ = MoveWindow(app_state.g_chat_transcript_hwnd, win.left, win.top, win.right - win.left, win.bottom - win.top, 0);
+        _ = MoveWindow(app_state.g_chat_composer_hwnd, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, 0);
+    }
+    logChatFrame(layout);
+    if (app_state.g_chat_layout_dirty and app_state.g_chat_transcript_hwnd != null) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        @import("chat_render.zig").chatViewClientRect(&rc);
+        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
+    }
+    @import("chat_float.zig").syncChatRegion();
+    chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
+    chatComposerKeepCaretVisible();
+    chatAcLayout();
+}
+
+fn ensureChatControls() bool {
+    if (app_state.g_main_hwnd == null) return false;
+    const GWLP_WNDPROC: i32 = -4;
+    if (app_state.g_chat_transcript_hwnd == null) {
+        ensureChatTranscriptClassRegistered();
+        app_state.g_chat_transcript_hwnd = CreateWindowExW(
+            0,
+            L("ZigShellChatTranscript"),
+            L(""),
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+            0,
+            0,
+            100,
+            100,
+            app_state.g_main_hwnd,
+            null,
+            null,
+            null,
+        );
+        if (app_state.g_chat_transcript_hwnd == null) return false;
+        DragAcceptFiles(app_state.g_chat_transcript_hwnd, 1);
+        for ([_]UINT{ 0x0233, 0x004A, 0x0049 }) |message| {
+            _ = ChangeWindowMessageFilterEx(app_state.g_chat_transcript_hwnd, message, 1, null);
+        }
+    }
+    if (app_state.g_chat_status_hwnd == null) {
+        app_state.g_chat_status_hwnd = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, app_state.g_main_hwnd, null, null, null);
+        @import("fonts.zig").setControlFont(app_state.g_chat_status_hwnd);
+        if (app_state.g_chat_status_hwnd == null) return false;
+        _ = SetWindowLongPtrW(app_state.g_chat_status_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&@import("chat_render.zig").chatStatusWndProc)));
+    }
+    if (app_state.g_chat_composer_hwnd == null) {
+        _ = loadPaletteSkills();
+        app_state.g_chat_composer_scroll_shown = false;
+        app_state.g_chat_composer_hwnd = CreateWindowExW(
+            0,
+            L("EDIT"),
+            L(""),
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
+            0,
+            0,
+            100,
+            80,
+            app_state.g_main_hwnd,
+            null,
+            null,
+            null,
+        );
+        if (app_state.g_chat_composer_hwnd == null) return false;
+        DragAcceptFiles(app_state.g_chat_composer_hwnd, 1);
+        for ([_]UINT{ 0x0233, 0x004A, 0x0049 }) |message| {
+            _ = ChangeWindowMessageFilterEx(app_state.g_chat_composer_hwnd, message, 1, null);
+        }
+        app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(app_state.g_chat_composer_hwnd, GWLP_WNDPROC);
+        _ = SetWindowLongPtrW(app_state.g_chat_composer_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&chatComposerSubclassProc)));
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00C5, 16383, 0);
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(ensureChatFont()), 1);
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x1501, 1, @bitCast(@as(isize, @intCast(@intFromPtr(L("Message this session"))))));
+    }
+    if (app_state.g_chat_ac_hwnd == null) {
+        ensureChatAcClass();
+        app_state.g_chat_ac_hwnd = CreateWindowExW(0, L("ZigShellChatSuggest"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 100, 100, app_state.g_main_hwnd, null, null, null);
+        if (app_state.g_chat_ac_hwnd == null) return false;
+    }
+    for ([_]chat_complete.Mode{ .slash, .dollar }) |mode| {
+        if (mode == .dollar and chatAcAgent() != .codex) continue;
+        const index = chatAcCatalog(mode) orelse continue;
+        const slot = &app_state.g_chat_ac_slots[index];
+        const elapsed = GetTickCount64() -| slot.fetched;
+        if (slot.pending == 0 and (slot.fetched == 0 or elapsed > (if (slot.status == .@"error") @as(u64, 60_000) else if (slot.status == .loading) @as(u64, 4_000) else 600_000))) chatAcRequest(index);
+    }
+    refreshChatBrushes();
+    return true;
+}
+
+pub fn chatAcAgent() chat_complete.Agent {
+    if (app_state.active_shell >= app_state.shell_count) return .other;
+    return switch (app_state.shells[app_state.active_shell].ai_agent) {
+        1 => .claude,
+        2 => .codex,
+        else => .other,
+    };
+}
+
+pub fn chatAcClose() void {
+    app_state.g_chat_ac.open = false;
+    app_state.g_chat_ac.browse = false;
+    if (app_state.g_chat_ac_hwnd != null) _ = ShowWindow(app_state.g_chat_ac_hwnd, SW_HIDE);
+}
+
+fn chatAcLayout() void {
+    if (!app_state.g_chat_ac.open or app_state.g_chat_ac_hwnd == null or !chatViewOwnsInput()) return;
+    const layout = chatViewLayout();
+    const row_h = uiScaled(32);
+    const rows: i32 = @intCast(@min(app_state.g_chat_ac.count, 8));
+    const height = @max(row_h + chatAcPad() * 2, rows * row_h + chatAcPad() * 2);
+    const top = @max(layout.transcript.top, layout.composer_card.top - uiScaled(6) - height);
+    const ac_w = layout.composer_card.right - layout.composer_card.left;
+    const ac_h = layout.composer_card.top - uiScaled(6) - top;
+    _ = MoveWindow(app_state.g_chat_ac_hwnd, layout.composer_card.left, top, ac_w, ac_h, 1);
+    const ac_region = @import("win32.zig").CreateRoundRectRgn(0, 0, ac_w + 1, ac_h + 1, chatAcRadius() * 2, chatAcRadius() * 2);
+    if (ac_region != null and @import("win32.zig").SetWindowRgn(app_state.g_chat_ac_hwnd, ac_region, 1) == 0) _ = DeleteObject(ac_region);
+    _ = SetWindowPos(app_state.g_chat_ac_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
+}
+
+var chat_ac_window_clears: usize = 0;
+
+fn chatAcPaint(hwnd: HANDLE) void {
+    var ps: PAINTSTRUCT = undefined;
+    const target = BeginPaint(hwnd, &ps);
+    if (target == null) return;
+    defer _ = EndPaint(hwnd, &ps);
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(hwnd, &rc);
+    const w = @import("win32.zig");
+    const memory = w.CreateCompatibleDC(target);
+    defer if (memory != null) {
+        _ = w.DeleteDC(memory);
+    };
+    const bitmap = if (memory != null) w.CreateCompatibleBitmap(target, rc.right, rc.bottom) else null;
+    defer if (bitmap != null) {
+        _ = DeleteObject(bitmap);
+    };
+    const old_bitmap = if (bitmap != null) SelectObject(memory, bitmap) else null;
+    defer if (old_bitmap != null) {
+        _ = SelectObject(memory, old_bitmap);
+    };
+    const dc = if (old_bitmap != null) memory else target;
+    const menu_colors = @import("more_menu.zig").colors();
+    const background = CreateSolidBrush(menu_colors.outline);
+    _ = FillRect(dc, &rc, background);
+    const edge = @max(1, uiScaled(1));
+    @import("smooth.zig").fillRoundRect(dc, .{ .left = edge, .top = edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, chatAcRadius() - edge, menu_colors.panel);
+    if (@import("builtin").is_test and @import("win32.zig").WindowFromDC(dc) == hwnd) chat_ac_window_clears += 1;
+    _ = DeleteObject(background);
+    _ = SelectObject(dc, ensureChatFont());
+    _ = SetBkMode(dc, TRANSPARENT);
+    const slot = &app_state.g_chat_ac_slots[app_state.g_chat_ac.slot];
+    const row_h = uiScaled(32);
+    const mentioning = app_state.g_chat_ac.token.mode == .file;
+    if (app_state.g_chat_ac.count == 0) {
+        const text = if (mentioning) "No matches" else if (slot.pending != 0 or slot.status == .loading) "Loading commands from VPS..." else if (slot.status == .@"error") slot.error_text[0..slot.error_len] else "No matches";
+        var line = RECT{ .left = uiScaled(14), .top = chatAcPad(), .right = rc.right - uiScaled(14), .bottom = chatAcPad() + row_h };
+        _ = SetTextColor(dc, menu_colors.hint);
+        drawAscii(dc, text, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    if (mentioning) {
+        const rows = @import("chat_mention.zig").shownRows();
+        for (0..@min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) |v| {
+            const i = v + app_state.g_chat_ac.top;
+            if (i >= rows.len) break;
+            const y: i32 = @intCast(v);
+            const top = chatAcPad() + y * row_h;
+            if (i == app_state.g_chat_ac.sel) {
+                @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
+            }
+            const size = uiScaled(18);
+            const avatar = RECT{ .left = uiScaled(16), .top = top + @divTrunc(row_h - size, 2), .right = uiScaled(16) + size, .bottom = top + @divTrunc(row_h - size, 2) + size };
+            if (rows[i].index < app_state.shell_count) {
+                const shell = &app_state.shells[rows[i].index];
+                if (!@import("bot_photo.zig").draw(shell, dc, avatar)) @import("bot_avatar.zig").draw(dc, avatar, @import("bot_avatar.zig").forShell(shell));
+            }
+            var wide_name: [192]u16 = undefined;
+            const name_len = std.unicode.utf8ToUtf16Le(&wide_name, rows[i].name) catch 0;
+            var name_rc = RECT{ .left = avatar.right + uiScaled(10), .top = top, .right = rc.right - uiScaled(56), .bottom = top + row_h };
+            _ = SetTextColor(dc, menu_colors.text);
+            _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            var kind_rc = RECT{ .left = rc.right - uiScaled(56), .top = top, .right = rc.right - uiScaled(16), .bottom = top + row_h };
+            _ = SetTextColor(dc, menu_colors.hint);
+            drawAscii(dc, "Bot", &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+        }
+    }
+    for (0..@min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) |v| {
+        if (mentioning) break;
+        const i = v + app_state.g_chat_ac.top;
+        const entry = slot.entries[app_state.g_chat_ac.idx[i]];
+        const y: i32 = @intCast(v);
+        const top = chatAcPad() + y * row_h;
+        if (i == app_state.g_chat_ac.sel) {
+            @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
+        }
+        var name: [257]u8 = undefined;
+        const prefix = if (entry.kind == 'K') "$" else "/";
+        const title = std.fmt.bufPrint(&name, "{s}{s}", .{ prefix, entry.name }) catch entry.name;
+        var name_rc = RECT{ .left = uiScaled(16), .top = top, .right = @divTrunc(rc.right, 3), .bottom = top + row_h };
+        _ = SetTextColor(dc, menu_colors.text);
+        var wide_name: [257]u16 = undefined;
+        const name_len = std.unicode.utf8ToUtf16Le(&wide_name, title) catch 0;
+        _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const live_interactive = std.mem.eql(u8, entry.hint, "opens in terminal") and app_state.active_shell < app_state.shell_count and
+            !@import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]);
+        const tag: []const u8 = if (live_interactive) "live chat" else if (std.mem.eql(u8, entry.hint, "opens in terminal")) "opens in terminal" else switch (entry.kind) {
+            'S', 'K' => "skill",
+            'P' => "plugin",
+            'J' => "project",
+            'C', 'R' => "prompt",
+            else => "built-in",
+        };
+        const tag_width = if (!live_interactive and std.mem.eql(u8, entry.hint, "opens in terminal")) uiScaled(142) else uiScaled(82);
+        var hint_rc = RECT{ .left = @divTrunc(rc.right, 3), .top = top, .right = rc.right - tag_width, .bottom = top + row_h };
+        _ = SetTextColor(dc, menu_colors.hint);
+        var hint_text: [512]u8 = undefined;
+        const hint = if (entry.hint.len != 0 and !std.mem.eql(u8, entry.hint, "opens in terminal"))
+            std.fmt.bufPrint(&hint_text, "{s}  {s}", .{ entry.hint, entry.desc }) catch entry.desc
+        else
+            entry.desc;
+        var wide_hint: [512]u16 = undefined;
+        const hint_len = std.unicode.utf8ToUtf16Le(&wide_hint, hint) catch 0;
+        _ = chatDrawText(dc, &wide_hint, @intCast(hint_len), &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        var tag_rc = RECT{ .left = rc.right - tag_width, .top = top, .right = rc.right - uiScaled(16), .bottom = top + row_h };
+        drawAscii(dc, tag, &tag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+    }
+    if (dc != target) _ = w.BitBlt(target, 0, 0, rc.right, rc.bottom, dc, 0, 0, w.GDI_SRCCOPY);
+}
+
+fn chatAcRadius() i32 {
+    return uiScaled(14);
+}
+
+fn chatAcPad() i32 {
+    return uiScaled(6);
+}
+
+fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    const prior_focus_action = app_state.g_focus_user_action_tick;
+    app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
+    defer app_state.g_focus_user_action_tick = prior_focus_action;
+    switch (msg) {
+        WM_ERASEBKGND => return 1,
+        WM_PAINT => {
+            chatAcPaint(hwnd);
+            return 0;
+        },
+        0x0021 => return 3,
+        WM_MOUSEMOVE => {
+            if (!list_input.skills.hover()) return 0;
+            var client: RECT = std.mem.zeroes(RECT);
+            _ = GetClientRect(hwnd, &client);
+            if (GET_Y(lp) < chatAcPad() or GET_Y(lp) >= client.bottom - chatAcPad()) return 0;
+            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp) - chatAcPad(), @max(1, uiScaled(32)))));
+            const idx = row + app_state.g_chat_ac.top;
+            if (row < @min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top) and idx != app_state.g_chat_ac.sel) {
+                app_state.g_chat_ac.sel = idx;
+                chatAcRememberSelection();
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            return 0;
+        },
+        WM_LBUTTONDOWN => {
+            var client: RECT = std.mem.zeroes(RECT);
+            _ = GetClientRect(hwnd, &client);
+            if (GET_Y(lp) < chatAcPad() or GET_Y(lp) >= client.bottom - chatAcPad()) return 0;
+            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp) - chatAcPad(), @max(1, uiScaled(32)))));
+            if (row < @min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) {
+                app_state.g_chat_ac.sel = row + app_state.g_chat_ac.top;
+                chatAcRememberSelection();
+                _ = chatAcAccept();
+                if (app_state.g_chat_composer_hwnd != null) _ = SetFocus(app_state.g_chat_composer_hwnd);
+            }
+            return 0;
+        },
+        WM_MOUSEWHEEL => {
+            const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+            chatAcMove(if (delta > 0) -1 else 1);
+            return 0;
+        },
+        else => return DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+fn ensureChatAcClass() void {
+    if (app_state.g_chat_ac_class_registered) return;
+    const wc = WNDCLASSEXW{ .cbSize = @sizeOf(WNDCLASSEXW), .style = 0, .lpfnWndProc = chatAcWndProc, .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = GetModuleHandleW(null), .hIcon = null, .hCursor = LoadCursorW(null, @ptrFromInt(32512)), .hbrBackground = null, .lpszMenuName = null, .lpszClassName = L("ZigShellChatSuggest"), .hIconSm = null };
+    _ = RegisterClassExW(&wc);
+    app_state.g_chat_ac_class_registered = true;
+}
+
+fn chatAcRememberSelection() void {
+    if (app_state.g_chat_ac.count == 0) {
+        app_state.g_chat_ac.selected_len = 0;
+        return;
+    }
+    if (app_state.g_chat_ac.token.mode == .file) {
+        const rows = @import("chat_mention.zig").shownRows();
+        if (app_state.g_chat_ac.sel >= rows.len) {
+            app_state.g_chat_ac.selected_len = 0;
+            return;
+        }
+        const name = rows[app_state.g_chat_ac.sel].name;
+        if (name.len > app_state.g_chat_ac.selected_name.len) {
+            app_state.g_chat_ac.selected_len = 0;
+            return;
+        }
+        app_state.g_chat_ac.selected_len = name.len;
+        app_state.g_chat_ac.selected_kind = 'M';
+        @memcpy(app_state.g_chat_ac.selected_name[0..name.len], name);
+        return;
+    }
+    const entry = app_state.g_chat_ac_slots[app_state.g_chat_ac.slot].entries[app_state.g_chat_ac.idx[app_state.g_chat_ac.sel]];
+    app_state.g_chat_ac.selected_len = entry.name.len;
+    app_state.g_chat_ac.selected_kind = entry.kind;
+    @memcpy(app_state.g_chat_ac.selected_name[0..entry.name.len], entry.name);
+}
+
+fn chatAcMove(amount: i32) void {
+    list_input.skills.keyboard();
+    if (app_state.g_chat_ac.count == 0) return;
+    const total: i32 = @intCast(app_state.g_chat_ac.count);
+    app_state.g_chat_ac.sel = @intCast(@mod(@as(i32, @intCast(app_state.g_chat_ac.sel)) + amount, total));
+    if (app_state.g_chat_ac.sel < app_state.g_chat_ac.top) app_state.g_chat_ac.top = app_state.g_chat_ac.sel;
+    if (app_state.g_chat_ac.sel >= app_state.g_chat_ac.top + 8) app_state.g_chat_ac.top = app_state.g_chat_ac.sel - 7;
+    chatAcRememberSelection();
+    _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
+}
+
+fn chatAcRank(text: []const u16, token: chat_complete.Token) void {
+    if (token.mode == .file) {
+        var query_buf: [800]u8 = undefined;
+        const query = if (token.end > token.start and token.end - token.start <= 200)
+            query_buf[0 .. std.unicode.utf16LeToUtf8(&query_buf, text[token.start + 1 .. token.end]) catch 0]
+        else
+            "";
+        const rows = @import("chat_mention.zig").show(if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null, query);
+        const same_query = app_state.g_chat_ac.query_len == query.len and std.mem.eql(u8, app_state.g_chat_ac.query[0..app_state.g_chat_ac.query_len], query);
+        app_state.g_chat_ac.count = rows.len;
+        for (0..rows.len) |i| app_state.g_chat_ac.idx[i] = @intCast(i);
+        if (!same_query or app_state.g_chat_ac.sel >= rows.len) {
+            app_state.g_chat_ac.sel = 0;
+            app_state.g_chat_ac.top = 0;
+        }
+        if (app_state.g_chat_ac.sel < app_state.g_chat_ac.top) app_state.g_chat_ac.top = app_state.g_chat_ac.sel;
+        if (app_state.g_chat_ac.sel >= app_state.g_chat_ac.top + 8) app_state.g_chat_ac.top = app_state.g_chat_ac.sel - 7;
+        app_state.g_chat_ac.query_len = query.len;
+        @memcpy(app_state.g_chat_ac.query[0..query.len], query);
+        chatAcRememberSelection();
+        chatAcLayout();
+        return;
+    }
+    const slot = &app_state.g_chat_ac_slots[app_state.g_chat_ac.slot];
+    var query_buf: [800]u8 = undefined;
+    const query = if (token.end > token.start and token.end - token.start <= 200)
+        query_buf[0 .. std.unicode.utf16LeToUtf8(&query_buf, text[token.start + 1 .. token.end]) catch 0]
+    else
+        "";
+    const agent_index: usize = if (chatAcAgent() == .codex) 1 else 0;
+    var mru: [20][]const u8 = undefined;
+    for (0..app_state.g_chat_ac_mru_count[agent_index]) |i| mru[i] = std.mem.sliceTo(&app_state.g_chat_ac_mru[agent_index][i], 0);
+    const same_query = app_state.g_chat_ac.query_len == query.len and std.mem.eql(u8, app_state.g_chat_ac.query[0..app_state.g_chat_ac.query_len], query);
+    app_state.g_chat_ac.count = chat_complete.rank(slot.entries[0..slot.count], query, mru[0..app_state.g_chat_ac_mru_count[agent_index]], &app_state.g_chat_ac.idx);
+    app_state.g_chat_ac.sel = if (same_query) chat_complete.selectionAfterRank(slot.entries[0..slot.count], app_state.g_chat_ac.idx[0..app_state.g_chat_ac.count], app_state.g_chat_ac.selected_kind, app_state.g_chat_ac.selected_name[0..app_state.g_chat_ac.selected_len]) else 0;
+    if (!same_query) app_state.g_chat_ac.top = 0;
+    if (app_state.g_chat_ac.sel < app_state.g_chat_ac.top) app_state.g_chat_ac.top = app_state.g_chat_ac.sel;
+    if (app_state.g_chat_ac.sel >= app_state.g_chat_ac.top + 8) app_state.g_chat_ac.top = app_state.g_chat_ac.sel - 7;
+    app_state.g_chat_ac.query_len = query.len;
+    @memcpy(app_state.g_chat_ac.query[0..query.len], query);
+    chatAcRememberSelection();
+    chatAcLayout();
+}
+
+pub fn chatAcRequest(slot_index: usize) void {
+    const slot = &app_state.g_chat_ac_slots[slot_index];
+    if (slot.pending != 0) return;
+    app_state.g_chat_ac_request_id +%= 1;
+    if (app_state.g_chat_ac_request_id == 0) app_state.g_chat_ac_request_id = 1;
+    slot.pending = app_state.g_chat_ac_request_id;
+    const req = ChatAcRequest{ .slot = slot_index, .id = slot.pending, .host = slot.host, .agent = slot.agent, .mode = slot.mode, .session = slot.session, .cwd = slot.cwd };
+    const thread = std.Thread.spawn(.{}, chatAcFetchThread, .{req}) catch |err| {
+        slot.pending = 0;
+        slot.status = .@"error";
+        const text = std.fmt.bufPrint(&slot.error_text, "Commands unavailable: {s}", .{@errorName(err)}) catch "Commands unavailable";
+        slot.error_len = text.len;
+        slot.fetched = GetTickCount64();
+        return;
+    };
+    thread.detach();
+}
+
+fn chatAcFetchThread(req: ChatAcRequest) void {
+    var wire: [512]u8 = undefined;
+    const op = if (req.agent == .codex and req.mode == .dollar) "skills" else "slash";
+    const session = std.mem.sliceTo(&req.session, 0);
+    const cwd = std.mem.sliceTo(&req.cwd, 0);
+    const owner_account = req.host == TMUX_HOST_DE and (std.mem.eql(u8, cwd, "/home/inne") or std.mem.startsWith(u8, cwd, "/home/inne/"));
+    const agent = if (req.agent == .codex) "codex" else "claude";
+    const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
+    const started = GetTickCount64();
+    var bytes: [128 * 1024]u8 = undefined;
+    var n = if (owner_account) @as(usize, 0) else fetchAcPersistent(req.host, request, &bytes) orelse 0;
+    if (n == 0) {
+        var encoded: [1024]u8 = undefined;
+        const b64 = std.base64.standard.Encoder.encode(&encoded, request);
+        var command: [2048]u8 = undefined;
+        var pos: usize = 0;
+        if (appendSshExe(&command, &pos)) {
+            const helper = if (owner_account) "sudo -n -H -u inne -- python3 /home/inne/.local/share/zigshell/mp_complete.py" else "python3 ~/.local/share/zigshell/mp_complete.py";
+            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s} --once {s}", .{ tmuxSshTarget(req.host), helper, b64 }) catch "";
+            if (tail.len > 0) {
+                const result = sshOneShotCaptureInput(command[0 .. pos + tail.len], &bytes, null, 20_000);
+                n = result.len;
+                if (!result.success and n == 0) {
+                    const text: []const u8 = std.fmt.bufPrint(&bytes, "SSH command failed (exit {d})", .{result.exit_code}) catch "";
+                    n = text.len;
+                }
+            }
+        } else {
+            const text = "Could not locate the SSH executable";
+            @memcpy(bytes[0..text.len], text);
+            n = text.len;
+        }
+    }
+    while (!app_state.g_chat_ac_mutex.tryLock()) Sleep(1);
+    const slot = &app_state.g_chat_ac_slots[req.slot];
+    if (slot.pending == req.id) {
+        slot.pending_len = @min(n, slot.bytes[0].len);
+        @memcpy(slot.bytes[1 - slot.active][0..slot.pending_len], bytes[0..slot.pending_len]);
+    }
+    app_state.g_chat_ac_mutex.unlock();
+    var log: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "chat-ac: fetched host={d} bytes={d} ms={d}", .{ req.host, n, GetTickCount64() - started }) catch "chat-ac: fetch");
+    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_AC_READY, req.id, @intCast(req.slot));
+}
+
+pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
+    if (slot_index >= app_state.g_chat_ac_slots.len) return;
+    while (!app_state.g_chat_ac_mutex.tryLock()) Sleep(1);
+    defer app_state.g_chat_ac_mutex.unlock();
+    const slot = &app_state.g_chat_ac_slots[slot_index];
+    if (slot.pending != id) return;
+    slot.pending = 0;
+    slot.fetched = GetTickCount64();
+    const next = 1 - slot.active;
+    var entries: [512]chat_complete.Entry = undefined;
+    const parsed = chat_complete.parseResponse(slot.bytes[next][0..slot.pending_len], &entries);
+    if (parsed != null and parsed.?.header.id == id and parsed.?.header.status != .@"error") {
+        if (parsed.?.header.status != .loading or parsed.?.n > 0 or slot.count == 0) {
+            slot.active = next;
+            slot.len = slot.pending_len;
+            slot.count = parsed.?.n;
+            @memcpy(slot.entries[0..slot.count], entries[0..slot.count]);
+        }
+        slot.status = parsed.?.header.status;
+        slot.error_len = 0;
+    } else {
+        slot.status = .@"error";
+        const raw = std.mem.trim(u8, slot.bytes[next][0..slot.pending_len], " \t\r\n");
+        const detail = if (raw.len == 0) "No response from the command helper" else if (parsed != null and parsed.?.header.id != id) "Command helper returned a different request ID" else if (parsed != null) "Command helper rejected the request" else if (std.mem.startsWith(u8, raw, "@mp")) "Invalid command helper response" else raw[if (std.mem.lastIndexOfScalar(u8, raw, '\n')) |end| end + 1 else 0..];
+        const prefix = "Commands unavailable: ";
+        @memcpy(slot.error_text[0..prefix.len], prefix);
+        const n = @min(detail.len, slot.error_text.len - prefix.len);
+        for (detail[0..n], 0..) |c, i| slot.error_text[prefix.len + i] = if (c >= 32 and c < 127) c else ' ';
+        slot.error_len = prefix.len + n;
+    }
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
+    _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index) {
+        var text: [16384]u16 = undefined;
+        const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
+        chatAcRank(text[0..@intCast(@max(0, n))], app_state.g_chat_ac.token);
+    }
+    if (slot.refresh_pending) {
+        slot.refresh_pending = false;
+        if (slot.status != .@"error") chatAcRequest(slot_index);
+    } else if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index and !slot.retry_used and (slot.status == .stale or slot.status == .loading))
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_AC_DEBOUNCE, 4000, null);
+}
+
+fn chatAcCatalog(mode: chat_complete.Mode) ?usize {
+    const agent = chatAcAgent();
+    if (agent == .other or app_state.active_shell >= app_state.shell_count) return null;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!isRemoteShellKind(shell.kind)) {
+        return null;
+    }
+    const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
+    const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
+    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    var index: usize = 0;
+    var found = false;
+    for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+        if (slot.agent == agent and slot.mode == mode and slot.host == host and std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) and
+            std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd))
+        {
+            index = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        var oldest: u64 = std.math.maxInt(u64);
+        for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+            if (slot.pending == 0 and slot.fetched < oldest) {
+                index = i;
+                oldest = slot.fetched;
+            }
+        }
+        const slot = &app_state.g_chat_ac_slots[index];
+        if (slot.pending != 0) return null;
+        slot.* = .{ .host = host, .agent = agent, .mode = mode };
+        @memcpy(slot.session[0..session.len], session);
+        @memcpy(slot.cwd[0..cwd.len], cwd);
+    }
+    return index;
+}
+
+fn chatAcOnComposerChanged() void {
+    if (!chatViewOwnsInput() or app_state.g_chat_composer_hwnd == null) {
+        chatAcClose();
+        return;
+    }
+    const agent = chatAcAgent();
+    var text: [16384]u16 = undefined;
+    const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
+    if (n < 0) return;
+    const current = text[0..@intCast(n)];
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if (app_state.g_chat_ac_skill_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len])) app_state.g_chat_ac_skill_command_len = 0;
+        if (app_state.g_chat_ac_dialog_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) app_state.g_chat_ac_dialog_len = 0;
+    }
+    var caret: u32 = 0;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&caret), 0);
+    const lookup: chat_complete.Agent = if (agent == .other) .claude else agent;
+    const token = if (app_state.g_chat_ac.browse) app_state.g_chat_ac.token else chat_complete.tokenAtCaret(current, @min(caret, @as(u32, @intCast(n))), lookup) orelse {
+        chatAcClose();
+        return;
+    };
+    if (token.mode == .file) {
+        const fragment = current[token.start..token.end];
+        if (app_state.g_chat_ac.dismissed and app_state.g_chat_ac.dismissed_start == token.start and fragment.len == app_state.g_chat_ac.dismissed_len and
+            std.mem.eql(u16, fragment, app_state.g_chat_ac.dismissed_text[0..app_state.g_chat_ac.dismissed_len])) return;
+        app_state.g_chat_ac.dismissed = false;
+        const opening = !app_state.g_chat_ac.open or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != .file;
+        if (opening) {
+            app_state.g_chat_ac.query_len = 0;
+            app_state.g_chat_ac.selected_len = 0;
+        }
+        if (!app_state.g_chat_ac.open) list_input.skills.keyboard();
+        app_state.g_chat_ac.open = true;
+        app_state.g_chat_ac.token = token;
+        chatAcRank(current, token);
+        return;
+    }
+    if (agent == .other or app_state.active_shell >= app_state.shell_count or !isRemoteShellKind(app_state.shells[app_state.active_shell].kind)) {
+        chatAcClose();
+        return;
+    }
+    const fragment = text[token.start..token.end];
+    if (app_state.g_chat_ac.dismissed and app_state.g_chat_ac.dismissed_start == token.start and fragment.len == app_state.g_chat_ac.dismissed_len and
+        std.mem.eql(u16, fragment, app_state.g_chat_ac.dismissed_text[0..app_state.g_chat_ac.dismissed_len])) return;
+    app_state.g_chat_ac.dismissed = false;
+    const index = chatAcCatalog(token.mode) orelse return;
+    const slot = &app_state.g_chat_ac_slots[index];
+    const opening = !app_state.g_chat_ac.open or app_state.g_chat_ac.slot != index or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != token.mode;
+    if (opening) {
+        app_state.g_chat_ac.query_len = 0;
+        app_state.g_chat_ac.selected_len = 0;
+    }
+    if (!app_state.g_chat_ac.open) list_input.skills.keyboard();
+    app_state.g_chat_ac.open = true;
+    app_state.g_chat_ac.slot = index;
+    app_state.g_chat_ac.token = token;
+    chatAcRank(text[0..@intCast(n)], token);
+    if (opening and slot.pending != 0) slot.refresh_pending = true;
+    const elapsed = GetTickCount64() -| slot.fetched;
+    if (slot.pending == 0 and (slot.fetched == 0 or (if (slot.status == .@"error") elapsed >= 60_000 else opening or elapsed >= (if (slot.status == .loading) @as(u64, 4_000) else 600_000)))) chatAcRequest(index);
+}
+
+pub fn chatAcAfterSend(text: []const u16) void {
+    if (!std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), std.unicode.utf8ToUtf16LeStringLiteral("/reload-plugins"))) return;
+    if (chatAcAgent() != .claude or app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!isRemoteShellKind(shell.kind)) return;
+    const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
+    const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
+    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+        if (slot.agent != .claude or slot.host != host or !std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) or
+            !std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd)) continue;
+        if (slot.pending != 0) {
+            slot.refresh_pending = true;
+        } else {
+            chatAcRequest(i);
+        }
+    }
+}
+
+pub fn chatAcOpenBrowse() void {
+    if (!app_state.g_chat_active) toggleChatView();
+    if (!chatViewOwnsInput() or chatAcAgent() == .other or app_state.g_chat_composer_hwnd == null) return;
+    var caret: u32 = 0;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&caret), 0);
+    app_state.g_chat_ac.browse = true;
+    app_state.g_chat_ac.dismissed = false;
+    app_state.g_chat_ac.token = .{ .mode = .slash, .start = caret, .end = caret };
+    chatAcOnComposerChanged();
+    _ = SetFocus(app_state.g_chat_composer_hwnd);
+}
+
+fn chatAcAccept() bool {
+    if (!app_state.g_chat_ac.open or app_state.g_chat_ac.count == 0 or app_state.g_chat_composer_hwnd == null) return false;
+    const mentioning = app_state.g_chat_ac.token.mode == .file;
+    const entry: chat_complete.Entry = if (mentioning) blk: {
+        const rows = @import("chat_mention.zig").shownRows();
+        if (app_state.g_chat_ac.sel >= rows.len) return false;
+        const row = rows[app_state.g_chat_ac.sel];
+        break :blk .{ .kind = 'M', .name = row.name, .hint = row.session, .desc = "" };
+    } else app_state.g_chat_ac_slots[app_state.g_chat_ac.slot].entries[app_state.g_chat_ac.idx[app_state.g_chat_ac.sel]];
+    var insertion: [512]u8 = undefined;
+    const ins = chat_complete.insertionFor(chatAcAgent(), app_state.g_chat_ac.token.mode, entry, &insertion);
+    if (ins.len == 0) return false;
+    var text: [16384]u16 = undefined;
+    const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
+    if (n < 0) return false;
+    var wide: [1024]u16 = undefined;
+    var ilen = std.unicode.utf8ToUtf16Le(&wide, ins) catch return false;
+    if (app_state.g_chat_ac.browse and app_state.g_chat_ac.token.start > 0 and !std.ascii.isWhitespace(@truncate(text[app_state.g_chat_ac.token.start - 1]))) {
+        std.mem.copyBackwards(u16, wide[1 .. ilen + 1], wide[0..ilen]);
+        wide[0] = ' ';
+        ilen += 1;
+    }
+    var output: [16384]u16 = undefined;
+    const applied = chat_complete.applyAccept(text[0..@intCast(n)], app_state.g_chat_ac.token, wide[0..ilen], &output);
+    if (applied.len == 0 or applied.len >= output.len) return false;
+    output[applied.len] = 0;
+    app_state.g_chat_skill_name_len = 0;
+    app_state.g_chat_skill_body_len = 0;
+    app_state.g_chat_ac_dialog_len = 0;
+    app_state.g_chat_ac_skill_command_len = 0;
+    if (app_state.active_shell < app_state.shell_count) {
+        app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
+    }
+    if ((entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
+        app_state.g_chat_ac_skill_command_len = ilen;
+        @memcpy(app_state.g_chat_ac_skill_command[0..ilen], wide[0..ilen]);
+    }
+    if (std.mem.eql(u8, entry.hint, "opens in terminal") and applied.caret > 0 and ilen <= app_state.g_chat_ac_dialog_command.len) {
+        app_state.g_chat_ac_dialog_len = ilen;
+        @memcpy(app_state.g_chat_ac_dialog_command[0..ilen], wide[0..ilen]);
+    }
+    const a: usize = if (chatAcAgent() == .codex) 1 else 0;
+    chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], entry.name);
+    if (entry.kind == 'M') @import("chat_mention.zig").remember(entry.name, entry.hint);
+    chatAcClose();
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&output));
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, applied.caret, @intCast(applied.caret));
+    saveSession();
+    chatAcOnComposerChanged();
+    return true;
+}
+
+pub fn loadPaletteSkills() bool {
+    if (app_state.g_palette_skills.len > 0) {
+        skill_model.deinitAll(std.heap.page_allocator, app_state.g_palette_skills);
+        app_state.g_palette_skills = &.{};
+    }
+    var home_buf: [1024]u8 = undefined;
+    const home_len = GetEnvironmentVariableA("USERPROFILE", &home_buf, home_buf.len);
+    if (home_len == 0 or home_len >= home_buf.len) return false;
+    var threaded_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer threaded_io.deinit();
+    const found = skill_model.discover(std.heap.page_allocator, threaded_io.io(), home_buf[0..home_len], &CHAT_BUNDLED_SKILLS) catch return false;
+    app_state.g_palette_skills = found;
+    return true;
+}
+
+pub fn selectChatSkill(skill: skill_model.Skill) void {
+    if (app_state.g_chat_composer_hwnd == null or skill.name.len >= app_state.g_chat_skill_name.len or skill.body.len >= app_state.g_chat_skill_body.len) {
+        showHeaderNoticeAscii("This skill is too large for Chat View", 3500, true);
+        return;
+    }
+    @memcpy(app_state.g_chat_skill_name[0..skill.name.len], skill.name);
+    app_state.g_chat_skill_name_len = skill.name.len;
+    @memcpy(app_state.g_chat_skill_body[0..skill.body.len], skill.body);
+    app_state.g_chat_skill_body_len = skill.body.len;
+
+    var current: [16384]u16 = undefined;
+    const current_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &current, @intCast(current.len));
+    const current_len: usize = if (current_len_i > 0) @intCast(current_len_i) else 0;
+    var name_wide: [128]u16 = undefined;
+    const name_len = std.unicode.utf8ToUtf16Le(&name_wide, skill.name) catch return;
+    var output: [16384]u16 = undefined;
+    var pos: usize = 0;
+    output[pos] = '/';
+    pos += 1;
+    @memcpy(output[pos .. pos + name_len], name_wide[0..name_len]);
+    pos += name_len;
+    output[pos] = ' ';
+    pos += 1;
+
+    var rest_start: usize = 0;
+    if (current_len > 0 and current[0] == '/') {
+        while (rest_start < current_len and current[rest_start] != ' ') : (rest_start += 1) {}
+        if (rest_start < current_len) rest_start += 1;
+    }
+    const rest_len = @min(current_len - rest_start, output.len - pos - 1);
+    if (rest_len > 0) @memcpy(output[pos .. pos + rest_len], current[rest_start .. rest_start + rest_len]);
+    pos += rest_len;
+    output[pos] = 0;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&output));
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, pos, @intCast(pos));
+    _ = SetFocus(app_state.g_chat_composer_hwnd);
+}
+
+fn dropPendingActivationChar(hwnd: HANDLE, key: WPARAM) void {
+    const w = @import("win32.zig");
+    var pending: w.MSG = undefined;
+    for ([_]UINT{ 0x0102, 0x0106 }) |char_msg| {
+        while (w.PeekMessageW(&pending, hwnd, char_msg, char_msg, 0) != 0 and @import("message_menu.zig").activationCharMatches(key, pending.wParam)) {
+            _ = w.PeekMessageW(&pending, hwnd, char_msg, char_msg, 1);
+        }
+    }
+}
+
+var chat_newest_chord: chat_keynav.NewestChord = .{};
+
+fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == WM_KILLFOCUS or msg == 0x0002 or msg == 0x0201 or msg == 0x0203 or msg == 0x0204 or
+        msg == 0x000C or msg == 0x00C2 or msg == 0x0300 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304 or msg == 0x00C7 or
+        msg == 0x0104 or (msg == WM_KEYDOWN and wp != 0x47 and wp != 0x10)) chat_newest_chord = .{};
+    if (@import("message_menu.zig").suppressComposerActivation(msg, wp, lp)) {
+        if (msg == WM_KEYUP or msg == 0x0105) dropPendingActivationChar(hwnd, wp);
+        return 0;
+    }
+    if (!@import("room_frontend.zig").privateActionsAllowed() and (msg == WM_KEYDOWN or msg == 0x0102 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304)) return 0;
+    defer if (hwnd == app_state.g_chat_composer_hwnd and chatComposerEditMessage(msg, wp)) chatComposerKeepCaretVisible();
+    const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
+    defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
+    if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
+    if (chatComposerScrollMouse(hwnd, msg, wp, lp)) return 0;
+    if (msg == 0x0233) {
+        if (!@import("room_frontend.zig").privateActionsAllowed()) { @import("win32.zig").DragFinish(@ptrFromInt(wp)); return 0; }
+        chatDropFiles(@ptrFromInt(wp));
+        return 0;
+    }
+    const prior_focus_action = app_state.g_focus_user_action_tick;
+    app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
+    defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (@import("settings_panel.zig").windowKey(msg, wp, false)) return 0;
+    if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
+    if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x000E, 0, 0) != 0)) @import("chat_render.zig").chatNavClear();
+    if (msg == WM_KEYDOWN and @import("workspace_switcher.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and @import("plus_menu.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and !isCtrlDown()) {
+        const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        if ((GetAsyncKeyState(0x10) & down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & down) == 0 and @import("chat_render.zig").chatPermissionDigitKey(wp)) {
+            dropPendingActivationChar(hwnd, wp);
+            return 0;
+        }
+    }
+    if (msg == WM_KEYDOWN) {
+        const key_down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        const nav_action = chat_keynav.action(
+            app_state.g_chat_nav_active,
+            wp,
+            GetWindowTextLengthW(hwnd) == 0,
+            app_state.g_chat_ac.open,
+            isCtrlDown(),
+            (GetAsyncKeyState(0x10) & key_down) != 0,
+            (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) != 0,
+        );
+        if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
+        if (@import("chat_render.zig").chatNavKey(nav_action)) {
+            if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
+            return 0;
+        }
+        if (nav_action == .none and wp == 0x2E and GetWindowTextLengthW(hwnd) == 0 and !isCtrlDown() and (GetAsyncKeyState(0x10) & key_down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) == 0) {
+            if (@import("chat_render.zig").chatRemoveActiveTabNotSent()) return 0;
+        }
+    }
+    if (msg == 0x0102) {
+        const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        const shift_only = (GetKeyState(0x11) & down) == 0 and (GetKeyState(0x10) & down) != 0 and
+            (GetKeyState(@as(i32, VK_MENU)) & down) == 0 and (GetKeyState(0x5B) & down) == 0 and (GetKeyState(0x5C) & down) == 0;
+        var text: [3]u16 = undefined;
+        const len: usize = @intCast(@max(0, GetWindowTextW(hwnd, &text, text.len)));
+        if (chat_newest_chord.character(wp, text[0..len], GetTickCount64(), shift_only, (lp & 0x40000000) != 0 or (lp & 0xFFFF) > 1)) {
+            _ = SetWindowTextW(hwnd, L(""));
+            @import("chat_render.zig").chatJumpToNewest();
+            return 0;
+        }
+    }
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
+        clearChatReply();
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_sel_active and !app_state.g_chat_ac.open) {
+        chatSelectionClear();
+        app_state.g_chat_sel_transcript_focus = false;
+        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+        return 0;
+    }
+    if (msg == 0x0201 or msg == 0x0102) app_state.g_chat_sel_transcript_focus = false;
+    if ((msg == 0x0201 or msg == 0x0102) and app_state.g_chat_sel_active) {
+        chatSelectionClear();
+        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    }
+    if (!app_state.g_chat_ac.open and msg == WM_KEYDOWN and (wp == 0x21 or wp == 0x22) and !app_state.g_chat_composer_scroll_shown and app_state.g_chat_transcript_hwnd != null) {
+        _ = SendMessageW(app_state.g_chat_transcript_hwnd, WM_KEYDOWN, wp, lp);
+        return 0;
+    }
+    const can_edit = msg == 0x0102 or msg == WM_KEYDOWN or msg == 0x000C or msg == 0x00C2 or
+        msg == 0x0300 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304 or msg == 0x00C7;
+    const was_empty = can_edit and GetWindowTextLengthW(hwnd) == 0;
+    const result = chatComposerSubclassCore(hwnd, msg, wp, lp);
+    if (can_edit) {
+        if (was_empty != (GetWindowTextLengthW(hwnd) == 0)) {
+            _ = InvalidateRect(hwnd, null, 1);
+            if (hwnd == app_state.g_chat_composer_hwnd and @import("window_layout.zig").chatStopVisible()) chatComposerButtonsRefresh();
+        }
+        chatComposerAutoGrow();
+        chatDraftNoteEdit();
+        if (!chat_draft_loading and !shell_applying) shell_draft.onComposerEdit(GetTickCount64());
+        if (msg == 0x0102 and wp >= 32 and !isCtrlDown()) app_state.g_chat_ac.browse = false;
+        if (!(msg == WM_KEYDOWN and (wp == 0x0D or wp == 0x09 or wp == 0x26 or wp == 0x28 or wp == 0x21 or wp == 0x22 or
+            wp == 0x10 or wp == 0x11 or wp == 0x12 or wp == 0xA0 or wp == 0xA1 or wp == 0xA2 or wp == 0xA3 or wp == 0xA4 or wp == 0xA5)))
+            chatAcOnComposerChanged();
+    } else if (msg == WM_LBUTTONUP or (msg == WM_KEYUP and
+        !(app_state.g_chat_ac.open and (wp == 0x26 or wp == 0x28 or wp == 0x21 or wp == 0x22))))
+    {
+        chatAcOnComposerChanged();
+    }
+    return result;
+}
+
+fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
+    const w = @import("win32.zig");
+    var client: RECT = undefined;
+    if (GetClientRect(hwnd, &client) == 0 or client.right <= 0 or client.bottom <= 0) return false;
+    const dc = w.CreateCompatibleDC(target) orelse return false;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = client.right, .height = -client.bottom } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(target, &info, 0, &bits, null, 0) orelse return false;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const background = CreateSolidBrush(app_state.g_chat_input_color) orelse return false;
+    defer _ = DeleteObject(background);
+    if (FillRect(dc, &client, background) == 0) return false;
+    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+    var probe: [2]u16 = .{ 0, 0 };
+    if (GetWindowTextW(hwnd, &probe, 2) == 0) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@intFromPtr(&rc)));
+        if (rc.right <= rc.left) {
+            rc = client;
+            rc.left += uiScaled(2);
+        }
+        _ = SetBkMode(dc, TRANSPARENT);
+        _ = SelectObject(dc, ensureChatFont());
+        _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+        _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+    } else if (!@import("chat_composer_text.zig").paint(hwnd, dc, customColorOr("text", themeConsoleFg()), app_state.g_chat_input_color)) {
+        @import("chat_composer_text.zig").native_paint = true;
+        defer @import("chat_composer_text.zig").native_paint = false;
+        _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+    }
+    chatComposerPaintScroll(hwnd, dc, client);
+    return w.BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, w.GDI_SRCCOPY) != 0;
+}
+
+fn chatComposerEnterSends() void {
+    if (app_state.g_chat_ac.open and !CHAT_AC_ENTER_SENDS) {
+        if (chatAcAccept()) return;
+        chatAcClose();
+    }
+    chatShellDraftNoteSend();
+    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_SEND, 0, 0);
+}
+
+fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
+    if (app_state.g_chat_ac.open and (msg == WM_KEYDOWN or msg == 0x0102)) list_input.skills.keyboard();
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    if (chatDictationKey(msg, wp, lp, (GetKeyState(0x11) & down) != 0, (GetKeyState(0x10) & down) != 0, (GetKeyState(@as(i32, VK_MENU)) & down) != 0)) return 0;
+    if (msg == WM_KEYDOWN and wp == 0x41 and (GetKeyState(0x11) & down) != 0 and (GetKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
+        _ = SendMessageW(hwnd, 0x00B1, 0, -1);
+        return 0;
+    }
+    if (msg == 0x0102 and wp == 0x01) return 0;
+    if (chatImagePasteIntercept(msg, wp)) return 0;
+    if (msg == WM_KEYDOWN and chatCopyCodeKeyDown(wp)) {
+        chatCopyLatestCode();
+        return 0;
+    }
+
+    if (msg == WM_ERASEBKGND and @import("chat_composer_text.zig").enabled()) return 1;
+    if ((msg == WM_PAINT or msg == 0x0318) and @import("chat_composer_text.zig").enabled()) {
+        var ps: PAINTSTRUCT = undefined;
+        const dc = if (msg == WM_PAINT) BeginPaint(hwnd, &ps) else @as(HANDLE, @ptrFromInt(wp));
+        if (dc == null) return 0;
+        defer if (msg == WM_PAINT) {
+            _ = EndPaint(hwnd, &ps);
+        };
+        if (!chatComposerPaintBuffered(hwnd, dc)) {
+            @import("chat_composer_text.zig").native_paint = true;
+            defer @import("chat_composer_text.zig").native_paint = false;
+            _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+        }
+        return 0;
+    }
+    if (msg == WM_PAINT or msg == 0x0318) {
+        const result = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
+        const dc = if (msg == WM_PAINT) GetDC(hwnd) else @as(HANDLE, @ptrFromInt(wp));
+        if (dc == null) return result;
+        defer if (msg == WM_PAINT) {
+            _ = ReleaseDC(hwnd, dc);
+        };
+        var probe: [2]u16 = .{ 0, 0 };
+        if (GetWindowTextW(hwnd, &probe, 2) == 0) {
+            var rc: RECT = std.mem.zeroes(RECT);
+            _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@as(isize, @intCast(@intFromPtr(&rc)))));
+            if (rc.right <= rc.left) {
+                _ = GetClientRect(hwnd, &rc);
+                rc.left += uiScaled(2);
+            }
+            _ = SetBkMode(dc, TRANSPARENT);
+            _ = SelectObject(dc, ensureChatFont());
+            _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+            _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+        } else {
+            var client: RECT = std.mem.zeroes(RECT);
+            if (GetClientRect(hwnd, &client) != 0) chatComposerPaintScroll(hwnd, dc, client);
+        }
+        return result;
+    }
+    if (msg == WM_KEYDOWN and wp != 0x09) app_state.g_chat_ac_tab_accepted = false;
+    if (msg == WM_KEYDOWN and wp == 0xBF and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
+        chatAcOpenBrowse();
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and app_state.g_chat_ac.open) {
+        switch (wp) {
+            0x26 => {
+                chatAcMove(-1);
+                return 0;
+            },
+            0x28 => {
+                chatAcMove(1);
+                return 0;
+            },
+            0x21 => {
+                chatAcMove(-8);
+                return 0;
+            },
+            0x22 => {
+                chatAcMove(8);
+                return 0;
+            },
+            0x09 => {
+                if (chatAcAccept()) {
+                    app_state.g_chat_ac_tab_accepted = true;
+                    return 0;
+                }
+                chatAcClose();
+            },
+            0x1B => {
+                var text: [16384]u16 = undefined;
+                const n = GetWindowTextW(hwnd, &text, text.len);
+                const token = app_state.g_chat_ac.token;
+                if (n >= 0 and token.end <= @as(usize, @intCast(n)) and token.end - token.start <= app_state.g_chat_ac.dismissed_text.len) {
+                    app_state.g_chat_ac.dismissed = true;
+                    app_state.g_chat_ac.dismissed_start = token.start;
+                    app_state.g_chat_ac.dismissed_len = token.end - token.start;
+                    @memcpy(app_state.g_chat_ac.dismissed_text[0..app_state.g_chat_ac.dismissed_len], text[token.start..token.end]);
+                }
+                chatAcClose();
+                return 0;
+            },
+            else => {},
+        }
+    }
+    if (msg == WM_KILLFOCUS) {
+        if (hwnd == app_state.g_chat_composer_hwnd) @import("diagnostics.zig").focusTrace(.composer_killfocus, @ptrFromInt(wp), 0);
+        chatAcClose();
+    }
+    if (msg == WM_KEYDOWN and wp == 0x1B) {
+        if (@import("chat_working.zig").composerEscStops(@import("window_layout.zig").chatWorkingBarVisible(), app_state.g_chat_ac.open, app_state.g_chat_sel_active) and (lp & 0x40000000) == 0) _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and chatPaletteToggleKeyDown(wp)) {
+        postPaletteToggle();
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and wp == 0x0D) {
+        const shift = (GetAsyncKeyState(0x10) & down) != 0;
+        const alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0;
+        if (!shift and !alt and !isCtrlDown() and chat_dictation_state != .listening) {
+            app_state.g_chat_enter_key_sent_tick = GetTickCount64();
+            chatComposerEnterSends();
+            return 0;
+        }
+    }
+    if (msg == 0x0102) {
+        if (wp == 0x09 and app_state.g_chat_ac_tab_accepted) {
+            app_state.g_chat_ac_tab_accepted = false;
+            return 0;
+        }
+        if (wp == 0x1B or wp == 0x0B or (wp == 0x09 and app_state.g_chat_ac.open) or ((wp == 0x2F or wp == 0x1F) and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0)) return 0;
+        if (wp == 0x0D) {
+            const shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            if (!shift) {
+                const sent_tick = app_state.g_chat_enter_key_sent_tick;
+                app_state.g_chat_enter_key_sent_tick = 0;
+                if (sent_tick != 0 and GetTickCount64() -| sent_tick <= 200) return 0;
+                chatComposerEnterSends();
+                return 0;
+            }
+            chatAcClose();
+        }
+    }
+    return CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
+}
+
+pub fn fullWidthShouldResizeConsole(chat_active: bool) bool {
+    return !app_state.ISSUE_440_FULL_WIDTH_CHAT or !chat_active;
+}
+
+test "ISSUE-440 full width never resizes the console behind Chat View" {
+    try std.testing.expect(!fullWidthShouldResizeConsole(true));
+    try std.testing.expect(fullWidthShouldResizeConsole(false));
+}
+
+test "ISSUE-440 full width respects remembered views" {
+    for ([_]bool{ false, true }) |remembered| {
+        const chat = chatViewShouldShowForTab(remembered);
+        try std.testing.expectEqual(!chat, fullWidthShouldResizeConsole(chat));
+        try std.testing.expectEqual(remembered, chat);
+    }
+}
+
+pub const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
+
+fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_chat: bool, covered: bool) bool {
+    return is_active and !chat_active and !(tab_wants_chat and chat_active) and !covered;
+}
+
+test "IGSH-1266 a tab that wants chat but has no chat window still shows its console" {
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, true, true, false) == false);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, true, false) == true);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, false) == true);
+    try std.testing.expect(shellConsoleVisibilityAllowed(false, false, false, false) == false);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, true) == false);
+}
+
+pub fn shellConsoleShouldBeVisible(idx: u32) bool {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return false;
+    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
+    const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
+    return shellConsoleVisibilityAllowed(
+        idx == app_state.active_shell,
+        app_state.g_chat_active,
+        tab_wants_chat,
+        app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+            app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active,
+    );
+}
+
+pub fn overlayOpen() bool {
+    return app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+        app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active;
+}
+
+pub fn shellConsoleReachable(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    return app_state.shells[idx].hwnd != null or app_state.shells[idx].native_terminal;
+}
+
+pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
+    if (idx >= app_state.shell_count) return 0;
+    if (app_state.shells[idx].hwnd == null and app_state.shells[idx].native_terminal and !app_state.shells[idx].disconnected) {
+        const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
+        const covered = app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+            app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active;
+        if (shellConsoleVisibilityAllowed(idx == app_state.active_shell, app_state.g_chat_active, tab_wants_chat, covered)) {
+            _ = @import("native_session.zig").ensureWindow(app_state.shells[idx].shell_id);
+        }
+    }
+    if (app_state.shells[idx].hwnd == null) return 0;
+    if (!shellConsoleShouldBeVisible(idx)) {
+        if (IsWindowVisible(app_state.shells[idx].hwnd) == 0) return 0;
+        if (verboseLoggingEnabled() and (app_state.g_chat_active or
+            chatViewShouldShowForTab(app_state.shells[idx].chat_view_on)))
+        {
+            var buf: [160]u8 = undefined;
+            const line = std.fmt.bufPrint(&buf, "[chatview] suppressed console show shell={d} from={s}", .{ app_state.shells[idx].shell_id, from }) catch "[chatview] suppressed console show";
+            debugLog(line);
+        }
+        return ShowWindowAsync(app_state.shells[idx].hwnd, SW_HIDE);
+    }
+    if (app_state.shells[idx].native_terminal and !@import("native_session.zig").alive(app_state.shells[idx].shell_id)) {
+        app_state.shells[idx].console_inflight = true;
+        if (!@import("native_session.zig").connect(app_state.shells[idx].shell_id)) @import("native_session.zig").ready(app_state.shells[idx].shell_id, false);
+    }
+    return ShowWindow(app_state.shells[idx].hwnd, cmd);
+}
+
+test "console visibility rejects chat, saved chat before restore, inactive tabs and overlays" {
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, false));
+    try std.testing.expect(!shellConsoleVisibilityAllowed(true, true, false, false));
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, true, false));
+    try std.testing.expect(!shellConsoleVisibilityAllowed(false, false, false, false));
+    try std.testing.expect(!shellConsoleVisibilityAllowed(true, false, false, true));
+}
+
+pub fn openChatView() void {
+    if (overlayOpen()) return;
+    if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) {
+        debugLog("[view] open skipped: no frame or no active tab");
+        return;
+    }
+    if (!app_state.g_chat_active and !app_state.g_startup_progress and !app_state.g_restoring and !app_state.g_account_applying) @import("browser_pane.zig").armPinnedBrowserEntry(app_state.shells[app_state.active_shell].shell_id);
+    if (app_state.g_chat_browser_swap.shell_id == 0) {
+        app_state.g_chat_switch_started = GetTickCount64();
+        app_state.g_chat_switch_content_sid = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id, app_state.g_chat_switch_started);
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_BROWSER_SWAP, @import("chat_switch.zig").paint_deadline_ms, null);
+        app_state.g_chat_switch_browser_sid = 0;
+    }
+    const was_preparing = app_state.g_chat_switch_preparing;
+    app_state.g_chat_switch_preparing = true;
+    defer {
+        app_state.g_chat_switch_preparing = was_preparing;
+        if (!was_preparing and app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    }
+    closeWebView2();
+    cancelShellRefocus(app_state.g_main_hwnd);
+    app_state.g_browser_focus_mode = false;
+    app_state.g_shell_focused = false;
+    app_state.g_chat_active = true;
+    if (!ensureChatControls()) {
+        app_state.g_chat_active = false;
+        debugLog("[view] open failed: chat controls missing");
+        showHeaderNoticeAscii("Chat View could not create its controls", 3500, true);
+        return;
+    }
+    app_state.shells[app_state.active_shell].chat_view_on = true;
+    _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
+    _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+    chatDraftBindToActive();
+    chatDeferTranscriptLoad();
+    layoutChatControls();
+    _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
+    _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
+    focusActiveShell();
+    for (&app_state.g_voice_deferred_text) |*pending| {
+        if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
+            insertTextIntoChatComposer(pending.text[0..pending.len]);
+            pending.* = .{};
+        }
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub fn closeChatView() void {
+    @import("chat_session.zig").chatHistoryStreamsKeep(0);
+    @import("chat_find_ui.zig").close(false);
+    chatAcClose();
+    if (!app_state.g_chat_active) return;
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].chat_view_on) @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[app_state.active_shell].shell_id);
+    _ = @import("chat_session.zig").chatReadMark(false);
+    chatDraftFlush();
+    app_state.g_chat_active = false;
+    @import("window_layout.zig").chatWorkingIndicatorSync();
+    app_state.g_chat_browser_swap.cancel();
+    app_state.g_chat_switch_browser_sid = 0;
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
+    app_state.g_chat_switch_loading = false;
+    app_state.g_chat_working_applied_len = 0;
+    app_state.g_chat_screen_status_len = 0;
+    chatSelectionClear();
+    app_state.g_chat_sel_transcript_focus = false;
+    if (app_state.active_shell < app_state.shell_count) {
+        const closing = &app_state.shells[app_state.active_shell];
+        closing.chat_view_on = @import("chat_view.zig").forSession(closing.tmux_session[0..closing.tmux_session_len], false);
+    }
+    if (app_state.g_voice_mode_active) {
+        if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
+    } else if (app_state.g_main_hwnd != null) {
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH);
+    }
+    if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
+    if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
+    if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
+    if (shellConsoleReachable(app_state.active_shell)) {
+        if (app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.shells[app_state.active_shell].full_width_pending_console_resize) {
+            app_state.shells[app_state.active_shell].full_width_pending_console_resize = false;
+            if (app_state.shells[app_state.active_shell].pid != 0) @import("console.zig").applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+        }
+        _ = showShellConsole(app_state.active_shell, SW_SHOW, "closeChatView");
+        repositionActive();
+        updateBrowserVisibility();
+        focusActiveShell();
+    }
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+test "ISSUE-611 shell console is visible during restore and after tab switches" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_chat = app_state.g_chat_active;
+    const saved_restoring = app_state.g_restoring;
+    const saved_startup = app_state.g_startup_progress;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_chat_active = saved_chat;
+        app_state.g_restoring = saved_restoring;
+        app_state.g_startup_progress = saved_startup;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].hwnd = @ptrFromInt(1);
+    app_state.shells[0].chat_view_on = false;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = false;
+    for ([_]bool{ false, true }) |restoring| {
+        app_state.g_restoring = restoring;
+        for ([_]bool{ false, true }) |startup| {
+            app_state.g_startup_progress = startup;
+            try std.testing.expect(shellConsoleShouldBeVisible(0));
+        }
+    }
+    app_state.shells[0].chat_view_on = true;
+    try std.testing.expect(shellConsoleShouldBeVisible(0));
+}
+
+var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
+var chat_draft_loading = false;
+
+fn chatDraftSafeName(id: []const u8, out: []u8) []const u8 {
+    var h: u32 = 2166136261;
+    for (id) |c| h = (h ^ c) *% 16777619;
+    var n: usize = 0;
+    for (id) |c| {
+        if (n >= 80 or n + 9 > out.len) break;
+        const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '-' or c == '_';
+        out[n] = if (ok) c else '_';
+        n += 1;
+    }
+    const tail = std.fmt.bufPrint(out[n..], "-{x:0>8}", .{h}) catch return out[0..n];
+    return out[0 .. n + tail.len];
+}
+
+fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 {
+    if (id.len == 0) return null;
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 300);
+    if (appdata_len == 0 or appdata_len >= 290) return null;
+    const mid = "\\ZigShell\\drafts\\";
+    @memcpy(buf[appdata_len .. appdata_len + mid.len], mid);
+    var safe_buf: [100]u8 = undefined;
+    const safe = chatDraftSafeName(id, &safe_buf);
+    var n = appdata_len + mid.len;
+    @memcpy(buf[n .. n + safe.len], safe);
+    n += safe.len;
+    const ext = ".txt";
+    @memcpy(buf[n .. n + ext.len], ext);
+    return buf[0 .. n + ext.len];
+}
+
+fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
+    var dir_end: usize = path.len;
+    while (dir_end > 0 and path[dir_end - 1] != '\\') dir_end -= 1;
+    if (dir_end > 1) win32MakePath(path[0 .. dir_end - 1]);
+    var tmp_buf: [580]u8 = undefined;
+    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
+    var wbuf: [600]u16 = undefined;
+    const tmp_w = win32WidePath(&wbuf, tmp) orelse return false;
+    const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    if (h == INVALID_HANDLE_VALUE_PTR) return false;
+    var written: DWORD = 0;
+    const complete = WriteFile(h, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
+    const flushed = FlushFileBuffers(h) != 0;
+    _ = CloseHandle(h);
+    return complete and flushed and win32MoveReplace(tmp, path);
+}
+
+pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
+    if (idx >= app_state.shell_count) return buf[0..0];
+    const sh = &app_state.shells[idx];
+    if (sh.chat_id == 0) {
+        var io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer io.deinit();
+        while (sh.chat_id == 0) {
+            io.io().random(std.mem.asBytes(&sh.chat_id));
+            sh.chat_id &= (1 << 53) - 1;
+        }
+        saveSession();
+    }
+    return std.fmt.bufPrint(buf, "session:#{x:0>16}", .{sh.chat_id}) catch buf[0..0];
+}
+
+fn chatDraftLoad(id: []const u8) void {
+    if (id.len == 0 or chat_drafts.entries.contains(id)) return;
+    var text: [16384]u16 = undefined;
+    var len: usize = 0;
+    var dirty = false;
+    var path_buf: [560]u8 = undefined;
+    const path = getChatDraftPath(id, &path_buf) orelse return;
+    if (readFileAllocWin32(path, 65536)) |bytes| {
+        defer std.heap.page_allocator.free(bytes);
+        len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch return;
+    } else {
+        var wbuf: [600]u16 = undefined;
+        const w = win32WidePath(&wbuf, path) orelse return;
+        if (GetFileAttributesW(w.ptr) != 0xFFFF_FFFF) return;
+        for (0..app_state.shell_count) |idx| {
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            if (!std.mem.eql(u8, id, chatDraftKeyForShell(@intCast(idx), &key_buf))) continue;
+            var old_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            var legacy_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const candidates = [_][]const u8{ chatOutboxKeyForShell(@intCast(idx), &old_buf), chatOutboxLegacyKeyForShell(@intCast(idx), &legacy_buf) };
+            for (candidates) |candidate| {
+                if (candidate.len == 0) continue;
+                var matches: usize = 0;
+                for (0..app_state.shell_count) |other| {
+                    var other_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                    var other_legacy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                    if (std.mem.eql(u8, candidate, chatOutboxKeyForShell(@intCast(other), &other_buf)) or
+                        std.mem.eql(u8, candidate, chatOutboxLegacyKeyForShell(@intCast(other), &other_legacy))) matches += 1;
+                }
+                if (matches != 1) continue;
+                var old_path_buf: [560]u8 = undefined;
+                const old_path = getChatDraftPath(candidate, &old_path_buf) orelse continue;
+                const bytes = readFileAllocWin32(old_path, 65536) orelse continue;
+                defer std.heap.page_allocator.free(bytes);
+                len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch continue;
+                dirty = !chatDraftWriteFile(path, bytes);
+                if (!dirty) {
+                    if (win32WidePath(&wbuf, old_path)) |old_w| _ = DeleteFileW(old_w.ptr);
+                }
+                break;
+            }
+            break;
+        }
+    }
+    chat_drafts.set(id, text[0..len], dirty) catch {};
+}
+
+pub fn chatDraftHasForShell(idx: u32) bool {
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &buf);
+    chatDraftLoad(id);
+    return chat_drafts.hasDraft(id);
+}
+
+pub fn chatDraftFlush() void {
+    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
+    if (app_state.g_chat_draft_dirty) chatDraftNoteEdit();
+    app_state.g_chat_draft_dirty = false;
+    var it = chat_drafts.entries.iterator();
+    while (it.next()) |entry| {
+        const draft = entry.value_ptr;
+        if (!draft.dirty) {
+            if (draft.evict) {
+                chat_drafts.remove(entry.key_ptr.*);
+                it = chat_drafts.entries.iterator();
+            }
+            continue;
+        }
+        var path_buf: [560]u8 = undefined;
+        const path = getChatDraftPath(entry.key_ptr.*, &path_buf) orelse {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
+        const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, draft.text) catch {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
+        defer std.heap.page_allocator.free(utf8);
+        if (chatDraftWriteFile(path, utf8)) draft.dirty = false;
+        if (draft.dirty) {
+            app_state.g_chat_draft_dirty = true;
+        } else if (draft.evict) {
+            chat_drafts.remove(entry.key_ptr.*);
+            it = chat_drafts.entries.iterator();
+        }
+    }
+    if (app_state.g_main_hwnd != null) {
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
+        if (app_state.g_chat_draft_dirty or (shell_draft.edit_pending and shell_draft.foreign)) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    }
+}
+
+var shell_draft: chat_shell_sync.Draft = .{};
+var shell_applying = false;
+
+fn composerText(buf: *[16400]u16) []const u16 {
+    if (app_state.g_chat_composer_hwnd == null) return buf[0..0];
+    const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, buf, @intCast(buf.len));
+    const n: usize = if (n_i > 0) @intCast(n_i) else 0;
+    return buf[0..n];
+}
+
+pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) void {
+    if (!status.draft_known or app_state.g_chat_composer_hwnd == null or app_state.g_chat_draft_owner_len == 0) return;
+    if (app_state.g_dictation_draft_owner_len > 0 and app_state.g_dictation_running.load(.acquire)) return;
+    if (@import("chat_session.zig").chatDeliveryPending(shell_id, true)) return;
+    var composer: [16400]u16 = undefined;
+    const text = composerText(&composer);
+    const shell = status.draft[0..status.draft_len];
+    if (shell_draft.onShell(shell_id, shell, text, GetFocus() == app_state.g_chat_composer_hwnd, GetTickCount64()) != .apply) return;
+    var out: [1100]u16 = undefined;
+    const n = chat_shell_sync.toComposer(out[0 .. out.len - 1], shell);
+    out[n] = 0;
+    shell_applying = true;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&out));
+    chat_draft_loading = false;
+    shell_applying = false;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, n, @intCast(n));
+    chatComposerAutoGrow();
+    shell_draft.applied(shell);
+    chatDraftNoteEdit();
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 1);
+}
+
+pub fn chatShellDraftArmPull(armed: bool) void {
+    if (armed) shell_draft.armPull(GetTickCount64()) else shell_draft.disarmPull();
+}
+
+pub fn chatShellDraftNoteSend() void {
+    shell_draft.onSend(GetTickCount64());
+}
+
+pub fn chatShellDraftPushDue() void {
+    if (!shell_draft.edit_pending) return;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.g_chat_composer_hwnd == null or
+        GetFocus() != app_state.g_chat_composer_hwnd or !shell_draft.known or shell_draft.shell_id != app_state.shells[app_state.active_shell].shell_id)
+    {
+        shell_draft.edit_pending = false;
+        return;
+    }
+    var composer: [16400]u16 = undefined;
+    const text = composerText(&composer);
+    const now = GetTickCount64();
+    if (!shell_draft.pushDue(text, now)) return;
+    if (@import("chat_send.zig").chatShellOp(app_state.active_shell, "draft", text, &shell_draft.push_in_flight)) {
+        shell_draft.pushed(text, now);
+    } else {
+        shell_draft.pushFinished();
+    }
+}
+
+fn chatDraftNoteEdit() void {
+    if (chat_draft_loading or app_state.g_chat_draft_owner_len == 0 or app_state.g_chat_composer_hwnd == null) return;
+    var text: [16400]u16 = undefined;
+    const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
+    const n: usize = if (n_i > 0) @intCast(n_i) else 0;
+    const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    chat_drafts.set(id, text[0..n], true) catch return;
+    app_state.g_chat_draft_dirty = true;
+    if (app_state.g_main_hwnd != null) {
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    }
+}
+
+pub fn chatDraftCloseForShell(idx: u32) void {
+    if (idx >= app_state.shell_count or app_state.shells[idx].chat_id == 0) return;
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &buf);
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
+        chatDictationLiveDiscard();
+        chatDraftNoteEdit();
+    }
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = true;
+    chatDraftFlush();
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
+        app_state.g_chat_draft_owner_len = 0;
+        chat_draft_loading = true;
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+        chat_draft_loading = false;
+    }
+}
+
+pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
+    if (id.len == 0) return;
+    for (0..app_state.shell_count) |idx| {
+        if (app_state.shells[idx].chat_id == 0) continue;
+        var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        if (std.mem.eql(u8, id, chatDraftKeyForShell(@intCast(idx), &buf))) break;
+    } else {
+        return;
+    }
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) chatDraftNoteEdit();
+    chatDraftLoad(id);
+    chat_drafts.append(id, text) catch return;
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) and app_state.g_chat_composer_hwnd != null) {
+        var out: [16400]u16 = undefined;
+        const draft = chat_drafts.entries.get(id).?.text;
+        @memcpy(out[0..draft.len], draft);
+        out[draft.len] = 0;
+        chat_draft_loading = true;
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&out));
+        chat_draft_loading = false;
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, draft.len, @intCast(draft.len));
+        chatComposerAutoGrow();
+        shell_draft.onComposerEdit(GetTickCount64());
+    }
+    chatDraftFlush();
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+const LiveDraft = struct {
+    active: bool = false,
+    sealed: bool = false,
+    owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined,
+    owner_len: usize = 0,
+    range: dictation_live.Range = .{ .start = 0, .len = 0 },
+    snap: [16400]u16 = undefined,
+    snap_len: usize = 0,
+    shown: [dictation_live.text_cap]u16 = undefined,
+    shown_len: usize = 0,
+    baseline: [dictation_live.text_cap]u16 = undefined,
+    baseline_len: usize = 0,
+};
+var live_draft: LiveDraft = .{};
+
+fn chatLiveCaret(cur_len: usize) usize {
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    return @min(@as(usize, sel_end), cur_len);
+}
+
+fn chatLiveCopy(dst: []u16, src: []const u16) usize {
+    const n = @min(src.len, dst.len);
+    if (n > 0) @memcpy(dst[0..n], src[0..n]);
+    return n;
+}
+
+fn chatLiveOwnerMatches(owner: []const u8) bool {
+    if (app_state.g_chat_composer_hwnd == null or owner.len == 0) return false;
+    return std.mem.eql(u8, owner, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+}
+
+fn chatLiveCurrentRange(cur: []const u16) dictation_live.Range {
+    return dictation_live.adjustRange(live_draft.snap[0..live_draft.snap_len], cur, live_draft.range);
+}
+
+fn chatLiveWrite(cur: []const u16, range: dictation_live.Range, words: []const u16, caret_end: bool) bool {
+    var piece: [4200]u16 = undefined;
+    const before: ?u16 = if (range.start > 0) cur[range.start - 1] else null;
+    const after: ?u16 = if (range.start + range.len < cur.len) cur[range.start + range.len] else null;
+    const piece_len = dictation_live.compose(before, after, words, &piece);
+    if (cur.len - range.len + piece_len >= live_draft.snap.len) return false;
+    const hwnd = app_state.g_chat_composer_hwnd;
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = SendMessageW(hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    var out: [16400]u16 = undefined;
+    @memcpy(out[0..range.start], cur[0..range.start]);
+    @memcpy(out[range.start..][0..piece_len], piece[0..piece_len]);
+    const tail = cur[range.start + range.len ..];
+    @memcpy(out[range.start + piece_len ..][0..tail.len], tail);
+    const total = range.start + piece_len + tail.len;
+    out[total] = 0;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(hwnd, @ptrCast(&out));
+    chat_draft_loading = false;
+    var new_start: usize = dictation_live.mapCaret(sel_start, range, piece_len);
+    var new_end: usize = dictation_live.mapCaret(sel_end, range, piece_len);
+    if (caret_end and sel_start == sel_end and sel_start >= range.start and sel_start <= range.start + range.len) {
+        new_start = range.start + piece_len;
+        new_end = new_start;
+    }
+    _ = SendMessageW(hwnd, 0x00B1, new_start, @intCast(new_end));
+    @memcpy(live_draft.snap[0..total], out[0..total]);
+    live_draft.snap_len = total;
+    live_draft.range = .{ .start = range.start, .len = piece_len };
+    chatComposerAutoGrow();
+    return true;
+}
+
+pub fn chatDictationLiveApply(owner: []const u8, words: []const u16) void {
+    if (!chatLiveOwnerMatches(owner)) {
+        live_draft.active = false;
+        return;
+    }
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    if (!live_draft.active or !std.mem.eql(u8, live_draft.owner[0..live_draft.owner_len], owner)) {
+        if (owner.len > live_draft.owner.len) return;
+        const at = chatLiveCaret(cur.len);
+        @memcpy(live_draft.owner[0..owner.len], owner);
+        live_draft.owner_len = owner.len;
+        @memcpy(live_draft.snap[0..cur.len], cur);
+        live_draft.snap_len = cur.len;
+        live_draft.range = .{ .start = at, .len = 0 };
+        live_draft.active = true;
+        live_draft.sealed = false;
+        live_draft.shown_len = 0;
+        live_draft.baseline_len = 0;
+    }
+    const decided = dictation_live.planApply(
+        live_draft.snap[0..live_draft.snap_len],
+        cur,
+        live_draft.sealed,
+        live_draft.baseline[0..live_draft.baseline_len],
+        live_draft.shown[0..live_draft.shown_len],
+        words,
+    );
+    if (decided.seal and (!live_draft.sealed or decided.at_caret)) {
+        live_draft.baseline_len = chatLiveCopy(&live_draft.baseline, live_draft.shown[0..live_draft.shown_len]);
+    }
+    if (decided.seal) live_draft.sealed = true;
+    live_draft.shown_len = chatLiveCopy(&live_draft.shown, words);
+    if (decided.skip) return;
+    const range: dictation_live.Range = if (decided.at_caret)
+        .{ .start = chatLiveCaret(cur.len), .len = 0 }
+    else
+        chatLiveCurrentRange(cur);
+    if (decided.at_caret and decided.words.len == 0) {
+        @memcpy(live_draft.snap[0..cur.len], cur);
+        live_draft.snap_len = cur.len;
+        live_draft.range = range;
+        return;
+    }
+    if (!chatLiveWrite(cur, range, decided.words, true)) live_draft.active = false;
+}
+
+pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
+    if (!live_draft.active or !chatLiveOwnerMatches(owner) or !std.mem.eql(u8, live_draft.owner[0..live_draft.owner_len], owner)) {
+        live_draft.active = false;
+        return false;
+    }
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const decided = dictation_live.planApply(
+        live_draft.snap[0..live_draft.snap_len],
+        cur,
+        live_draft.sealed,
+        live_draft.baseline[0..live_draft.baseline_len],
+        live_draft.shown[0..live_draft.shown_len],
+        words,
+    );
+    const range: dictation_live.Range = if (decided.at_caret)
+        .{ .start = chatLiveCaret(cur.len), .len = 0 }
+    else
+        chatLiveCurrentRange(cur);
+    const ok = if (decided.skip) true else if (decided.seal)
+        chatLiveWrite(cur, range, decided.words, true)
+    else
+        chatLiveWrite(cur, range, words, true);
+    live_draft.active = false;
+    live_draft.sealed = false;
+    live_draft.shown_len = 0;
+    live_draft.baseline_len = 0;
+    if (!ok) return false;
+    chatDraftNoteEdit();
+    chatDraftFlush();
+    shell_draft.onComposerEdit(GetTickCount64());
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
+}
+
+pub fn chatDictationLiveDiscard() void {
+    if (!live_draft.active) return;
+    live_draft.active = false;
+    live_draft.sealed = false;
+    live_draft.shown_len = 0;
+    live_draft.baseline_len = 0;
+    if (!chatLiveOwnerMatches(live_draft.owner[0..live_draft.owner_len])) return;
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const range = chatLiveCurrentRange(cur);
+    if (range.len == 0) return;
+    _ = chatLiveWrite(cur, range, &.{}, false);
+}
+
+fn chatLiveStripFromStore() void {
+    if (!live_draft.active) return;
+    defer live_draft.active = false;
+    const id = live_draft.owner[0..live_draft.owner_len];
+    if (!chatLiveOwnerMatches(id)) return;
+    if (chat_drafts.entries.getPtr(id) == null) return;
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const range = chatLiveCurrentRange(cur);
+    var out: [16400]u16 = undefined;
+    @memcpy(out[0..range.start], cur[0..range.start]);
+    const tail = cur[range.start + range.len ..];
+    @memcpy(out[range.start..][0..tail.len], tail);
+    chat_drafts.set(id, out[0 .. range.start + tail.len], true) catch return;
+}
+
+pub fn chatDraftBindToActive() void {
+    const ReplyStash = struct {
+        var drafts = std.StringHashMap([]u8).init(std.heap.page_allocator);
+    };
+    const SkillStash = struct {
+        var owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        var owner_len: usize = 0;
+        var name: @TypeOf(app_state.g_chat_skill_name) = undefined;
+        var name_len: usize = 0;
+        var body: @TypeOf(app_state.g_chat_skill_body) = undefined;
+        var body_len: usize = 0;
+    };
+    if (app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
+    var id_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(app_state.active_shell, &id_buf);
+    if (id.len == 0) return;
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = false;
+    if (app_state.g_chat_draft_owner_len == id.len and std.mem.eql(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], id)) return;
+    chatLiveStripFromStore();
+    if (app_state.g_chat_draft_owner_len > 0 and app_state.g_chat_reply_len > 0) {
+        const a = std.heap.page_allocator;
+        const owner = a.dupe(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) catch return;
+        const quote = a.dupe(u8, app_state.g_chat_reply[0..app_state.g_chat_reply_len]) catch {
+            a.free(owner);
+            return;
+        };
+        ReplyStash.drafts.put(owner, quote) catch {
+            a.free(owner);
+            a.free(quote);
+            return;
+        };
+    }
+    app_state.g_chat_reply_len = 0;
+    app_state.g_chat_reply_preview_len = 0;
+    if (ReplyStash.drafts.fetchRemove(id)) |saved| {
+        @memcpy(app_state.g_chat_reply[0..saved.value.len], saved.value);
+        app_state.g_chat_reply_len = saved.value.len;
+        std.heap.page_allocator.free(saved.key);
+        std.heap.page_allocator.free(saved.value);
+        chatReplyRefreshPreview();
+    }
+    if (app_state.g_chat_draft_owner_len > 0) {
+        if (app_state.g_chat_skill_name_len > 0) {
+            @memcpy(SkillStash.owner[0..app_state.g_chat_draft_owner_len], app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+            SkillStash.owner_len = app_state.g_chat_draft_owner_len;
+            @memcpy(SkillStash.name[0..app_state.g_chat_skill_name_len], app_state.g_chat_skill_name[0..app_state.g_chat_skill_name_len]);
+            SkillStash.name_len = app_state.g_chat_skill_name_len;
+            @memcpy(SkillStash.body[0..app_state.g_chat_skill_body_len], app_state.g_chat_skill_body[0..app_state.g_chat_skill_body_len]);
+            SkillStash.body_len = app_state.g_chat_skill_body_len;
+        }
+        app_state.g_chat_skill_name_len = 0;
+        app_state.g_chat_skill_body_len = 0;
+    }
+    chatDraftFlush();
+    @memcpy(app_state.g_chat_draft_owner[0..id.len], id);
+    app_state.g_chat_draft_owner_len = id.len;
+    if (SkillStash.owner_len > 0 and std.mem.eql(u8, SkillStash.owner[0..SkillStash.owner_len], id)) {
+        @memcpy(app_state.g_chat_skill_name[0..SkillStash.name_len], SkillStash.name[0..SkillStash.name_len]);
+        app_state.g_chat_skill_name_len = SkillStash.name_len;
+        @memcpy(app_state.g_chat_skill_body[0..SkillStash.body_len], SkillStash.body[0..SkillStash.body_len]);
+        app_state.g_chat_skill_body_len = SkillStash.body_len;
+        SkillStash.owner_len = 0;
+    }
+    chatDraftLoad(id);
+    var text: [16400]u16 = undefined;
+    const draft = chat_drafts.entries.get(id);
+    const value: []const u16 = if (draft) |d| d.text else &.{};
+    @memcpy(text[0..value.len], value);
+    text[value.len] = 0;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&text));
+    chat_draft_loading = false;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, value.len, @intCast(value.len));
+    chatComposerAutoGrow();
+    layoutChatControls();
+}
+
+test "chat draft safe name is file-name safe and collision-free" {
+    var a: [100]u8 = undefined;
+    var b: [100]u8 = undefined;
+    const k1 = chatDraftSafeName("tmux:1:my/session", &a);
+    const k2 = chatDraftSafeName("tmux:1:my\\session", &b);
+    try std.testing.expect(!std.mem.eql(u8, k1, k2));
+    for (k1) |c| try std.testing.expect(c != ':' and c != '/' and c != '\\');
+    try std.testing.expect(std.mem.startsWith(u8, k1, "tmux_1_my_session-"));
+}
+
+pub fn toggleChatView() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len])) return;
+    shell.chat_view_on = app_state.g_chat_active;
+    @import("chat_view.zig").toggle(shell);
+    if (shell.chat_view_on) openChatView() else closeChatView();
+    saveSession();
+}
+
+pub const ChatViewMove = enum { open, close, keep };
+
+pub fn chatViewMove(wanted: bool, active: bool, window_up: bool) ChatViewMove {
+    if (wanted) return if (active and window_up) .keep else .open;
+    return if (active) .close else .keep;
+}
+
+pub fn chatViewWindowUp() bool {
+    if (app_state.g_chat_transcript_hwnd == null or app_state.g_chat_composer_hwnd == null) return false;
+    if (IsWindowVisible(app_state.g_chat_transcript_hwnd) == 0) return false;
+    var rc: RECT = std.mem.zeroes(RECT);
+    if (GetWindowRect(app_state.g_chat_transcript_hwnd, &rc) == 0) return false;
+    return rc.right > rc.left and rc.bottom > rc.top;
+}
+
+pub fn applySessionView() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    switch (chatViewMove(chatViewShouldShowForTab(shell.chat_view_on), app_state.g_chat_active, chatViewWindowUp())) {
+        .open => openChatView(),
+        .close => closeChatView(),
+        .keep => {},
+    }
+}
+
+test "IGSH-1266 a chat view that wants to show opens whenever its window is not really up" {
+    const legacy_move = struct {
+        fn move(wanted: bool, active: bool) bool {
+            return wanted != active;
+        }
+    }.move;
+    try std.testing.expect(!legacy_move(true, true));
+    try std.testing.expectEqual(ChatViewMove.open, chatViewMove(true, true, false));
+    try std.testing.expectEqual(ChatViewMove.open, chatViewMove(true, false, false));
+    try std.testing.expectEqual(ChatViewMove.keep, chatViewMove(true, true, true));
+    try std.testing.expectEqual(ChatViewMove.keep, chatViewMove(false, false, false));
+    try std.testing.expectEqual(ChatViewMove.close, chatViewMove(false, true, false));
+}
+
+pub fn invalidateChatHeader() void {
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    updateMainWindowTitle();
+}
+
+test "IGSH-760 typing presents completed smooth frames without native inline paints" {
+    const w = @import("win32.zig");
+    const painter = @import("chat_composer_text.zig");
+    const Spy = struct {
+        var edit_original: isize = 0;
+        var parent_original: isize = 0;
+        var colors: usize = 0;
+        var paints: usize = 0;
+        var prints: usize = 0;
+        var window_prints: usize = 0;
+        var guarded = false;
+        var background_brush: HANDLE = null;
+
+        extern "user32" fn WindowFromDC(HANDLE) callconv(WINAPI) HANDLE;
+
+        fn parentProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == 0x0133 or msg == 0x0138) {
+                colors += 1;
+                const dc: HANDLE = @ptrFromInt(wp);
+                _ = SetTextColor(dc, if (painter.enabled() and !painter.native_paint) app_state.g_chat_input_color else customColorOr("text", themeConsoleFg()));
+                _ = w.SetBkColor(dc, app_state.g_chat_input_color);
+                return @bitCast(@intFromPtr(background_brush));
+            }
+            return CallWindowProcW(parent_original, hwnd, msg, wp, lp);
+        }
+
+        fn nativeProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == 0x0318) {
+                prints += 1;
+                if (WindowFromDC(@ptrFromInt(wp)) == hwnd) window_prints += 1;
+            }
+            return CallWindowProcW(edit_original, hwnd, msg, wp, lp);
+        }
+
+        fn editProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            const redraw = guarded and painter.suspendNativePaint(hwnd, msg);
+            defer if (guarded) painter.resumeNativePaint(hwnd, msg, redraw) else painter.invalidateAfter(hwnd, msg);
+            if (msg == WM_PAINT) paints += 1;
+            if (msg == WM_PAINT or msg == WM_ERASEBKGND or msg == 0x0318) return chatComposerSubclassCore(hwnd, msg, wp, lp);
+            return nativeProc(hwnd, msg, wp, lp);
+        }
+    };
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const font = fonts.chat(-18, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(font);
+    defer @import("dwrite_text.zig").resetFonts();
+    var previous: [32768]u16 = undefined;
+    const length = w.GetEnvironmentVariableW(L("IGSH_731"), &previous, previous.len);
+    defer _ = w.SetEnvironmentVariableW(L("IGSH_731"), if (length > 0 and length < previous.len) @ptrCast(&previous) else null);
+    const saved_original = app_state.g_chat_composer_orig_proc;
+    const saved_color = app_state.g_chat_input_color;
+    defer {
+        app_state.g_chat_composer_orig_proc = saved_original;
+        app_state.g_chat_input_color = saved_color;
+    }
+    app_state.g_chat_input_color = customColorOr("text", themeConsoleFg()) ^ 0xffffff;
+    Spy.background_brush = CreateSolidBrush(app_state.g_chat_input_color) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(Spy.background_brush);
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000 | WS_VISIBLE, 0, 0, 320, 80, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    Spy.parent_original = GetWindowLongPtrW(parent, -4);
+    _ = SetWindowLongPtrW(parent, -4, @bitCast(@intFromPtr(&Spy.parentProc)));
+    const edit = CreateWindowExW(0, L("EDIT"), L("seed"), WS_CHILD | WS_VISIBLE | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, 320, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
+    Spy.edit_original = GetWindowLongPtrW(edit, -4);
+    app_state.g_chat_composer_orig_proc = @bitCast(@intFromPtr(&Spy.nativeProc));
+    _ = SetWindowLongPtrW(edit, -4, @bitCast(@intFromPtr(&Spy.editProc)));
+    _ = w.UpdateWindow(parent);
+    var inline_paints: [2]usize = .{ 0, 0 };
+    try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_731"), L("1")) != 0);
+    for ([_]bool{ false, true }, 0..) |guarded, mode| {
+        Spy.guarded = guarded;
+        _ = SetWindowTextW(edit, L("seed"));
+        _ = SendMessageW(edit, 0x00B1, 4, 4);
+        _ = app_state.FocusNative.SetFocus(edit);
+        _ = InvalidateRect(edit, null, 1);
+        _ = w.UpdateWindow(edit);
+        Spy.paints = 0;
+        Spy.prints = 0;
+        Spy.window_prints = 0;
+        const runs_before = @import("dwrite_text.zig").painted_runs;
+        for ("abcd") |character| {
+            Spy.colors = 0;
+            _ = SendMessageW(edit, WM_KEYDOWN, character - 32, 1);
+            _ = SendMessageW(edit, 0x0102, character, 1);
+            _ = SendMessageW(edit, WM_KEYUP, character - 32, 1);
+            inline_paints[mode] += Spy.colors;
+            _ = w.UpdateWindow(edit);
+            try std.testing.expect(IsWindowVisible(edit) != 0);
+            try std.testing.expectEqual(edit, GetFocus());
+        }
+        var text: [32]u16 = undefined;
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("seedabcd")), text[0..@intCast(n)]);
+        std.debug.print("IGSH-760 guarded={} chars=4 inline_color_requests={d} paints={d} offscreen_prints={d} window_prints={d}\n", .{ guarded, inline_paints[mode], Spy.paints, Spy.prints - Spy.window_prints, Spy.window_prints });
+        if (guarded) {
+            try std.testing.expectEqual(@as(usize, 0), inline_paints[mode]);
+            try std.testing.expectEqual(@as(usize, 4), Spy.paints);
+            try std.testing.expectEqual(@as(usize, 4), Spy.prints);
+            try std.testing.expectEqual(@as(usize, 0), Spy.window_prints);
+            try std.testing.expectEqual(runs_before + 4, @import("dwrite_text.zig").painted_runs);
+        }
+    }
+    try std.testing.expect(inline_paints[0] > 0);
+    _ = ShowWindow(edit, SW_HIDE);
+    _ = SendMessageW(edit, 0x0102, 'e', 1);
+    try std.testing.expect(IsWindowVisible(edit) == 0);
+}
+
+test "IGSH-813 pill is centered outside transcript and close keeps its count and layout space" {
+    const w = @import("win32.zig");
+    const hwnd = CreateWindowExW(0, L("STATIC"), L("new message layout"), 0, 0, 0, 1200, 900, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_main = app_state.g_main_hwnd;
+    const old_active = app_state.g_chat_active;
+    const old_count = app_state.shell_count;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_counter = app_state.g_chat_new_messages;
+    defer {
+        app_state.g_main_hwnd = old_main;
+        app_state.g_chat_active = old_active;
+        app_state.shell_count = old_count;
+        app_state.g_chat_scrolled_up = old_up;
+        app_state.g_chat_new_messages = old_counter;
+    }
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    app_state.g_chat_new_messages.arrive(123, true);
+    const layout = chatViewLayout();
+    const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
+    try std.testing.expect(pill.top >= layout.transcript.bottom);
+    try std.testing.expect(pill.bottom <= layout.composer_card.top - chatWorkingIndicatorH());
+    try std.testing.expect(@abs((pill.left + pill.right) - (layout.transcript.left + layout.transcript.right)) <= 1);
+    try std.testing.expectEqual(@as(u8, 10), chatButtonAt(pill.left + 1, pill.top + 1));
+    try std.testing.expectEqual(@as(u8, 11), chatButtonAt(pill.right - 1, pill.top + 1));
+    chatNewMessagesDismiss();
+    try std.testing.expectEqual(@as(usize, 123), app_state.g_chat_new_messages.count());
+    try std.testing.expect(chatNewMessagesRect() == null);
+    try std.testing.expectEqualDeep(layout.transcript, chatViewLayout().transcript);
+    app_state.g_chat_scrolled_up = false;
+    try std.testing.expect(chatNewMessagesRect() == null);
+}
+
+fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply, queued_ctrl_stop, queued_select }) !void {
+    const w = @import("win32.zig");
+    const saved_shell_draft = shell_draft;
+    defer shell_draft = saved_shell_draft;
+    shell_draft = .{};
+    const Engine = struct {
+        fn toggle() void {
+            if (app_state.g_dictation_recording.load(.acquire)) {
+                app_state.g_dictation_recording.store(false, .release);
+            } else if (!app_state.g_dictation_running.load(.acquire)) {
+                app_state.g_dictation_recording.store(true, .release);
+                app_state.g_dictation_running.store(true, .release);
+                const id = chatDraftKeyForShell(0, &app_state.g_dictation_draft_owner);
+                app_state.g_dictation_draft_owner_len = id.len;
+            }
+        }
+    };
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .edit = app_state.g_chat_composer_hwnd,
+        .original = app_state.g_chat_composer_orig_proc,
+        .chat = app_state.g_chat_active,
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .drafts = chat_drafts,
+        .owner = app_state.g_chat_draft_owner,
+        .owner_len = app_state.g_chat_draft_owner_len,
+        .dirty = app_state.g_chat_draft_dirty,
+        .dictation_owner = app_state.g_dictation_draft_owner,
+        .dictation_owner_len = app_state.g_dictation_draft_owner_len,
+        .state = chat_dictation_state,
+        .toggle = chat_dictation_engine_toggle,
+        .running = app_state.g_dictation_running.load(.acquire),
+        .recording = app_state.g_dictation_recording.load(.acquire),
+        .voice = app_state.g_voice_listening_active.load(.acquire),
+    };
+    defer {
+        chat_drafts.deinit();
+        chat_drafts = saved.drafts;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_composer_hwnd = saved.edit;
+        app_state.g_chat_composer_orig_proc = saved.original;
+        app_state.g_chat_active = saved.chat;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_draft_owner = saved.owner;
+        app_state.g_chat_draft_owner_len = saved.owner_len;
+        app_state.g_chat_draft_dirty = saved.dirty;
+        app_state.g_dictation_draft_owner = saved.dictation_owner;
+        app_state.g_dictation_draft_owner_len = saved.dictation_owner_len;
+        chat_dictation_state = saved.state;
+        chat_dictation_engine_toggle = saved.toggle;
+        app_state.g_dictation_running.store(saved.running, .release);
+        app_state.g_dictation_recording.store(saved.recording, .release);
+        app_state.g_voice_listening_active.store(saved.voice, .release);
+    }
+    chat_drafts = draft_model.Store.init(std.testing.allocator);
+    var previous_appdata: [32768]u16 = undefined;
+    const appdata_len = w.GetEnvironmentVariableW(L("APPDATA"), &previous_appdata, previous_appdata.len);
+    defer _ = w.SetEnvironmentVariableW(L("APPDATA"), if (appdata_len > 0 and appdata_len < previous_appdata.len) @ptrCast(&previous_appdata) else null);
+    try std.testing.expect(w.SetEnvironmentVariableW(L("APPDATA"), null) != 0);
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].chat_id = 812;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_chat_draft_dirty = false;
+    app_state.g_dictation_draft_owner_len = 0;
+    app_state.g_dictation_running.store(false, .release);
+    app_state.g_dictation_recording.store(false, .release);
+    app_state.g_voice_listening_active.store(false, .release);
+    chat_dictation_state = .idle;
+    chat_dictation_engine_toggle = Engine.toggle;
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1200, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("typed"), WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL, 0, 0, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    const id = chatDraftKeyForShell(0, &app_state.g_chat_draft_owner);
+    app_state.g_chat_draft_owner_len = id.len;
+    try chat_drafts.set(id, std.mem.span(L("typed")), false);
+    try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x44, true, false, 0));
+    try std.testing.expect(!chatDictationKey(WM_KEYDOWN, 0x44, 0, true, true, false));
+    try std.testing.expect(!chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, true));
+    try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
+    if (action == .mic_start or action == .mic_stop) {
+        const layout = chatViewLayout();
+        try std.testing.expect(layout.send_btn.left > layout.mic_btn.right);
+        try std.testing.expect(layout.send_btn.right < layout.composer_card.right);
+        try std.testing.expect(layout.send_shown and !layout.stop_shown);
+        try std.testing.expect(layout.mic_btn.left > layout.composer.right);
+        try std.testing.expect(!chatDictationClick(layout.mic_btn.right, layout.mic_btn.top));
+        try std.testing.expect(chatDictationClick(layout.mic_btn.left, layout.mic_btn.top));
+    } else {
+        try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
+    }
+    try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0x40000000, true, false, false));
+    try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    var text: [64]u16 = undefined;
+    if (action == .transcript) {
+        app_state.g_dictation_transcript_len = 6;
+        @memcpy(app_state.g_dictation_transcript[0..6], std.mem.span(L("spoken")));
+        app_state.g_dictation_error_len = 0;
+        const listening = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed")), text[0..@intCast(listening)]);
+    }
+    if (action == .typing) {
+        _ = SendMessageW(edit, 0x00B1, 5, 5);
+        for (" more") |character| {
+            _ = chatComposerSubclassCore(edit, 0x0102, character, 1);
+        }
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed more")), text[0..@intCast(n)]);
+        try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    }
+    if (action == .reply) {
+        const typed = std.mem.span(L("typed"));
+        const incoming = std.mem.span(L("older shell draft"));
+        shell_draft = .{ .shell_id = 7, .known = true, .shell_hash = chat_shell_sync.draftHash(std.mem.span(L("other"))), .synced_hash = chat_shell_sync.draftHash(typed) };
+        var status: chat_transcript.Status = .{ .draft_known = true, .draft_len = incoming.len };
+        @memcpy(status.draft[0..incoming.len], incoming);
+        chatShellDraftPull(7, &status);
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, typed, text[0..@intCast(n)]);
+        try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+        try std.testing.expect(app_state.g_dictation_running.load(.acquire));
+        try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    }
+    if (action == .queued_ctrl_stop or action == .queued_select) {
+        const Keyboard = struct {
+            extern "user32" fn GetKeyboardState([*]u8) callconv(WINAPI) BOOL;
+            extern "user32" fn SetKeyboardState([*]const u8) callconv(WINAPI) BOOL;
+        };
+        var previous: [256]u8 = undefined;
+        try std.testing.expect(Keyboard.GetKeyboardState(&previous) != 0);
+        defer _ = Keyboard.SetKeyboardState(&previous);
+        try std.testing.expect((GetAsyncKeyState(0x11) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0);
+        var queued: [256]u8 = @splat(0);
+        queued[0x11] = 0x80;
+        queued[0xA2] = 0x80;
+        try std.testing.expect(Keyboard.SetKeyboardState(&queued) != 0);
+        _ = chatComposerSubclassCore(edit, WM_KEYDOWN, if (action == .queued_select) 0x41 else 0x44, 1);
+        if (action == .queued_select) {
+            var start: DWORD = 0;
+            var end: DWORD = 0;
+            _ = SendMessageW(edit, 0x00B0, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+            try std.testing.expectEqual(@as(DWORD, 0), start);
+            try std.testing.expectEqual(@as(DWORD, 5), end);
+            return;
+        }
+    }
+    if (action == .ctrl_start or action == .mic_start or action == .typing or action == .reply) return;
+    if (action == .queued_ctrl_stop) {
+        try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    } else if (action == .enter_stop) {
+        _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+        var message: w.MSG = undefined;
+        try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
+    } else if (action == .mic_stop) {
+        const rc = chatViewLayout().mic_btn;
+        try std.testing.expect(chatDictationClick(rc.left, rc.top));
+    } else {
+        try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
+    }
+    try std.testing.expectEqual(DictationState.finishing, chat_dictation_state);
+    try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_running.load(.acquire));
+    const before = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("typed")), text[0..@intCast(before)]);
+    if (action == .transcript) {
+        _ = SendMessageW(edit, 0x00B1, 5, 5);
+        _ = chatComposerSubclassCore(edit, 0x0102, '!', 1);
+        app_state.g_main_hwnd = null;
+        app_state.g_chat_active = false;
+        @import("voice.zig").handleDictationReady();
+        try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
+        const after = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed! spoken")), text[0..@intCast(after)]);
+        try std.testing.expect(shell_draft.edit_pending);
+        try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
+    }
+}
+
+test "IGSH-812 Ctrl+D starts dictation" {
+    try testChatDictation(.ctrl_start);
+}
+
+test "IGSH-812 Ctrl+D stops dictation" {
+    try testChatDictation(.ctrl_stop);
+}
+
+test "IGSH-812 Enter stops dictation without sending" {
+    try testChatDictation(.enter_stop);
+}
+
+test "IGSH-812 mic click starts dictation" {
+    try testChatDictation(.mic_start);
+}
+
+test "IGSH-812 mic click stops dictation" {
+    try testChatDictation(.mic_stop);
+}
+
+test "IGSH-812 text arrives only when dictation finishes" {
+    try testChatDictation(.transcript);
+}
+
+test "IGSH-812 typing is never blocked while listening" {
+    try testChatDictation(.typing);
+}
+
+test "IGSH-885 a reply arriving while dictating leaves the draft and the recording alone" {
+    try testChatDictation(.reply);
+}
+
+test "IGSH-922 slash filtering presents one completed popup frame" {
+    const w = @import("win32.zig");
+    const Spy = struct {
+        var paints: usize = 0;
+        extern "gdi32" fn GdiFlush() callconv(WINAPI) BOOL;
+        fn snapshot(hwnd: HANDLE, step: usize) !void {
+            var rc: RECT = undefined;
+            try std.testing.expect(GetClientRect(hwnd, &rc) != 0);
+            const source = GetDC(hwnd) orelse return error.TestUnexpectedResult;
+            defer _ = ReleaseDC(hwnd, source);
+            const memory = w.CreateCompatibleDC(source) orelse return error.TestUnexpectedResult;
+            defer _ = w.DeleteDC(memory);
+            const info = w.BITMAPINFO{ .header = .{ .width = rc.right, .height = -rc.bottom } };
+            var bits: ?*anyopaque = null;
+            const bitmap = w.CreateDIBSection(source, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+            defer _ = DeleteObject(bitmap);
+            const old = SelectObject(memory, bitmap);
+            defer _ = SelectObject(memory, old);
+            try std.testing.expect(w.BitBlt(memory, 0, 0, rc.right, rc.bottom, source, 0, 0, w.GDI_SRCCOPY) != 0);
+            try std.testing.expect(GdiFlush() != 0);
+            const size: usize = @intCast(rc.right * rc.bottom * 4);
+            const bmp = try std.testing.allocator.alloc(u8, 54 + size);
+            defer std.testing.allocator.free(bmp);
+            @memset(bmp[0..54], 0);
+            @memcpy(bmp[0..2], "BM");
+            std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+            std.mem.writeInt(u32, bmp[10..14], 54, .little);
+            @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+            @memcpy(bmp[54..], @as([*]u8, @ptrCast(bits.?))[0..size]);
+            var path: [64]u8 = undefined;
+            try std.testing.expect(@import("file_io.zig").writeFileAtomicW(try std.fmt.bufPrint(&path, "skill-search-{d}.bmp", .{step}), bmp));
+        }
+        fn proc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == WM_PAINT) paints += 1;
+            return chatAcWndProc(hwnd, msg, wp, lp);
+        }
+    };
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .popup = app_state.g_chat_ac_hwnd,
+        .chat = app_state.g_chat_active,
+        .ac = app_state.g_chat_ac,
+        .count = app_state.shell_count,
+        .entries = app_state.g_chat_ac_slots[0].entries[0..4].*,
+        .slot_count = app_state.g_chat_ac_slots[0].count,
+        .status = app_state.g_chat_ac_slots[0].status,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_ac_hwnd = saved.popup;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_chat_ac = saved.ac;
+        app_state.shell_count = saved.count;
+        app_state.g_chat_ac_slots[0].entries[0..4].* = saved.entries;
+        app_state.g_chat_ac_slots[0].count = saved.slot_count;
+        app_state.g_chat_ac_slots[0].status = saved.status;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000 | WS_VISIBLE, 0, 0, 1000, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    ensureChatAcClass();
+    const popup = CreateWindowExW(0, L("ZigShellChatSuggest"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 100, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(popup);
+    _ = SetWindowLongPtrW(popup, -4, @bitCast(@intFromPtr(&Spy.proc)));
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_ac_hwnd = popup;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{ .open = true };
+    for ([_][]const u8{ "skill-one", "skill-two", "search", "other" }, 0..) |name, i| {
+        app_state.g_chat_ac_slots[0].entries[i] = .{ .kind = 'S', .name = name, .hint = "", .desc = "" };
+    }
+    app_state.g_chat_ac_slots[0].count = 4;
+    app_state.g_chat_ac_slots[0].status = .ok;
+    _ = w.UpdateWindow(parent);
+    var inline_paints: usize = 0;
+    var queued_paints: usize = 0;
+    const clears_before = chat_ac_window_clears;
+    for ([_][]const u16{ std.mem.span(L("/")), std.mem.span(L("/s")), std.mem.span(L("/sk")), std.mem.span(L("/ski")), std.mem.span(L("/skiz")), std.mem.span(L("/ski")) }, [_]usize{ 4, 3, 2, 2, 0, 2 }, 0..) |text, expected_count, step| {
+        Spy.paints = 0;
+        const step_clears = chat_ac_window_clears;
+        const token = chat_complete.tokenAtCaret(text, text.len, .claude) orelse return error.TestUnexpectedResult;
+        chatAcRank(text, token);
+        chatAcRank(text, token);
+        inline_paints += Spy.paints;
+        const inline_count = Spy.paints;
+        _ = w.UpdateWindow(popup);
+        queued_paints += Spy.paints - inline_count;
+        std.debug.print("IGSH-922 chars={d} matches={d} inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ text.len, app_state.g_chat_ac.count, inline_count, Spy.paints - inline_count, chat_ac_window_clears - step_clears });
+        try std.testing.expectEqual(expected_count, app_state.g_chat_ac.count);
+        try std.testing.expect(IsWindowVisible(popup) != 0);
+        try Spy.snapshot(popup, step);
+        if (expected_count > 0) {
+            const dc = GetDC(popup) orelse return error.TestUnexpectedResult;
+            defer _ = ReleaseDC(popup, dc);
+            try std.testing.expectEqual(@import("more_menu.zig").colors().raised, w.GetPixel(dc, uiScaled(10), chatAcPad() + @divTrunc(uiScaled(32), 2)));
+        }
+    }
+    std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ inline_paints, queued_paints, chat_ac_window_clears - clears_before });
+    try std.testing.expectEqual(@as(usize, 0), inline_paints);
+    try std.testing.expectEqual(@as(usize, 6), queued_paints);
+    try std.testing.expectEqual(@as(usize, 0), chat_ac_window_clears - clears_before);
+}
+
+test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
+    const w = @import("win32.zig");
+    const Cursor = struct {
+        extern "user32" fn SetCursorPos(i32, i32) callconv(WINAPI) i32;
+    };
+    var original_cursor: w.POINT = undefined;
+    try std.testing.expect(w.GetCursorPos(&original_cursor) != 0);
+    defer _ = Cursor.SetCursorPos(original_cursor.x, original_cursor.y);
+    const saved_input = list_input.skills;
+    defer list_input.skills = saved_input;
+    const saved = .{
+        .g_main_hwnd = app_state.g_main_hwnd,
+        .g_chat_composer_hwnd = app_state.g_chat_composer_hwnd,
+        .g_chat_composer_orig_proc = app_state.g_chat_composer_orig_proc,
+        .g_chat_ac_hwnd = app_state.g_chat_ac_hwnd,
+        .g_chat_ac = app_state.g_chat_ac,
+        .g_chat_active = app_state.g_chat_active,
+        .g_restoring = app_state.g_restoring,
+        .shell_count = app_state.shell_count,
+        .g_chat_ac_mru = app_state.g_chat_ac_mru,
+        .g_chat_ac_mru_count = app_state.g_chat_ac_mru_count,
+        .g_chat_skill_name_len = app_state.g_chat_skill_name_len,
+        .g_chat_skill_body_len = app_state.g_chat_skill_body_len,
+        .g_chat_ac_dialog_len = app_state.g_chat_ac_dialog_len,
+        .g_chat_ac_tab_accepted = app_state.g_chat_ac_tab_accepted,
+        .entries = app_state.g_chat_ac_slots[0].entries[0..3].*,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.g_main_hwnd;
+        app_state.g_chat_composer_hwnd = saved.g_chat_composer_hwnd;
+        app_state.g_chat_composer_orig_proc = saved.g_chat_composer_orig_proc;
+        app_state.g_chat_ac_hwnd = saved.g_chat_ac_hwnd;
+        app_state.g_chat_ac = saved.g_chat_ac;
+        app_state.g_chat_active = saved.g_chat_active;
+        app_state.g_restoring = saved.g_restoring;
+        app_state.shell_count = saved.shell_count;
+        app_state.g_chat_ac_mru = saved.g_chat_ac_mru;
+        app_state.g_chat_ac_mru_count = saved.g_chat_ac_mru_count;
+        app_state.g_chat_skill_name_len = saved.g_chat_skill_name_len;
+        app_state.g_chat_skill_body_len = saved.g_chat_skill_body_len;
+        app_state.g_chat_ac_dialog_len = saved.g_chat_ac_dialog_len;
+        app_state.g_chat_ac_tab_accepted = saved.g_chat_ac_tab_accepted;
+        app_state.g_chat_ac_slots[0].entries[0..3].* = saved.entries;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 800, 600, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("/"), WS_CHILD | ES_MULTILINE, 0, 300, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    const popup = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD, 0, 0, 600, 3 * uiScaled(32) + uiScaled(30), parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(popup);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    app_state.g_chat_ac_hwnd = popup;
+    app_state.g_chat_active = false;
+    app_state.g_restoring = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{ .open = true, .count = 3, .token = .{ .mode = .slash, .start = 0, .end = 1 } };
+    for ([_][]const u8{ "zero", "one", "two" }, 0..) |name, i| {
+        app_state.g_chat_ac.idx[i] = @intCast(i);
+        app_state.g_chat_ac_slots[0].entries[i] = .{ .kind = 'S', .name = name, .hint = "", .desc = "" };
+    }
+    const x: i32 = 20;
+    const y = @divFloor(uiScaled(32), 2);
+    const lp: LPARAM = @intCast((y << 16) | x);
+    var point = w.POINT{ .x = x, .y = y };
+    try std.testing.expect(w.ClientToScreen(popup, &point) != 0);
+    try std.testing.expect(Cursor.SetCursorPos(point.x, point.y) != 0);
+    list_input.skills.keyboard();
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    for (0..3) |_| _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_ac.sel);
+    for (1..3) |delta| {
+        try std.testing.expect(Cursor.SetCursorPos(point.x + @as(i32, @intCast(delta)), point.y) != 0);
+        _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + @as(LPARAM, @intCast(delta)));
+        try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_ac.sel);
+    }
+    try std.testing.expect(Cursor.SetCursorPos(point.x + 3, point.y) != 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_ac.sel);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    app_state.g_chat_ac.top = 1;
+    _ = InvalidateRect(popup, null, 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(usize, 2), app_state.g_chat_ac.sel);
+    _ = chatAcWndProc(popup, WM_LBUTTONDOWN, 0, lp + 3);
+    var text: [32]u16 = undefined;
+    var n = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
+    _ = SetWindowTextW(edit, L("/"));
+    app_state.g_chat_ac.open = true;
+    app_state.g_chat_ac.top = 0;
+    app_state.g_chat_ac.sel = 0;
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 0);
+    n = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
+}
+
+test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
+    const saved_extra = app_state.g_chat_composer_extra_h;
+    const saved_reply = app_state.g_chat_reply_len;
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_chat_composer_extra_h = saved_extra;
+    defer app_state.g_chat_reply_len = saved_reply;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        app_state.g_main_monitor_dpi = dpi;
+        for ([_]u32{ 100, 150 }) |scale| {
+            app_state.g_ui_scale = scale;
+            for ([_]u32{ 0, 5, 20 }) |extra_lines| {
+                app_state.g_chat_composer_extra_h = @as(i32, @intCast(extra_lines)) * chatComposerLineH();
+                for ([_]u32{ 0, 1 }) |reply| {
+                    app_state.g_chat_reply_len = reply;
+                    const layout = chatViewLayout();
+                    for ([_]RECT{ layout.attach_btn, layout.mic_btn, layout.send_btn, layout.stop_btn }) |button| {
+                        try std.testing.expectEqual(layout.send_btn.bottom, button.bottom);
+                        try std.testing.expectEqual(layout.send_btn.top, button.top);
+                        try std.testing.expectEqual(uiScaled(32), button.right - button.left);
+                        try std.testing.expectEqual(uiScaled(32), button.bottom - button.top);
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "IGSH-887 the elapsed timer counts up as minutes and seconds" {
+    var buf: [8]u16 = undefined;
+    const cases = [_]struct { ms: u64, text: []const u8 }{
+        .{ .ms = 0, .text = "0:00" },
+        .{ .ms = 2400, .text = "0:02" },
+        .{ .ms = 59999, .text = "0:59" },
+        .{ .ms = 65000, .text = "1:05" },
+        .{ .ms = 605000, .text = "10:05" },
+        .{ .ms = 6000000, .text = "100:00" },
+    };
+    for (cases) |c| {
+        const out = chatDictationElapsedText(&buf, c.ms);
+        try std.testing.expectEqual(c.text.len, out.len);
+        for (c.text, out) |want, got| try std.testing.expectEqual(@as(u16, want), got);
+    }
+}
+
+test "IGSH-887 the mic is a round button when idle and a wide pill while dictating" {
+    try std.testing.expectEqual(uiScaled(32), chatDictationMicWidth(.idle));
+    try std.testing.expect(chatDictationMicWidth(.listening) > chatDictationMicWidth(.idle) * 3);
+    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicWidth(.finishing));
+    const saved = chat_dictation_state;
+    defer chat_dictation_state = saved;
+    chat_dictation_state = .idle;
+    const idle = chatViewLayout();
+    try std.testing.expectEqual(idle.mic_btn.bottom - idle.mic_btn.top, idle.mic_btn.right - idle.mic_btn.left);
+    chat_dictation_state = .listening;
+    const live = chatViewLayout();
+    try std.testing.expect(live.mic_btn.right - live.mic_btn.left >= uiScaled(80));
+    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicFit(chatDictationMicWidth(.listening), uiScaled(1000)));
+    try std.testing.expectEqual(uiScaled(80), chatDictationMicFit(chatDictationMicWidth(.listening), uiScaled(100)));
+    try std.testing.expectEqual(chatDictationMicWidth(.idle), chatDictationMicFit(chatDictationMicWidth(.idle), uiScaled(10)));
+    try std.testing.expectEqual(idle.mic_btn.right, live.mic_btn.right);
+    try std.testing.expect(live.composer.right < idle.composer.right);
+    try std.testing.expect(live.mic_btn.left > live.composer.right);
+}
+
+test "IGSH-887 the wave follows the voice level and shifts left each tick" {
+    try std.testing.expectEqual(@as(u8, 0), chatDictationLevelBar(0));
+    try std.testing.expectEqual(@as(u8, 255), chatDictationLevelBar(40000));
+    try std.testing.expect(chatDictationLevelBar(1000) < chatDictationLevelBar(2000));
+    const saved = chat_dictation_state;
+    const wave = chat_dictation_wave;
+    defer {
+        chat_dictation_state = saved;
+        chat_dictation_wave = wave;
+        app_state.g_dictation_level.store(0, .release);
+    }
+    chat_dictation_state = .listening;
+    chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+    app_state.g_dictation_level.store(2000, .release);
+    chatDictationWaveTick();
+    app_state.g_dictation_level.store(0, .release);
+    chatDictationWaveTick();
+    try std.testing.expectEqual(chatDictationLevelBar(2000), chat_dictation_wave[DICTATION_WAVE_BARS - 2]);
+    try std.testing.expectEqual(@as(u8, 0), chat_dictation_wave[DICTATION_WAVE_BARS - 1]);
+}
+
+test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release" {
+    try testChatDictation(.queued_ctrl_stop);
+}
+
+test "IGSH-1072 queued Ctrl+A selects the full dictation draft" {
+    try testChatDictation(.queued_select);
+}
+
+test "IGSH-1266 Enter sends from the key down and leaves the composer text alone" {
+    const w = @import("win32.zig");
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .composer = app_state.g_chat_composer_hwnd,
+        .orig = app_state.g_chat_composer_orig_proc,
+        .active = app_state.g_chat_active,
+        .count = app_state.shell_count,
+        .shell = app_state.active_shell,
+        .sent_tick = app_state.g_chat_enter_key_sent_tick,
+        .ac_open = app_state.g_chat_ac.open,
+        .draft_pending = shell_draft.edit_pending,
+        .draft_quiet = shell_draft.quiet_until_ms,
+        .shell0 = app_state.shells[0],
+    };
+    defer {
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+        app_state.g_chat_active = saved.active;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.shell;
+        app_state.g_chat_enter_key_sent_tick = saved.sent_tick;
+        app_state.g_chat_ac.open = saved.ac_open;
+        shell_draft.edit_pending = saved.draft_pending;
+        shell_draft.quiet_until_ms = saved.draft_quiet;
+        app_state.shells[0] = saved.shell0;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].chat_id = 6415;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_chat_enter_key_sent_tick = 0;
+    app_state.g_chat_ac.open = false;
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1200, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("Reply with exactly: pong four"), WS_CHILD | ES_MULTILINE | ES_WANTRETURN, 0, 0, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x0D, 0x001C0001);
+    var message: w.MSG = undefined;
+    try std.testing.expect(w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1) != 0);
+    var text: [128]u16 = undefined;
+    const len: usize = @intCast(@max(0, w.GetWindowTextW(edit, &text, text.len)));
+    const expected = std.mem.span(L("Reply with exactly: pong four"));
+    try std.testing.expectEqual(expected.len, len);
+    try std.testing.expectEqualSlices(u16, expected, text[0..len]);
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+    try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
+    app_state.g_chat_enter_key_sent_tick = 0;
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+    try std.testing.expect(w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1) != 0);
+}
+
+test "IGSH-1761 long pasted text leaves the composer scrolled so the caret line is in view" {
+    const w = @import("win32.zig");
+    const saved = .{ .composer = app_state.g_chat_composer_hwnd, .orig = app_state.g_chat_composer_orig_proc };
+    defer {
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 600, 400, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L(""), WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, 0, 0, 400, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = ShowWindow(parent, 4);
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    var text: [512]u16 = undefined;
+    var len: usize = 0;
+    for (0..40) |row| {
+        text[len] = 'a' + @as(u16, @intCast(row % 26));
+        text[len + 1] = '\r';
+        text[len + 2] = '\n';
+        len += 3;
+    }
+    text[len] = 0;
+    _ = SetWindowTextW(edit, text[0..len :0].ptr);
+    _ = SendMessageW(edit, 0x00B1, len, @intCast(len));
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(edit, &client);
+    chatComposerKeepCaretVisible();
+    const lines = chatComposerLines(edit);
+    const caret_line: i32 = @intCast(SendMessageW(edit, EM_LINEFROMCHAR, len, 0));
+    try std.testing.expect(lines.total > lines.visible);
+    try std.testing.expect(lines.first > 0);
+    try std.testing.expect(caret_line >= lines.first and caret_line < lines.first + lines.visible);
+    try std.testing.expect(chatComposerThumb(edit, client.bottom - client.top) != null);
+    _ = SendMessageW(edit, 0x00B1, 0, 0);
+    chatComposerKeepCaretVisible();
+    try std.testing.expectEqual(@as(i32, 0), chatComposerLines(edit).first);
+}
+
+test "SOFT-2489 gg types gg in the composer" {
+    const w = @import("win32.zig");
+    const saved = .{
+        .composer = app_state.g_chat_composer_hwnd,
+        .orig = app_state.g_chat_composer_orig_proc,
+        .chord = chat_newest_chord,
+        .count = app_state.shell_count,
+        .ac = app_state.g_chat_ac,
+        .nav = app_state.g_chat_nav_active,
+    };
+    defer {
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+        chat_newest_chord = saved.chord;
+        app_state.shell_count = saved.count;
+        app_state.g_chat_ac = saved.ac;
+        app_state.g_chat_nav_active = saved.nav;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 600, 400, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L(""), WS_CHILD | ES_MULTILINE, 0, 0, 400, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_chat_composer_hwnd = null;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{};
+    app_state.g_chat_nav_active = false;
+    chat_newest_chord = .{};
+    _ = chatComposerSubclassProc(edit, 0x0102, 'g', 1);
+    var text: [4]u16 = undefined;
+    try std.testing.expectEqual(@as(i32, 1), GetWindowTextW(edit, &text, text.len));
+    try std.testing.expectEqualSlices(u16, &.{'g'}, text[0..1]);
+    _ = chatComposerSubclassProc(edit, 0x0102, 'g', 1);
+    try std.testing.expectEqual(@as(i32, 2), GetWindowTextW(edit, &text, text.len));
+    try std.testing.expectEqualSlices(u16, &.{ 'g', 'g' }, text[0..2]);
+}

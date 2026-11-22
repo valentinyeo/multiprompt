@@ -1,0 +1,3390 @@
+const app_state = @import("app_state.zig");
+const IS_DEV = @import("main.zig").IS_DEV;
+const std = @import("std");
+const tmux_identity = @import("tmux_identity.zig");
+const sync_auth = @import("sync_auth.zig");
+const session_layout = @import("session_layout.zig");
+const account_hosts = @import("account_hosts.zig");
+const account_keys = @import("account_keys.zig");
+const account_layout = @import("account_layout.zig");
+const account_state = @import("account_state.zig");
+const account_client = @import("account_client.zig");
+const sync_protocol = @import("sync_protocol.zig");
+const sync_vault = @import("sync_vault.zig");
+const DWORD = @import("win32.zig").DWORD;
+const LPARAM = @import("win32.zig").LPARAM;
+const HANDLE = @import("win32.zig").HANDLE;
+const LPCWSTR = @import("win32.zig").LPCWSTR;
+const SW_SHOW = @import("win32.zig").SW_SHOW;
+const SW_HIDE = @import("win32.zig").SW_HIDE;
+const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
+const DT_VCENTER = @import("win32.zig").DT_VCENTER;
+const DT_CENTER = @import("win32.zig").DT_CENTER;
+const DT_WORDBREAK = @import("win32.zig").DT_WORDBREAK;
+const TRANSPARENT = @import("win32.zig").TRANSPARENT;
+const WM_APP_LAYOUT_READY = @import("win32.zig").WM_APP_LAYOUT_READY;
+const MSG = @import("win32.zig").MSG;
+const RECT = @import("win32.zig").RECT;
+const PAINTSTRUCT = @import("win32.zig").PAINTSTRUCT;
+const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
+const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
+const HKEY_CURRENT_USER = @import("win32.zig").HKEY_CURRENT_USER;
+const KEY_SET_VALUE = @import("win32.zig").KEY_SET_VALUE;
+const REG_SZ = @import("win32.zig").REG_SZ;
+const GetMessageW = @import("win32.zig").GetMessageW;
+const TranslateMessage = @import("win32.zig").TranslateMessage;
+const DispatchMessageW = @import("win32.zig").DispatchMessageW;
+const GetClientRect = @import("win32.zig").GetClientRect;
+const InvalidateRect = @import("win32.zig").InvalidateRect;
+const BeginPaint = @import("win32.zig").BeginPaint;
+const EndPaint = @import("win32.zig").EndPaint;
+const FillRect = @import("win32.zig").FillRect;
+const DrawTextW = @import("win32.zig").DrawTextW;
+const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
+const DeleteObject = @import("win32.zig").DeleteObject;
+const SetBkMode = @import("win32.zig").SetBkMode;
+const SetTextColor = @import("win32.zig").SetTextColor;
+const SelectObject = @import("win32.zig").SelectObject;
+const CreateFontW = @import("fonts.zig").create;
+const CreateProcessW = @import("win32.zig").CreateProcessW;
+const Sleep = @import("win32.zig").Sleep;
+const GetModuleFileNameW = @import("win32.zig").GetModuleFileNameW;
+const CloseHandle = @import("win32.zig").CloseHandle;
+const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
+const RegCreateKeyExW = @import("win32.zig").RegCreateKeyExW;
+const RegSetValueExW = @import("win32.zig").RegSetValueExW;
+const RegCloseKey = @import("win32.zig").RegCloseKey;
+const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const GetCommandLineA = @import("win32.zig").GetCommandLineA;
+const GlobalLock = @import("win32.zig").GlobalLock;
+const GlobalUnlock = @import("win32.zig").GlobalUnlock;
+const GlobalFree = @import("win32.zig").GlobalFree;
+const OpenClipboard = @import("win32.zig").OpenClipboard;
+const CloseClipboard = @import("win32.zig").CloseClipboard;
+const EmptyClipboard = @import("win32.zig").EmptyClipboard;
+const SetClipboardData = @import("win32.zig").SetClipboardData;
+const GlobalAlloc = @import("win32.zig").GlobalAlloc;
+const DeleteFileW = @import("win32.zig").DeleteFileW;
+const CF_UNICODETEXT = @import("win32.zig").CF_UNICODETEXT;
+const GMEM_MOVEABLE = @import("win32.zig").GMEM_MOVEABLE;
+const WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = @import("win32.zig").WINHTTP_ACCESS_TYPE_DEFAULT_PROXY;
+const WINHTTP_FLAG_SECURE = @import("win32.zig").WINHTTP_FLAG_SECURE;
+const WINHTTP_ADDREQ_FLAG_ADD = @import("win32.zig").WINHTTP_ADDREQ_FLAG_ADD;
+const WINHTTP_QUERY_STATUS_CODE = @import("win32.zig").WINHTTP_QUERY_STATUS_CODE;
+const WINHTTP_QUERY_FLAG_NUMBER = @import("win32.zig").WINHTTP_QUERY_FLAG_NUMBER;
+const WinHttpOpen = @import("win32.zig").WinHttpOpen;
+const WinHttpConnect = @import("win32.zig").WinHttpConnect;
+const WinHttpOpenRequest = @import("win32.zig").WinHttpOpenRequest;
+const WinHttpAddRequestHeaders = @import("win32.zig").WinHttpAddRequestHeaders;
+const WinHttpSendRequest = @import("win32.zig").WinHttpSendRequest;
+const WinHttpReceiveResponse = @import("win32.zig").WinHttpReceiveResponse;
+const WinHttpQueryHeaders = @import("win32.zig").WinHttpQueryHeaders;
+const WinHttpQueryDataAvailable = @import("win32.zig").WinHttpQueryDataAvailable;
+const WinHttpReadData = @import("win32.zig").WinHttpReadData;
+const WinHttpSetTimeouts = @import("win32.zig").WinHttpSetTimeouts;
+const WinHttpCloseHandle = @import("win32.zig").WinHttpCloseHandle;
+const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
+const OpenProcess = @import("win32.zig").OpenProcess;
+const PROCESS_QUERY_LIMITED_INFORMATION = @import("win32.zig").PROCESS_QUERY_LIMITED_INFORMATION;
+const PROCESS_SYNCHRONIZE = @import("win32.zig").PROCESS_SYNCHRONIZE;
+const PROCESS_TERMINATE = @import("win32.zig").PROCESS_TERMINATE;
+const QueryFullProcessImageNameW = @import("win32.zig").QueryFullProcessImageNameW;
+const TerminateProcess = @import("win32.zig").TerminateProcess;
+const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
+const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
+const IsWindow = @import("win32.zig").IsWindow;
+const SendMessageTimeoutW = @import("win32.zig").SendMessageTimeoutW;
+const SMTO_ABORTIFHUNG = @import("win32.zig").SMTO_ABORTIFHUNG;
+const SMTO_BLOCK = @import("win32.zig").SMTO_BLOCK;
+const SW_RESTORE = @import("win32.zig").SW_RESTORE;
+const WM_APP_FOCUS = @import("win32.zig").WM_APP_FOCUS;
+const keybd_event = @import("win32.zig").keybd_event;
+const VK_MENU = @import("app_state.zig").VK_MENU;
+const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const MessageBoxW = @import("fonts.zig").messageBox;
+const ShellExecuteW = @import("win32.zig").ShellExecuteW;
+const SESSION_JSON_CAPACITY = @import("app_state.zig").SESSION_JSON_CAPACITY;
+const L = @import("startup.zig").L;
+const RGB = @import("startup.zig").RGB;
+const getInstanceName = @import("startup.zig").getInstanceName;
+const Shell = @import("app_state.zig").Shell;
+const empty_shell = @import("app_state.zig").empty_shell;
+const MAX_SHELLS = @import("app_state.zig").MAX_SHELLS;
+const themeSidebarBg = @import("themes.zig").themeSidebarBg;
+const MAX_LWS = @import("app_state.zig").MAX_LWS;
+const PostMessageW = @import("focus.zig").PostMessageW;
+const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
+const SetFocus = @import("focus.zig").SetFocus;
+const ShowWindow = @import("focus.zig").ShowWindow;
+const getSessionPath = @import("session.zig").getSessionPath;
+const getSessionDir = @import("session.zig").getSessionDir;
+const win32WidePath = @import("file_io.zig").win32WidePath;
+const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
+const win32MakeDir = @import("file_io.zig").win32MakeDir;
+const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
+const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
+const CreateMutexW = @import("win32.zig").CreateMutexW;
+const ensureWorkspaceSlotId = @import("workspaces.zig").ensureWorkspaceSlotId;
+const syncInProcessWorkspacesToRegistry = @import("workspaces.zig").syncInProcessWorkspacesToRegistry;
+const removedWorkspaceNames = @import("workspaces.zig").removedWorkspaceNames;
+const debugLog = @import("diagnostics.zig").debugLog;
+const debugLog2 = @import("diagnostics.zig").debugLog2;
+const syncLog = @import("diagnostics.zig").syncLog;
+const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
+const saveSession = @import("session.zig").saveSession;
+const TIMER_ACCOUNT = @import("app_state.zig").TIMER_ACCOUNT;
+const TIMER_ACCOUNT_SAVE = @import("app_state.zig").TIMER_ACCOUNT_SAVE;
+const AccountJobKind = @import("app_state.zig").AccountJobKind;
+const AccountJob = @import("app_state.zig").AccountJob;
+const LayoutReply = @import("app_state.zig").LayoutReply;
+const AccountClosed = @import("app_state.zig").AccountClosed;
+const SavedTab = @import("app_state.zig").SavedTab;
+const parseSessionTabs = @import("session.zig").parseSessionTabs;
+const sessionFileIsValid = @import("session.zig").sessionFileIsValid;
+const restoreSession = @import("session.zig").restoreSession;
+const spawnShell = @import("console.zig").spawnShell;
+const COINIT_APARTMENTTHREADED = @import("win32.zig").COINIT_APARTMENTTHREADED;
+const CoInitializeEx = @import("win32.zig").CoInitializeEx;
+const CoUninitialize = @import("win32.zig").CoUninitialize;
+const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
+const spawnShellWithSession = @import("console.zig").spawnShellWithSession;
+const closeShellRemember = @import("console.zig").closeShellRemember;
+const switchToShell = @import("console.zig").switchToShell;
+const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
+const switchToWorkspace = @import("workspaces.zig").switchToWorkspace;
+const closeBrowserForShell = @import("browser_pane.zig").closeBrowserForShell;
+const closeChatView = @import("chat_composer.zig").closeChatView;
+const uiScaled = @import("drawing.zig").uiScaled;
+const allocUnicodeClipboardBlock = @import("clipboard.zig").allocUnicodeClipboardBlock;
+const asciiToWideZ = @import("voice.zig").asciiToWideZ;
+const SetTimer = @import("win32.zig").SetTimer;
+const KillTimer = @import("win32.zig").KillTimer;
+const SYNC_AUTH_CONFIG_TEMPLATE = @import("app_state.zig").SYNC_AUTH_CONFIG_TEMPLATE;
+const HttpsTarget = @import("app_state.zig").HttpsTarget;
+const CREDUI_INFOW = @import("app_state.zig").CREDUI_INFOW;
+const CREDUI_FLAGS_GENERIC_CREDENTIALS = @import("app_state.zig").CREDUI_FLAGS_GENERIC_CREDENTIALS;
+const CREDUI_FLAGS_KEEP_USERNAME = @import("app_state.zig").CREDUI_FLAGS_KEEP_USERNAME;
+const CREDUI_FLAGS_DO_NOT_PERSIST = @import("app_state.zig").CREDUI_FLAGS_DO_NOT_PERSIST;
+const CREDUI_FLAGS_EXCLUDE_CERTIFICATES = @import("app_state.zig").CREDUI_FLAGS_EXCLUDE_CERTIFICATES;
+const CredUIPromptForCredentialsW = @import("fonts.zig").promptForCredentials;
+const HttpsBearerResult = @import("app_state.zig").HttpsBearerResult;
+const SYNC_VAULT_URL = @import("app_state.zig").SYNC_VAULT_URL;
+const VaultFetch = @import("app_state.zig").VaultFetch;
+const VaultPut = @import("app_state.zig").VaultPut;
+const RegisterClipboardFormatW = @import("win32.zig").RegisterClipboardFormatW;
+
+pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_layout.Layout {
+    var workspaces: std.ArrayList(session_layout.Workspace) = .empty;
+    var tabs: std.ArrayList(session_layout.Tab) = .empty;
+    const count: usize = if (app_state.g_single_window) app_state.g_lws_count else 1;
+    for (0..count) |ws| {
+        var name_buf: [32]u8 = undefined;
+        const name = if (app_state.g_single_window) blk: {
+            if (app_state.g_ws_name_len[ws] > 0) break :blk app_state.g_ws_names[ws][0..app_state.g_ws_name_len[ws]];
+            break :blk workspaceDisplayName(@intCast(ws), &name_buf);
+        } else getInstanceName();
+        if (name.len > 32) return error.InvalidLayout;
+        try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
+    }
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        const remote = shell.tmux_session_len > 0;
+        if (!include_local and !remote) continue;
+        const ws: usize = if (app_state.g_single_window) shell.workspace else 0;
+        if (ws >= workspaces.items.len) return error.InvalidLayout;
+        const name = try std.unicode.utf16LeToUtf8Alloc(a, shell.name[0..shell.name_len]);
+        try tabs.append(a, .{
+            .kind = if (remote) "tmux" else @tagName(shell.kind),
+            .name = name,
+            .manual = shell.name_source == .manual,
+            .group = if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
+            .starred_group = if (@import("sidebar.zig").findGroupIdx(shell.starred_group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
+            .favorite = shell.favorite,
+            .muted = shell.muted,
+            .face = shell.face,
+            .color = shell.color,
+            .used = if (shell.last_used != 0) shell.last_used else null,
+            .input = if (shell.input != 0) shell.input else null,
+            .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
+            .tmux_session = try a.dupe(u8, shell.tmux_session[0..shell.tmux_session_len]),
+            .tmux_host = shell.tmux_host,
+            .workspace = workspaces.items[ws].name,
+        });
+    }
+    const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
+    return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+}
+
+var g_account_hosts_cache: struct {
+    arena: ?std.heap.ArenaAllocator = null,
+    hosts: []const account_hosts.Host = &.{},
+    refreshed_at: ?u64 = null,
+} = .{};
+
+var g_account_keys_cache: struct {
+    last_check_ms: ?u64 = null,
+    published_key: ?[]const u8 = null,
+} = .{};
+var g_account_key_prompt_active = false;
+var g_account_pending_device_keys: ?[]u8 = null;
+var startup_reply: LPARAM = 0;
+const appearance_intent = @import("appearance_intent.zig");
+const PendingLayout = struct {
+    base: ?session_layout.Layout = null,
+    edited: ?session_layout.Layout = null,
+    appearance: []const appearance_intent.Intent = &.{},
+};
+var g_appearance: ?[]appearance_intent.Intent = null;
+var g_palette8_supported = false;
+var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
+var g_tracking = false;
+var g_pending_loaded = false;
+var g_pending_bytes: ?[]u8 = null;
+var g_pending_write_mutex: app_state.SpinMutex = .{};
+var g_sync_log_at: u64 = 0;
+var g_photo_sync: @import("bot_photo_sync.zig").Sync = .{};
+var g_photo_sync_loaded = false;
+var g_photo_sync_saved_generation: u64 = 0;
+const PhotoContext = struct {
+    access: []const u8,
+    pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
+        return @import("bot_photo.zig").readForSync(digest);
+    }
+    pub fn send(self: @This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
+        const response = try account_client.request(method, path, self.access, body);
+        defer response.deinit();
+        return response.status;
+    }
+};
+
+fn syncLogThrottled(msg: []const u8) void {
+    const now = GetTickCount64();
+    if (g_sync_log_at != 0 and now -% g_sync_log_at < 60_000) return;
+    g_sync_log_at = now;
+    syncLog(msg);
+}
+
+fn accountJobFree(job: AccountJob) void {
+    const a = std.heap.page_allocator;
+    if (job.base) |b| a.free(b);
+    if (job.edited) |b| a.free(b);
+    if (job.device) |b| a.free(b);
+    if (job.credential) |b| freeSecret(b);
+    if (job.appearance) |intents| appearance_intent.free(a, intents);
+}
+fn accountResetAppearanceTracking() void {
+    const a = std.heap.page_allocator;
+    for (g_after_submit.items) |touch| a.free(touch.tmux_session);
+    g_after_submit.clearRetainingCapacity();
+    g_tracking = false;
+}
+pub fn startAccountJob(job: AccountJob) void {
+    if (app_state.g_account_busy or app_state.g_account_bypass) {
+        accountJobFree(job);
+        return;
+    }
+    if (g_account_key_prompt_active and job.kind != .decide_keys) {
+        accountJobFree(job);
+        return;
+    }
+    var submitted = job;
+    const layout_job = switch (job.kind) { .startup, .login, .pull, .push, .remove_host => true, else => false };
+    if (layout_job) {
+        accountLoadPending() catch {
+            accountJobFree(job);
+            syncLog("account-sync: pending layout load failed before job start");
+            return;
+        };
+        if (job.kind == .startup and job.base == null and job.edited == null) {
+            submitted = accountResumeJob(.startup) catch {
+                accountJobFree(job);
+                syncLog("account-sync: pending layout resume failed before job start");
+                return;
+            };
+        }
+        submitted.appearance = appearance_intent.clone(std.heap.page_allocator, g_appearance orelse &.{}) catch {
+            accountJobFree(submitted);
+            syncLog("account-sync: pending appearance clone failed before job start");
+            return;
+        };
+        accountResetAppearanceTracking();
+        g_tracking = true;
+    }
+    app_state.g_account_busy = true;
+    app_state.g_account_login_active = job.kind == .login;
+    app_state.g_account_cancel.store(false, .release);
+    const thread = std.Thread.spawn(.{}, layoutSyncWorker, .{submitted}) catch {
+        app_state.g_account_busy = false;
+        app_state.g_account_login_active = false;
+        accountResetAppearanceTracking();
+        accountJobFree(submitted);
+        app_state.g_account_status = "Could not start sign-in. Press Enter to retry.";
+        return;
+    };
+    thread.detach();
+}
+pub fn accountRecordClose(idx: u32) void {
+    if (app_state.g_account_applying or idx >= app_state.shell_count) return;
+    const sh = &app_state.shells[idx];
+    if (sh.tmux_session_len == 0 or app_state.g_account_closed_count >= app_state.g_account_closed.len) return;
+    var rec: AccountClosed = .{ .host = sh.tmux_host, .len = @intCast(sh.tmux_session_len) };
+    @memcpy(rec.session[0..rec.len], sh.tmux_session[0..sh.tmux_session_len]);
+    app_state.g_account_closed[app_state.g_account_closed_count] = rec;
+    app_state.g_account_closed_count += 1;
+}
+fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !session_layout.Layout {
+    const local = try captureSessionLayout(a, false);
+    const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count);
+    for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed) |c, *t|
+        t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
+    const kept = try account_layout.keepHeld(a, base, local, closed);
+    if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
+    return kept;
+}
+pub fn publishSessionLayout() void {
+    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
+    defer base.deinit();
+    const local = accountCapturePush(arena.allocator(), base.value) catch return;
+    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
+    defer synced.deinit();
+    accountLoadPending() catch return;
+    const intents = g_appearance orelse return;
+    accountWritePending(.{ .base = base.value, .edited = local, .appearance = intents }) catch {
+        syncLogThrottled("account-sync: pending layout write failed");
+        return;
+    };
+    var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
+    var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
+    var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
+    if (!app_state.g_account_groups_supported) {
+        plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_starred_groups_supported) {
+        plain_local = account_layout.withoutStarredGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutStarredGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutStarredGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_group_order_supported) {
+        plain_local = account_layout.withoutGroupOrder(plain_local);
+        plain_base = account_layout.withoutGroupOrder(plain_base);
+        plain_synced = account_layout.withoutGroupOrder(plain_synced);
+    }
+    if (!app_state.g_account_colors_supported) {
+        plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutColors(arena.allocator(), plain_synced) catch return;
+    }
+    if (!g_palette8_supported) {
+        plain_local = account_layout.projectPalette7(arena.allocator(), plain_local, plain_base) catch return;
+        plain_base = account_layout.projectPalette7(arena.allocator(), plain_base, plain_synced) catch return;
+    }
+    var eligible = false;
+    if (app_state.g_account_appearance_supported) {
+        for (local.tabs) |tab| {
+            for (intents) |intent| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent) and (g_palette8_supported or intent.touched & appearance_intent.face_bit != 0 or (intent.touched & appearance_intent.color_bit != 0 and intent.color != 7))) eligible = true;
+            }
+        }
+    }
+    if (!eligible and !account_layout.publishNeeded(plain_local, plain_base, plain_synced)) {
+        app_state.g_account_dirty_at = 0;
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+        return;
+    }
+    app_state.g_account_dirty_at = GetTickCount64();
+    if (!app_state.g_account_retry.notified and !app_state.g_account_reauth) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE, 2000, null);
+}
+pub fn pullSessionLayout() void {
+    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
+    if (app_state.g_account_base == null) {
+        const job = accountResumeJob(.startup) catch {
+            syncLog("account-sync: pending layout resume failed on pull");
+            return;
+        };
+        startAccountJob(job);
+        return;
+    }
+    if (app_state.g_account_dirty_at != 0) {
+        accountPush();
+        return;
+    }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const held = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
+    defer held.deinit();
+    const current = accountCapturePush(arena.allocator(), held.value) catch return;
+    const edited = session_layout.encode(std.heap.page_allocator, current) catch return;
+    const base = std.heap.page_allocator.dupe(u8, app_state.g_account_local_base orelse {
+        std.heap.page_allocator.free(edited);
+        return;
+    }) catch {
+        std.heap.page_allocator.free(edited);
+        return;
+    };
+    startAccountJob(.{ .kind = .pull, .base = base, .edited = edited });
+}
+pub fn accountPush() void {
+    if (app_state.g_account_busy or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_base == null or !app_state.g_account_retry.ready(GetTickCount64())) return;
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const held = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
+    defer held.deinit();
+    const local = accountCapturePush(arena.allocator(), held.value) catch return;
+    const encoded = session_layout.encode(std.heap.page_allocator, local) catch return;
+    const base = std.heap.page_allocator.dupe(u8, app_state.g_account_local_base orelse {
+        std.heap.page_allocator.free(encoded);
+        return;
+    }) catch {
+        std.heap.page_allocator.free(encoded);
+        return;
+    };
+    startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
+}
+pub fn accountRemoveServer(slot: u8) void {
+    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_busy or g_account_key_prompt_active) return;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const parsed = session_layout.parse(a, app_state.g_account_base orelse return) catch return;
+    defer parsed.deinit();
+    if (account_hosts.isRemoved(parsed.value.removed_hosts orelse &.{}, slot)) return;
+    const host = account_hosts.find(parsed.value.hosts orelse &.{}, slot) orelse {
+        showHeaderNoticeAscii("No account server in this slot", 4000, false);
+        return;
+    };
+    const text = std.fmt.allocPrint(a, "Remove {s} ({s}) from your account on every device?\nLocal SSH settings and sessions will stay unchanged.", .{ host.name, host.hostname }) catch return;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
+    if (@import("dialog.zig").show(app_state.g_main_hwnd, wide.ptr, L("Remove server?"), &.{
+        .{ .label = L("Cancel"), .result = 7 },
+        .{ .label = L("Remove"), .result = 6, .destructive = true },
+    }, 0) != 6) return;
+    const base_bytes = app_state.g_account_local_base orelse app_state.g_account_base orelse return;
+    const held = session_layout.parse(a, base_bytes) catch return;
+    defer held.deinit();
+    const local = accountCapturePush(a, held.value) catch return;
+    const edited = session_layout.encode(std.heap.page_allocator, local) catch return;
+    const base = std.heap.page_allocator.dupe(u8, base_bytes) catch {
+        std.heap.page_allocator.free(edited);
+        return;
+    };
+    startAccountJob(.{ .kind = .remove_host, .slot = slot, .base = base, .edited = edited });
+}
+fn layoutPendingPath(buf: *[512]u8) ?[]const u8 {
+    var name_buf: [64]u8 = undefined;
+    const name = @import("session.zig").channelFileName(&name_buf, "account-layout-pending.json", IS_DEV) orelse return null;
+    return syncAuthPath(buf, name);
+}
+fn accountWritePending(value: PendingLayout) !void {
+    while (!g_pending_write_mutex.tryLock()) Sleep(1);
+    defer g_pending_write_mutex.unlock();
+    return accountWritePendingLocked(value);
+}
+
+fn accountWritePendingLocked(value: PendingLayout) !void {
+    const w = @import("win32.zig");
+    try appearance_intent.validate(value.appearance);
+    if ((value.base == null) != (value.edited == null)) return error.Storage;
+    if (value.base) |base| {
+        const checked = try session_layout.encode(std.heap.page_allocator, base);
+        std.heap.page_allocator.free(checked);
+    }
+    if (value.edited) |edited| {
+        const checked = try session_layout.encode(std.heap.page_allocator, edited);
+        std.heap.page_allocator.free(checked);
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.heap.page_allocator, value, .{ .emit_null_optional_fields = false });
+    errdefer std.heap.page_allocator.free(bytes);
+    if (bytes.len >= 3 * session_layout.max_bytes) return error.Storage;
+    if (g_pending_bytes) |old| {
+        if (std.mem.eql(u8, old, bytes)) {
+            std.heap.page_allocator.free(bytes);
+            return;
+        }
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = layoutPendingPath(&path_buf) orelse return error.Storage;
+    var tmp_buf: [520]u8 = undefined;
+    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.Storage;
+    var tmp_wide: [520]u16 = undefined;
+    var path_wide: [520]u16 = undefined;
+    const tmp_w = win32WidePath(&tmp_wide, tmp) orelse return error.Storage;
+    const path_w = win32WidePath(&path_wide, path) orelse return error.Storage;
+    const file = w.CreateFileW(tmp_w.ptr, w.GENERIC_WRITE, 0, null, w.CREATE_ALWAYS, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var written: DWORD = 0;
+        if (w.WriteFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) {
+            _ = CloseHandle(file);
+            return error.Storage;
+        }
+        total += written;
+    }
+    const flushed = w.FlushFileBuffers(file);
+    const closed = CloseHandle(file);
+    if (flushed == 0 or closed == 0) return error.Storage;
+    if (w.MoveFileExW(tmp_w.ptr, path_w.ptr, w.MOVEFILE_REPLACE_EXISTING | w.MOVEFILE_WRITE_THROUGH) == 0) return error.Storage;
+    if (g_pending_bytes) |old| std.heap.page_allocator.free(old);
+    g_pending_bytes = bytes;
+}
+
+fn accountReadPending(path: []const u8) ![]u8 {
+    const w = @import("win32.zig");
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+    const file = w.CreateFileW(wide.ptr, w.GENERIC_READ, w.FILE_SHARE_READ, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    defer _ = CloseHandle(file);
+    const a = std.heap.page_allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    errdefer bytes.deinit(a);
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        var count: DWORD = 0;
+        if (w.ReadFile(file, &chunk, chunk.len, &count, null) == 0) return error.Storage;
+        if (count == 0) break;
+        if (bytes.items.len + count > 3 * session_layout.max_bytes) return error.Storage;
+        try bytes.appendSlice(a, chunk[0..count]);
+    }
+    if (bytes.items.len == 0) return error.Storage;
+    return try bytes.toOwnedSlice(a);
+}
+
+fn accountLoadPending() !void {
+    if (g_pending_loaded) return;
+    const a = std.heap.page_allocator;
+    var path_buf: [512]u8 = undefined;
+    const path = layoutPendingPath(&path_buf) orelse return error.Storage;
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+    if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+        const reason = @import("win32.zig").GetLastError();
+        if (reason != 2 and reason != 3) return error.Storage;
+        g_appearance = try appearance_intent.clone(a, &.{});
+        g_pending_loaded = true;
+        return;
+    }
+    const bytes = try accountReadPending(path);
+    errdefer a.free(bytes);
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const parsed = try std.json.parseFromSlice(PendingLayout, alloc, bytes, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    const raw = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
+    defer raw.deinit();
+    if (raw.value != .object or (parsed.value.base == null) != (parsed.value.edited == null)) return error.Storage;
+    var pending = parsed.value;
+    for ([_][]const u8{ "base", "edited" }) |key| {
+        if (raw.value.object.get(key)) |snapshot| {
+            if (snapshot == .null) continue;
+            const encoded = try std.json.Stringify.valueAlloc(alloc, snapshot, .{});
+            if (encoded.len >= session_layout.max_bytes) return error.InvalidLayout;
+            const checked = try session_layout.parse(alloc, encoded);
+            checked.deinit();
+        }
+    }
+    var migrated: std.ArrayList(appearance_intent.Intent) = .empty;
+    if (!raw.value.object.contains("appearance")) {
+        if (pending.base) |base| {
+            const edited = pending.edited.?;
+            for (edited.tabs) |tab| {
+                const index = account_layout.find(base.tabs, tab) orelse continue;
+                const previous = base.tabs[index];
+                var mask: u8 = 0;
+                if (tab.face != previous.face) mask |= appearance_intent.face_bit;
+                if (tab.color != previous.color) mask |= appearance_intent.color_bit;
+                if (mask == 0) continue;
+                const name = try alloc.dupe(u8, tab.tmux_session);
+                _ = std.ascii.lowerString(name, name);
+                try migrated.append(alloc, .{ .tmux_host = tab.tmux_host, .tmux_session = name, .touched = mask, .face = tab.face, .color = tab.color });
+            }
+        }
+        pending.appearance = migrated.items;
+    }
+    try appearance_intent.validate(pending.appearance);
+    const owned = try appearance_intent.clone(a, pending.appearance);
+    errdefer appearance_intent.free(a, owned);
+    if (!raw.value.object.contains("appearance")) {
+        try accountWritePending(pending);
+        a.free(bytes);
+    } else {
+        g_pending_bytes = bytes;
+    }
+    g_appearance = owned;
+    g_pending_loaded = true;
+}
+
+pub fn appearancePendingMask(host: u8, session: []const u8) !u8 {
+    if (app_state.g_account_bypass or session.len == 0) return 0;
+    try accountLoadPending();
+    for (g_appearance orelse &.{}) |intent| {
+        if (appearance_intent.same(host, session, intent)) return intent.touched;
+    }
+    return 0;
+}
+
+pub fn applyPendingAppearance(idx: u32) void {
+    if (app_state.g_account_bypass or idx >= app_state.shell_count) return;
+    accountLoadPending() catch return;
+    const shell = &app_state.shells[idx];
+    if (shell.tmux_session_len == 0) return;
+    const session = shell.tmux_session[0..shell.tmux_session_len];
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    if (g_pending_bytes) |bytes| {
+        const pending = std.json.parseFromSlice(PendingLayout, arena.allocator(), bytes, .{ .allocate = .alloc_always }) catch return;
+        defer pending.deinit();
+        if (pending.value.edited) |edited| {
+            for (edited.tabs) |tab| {
+                if (!tmux_identity.same(tab.tmux_host, tab.tmux_session, shell.tmux_host, session)) continue;
+                shell.face = tab.face;
+                shell.color = tab.color;
+                break;
+            }
+        }
+    }
+    for (g_appearance orelse &.{}) |intent| {
+        if (!appearance_intent.same(shell.tmux_host, session, intent)) continue;
+        if (intent.touched & appearance_intent.face_bit != 0) shell.face = intent.face;
+        if (intent.touched & appearance_intent.color_bit != 0) shell.color = intent.color;
+        break;
+    }
+}
+
+pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void {
+    if ((@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) or app_state.g_account_locked or app_state.g_restoring or app_state.g_account_applying) return error.Unavailable;
+    const idx = @import("inbox.zig").findShellById(shell_id) orelse return error.Unavailable;
+    const shell = &app_state.shells[idx];
+    const bit: u8 = switch (edit) {
+        .face => |face| blk: { if (face != null and face.? >= 20) return error.InvalidAppearance; break :blk appearance_intent.face_bit; },
+        .color => |color| blk: { if (color != null and color.? >= @import("session_layout.zig").color_count) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
+    };
+    if (app_state.g_account_bypass or shell.kind != .tmux or shell.tmux_session_len == 0) {
+        switch (edit) {
+            .face => |face| shell.face = face,
+            .color => |color| shell.color = color,
+        }
+        @import("launch_cache.zig").changed();
+        var path_buf: [512]u8 = undefined;
+        if (getSessionPath(&path_buf)) |path| {
+            _ = @import("session.zig").saveSessionTo(path, null);
+        }
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+        return;
+    }
+    try accountLoadPending();
+    const a = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var pending = PendingLayout{};
+    if (g_pending_bytes) |bytes| {
+        const parsed = try std.json.parseFromSlice(PendingLayout, alloc, bytes, .{ .allocate = .alloc_always });
+        pending = parsed.value;
+    }
+    var staged: std.ArrayList(appearance_intent.Intent) = .empty;
+    try staged.appendSlice(alloc, g_appearance orelse &.{});
+    const session = shell.tmux_session[0..shell.tmux_session_len];
+    var found: ?usize = null;
+    for (staged.items, 0..) |intent, i| {
+        if (appearance_intent.same(shell.tmux_host, session, intent)) { found = i; break; }
+    }
+    if (found == null) {
+        const name = try alloc.dupe(u8, session);
+        _ = std.ascii.lowerString(name, name);
+        try staged.append(alloc, .{ .tmux_host = shell.tmux_host, .tmux_session = name, .touched = bit });
+        found = staged.items.len - 1;
+    }
+    const intent = &staged.items[found.?];
+    intent.touched |= bit;
+    switch (edit) { .face => |face| intent.face = face, .color => |color| intent.color = color }
+    try appearance_intent.validate(staged.items);
+    const owned = try appearance_intent.clone(a, staged.items);
+    errdefer appearance_intent.free(a, owned);
+    var next_touches: std.ArrayList(appearance_intent.Touch) = .empty;
+    errdefer {
+        for (next_touches.items) |touch| a.free(touch.tmux_session);
+        next_touches.deinit(a);
+    }
+    for (g_after_submit.items) |touch| {
+        const name = try a.dupe(u8, touch.tmux_session);
+        next_touches.append(a, .{ .tmux_host = touch.tmux_host, .tmux_session = name, .touched = touch.touched }) catch |err| { a.free(name); return err; };
+    }
+    if (g_tracking) {
+        var touch_found = false;
+        for (next_touches.items) |*touch| {
+            if (touch.tmux_host == shell.tmux_host and std.ascii.eqlIgnoreCase(touch.tmux_session, session)) {
+                touch.touched |= bit;
+                touch_found = true;
+                break;
+            }
+        }
+        if (!touch_found) {
+            const name = try a.dupe(u8, intent.tmux_session);
+            next_touches.append(a, .{ .tmux_host = shell.tmux_host, .tmux_session = name, .touched = bit }) catch |err| { a.free(name); return err; };
+        }
+    }
+    pending.appearance = owned;
+    try accountWritePending(pending);
+    if (g_appearance) |old| appearance_intent.free(a, old);
+    g_appearance = owned;
+    for (g_after_submit.items) |touch| a.free(touch.tmux_session);
+    g_after_submit.deinit(a);
+    g_after_submit = next_touches;
+    switch (edit) { .face => |face| shell.face = face, .color => |color| shell.color = color }
+    saveSession();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+
+fn accountResumeJob(kind: AccountJobKind) !AccountJob {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    try accountLoadPending();
+    const bytes = g_pending_bytes orelse return .{ .kind = kind };
+    const parsed = try std.json.parseFromSlice(PendingLayout, arena.allocator(), bytes, .{});
+    defer parsed.deinit();
+    const base_value = parsed.value.base orelse return .{ .kind = kind };
+    const edited_value = parsed.value.edited orelse return error.Storage;
+    const base = try session_layout.encode(std.heap.page_allocator, base_value);
+    errdefer std.heap.page_allocator.free(base);
+    const edited = try session_layout.encode(std.heap.page_allocator, edited_value);
+    return .{ .kind = kind, .base = base, .edited = edited };
+}
+fn accountDeleteToken() void {
+    var buf: [512]u8 = undefined;
+    for ([_][]const u8{ "account-device.dat", "account-hosts-base.dat" }) |suffix| {
+        if (syncAuthPath(&buf, suffix)) |path| {
+            var wide: [600]u16 = undefined;
+            if (win32WidePath(&wide, path)) |wp| _ = DeleteFileW(wp.ptr);
+        }
+    }
+}
+fn accountLock() void {
+    @import("room_frontend.zig").setAccount(null);
+    g_applied_layout.forget(std.heap.page_allocator);
+    if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
+    g_account_pending_device_keys = null;
+    app_state.g_account_locked = true;
+    _ = KillTimer(app_state.g_main_hwnd, @import("launch_cache.zig").TIMER_STARTUP);
+    app_state.g_account_dirty_at = 0;
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    app_state.g_search_active = false;
+    app_state.g_inbox_active = false;
+    app_state.g_all_sessions_active = false;
+    if (app_state.g_chat_active) closeChatView();
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].hwnd != null) _ = ShowWindow(app_state.shells[i].hwnd, SW_HIDE);
+        closeBrowserForShell(@intCast(i));
+    }
+    app_state.g_account_status = "Sign in to Multi Bot to open your workspaces.";
+    _ = SetForegroundWindow(app_state.g_main_hwnd);
+    _ = SetFocus(app_state.g_main_hwnd);
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+pub fn accountSignOut() void {
+    if (app_state.g_account_busy) {
+        showHeaderNoticeAscii("Account request in progress; try again", 3000, true);
+        return;
+    }
+    saveSession();
+    accountResetAppearanceTracking();
+    g_palette8_supported = false;
+    app_state.g_account_colors_supported = false;
+    app_state.g_account_appearance_supported = false;
+    app_state.g_account_groups_supported = false;
+    app_state.g_account_group_order_supported = false;
+    app_state.g_account_starred_groups_supported = false;
+    const credential = readDpapiFile("account-device.dat", 16384);
+    accountDeleteToken();
+    app_state.g_account_has_token = false;
+    accountLock();
+    startAccountJob(.{ .kind = .signout, .credential = credential });
+}
+pub fn accountSignIn() void {
+    if (app_state.g_account_busy) return;
+    if (app_state.g_account_has_token and !app_state.g_account_reauth) {
+        app_state.g_account_status = "Retrying account service...";
+        const job = accountResumeJob(.startup) catch {
+            syncLog("account-sync: pending layout resume failed on sign-in retry");
+            return;
+        };
+        startAccountJob(job);
+    } else {
+        app_state.g_account_status = "Complete sign-in in your browser. Esc cancels.";
+        const job = accountResumeJob(.login) catch {
+            syncLog("account-sync: pending layout resume failed on sign-in");
+            return;
+        };
+        startAccountJob(job);
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+pub fn accountCancelSignIn() void {
+    if (!app_state.g_account_login_active) return;
+    app_state.g_account_cancel.store(true, .release);
+    app_state.g_account_status = "Cancelling sign-in...";
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+fn accountSyncFailed(has_token: bool) void {
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    const notify = app_state.g_account_retry.failed(GetTickCount64());
+    switch (account_state.failure(app_state.g_account_bootstrapping, has_token, false)) {
+        .unlock_local => {
+            app_state.g_account_locked = false;
+            app_state.g_account_status = "Offline; restored local workspaces. Sync will retry.";
+        },
+        .sign_in => app_state.g_account_status = "Sign in to Multi Bot to open your workspaces.",
+        .retry => app_state.g_account_status = "Cannot reach account service. Sync will retry.",
+    }
+    if (notify) syncLog("account-sync: sync failed, local changes kept for retry");
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+fn accountReadLayout(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    const p = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
+    defer p.deinit();
+    if (p.value != .object) return error.InvalidLayout;
+    const value = p.value.object.get("layout") orelse return error.InvalidLayout;
+    const revision = p.value.object.get("revision") orelse return error.InvalidLayout;
+    const json = try std.json.Stringify.valueAlloc(a, value, .{ .emit_null_optional_fields = false });
+    const parsed = try session_layout.parse(a, json);
+    defer parsed.deinit();
+    if (revision != .integer or revision.integer < 0 or parsed.value.revision != revision.integer) return error.InvalidLayout;
+    return json;
+}
+fn accountSshOutput(a: std.mem.Allocator, command: []const u8, timeout_ms: u32) ![]const u8 {
+    const w = @import("win32.zig");
+    var cmd: [4096]u16 = undefined;
+    const cmd_z = win32WidePath(&cmd, command) orelse return error.InvalidHosts;
+    var sa = w.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(w.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
+    var reader: HANDLE = null;
+    var writer: HANDLE = null;
+    if (w.CreatePipe(&reader, &writer, &sa, 0) == 0) return error.Storage;
+    defer _ = CloseHandle(reader);
+    if (w.SetHandleInformation(reader, 1, 0) == 0) {
+        _ = CloseHandle(writer);
+        return error.Storage;
+    }
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = 0x00000100;
+    si.hStdOutput = writer;
+    var pi = std.mem.zeroes(PROCESS_INFORMATION);
+    const started = CreateProcessW(null, cmd_z.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
+    _ = CloseHandle(writer);
+    if (started == 0) return error.Process;
+    _ = CloseHandle(pi.hThread);
+    defer _ = CloseHandle(pi.hProcess);
+    defer {
+        if (WaitForSingleObject(pi.hProcess, 0) != 0) {
+            _ = TerminateProcess(pi.hProcess, 1);
+            _ = WaitForSingleObject(pi.hProcess, 1000);
+        }
+    }
+    const deadline = GetTickCount64() + timeout_ms;
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(a);
+    var done = false;
+    while (true) {
+        var available: DWORD = 0;
+        if (w.PeekNamedPipe(reader, null, 0, null, &available, null) != 0 and available > 0) {
+            var buf: [4096]u8 = undefined;
+            var count: DWORD = 0;
+            if (w.ReadFile(reader, &buf, @min(available, buf.len), &count, null) == 0) break;
+            if (output.items.len + count > 65536) {
+                _ = TerminateProcess(pi.hProcess, 1);
+                _ = WaitForSingleObject(pi.hProcess, 1000);
+                return error.TooLarge;
+            }
+            try output.appendSlice(a, buf[0..count]);
+            continue;
+        }
+        if (done) break;
+        if (GetTickCount64() >= deadline) {
+            _ = TerminateProcess(pi.hProcess, 1);
+            _ = WaitForSingleObject(pi.hProcess, 1000);
+            return error.Timeout;
+        }
+        done = WaitForSingleObject(pi.hProcess, 10) == 0;
+    }
+    var exit: DWORD = 1;
+    if (w.GetExitCodeProcess(pi.hProcess, &exit) == 0 or exit != 0) return error.Process;
+    return output.toOwnedSlice(a);
+}
+
+fn accountAppendSshFile(path: []const u8, bytes: []const u8) !void {
+    const file = @import("file_io.zig").win32OpenAppend(path) orelse return error.Storage;
+    defer _ = CloseHandle(file);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var written: DWORD = 0;
+        if (@import("win32.zig").WriteFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) return error.Storage;
+        total += written;
+    }
+}
+
+fn accountApplyHostAddresses(a: std.mem.Allocator, before: []const account_hosts.Host, after: []const account_hosts.Host) !void {
+    var changed = false;
+    for (after) |host| {
+        if (account_hosts.find(before, host.slot)) |old| changed = changed or !account_hosts.sameAddress(old, host);
+    }
+    if (!changed) return;
+    const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+    var ssh_buf: [1024]u8 = undefined;
+    var ssh_len: usize = 0;
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
+    for (before) |old| {
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh_buf[0..ssh_len], aliases[old.slot] });
+        const output = try accountSshOutput(a, command, 5000);
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+        var current = old;
+        current.hostname = resolved.hostname;
+        current.port = resolved.port;
+        current.user = resolved.user;
+        if (!account_hosts.sameAddress(old, current)) return error.HostChanged;
+    }
+    var profile_buf: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
+    if (n == 0 or n >= profile_buf.len) return error.Storage;
+    const config = try std.fmt.allocPrint(a, "{s}\\.ssh\\config", .{profile_buf[0..n]});
+    const original = readFileAllocWin32(config, 1024 * 1024) orelse return error.Storage;
+    defer std.heap.page_allocator.free(original);
+    if (original.len >= 1024 * 1024) return error.Storage;
+    var rewritten: []const u8 = original;
+    for (after) |host| {
+        if (account_hosts.find(before, host.slot)) |old| rewritten = try account_hosts.rewriteConfig(a, rewritten, aliases[host.slot], old, host);
+    }
+    var stamp: [2]DWORD = undefined;
+    @import("win32.zig").GetSystemTimeAsFileTime(&stamp);
+    const backup = try std.fmt.allocPrint(a, "{s}.{d}.bak", .{ config, (@as(u64, stamp[1]) << 32) | stamp[0] });
+    var config_buf: [520]u16 = undefined;
+    var backup_buf: [520]u16 = undefined;
+    const config_w = @import("file_io.zig").win32WidePath(&config_buf, config) orelse return error.Storage;
+    const backup_w = @import("file_io.zig").win32WidePath(&backup_buf, backup) orelse return error.Storage;
+    const kernel = struct {
+        extern "kernel32" fn CopyFileW(LPCWSTR, LPCWSTR, i32) callconv(.winapi) i32;
+    };
+    if (kernel.CopyFileW(config_w.ptr, backup_w.ptr, 1) == 0) return error.Storage;
+    if (!writeFileAtomicW(config, rewritten)) return error.Storage;
+}
+
+fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host, removed: []const u8) ![]const account_hosts.Host {
+    const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+    const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
+    var ssh_buf: [1024]u8 = undefined;
+    var ssh_len: usize = 0;
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
+    const ssh = ssh_buf[0..ssh_len];
+    const path = @import("console.zig").sshExeOf(ssh);
+    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return error.SshUnavailable;
+    const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
+    var profile_buf: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
+    if (n == 0 or n >= profile_buf.len) return error.Storage;
+    const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
+    const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
+    const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
+    var resolved_hosts: [3]account_hosts.Resolved = @splat(.{ .hostname = "", .port = 22, .user = "" });
+    for (aliases, &resolved_hosts, 0..) |alias, *resolved, slot| {
+        if (account_hosts.isRemoved(removed, @intCast(slot))) continue;
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
+        const output = try accountSshOutput(a, command, 5000);
+        resolved.* = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+    }
+    var hosts: std.ArrayList(account_hosts.Host) = .empty;
+    for (aliases, names, resolved_hosts, 0..) |alias, name, resolved, slot| {
+        if (account_hosts.isRemoved(removed, @intCast(slot))) continue;
+        const missing = account_hosts.shouldImport(alias, resolved);
+        var incoming: ?account_hosts.Host = null;
+        if (missing) {
+            for (remote) |host| if (host.slot == slot) {
+                incoming = host;
+                break;
+            };
+            if (incoming == null) continue;
+        }
+        var host = incoming orelse account_hosts.Host{ .slot = @intCast(slot), .name = name, .hostname = resolved.hostname, .port = resolved.port, .user = resolved.user };
+        const target = try account_hosts.knownHostName(a, host.hostname, host.port);
+        const lookup = try std.fmt.allocPrint(a, "{s} -F \"{s}\" -f \"{s}\"", .{ keygen, target, known });
+        const key_output = accountSshOutput(a, lookup, 5000) catch "";
+        const keys = try account_hosts.readKeys(a, key_output);
+        if (missing) {
+            host.hostname = try a.dupe(u8, host.hostname);
+            host.user = try a.dupe(u8, host.user);
+            if (host.host_keys) |incoming_keys| {
+                const owned_keys = try a.alloc([]const u8, incoming_keys.len);
+                for (incoming_keys, owned_keys) |key, *owned| owned.* = try a.dupe(u8, key);
+                host.host_keys = owned_keys;
+            }
+            const block = try account_hosts.configBlock(a, alias, host);
+            win32MakeDir(folder);
+            var additions: std.ArrayList(u8) = .empty;
+            for (host.host_keys orelse &.{}) |key| {
+                var present = false;
+                for (keys) |old| if (std.mem.eql(u8, old, key)) {
+                    present = true;
+                };
+                if (!present) try additions.appendSlice(a, try account_hosts.knownHostLine(a, host, key));
+            }
+            if (additions.items.len > 0) {
+                try accountAppendSshFile(known, "\r\n");
+                try accountAppendSshFile(known, additions.items);
+            }
+            accountAppendSshFile(config, block) catch continue;
+        } else host.host_keys = keys[0..@min(keys.len, 4)];
+        host.name = try a.dupe(u8, account_hosts.displayName(remote, @intCast(slot), name));
+        try hosts.append(a, host);
+    }
+    return hosts.toOwnedSlice(a);
+}
+
+fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
+    if (!account_keys.syncPolicy(reply.job.kind, 0, null, null, null).show_error or reply.key_error != null) return;
+    reply.key_error = std.heap.page_allocator.dupe(u8, text) catch null;
+}
+
+fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []const u8, job_kind: AccountJobKind) !void {
+    const exe = @import("console.zig").sshExeOf(ssh);
+    const dir = std.mem.lastIndexOfAny(u8, exe, "\\/") orelse return error.Process;
+    var profile: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile, profile.len);
+    if (n == 0 or n >= profile.len) return error.Storage;
+    const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile[0..n]});
+    const private_path = try std.fmt.allocPrint(a, "{s}\\id_ed25519", .{folder});
+    const public_path = try std.fmt.allocPrint(a, "{s}.pub", .{private_path});
+    var wide: [1024]u16 = undefined;
+    const private_w = win32WidePath(&wide, private_path) orelse return error.Storage;
+    const has_private = GetFileAttributesW(private_w.ptr) != 0xffffffff;
+    const public_w = win32WidePath(&wide, public_path) orelse return error.Storage;
+    const has_public = GetFileAttributesW(public_w.ptr) != 0xffffffff;
+    if (!has_private) {
+        if (has_public) return error.IncompleteKeyPair;
+        win32MakeDir(folder);
+        const generate = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\" -t ed25519 -N \"\" -q -C multiprompt -f \"{s}\"", .{ exe[0..dir], private_path });
+        _ = try accountSshOutput(a, generate, 30000);
+    } else if (!has_public) return error.MissingPublicKey;
+    const bytes = readFileAllocWin32(public_path, 4096) orelse return error.Storage;
+    defer std.heap.page_allocator.free(bytes);
+    const key = try account_keys.parsePublicKey(a, bytes);
+    if (!account_keys.syncPolicy(job_kind, 0, null, g_account_keys_cache.published_key, key).publish) return;
+    const published = try std.heap.page_allocator.dupe(u8, key);
+    errdefer std.heap.page_allocator.free(published);
+    const body = try std.json.Stringify.valueAlloc(a, .{ .public_key = key }, .{});
+    const result = try account_client.request("PUT", "/v1/device-key", access, body);
+    defer result.deinit();
+    if (result.status != 200) return error.PublishKey;
+    if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
+    g_account_keys_cache.published_key = published;
+}
+
+fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutReply) ![]const []const u8 {
+    var aliases: std.ArrayList([]const u8) = .empty;
+    for ([_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE }) |alias| {
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
+        const output = accountSshOutput(a, command, 5000) catch |err| {
+            accountDeviceKeyError(reply, try std.fmt.allocPrint(a, "Could not resolve SSH host {s}. Device access was not updated.", .{alias}));
+            return err;
+        };
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+        if (!account_hosts.shouldImport(alias, resolved)) try aliases.append(a, alias);
+    }
+    return aliases.toOwnedSlice(a);
+}
+
+fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !struct { complete: bool, skipped: []const u8 } {
+    const Runner = struct {
+        a: std.mem.Allocator,
+        ssh: []const u8,
+        escaped: []const u8,
+        skipped: ?*std.ArrayList([]const u8),
+        pub fn apply(self: *@This(), alias: []const u8) !void {
+            errdefer {
+                debugLog2("account-keys: skipped unreachable SSH host:", alias);
+                if (self.skipped) |skipped| skipped.appendAssumeCapacity(alias);
+            }
+            const command = try std.fmt.allocPrint(self.a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ self.ssh, alias, self.escaped });
+            _ = try accountSshOutput(self.a, command, 30000);
+        }
+    };
+    var skipped: std.ArrayList([]const u8) = .empty;
+    if (reply.job.kind == .decide_keys) try skipped.ensureTotalCapacity(a, aliases.len);
+    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\""), .skipped = if (reply.job.kind == .decide_keys) &skipped else null };
+    const rollout = account_keys.applyOnHosts(aliases, &runner);
+    if (!rollout.reachedAny()) {
+        accountDeviceKeyError(reply, "Could not update SSH access on any host. Check your connection and try again.");
+    }
+    var labels: std.ArrayList(u8) = .empty;
+    if (skipped.items.len > 0) {
+        const known = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+        const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
+        for (skipped.items) |alias| {
+            if (labels.items.len > 0) try labels.appendSlice(a, ", ");
+            var name: []const u8 = "Server";
+            for (known, names, 0..) |target, fallback, slot| {
+                if (std.mem.eql(u8, alias, target)) {
+                    name = account_hosts.displayName(g_account_hosts_cache.hosts, @intCast(slot), fallback);
+                    break;
+                }
+            }
+            try labels.appendSlice(a, name);
+        }
+        if (!rollout.reachedAny()) {
+            if (reply.key_error) |old| {
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "Could not reach: {s}. Device not approved. Check your connection and try again.", .{labels.items});
+                std.heap.page_allocator.free(old);
+                reply.key_error = message;
+            }
+        }
+    }
+    if (!rollout.reachedAny()) return error.Process;
+    return .{ .complete = rollout.complete(), .skipped = labels.items };
+}
+
+fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutReply) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const now = GetTickCount64();
+    const policy = account_keys.syncPolicy(job.kind, now, g_account_keys_cache.last_check_ms, null, null);
+    if (policy.check) g_account_keys_cache.last_check_ms = now;
+    var ssh_buf: [1024]u8 = undefined;
+    var ssh_len: usize = 0;
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.Process;
+    const ssh = ssh_buf[0..ssh_len];
+    accountPublishDeviceKey(a, ssh, access, job.kind) catch |err| {
+        if (err == error.MissingPublicKey) accountDeviceKeyError(reply, "The public key file id_ed25519.pub is missing next to your private key.");
+        return err;
+    };
+    if (!policy.check) return;
+    const result = try account_client.request("GET", "/v1/device-keys", access, "");
+    defer result.deinit();
+    if (result.status != 200) return error.DeviceKeys;
+    const listing = try account_keys.parseListing(a, result.bytes);
+    defer listing.deinit();
+    if (job.kind == .decide_keys) {
+        const decisions = try std.json.parseFromSlice([]const account_keys.Decision, a, job.edited orelse return error.InvalidKey, .{});
+        defer decisions.deinit();
+        for (decisions.value) |decision| {
+            if (!account_keys.validDeviceId(decision.device_id) or !account_keys.validKey(decision.public_key)) return error.InvalidKey;
+            var device_name: ?[]const u8 = null;
+            for (listing.value.keys) |key| {
+                if (key.status == .pending and std.mem.eql(u8, key.device_id, decision.device_id) and std.mem.eql(u8, key.public_key, decision.public_key) and !std.mem.eql(u8, key.device_id, listing.value.device_id)) device_name = key.name;
+            }
+            const name = device_name orelse return error.DeviceChanged;
+            var skipped: []const u8 = "";
+            if (decision.approve) {
+                const aliases = try accountKnownKeyHosts(a, ssh, reply);
+                if (aliases.len == 0) {
+                    accountDeviceKeyError(reply, "No configured SSH hosts were found. The device was not approved.");
+                    return error.InvalidHosts;
+                }
+                const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                skipped = outcome.skipped;
+            }
+            const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/{s}", .{ decision.device_id, if (decision.approve) "approve" else "deny" });
+            const decided = try account_client.request("POST", path, access, "");
+            defer decided.deinit();
+            if (decided.status != 200) return error.DecideKey;
+            if (skipped.len > 0) {
+                const old = reply.bytes;
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "{s}{s} approved on reachable servers. Could not reach: {s}.\n", .{ if (old) |bytes| bytes else "", name, skipped });
+                if (old) |bytes| std.heap.page_allocator.free(bytes);
+                reply.bytes = message;
+            }
+        }
+        return;
+    }
+    reply.device_keys = try std.heap.page_allocator.dupe(u8, result.bytes);
+    const aliases = try accountKnownKeyHosts(a, ssh, reply);
+    const cleaned = readDpapiFile("account-keys-cleaned.dat", 64 * 1024);
+    defer if (cleaned) |bytes| std.heap.page_allocator.free(bytes);
+    var state: std.ArrayList(u8) = .empty;
+    if (cleaned) |bytes| try state.appendSlice(a, bytes);
+    for (listing.value.keys) |key| {
+        if (key.status != .revoked or account_keys.isCleaned(state.items, key.public_key) or aliases.len == 0) continue;
+        const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply);
+        if (!outcome.complete) continue;
+        try state.appendSlice(a, key.public_key);
+        try state.append(a, '\n');
+        if (!writeDpapiFile("account-keys-cleaned.dat", state.items)) return error.Storage;
+    }
+}
+
+fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const session_layout.Tab) !void {
+    const a = std.heap.page_allocator;
+    const account = try account_client.field(credential, "account_id");
+    defer freeSecret(account);
+    if (!g_photo_sync_loaded) {
+        var path_buf: [512]u8 = undefined;
+        const path = syncAuthPath(&path_buf, "account-photo-base.dat") orelse return error.Storage;
+        var wide_buf: [520]u16 = undefined;
+        const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+        if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+            const reason = @import("win32.zig").GetLastError();
+            if (reason != 2 and reason != 3) return error.Storage;
+        } else {
+            const bytes = readDpapiFile("account-photo-base.dat", 8 * 1024 * 1024) orelse return error.Storage;
+            defer a.free(bytes);
+            g_photo_sync = try @TypeOf(g_photo_sync).parse(a, bytes);
+            g_photo_sync_saved_generation = g_photo_sync.generation;
+        }
+        g_photo_sync_loaded = true;
+    }
+    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+    if (g_photo_sync.generation != g_photo_sync_saved_generation) {
+        const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
+        defer a.free(encoded);
+        if (!writeDpapiFile("account-photo-base.dat", encoded)) return error.Storage;
+        g_photo_sync_saved_generation = g_photo_sync.generation;
+    }
+    try result;
+}
+
+var g_deepgram_push_pending = std.atomic.Value(bool).init(false);
+var g_deepgram_checked_at: u64 = 0;
+
+pub fn accountPushDeepgramKey() void {
+    g_deepgram_push_pending.store(true, .release);
+    if (!app_state.g_account_has_token or app_state.g_account_reauth) return;
+    pullSessionLayout();
+}
+
+fn putDeepgramKey(access: []const u8, key: []const u8) bool {
+    const a = std.heap.page_allocator;
+    const body = std.json.Stringify.valueAlloc(a, .{ .key = key }, .{}) catch return false;
+    defer freeSecret(body);
+    const response = account_client.request("PUT", "/v1/secrets/deepgram", access, body) catch return false;
+    defer response.deinit();
+    return response.status == 200;
+}
+
+fn accountSyncDeepgramKey(access: []const u8, kind: AccountJobKind) void {
+    const voice = @import("voice.zig");
+    var local_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &local_buf);
+    const local = voice.readDeepgramApiKey(&local_buf);
+    if (g_deepgram_push_pending.load(.acquire)) {
+        const key = local orelse {
+            g_deepgram_push_pending.store(false, .release);
+            return;
+        };
+        if (putDeepgramKey(access, key)) {
+            g_deepgram_push_pending.store(false, .release);
+            debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    const now = GetTickCount64();
+    if (kind != .startup and kind != .login and g_deepgram_checked_at != 0 and now -% g_deepgram_checked_at < 60_000) return;
+    g_deepgram_checked_at = now;
+    const response = account_client.request("GET", "/v1/secrets/deepgram", access, "") catch return;
+    defer response.deinit();
+    if (response.status == 404) {
+        if (local) |key| {
+            if (putDeepgramKey(access, key)) debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    if (response.status != 200) return;
+    const remote = account_client.field(response.bytes, "key") catch return;
+    defer freeSecret(remote);
+    if (remote.len > 256) return;
+    if (local) |key| if (std.mem.eql(u8, key, remote)) return;
+    var wide: [257:0]u16 = @splat(0);
+    defer std.crypto.secureZero(u16, &wide);
+    for (remote, 0..) |c, i| {
+        if (c < 0x21 or c > 0x7e) return;
+        wide[i] = c;
+    }
+    if (g_deepgram_push_pending.load(.acquire)) return;
+    if (voice.saveDeepgramApiKey(wide[0..remote.len :0])) debugLog("[voice] deepgram key source=account");
+}
+
+fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
+    const a = std.heap.page_allocator;
+    var renewed = job.kind == .login;
+    var response = if (job.kind == .login) try account_client.signIn(&app_state.g_account_cancel) else blk: {
+        if (app_state.g_account_access.bytes) |cached| {
+            reply.has_token = true;
+            if (app_state.g_account_access.usable(GetTickCount64()))
+                break :blk account_client.Response{ .status = 200, .bytes = try a.dupe(u8, cached) };
+        }
+        const cached_credential = job.credential orelse app_state.g_account_access.bytes;
+        const old = cached_credential orelse readDpapiFile("account-device.dat", 16384) orelse {
+            reply.unauthorized = true;
+            return;
+        };
+        reply.has_token = true;
+        defer if (cached_credential == null) freeSecret(old);
+        const refreshed = try account_client.refresh(old);
+        renewed = refreshed.status == 200;
+        break :blk refreshed;
+    };
+    defer response.deinit();
+    if (app_state.g_account_cancel.load(.acquire)) return error.Cancelled;
+    if (response.status != 200) {
+        reply.unauthorized = account_state.invalidCredential(response.status, response.bytes);
+        return error.Authentication;
+    }
+    if (job.kind == .login) {
+        if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
+        g_account_keys_cache.published_key = null;
+        g_account_keys_cache.last_check_ms = null;
+    }
+    if (@import("room_frontend.zig").enabled and job.kind != .signout) {
+        reply.account_id = account_client.field(response.bytes, "account_id") catch null;
+    }
+    if (renewed) try app_state.g_account_access.remember(a, response.bytes, GetTickCount64());
+    reply.has_token = true;
+    if (job.kind != .signout and !writeDpapiFile("account-device.dat", response.bytes)) return error.Storage;
+    const access = try account_client.field(response.bytes, "access_token");
+    defer freeSecret(access);
+    @import("report_upload.zig").setAccess(access);
+    if (job.kind == .signout or job.kind == .revoke) {
+        const device = if (job.device) |id| try a.dupe(u8, id) else try account_client.field(response.bytes, "device_id");
+        defer a.free(device);
+        const path = try std.fmt.allocPrint(a, "/v1/devices/{s}", .{device});
+        defer a.free(path);
+        const revoked = try account_client.request("DELETE", path, access, "");
+        defer revoked.deinit();
+        if (revoked.status == 401) reply.unauthorized = true;
+        if (revoked.status != 200) return error.Revoke;
+        if (job.kind == .signout) {
+            @import("report_upload.zig").setAccess("");
+            accountDeleteToken();
+            reply.signed_out = true;
+            return;
+        }
+    }
+    if (job.kind == .devices or job.kind == .revoke) {
+        const devices = try account_client.request("GET", "/v1/devices", access, "");
+        defer devices.deinit();
+        if (devices.status == 401) reply.unauthorized = true;
+        if (devices.status != 200) return error.Authentication;
+        reply.bytes = try a.dupe(u8, devices.bytes);
+        return;
+    }
+    if (job.kind == .device_keys or job.kind == .decide_keys) {
+        accountSyncDeviceKeys(access, job, reply) catch {
+            accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
+            if (job.kind == .decide_keys) {
+                if (reply.bytes) |bytes| {
+                    const error_text = reply.key_error orelse "Could not update device approvals. Please try again.";
+                    if (std.fmt.allocPrint(std.heap.page_allocator, "{s}\n\n{s}", .{ error_text, bytes }) catch null) |combined| {
+                        if (reply.key_error) |old| std.heap.page_allocator.free(old);
+                        reply.key_error = combined;
+                    }
+                    std.heap.page_allocator.free(bytes);
+                }
+                reply.bytes = null;
+            }
+        };
+        return;
+    }
+    var remote = try account_client.request("GET", "/v1/layout", access, "");
+    defer remote.deinit();
+    if (remote.status == 401) reply.unauthorized = true;
+    if (remote.status != 200) return error.Network;
+    reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
+    reply.starred_groups_supported = remote.starred_groups_supported;
+    reply.appearance_supported = remote.appearance_supported;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const initial_json = try accountReadLayout(alloc, remote.bytes);
+    const initial = try session_layout.parse(alloc, initial_json);
+    defer initial.deinit();
+    if (job.kind == .remove_host and !remote.removal_supported) return error.RemovalUnsupported;
+    var removed = initial.value.removed_hosts orelse &.{};
+    if (job.kind == .remove_host) removed = try account_hosts.addRemoved(alloc, removed, job.slot orelse return error.InvalidHosts);
+    if (g_account_hosts_cache.arena) |*cache_arena| {
+        for (removed) |slot| {
+            if (account_hosts.find(g_account_hosts_cache.hosts, slot) == null) continue;
+            g_account_hosts_cache.hosts = try account_hosts.withoutRemoved(cache_arena.allocator(), g_account_hosts_cache.hosts, removed);
+            break;
+        }
+    }
+    var hosts_ready = g_account_hosts_cache.arena != null;
+    if (job.kind != .remove_host and remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
+        var host_arena = std.heap.ArenaAllocator.init(a);
+        const discovered: ?[]const account_hosts.Host = accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{}, removed) catch null;
+        hosts_ready = discovered != null;
+        if (discovered) |found| {
+            if (g_account_hosts_cache.arena) |*old| old.deinit();
+            g_account_hosts_cache = .{ .arena = host_arena, .hosts = found, .refreshed_at = GetTickCount64() };
+        } else host_arena.deinit();
+    }
+    const hosts = g_account_hosts_cache.hosts;
+    var host_base: []const account_hosts.Host = &.{};
+    if (readDpapiFile("account-hosts-base.dat", 64 * 1024)) |bytes| {
+        defer a.free(bytes);
+        if (std.json.parseFromSlice([]const account_hosts.Host, alloc, bytes, .{ .allocate = .alloc_always })) |parsed| {
+            account_hosts.validate(parsed.value) catch return error.InvalidHosts;
+            host_base = parsed.value;
+        } else |_| {}
+    }
+    var synced_hosts = hosts;
+    var appearance_confirmable = remote.appearance_supported;
+    var attempts: usize = 0;
+    while (attempts < 3) : (attempts += 1) {
+        if (job.kind == .remove_host and !remote.removal_supported) return error.RemovalUnsupported;
+        const json = try accountReadLayout(alloc, remote.bytes);
+        const server = try session_layout.parse(alloc, json);
+        defer server.deinit();
+        var rebased = server.value;
+        if (job.base != null and job.edited != null) {
+            const base = try session_layout.parse(alloc, job.base.?);
+            defer base.deinit();
+            const edited = try session_layout.parse(alloc, job.edited.?);
+            defer edited.deinit();
+            const known = if (remote.appearance_supported) server.value else try account_layout.appearanceFrom(alloc, server.value, base.value);
+            rebased = try account_layout.rebase(alloc, base.value, edited.value, known);
+        }
+        rebased = try appearance_intent.overlay(alloc, rebased, job.appearance orelse &.{});
+        removed = try account_hosts.mergeRemoved(alloc, removed, rebased.removed_hosts orelse &.{});
+        if (g_account_hosts_cache.arena) |*cache_arena| {
+            for (removed) |slot| {
+                if (account_hosts.find(g_account_hosts_cache.hosts, slot) == null) continue;
+                g_account_hosts_cache.hosts = try account_hosts.withoutRemoved(cache_arena.allocator(), g_account_hosts_cache.hosts, removed);
+                break;
+            }
+        }
+        rebased.removed_hosts = if (remote.removal_supported and removed.len > 0) removed else null;
+        const merged_hosts = try account_hosts.withoutRemoved(alloc, hosts, removed);
+        for (merged_hosts) |*host| {
+            const merged = account_hosts.rebase(host.*, account_hosts.find(host_base, host.slot), account_hosts.find(server.value.hosts orelse &.{}, host.slot));
+            host.* = merged.host;
+            if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
+        }
+        synced_hosts = merged_hosts;
+        if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
+        if (!remote.group_order_supported) rebased = account_layout.withoutGroupOrder(rebased);
+        if (!remote.starred_groups_supported) rebased = try account_layout.withoutStarredGroups(alloc, rebased);
+        if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
+        if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
+        if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
+        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
+        const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
+        rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;
+        const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
+        const sent_appearance = remote.appearance_supported;
+        const sent_colors = remote.colors_supported;
+        const sent_palette8 = remote.palette8_supported;
+        const put = try account_client.requestWithLayoutFeatures("PUT", "/v1/layout", access, body, sent_colors, sent_appearance);
+        remote.deinit();
+        remote = put;
+        appearance_confirmable = sent_appearance and remote.appearance_supported and remote.status == 200;
+        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors) or (remote.palette8_supported and !sent_palette8)) and (remote.status == 200 or remote.status == 409)) {
+            const refreshed = try account_client.request("GET", "/v1/layout", access, "");
+            remote.deinit();
+            remote = refreshed;
+            if (remote.status == 401) reply.unauthorized = true;
+            if (remote.status != 200) return error.Network;
+            appearance_confirmable = remote.appearance_supported;
+            if (attempts + 1 >= 3) return error.Conflict;
+            continue;
+        }
+        if (remote.status == 200) break;
+        if (remote.status == 401) reply.unauthorized = true;
+        if (remote.status != 409) return error.Network;
+    }
+    if (remote.status != 200) return error.Conflict;
+    reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
+    reply.starred_groups_supported = remote.starred_groups_supported;
+    reply.appearance_supported = remote.appearance_supported;
+    const final_json = try accountReadLayout(alloc, remote.bytes);
+    const final_layout = try session_layout.parse(alloc, final_json);
+    defer final_layout.deinit();
+    removed = try account_hosts.mergeRemoved(alloc, removed, final_layout.value.removed_hosts orelse &.{});
+    synced_hosts = try account_hosts.withoutRemoved(alloc, if (hosts_ready) synced_hosts else host_base, removed);
+    if (remote.hosts_supported and (hosts_ready or removed.len > 0)) {
+        if (hosts_ready and job.kind != .remove_host) try accountApplyHostAddresses(alloc, try account_hosts.withoutRemoved(alloc, hosts, removed), synced_hosts);
+        const encoded_hosts = try std.json.Stringify.valueAlloc(alloc, synced_hosts, .{ .emit_null_optional_fields = false });
+        if (!writeDpapiFile("account-hosts-base.dat", encoded_hosts)) return error.Storage;
+        if (hosts_ready) {
+            var host_arena = std.heap.ArenaAllocator.init(a);
+            const owned = std.json.parseFromSlice([]const account_hosts.Host, host_arena.allocator(), encoded_hosts, .{ .allocate = .alloc_always }) catch |err| {
+                host_arena.deinit();
+                return err;
+            };
+            const refreshed_at = g_account_hosts_cache.refreshed_at;
+            if (g_account_hosts_cache.arena) |*old| old.deinit();
+            g_account_hosts_cache = .{ .arena = host_arena, .hosts = owned.value, .refreshed_at = refreshed_at };
+        }
+    }
+    reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
+    reply.appearance_confirmable = appearance_confirmable;
+    reply.palette8_supported = remote.palette8_supported;
+    if (remote.photos_supported) {
+        accountSyncPhotos(access, response.bytes, final_layout.value.tabs) catch {
+            debugLog("account-sync: picture upload deferred");
+        };
+    }
+    accountSyncDeepgramKey(access, job.kind);
+    accountSyncDeviceKeys(access, job, reply) catch {
+        accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
+    };
+}
+fn layoutSyncWorker(submitted: AccountJob) void {
+    _ = @import("console.zig").resolveSshPath(false);
+    const job = submitted;
+    const a = std.heap.page_allocator;
+    const reply = a.create(LayoutReply) catch {
+        accountJobFree(job);
+        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_LAYOUT_READY, 0, 0);
+        return;
+    };
+    reply.* = .{ .job = job };
+    accountRequest(job, reply) catch |err| {
+        reply.cancelled = err == error.Cancelled;
+    };
+    if (job.kind == .login and app_state.g_account_cancel.load(.acquire)) reply.cancelled = true;
+    if (reply.unauthorized or job.kind == .signout) {
+        app_state.g_account_access.clear(a);
+    }
+    if (job.kind == .signout) {
+        accountDeleteToken();
+        reply.signed_out = true;
+    }
+    if (PostMessageW(app_state.g_main_hwnd, WM_APP_LAYOUT_READY, 0, @bitCast(@intFromPtr(reply))) == 0) {
+        accountJobFree(job);
+        if (reply.bytes) |bytes| a.free(bytes);
+        if (reply.account_id) |id| a.free(id);
+        if (reply.device_keys) |bytes| a.free(bytes);
+        if (reply.key_error) |bytes| a.free(bytes);
+        a.destroy(reply);
+    }
+}
+fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cached_colors: bool, preserve_cached_appearance: bool) ![]u8 {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const server = try session_layout.parse(a, json);
+    defer server.deinit();
+    var path_buf: [512]u8 = undefined;
+    const path = getSessionPath(&path_buf) orelse return error.Storage;
+    const old = readFileAllocWin32(path, SESSION_JSON_CAPACITY);
+    defer if (old) |bytes| std.heap.page_allocator.free(bytes);
+    const valid = if (old) |bytes| (if (sessionFileIsValid(bytes)) bytes else null) else null;
+    var restored = server.value;
+    if (preserve_cached_colors) if (valid) |bytes| {
+        const cached = std.json.parseFromSlice(std.json.Value, a, bytes, .{}) catch null;
+        if (cached) |parsed| {
+            defer parsed.deinit();
+            if (parsed.value == .object) if (parsed.value.object.get("workspaces")) |workspaces| {
+                if (workspaces == .array) {
+                    const copy = try a.dupe(session_layout.Workspace, restored.workspaces);
+                    for (copy) |*workspace| for (workspaces.array.items) |item| {
+                        if (item != .object) continue;
+                        const name = item.object.get("name") orelse continue;
+                        if (name != .string or !std.mem.eql(u8, name.string, workspace.name)) continue;
+                        const color = item.object.get("color") orelse break;
+                        if (color == .integer and color.integer >= 0 and color.integer < @import("session_layout.zig").color_count) workspace.color = @intCast(color.integer);
+                        break;
+                    };
+                    restored.workspaces = copy;
+                }
+            };
+        }
+    };
+    if (preserve_cached_appearance) {
+        if (valid) |bytes| {
+            const cached = std.json.parseFromSlice(std.json.Value, a, bytes, .{}) catch null;
+            if (cached) |parsed| {
+                defer parsed.deinit();
+                if (parsed.value == .object) {
+                    if (parsed.value.object.get("tabs")) |cached_tabs| {
+                        if (cached_tabs == .array) {
+                            const tabs = try a.dupe(session_layout.Tab, restored.tabs);
+                            for (tabs) |*tab| {
+                                for (cached_tabs.array.items) |record| {
+                                    if (record != .object) continue;
+                                    const session = record.object.get("tmux_session") orelse continue;
+                                    const host = record.object.get("tmux_host") orelse std.json.Value{ .integer = 0 };
+                                    if (session != .string or host != .integer or host.integer != tab.tmux_host or !std.ascii.eqlIgnoreCase(session.string, tab.tmux_session)) continue;
+                                    const face = @import("json_reader.zig").uintDefault(record, "face", 20);
+                                    const color = @import("json_reader.zig").uintDefault(record, "color", @import("session_layout.zig").color_count);
+                                    tab.face = if (face < 20) @intCast(face) else null;
+                                    tab.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
+                                    break;
+                                }
+                            }
+                            restored.tabs = tabs;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    restored = try appearance_intent.overlay(a, restored, g_appearance orelse &.{});
+    var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    restored = try account_layout.withoutRemovedWorkspaces(a, restored, removedWorkspaceNames(&removed_storage));
+    const cache = try account_layout.restoreCache(a, valid, restored) orelse return error.LayoutCapacity;
+    const normalized = try session_layout.encode(out, restored);
+    errdefer out.free(normalized);
+    if (!writeFileAtomicW(path, cache)) return error.Storage;
+    return normalized;
+}
+fn groupNamed(desc: []const u16) bool {
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (std.mem.eql(u16, group.name[0..group.name_len], desc)) return true;
+    }
+    return false;
+}
+
+fn groupNameSurvivesIn(tabs: []const session_layout.Tab, gidx: u32) bool {
+    var buf: [64]u8 = undefined;
+    const group = app_state.groups[gidx];
+    const old_len = std.unicode.utf16LeToUtf8(&buf, group.name[0..group.name_len]) catch return true;
+    if (old_len == 0) return true;
+    const old = buf[0..old_len];
+    for (tabs) |tab| {
+        if (std.mem.eql(u8, tab.group orelse "", old) or std.mem.eql(u8, tab.starred_group orelse "", old)) return true;
+    }
+    return false;
+}
+
+fn groupHasMember(gid: u32) bool {
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.group_id == gid or shell.starred_group_id == gid) return true;
+    }
+    return false;
+}
+
+fn dropEmptiedGroups(had: []const u32) void {
+    for (had) |gid| {
+        if (@import("sidebar.zig").findGroupIdx(gid) == null) continue;
+        if (groupHasMember(gid)) continue;
+        @import("sidebar.zig").deleteGroup(gid);
+    }
+}
+
+fn groupsWithMembers(out: *[app_state.MAX_GROUPS]u32) []const u32 {
+    var count: usize = 0;
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (groupHasMember(group.id)) {
+            out[count] = group.id;
+            count += 1;
+        }
+    }
+    return out[0..count];
+}
+
+fn syncedGroupId(current_id: u32, name: []const u8, starred: bool, tabs: []const session_layout.Tab) !u32 {
+    var wide: [64]u16 = undefined;
+    const len = try std.unicode.utf8ToUtf16Le(&wide, name);
+    if (len == 0) return 0;
+    if (@import("sidebar.zig").findGroupIdx(current_id)) |gi| {
+        const current = app_state.groups[gi];
+        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) return current.id;
+        if (!groupNamed(wide[0..len]) and !groupNameSurvivesIn(tabs, gi)) {
+            @memcpy(app_state.groups[gi].name[0..len], wide[0..len]);
+            app_state.groups[gi].name_len = @intCast(len);
+            return current.id;
+        }
+    }
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (!std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) continue;
+        const other_view = for (app_state.shells[0..app_state.shell_count]) |other| {
+            if ((if (starred) other.group_id else other.starred_group_id) == group.id) break true;
+        } else false;
+        if (!other_view) return group.id;
+    }
+    const created = @import("sidebar.zig").createGroup(wide[0..len]);
+    if (created == 0) return error.LayoutCapacity;
+    return created;
+}
+
+pub fn applyServerLayout(json: []const u8) !void {
+    const was_starred = app_state.g_starred_workspace;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const server = try session_layout.parse(a, json);
+    defer server.deinit();
+    var filled_before: [app_state.MAX_GROUPS]u32 = undefined;
+    const had_members = groupsWithMembers(&filled_before);
+    const local = try captureSessionLayout(a, true);
+    var owned: [MAX_SHELLS]bool = undefined;
+    for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
+    var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
+    var kept: std.ArrayList(session_layout.Tab) = .empty;
+    for (desired.tabs) |tab| {
+        if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
+    }
+    desired.tabs = kept.items;
+    app_state.g_account_applying = true;
+    defer app_state.g_account_applying = false;
+    const old_restoring = app_state.g_restoring;
+    app_state.g_restoring = true;
+    defer app_state.g_restoring = old_restoring;
+    const old_host = app_state.g_pending_tmux_host;
+    defer app_state.g_pending_tmux_host = old_host;
+    var local_ids: [MAX_SHELLS]u32 = undefined;
+    var local_count: usize = 0;
+    for (app_state.shells[0..app_state.shell_count]) |shell| if (shell.tmux_session_len == 0) {
+        local_ids[local_count] = shell.shell_id;
+        local_count += 1;
+    };
+    var local_cursor: usize = 0;
+    const active_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    var i = app_state.shell_count;
+    while (i > 0) {
+        i -= 1;
+        if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null) {
+            debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
+            logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
+            closeShellRemember(i, false);
+        }
+    }
+    const old_colors = app_state.g_ws_colors;
+    const old_names = app_state.g_ws_names;
+    const old_name_len = app_state.g_ws_name_len;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_len = app_state.g_ws_id_len;
+    const old_snoozed = app_state.g_ws_snoozed;
+    const old_last_shell = app_state.g_ws_last_shell;
+    const old_focus = app_state.g_ws_focus;
+    app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
+    app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
+    const old_ws_count = app_state.g_lws_count;
+    app_state.g_single_window = true;
+    app_state.g_lws_count = @intCast(@max(desired.workspaces.len, 1));
+    for (0..app_state.g_lws_count) |wi| {
+        const name = if (wi < desired.workspaces.len) desired.workspaces[wi].name else "Other";
+        app_state.g_ws_names[wi] = @splat(0);
+        @memcpy(app_state.g_ws_names[wi][0..name.len], name);
+        app_state.g_ws_name_len[wi] = @intCast(name.len);
+        app_state.g_ws_colors[wi] = if (wi < desired.workspaces.len) desired.workspaces[wi].color else null;
+        app_state.g_ws_ids[wi] = @splat(0);
+        app_state.g_ws_id_len[wi] = 0;
+        app_state.g_ws_snoozed[wi] = false;
+        for (0..old_ws_count) |oi| {
+            if (!std.mem.eql(u8, old_names[oi][0..old_name_len[oi]], name)) continue;
+            app_state.g_ws_ids[wi] = old_ids[oi];
+            app_state.g_ws_id_len[wi] = old_id_len[oi];
+            app_state.g_ws_snoozed[wi] = old_snoozed[oi];
+            app_state.g_ws_last_shell[wi] = old_last_shell[oi];
+            app_state.g_ws_focus[wi] = old_focus[oi];
+            break;
+        }
+        ensureWorkspaceSlotId(@intCast(wi));
+    }
+    for (0..old_ws_count) |oi| {
+        if (!old_snoozed[oi] or app_state.g_lws_count >= MAX_LWS) continue;
+        var present = false;
+        for (0..app_state.g_lws_count) |wi| {
+            if (std.mem.eql(u8, app_state.g_ws_names[wi][0..app_state.g_ws_name_len[wi]], old_names[oi][0..old_name_len[oi]])) present = true;
+        }
+        if (present) continue;
+        const slot = app_state.g_lws_count;
+        app_state.g_ws_names[slot] = old_names[oi];
+        app_state.g_ws_name_len[slot] = old_name_len[oi];
+        app_state.g_ws_colors[slot] = old_colors[oi];
+        app_state.g_ws_ids[slot] = old_ids[oi];
+        app_state.g_ws_id_len[slot] = old_id_len[oi];
+        app_state.g_ws_snoozed[slot] = true;
+        app_state.g_ws_last_shell[slot] = old_last_shell[oi];
+        app_state.g_ws_focus[slot] = old_focus[oi];
+        app_state.g_lws_count += 1;
+    }
+    for (desired.tabs, 0..) |tab, dest| {
+        var existing: ?usize = null;
+        if (tab.tmux_session.len == 0) {
+            const id = local_ids[local_cursor];
+            local_cursor += 1;
+            for (app_state.shells[0..app_state.shell_count], 0..) |s, si| if (s.shell_id == id) {
+                existing = si;
+                break;
+            };
+        } else {
+            for (app_state.shells[0..app_state.shell_count], 0..) |s, si| if (tmux_identity.same(s.tmux_host, s.tmux_session[0..s.tmux_session_len], tab.tmux_host, tab.tmux_session)) {
+                existing = si;
+                break;
+            };
+        }
+        if (existing == null) {
+            var shell = empty_shell;
+            shell.kind = .tmux;
+            shell.shell_id = app_state.allocateShellId() orelse return error.NoShellId;
+            shell.tmux_host = tab.tmux_host;
+            @memcpy(shell.tmux_session[0..tab.tmux_session.len], tab.tmux_session);
+            shell.tmux_session_len = @intCast(tab.tmux_session.len);
+            shell.ssh_reconnect.restored_session = tab.tmux_session.len > 0;
+            shell.disconnected = true;
+            app_state.shells[app_state.shell_count] = shell;
+            app_state.shell_count += 1;
+            @import("chat_send.zig").sshDisconnect(app_state.shell_count - 1, "account-restore-pending");
+            existing = app_state.shell_count - 1;
+        }
+        std.mem.swap(Shell, &app_state.shells[dest], &app_state.shells[existing.?]);
+        const shell = &app_state.shells[dest];
+        if (account_layout.find(server.value.tabs, tab) != null) {
+            shell.sync_owned = true;
+            shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
+            shell.name_source = if (tab.manual) .manual else .semantic;
+            @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
+            if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false, desired.tabs);
+            if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true, desired.tabs);
+            shell.face = tab.face;
+            shell.color = tab.color;
+            if (tab.favorite) |favorite| shell.favorite = favorite;
+            if (tab.muted) |muted| {
+                shell.muted = muted;
+                if (muted) {
+                    shell.activity = .idle;
+                    shell.needs_attention = false;
+                }
+            }
+            if (tab.used) |used| shell.last_used = @max(shell.last_used, used);
+            if (tab.input) |input| shell.input = @max(shell.input, input);
+            shell.visits = @import("frequent.zig").Visits.merge(shell.visits.optional(), tab.visits);
+        }
+        for (desired.workspaces, 0..) |ws, wi| if (std.mem.eql(u8, ws.name, tab.workspace)) {
+            shell.workspace = @intCast(wi);
+            break;
+        };
+    }
+    var kept_active = false;
+    for (app_state.shells[0..app_state.shell_count], 0..) |s, si| if (s.shell_id == active_id) {
+        app_state.active_shell = @intCast(si);
+        kept_active = true;
+        break;
+    };
+    if (kept_active) {
+        app_state.g_active_workspace = app_state.shells[app_state.active_shell].workspace;
+        debugLog("pane guard: account sync kept user on active tab");
+        if (!@import("chat_composer.zig").overlayOpen()) @import("chat_composer.zig").applySessionView();
+    } else {
+        if (app_state.active_shell >= app_state.shell_count) app_state.active_shell = 0;
+        app_state.g_active_workspace = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else 0;
+        switchToWorkspace(app_state.g_active_workspace);
+    }
+    app_state.g_layout_settings = desired.settings;
+    dropEmptiedGroups(had_members);
+    if (desired.group_order) |names| _ = @import("sidebar.zig").orderGroupsByName(names);
+    @import("inbox.zig").ensureInboxSplitVisible();
+    app_state.g_restoring = old_restoring;
+    saveSession();
+    syncInProcessWorkspacesToRegistry();
+    @import("inbox.zig").publishInboxStateNow();
+    @import("inbox.zig").loadInboxModel();
+    app_state.g_starred_workspace = was_starred;
+    if (was_starred) @import("workspaces.zig").refreshStarredWorkspace();
+    updateMainWindowTitle();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+    var applied_buf: [512]u8 = undefined;
+    var applied_len: usize = 0;
+    for (desired.workspaces) |ws| {
+        const part = std.fmt.bufPrint(applied_buf[applied_len..], "{s}{s}", .{ if (applied_len == 0) "" else "|", ws.name }) catch break;
+        applied_len += part.len;
+    }
+    var applied_line: [640]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&applied_line, "account-sync: applied workspaces={s} tabs={d}", .{ applied_buf[0..applied_len], desired.tabs.len }) catch "account-sync: applied");
+}
+fn accountDevices(bytes: []const u8) void {
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, bytes, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const current = parsed.value.object.get("device_id") orelse return;
+    const devices = parsed.value.object.get("devices") orelse return;
+    if (current != .string or devices != .array) return;
+    for (devices.array.items) |device| {
+        if (device != .object) continue;
+        const id = device.object.get("id") orelse continue;
+        const name = device.object.get("name") orelse continue;
+        const revoked = device.object.get("revoked") orelse continue;
+        if (id != .string or name != .string or revoked != .integer) continue;
+        var msg: [512]u8 = undefined;
+        const text = std.fmt.bufPrint(&msg, "{s}{s}\nDevice: {s}\n{s}", .{ name.string, if (std.mem.eql(u8, current.string, id.string)) " (this device)" else "", id.string, if (revoked.integer != 0) "Already revoked. Continue?" else "Revoke this device? No: next device. Cancel: close." }) catch continue;
+        const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, text) catch continue;
+        defer std.heap.page_allocator.free(wide);
+        const answer = MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Devices"), 3 | 0x20);
+        if (answer == 2) return;
+        if (answer == 6 and revoked.integer == 0) {
+            if (std.mem.eql(u8, current.string, id.string)) {
+                accountSignOut();
+                return;
+            }
+            startAccountJob(.{ .kind = .revoke, .device = std.heap.page_allocator.dupe(u8, id.string) catch return });
+            return;
+        }
+    }
+}
+fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
+    if (g_account_key_prompt_active or app_state.g_account_busy) return;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const listing = account_keys.parseListing(a, bytes) catch return;
+    defer listing.deinit();
+    var pending = false;
+    for (listing.value.keys) |key| {
+        if (key.status == .pending and !std.mem.eql(u8, key.device_id, listing.value.device_id)) pending = true;
+    }
+    const previous_bytes = g_account_pending_device_keys;
+    const previous = if (previous_bytes) |old| account_keys.parseListing(a, old) catch return else null;
+    defer if (previous) |old| old.deinit();
+    const retained = if (pending) std.heap.page_allocator.dupe(u8, bytes) catch return else null;
+    g_account_pending_device_keys = retained;
+    defer if (previous_bytes) |old| std.heap.page_allocator.free(old);
+    if (!pending) return;
+    g_account_key_prompt_active = true;
+    app_state.g_account_busy = true;
+    var submitted = false;
+    defer if (!submitted) {
+        g_account_key_prompt_active = false;
+        app_state.g_account_busy = false;
+    };
+    var decisions: std.ArrayList(account_keys.Decision) = .empty;
+    for (listing.value.keys) |key| {
+        if (key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)) continue;
+        if (!user_initiated) {
+            var seen = false;
+            if (previous) |old| {
+                for (old.value.keys) |prior| {
+                    if (prior.status == .pending and std.mem.eql(u8, prior.device_id, key.device_id) and std.mem.eql(u8, prior.public_key, key.public_key)) seen = true;
+                }
+            }
+            if (seen) continue;
+        }
+        const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: close. Open Ctrl+K > Account: Approve devices to return.", .{key.name}) catch return;
+        const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
+        const answer = MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Approve devices"), 3 | 0x20);
+        if (answer == 2) break;
+        if (answer != 6 and answer != 7) continue;
+        decisions.append(a, .{ .device_id = key.device_id, .public_key = key.public_key, .approve = answer == 6 }) catch return;
+    }
+    if (decisions.items.len == 0) return;
+    const encoded = std.json.Stringify.valueAlloc(std.heap.page_allocator, decisions.items, .{}) catch return;
+    app_state.g_account_busy = false;
+    startAccountJob(.{ .kind = .decide_keys, .edited = encoded });
+    submitted = app_state.g_account_busy;
+}
+
+pub fn resumeStartupReply() void {
+    const reply = startup_reply;
+    startup_reply = 0;
+    if (reply != 0) handleLayoutReply(reply);
+}
+
+var g_applied_layout: account_layout.AppliedLayout = .{};
+pub fn handleLayoutReply(lp: LPARAM) void {
+    if (lp != 0 and @import("launch_cache.zig").pending) {
+        const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (!reply.unauthorized and !reply.signed_out and !reply.cancelled and (reply.job.kind == .startup or (reply.job.kind == .login and reply.bytes != null))) {
+            if (app_state.g_account_locked and reply.bytes != null) {
+                app_state.g_account_locked = false;
+                _ = PostMessageW(app_state.g_main_hwnd, @import("launch_cache.zig").WM_DEFERRED, 0, 0);
+            }
+            startup_reply = lp;
+            return;
+        }
+    }
+    defer accountResetAppearanceTracking();
+    app_state.g_account_busy = false;
+    app_state.g_account_login_active = false;
+    if (lp == 0) {
+        @import("room_frontend.zig").setAccount(null);
+        g_account_key_prompt_active = false;
+        accountSyncFailed(app_state.g_account_has_token);
+        return;
+    }
+    const a = std.heap.page_allocator;
+    const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
+    defer a.destroy(reply);
+    defer accountJobFree(reply.job);
+    if (reply.job.kind == .decide_keys) g_account_key_prompt_active = false;
+    defer if (reply.bytes) |bytes| a.free(bytes);
+    defer if (reply.account_id) |id| a.free(id);
+    defer if (reply.device_keys) |bytes| a.free(bytes);
+    defer if (reply.key_error) |bytes| a.free(bytes);
+    defer {
+        if (reply.key_error) |text| {
+            app_state.g_account_busy = true;
+            showSyncMessage(text, true);
+            app_state.g_account_busy = false;
+        }
+        if (!reply.unauthorized and !reply.cancelled) {
+            if (reply.device_keys) |bytes| accountPromptDeviceKeys(bytes, reply.job.kind == .device_keys);
+        }
+    }
+    if (reply.signed_out) {
+        accountLock();
+        return;
+    }
+    if (reply.cancelled) {
+        @import("room_frontend.zig").setAccount(null);
+        app_state.g_account_status = "Sign-in cancelled. Press Enter to retry.";
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+        return;
+    }
+    if (reply.unauthorized) {
+        @import("room_frontend.zig").setAccount(null);
+        accountDeleteToken();
+        app_state.g_account_has_token = false;
+        app_state.g_account_reauth = true;
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+        if (reply.job.kind == .startup) {
+            accountLock();
+        } else {
+            _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+        }
+        return;
+    }
+    if (reply.has_token) {
+        app_state.g_account_has_token = true;
+        if (reply.job.kind == .login) {
+            app_state.g_account_reauth = false;
+            app_state.g_cap_msg_until = 0;
+        }
+    }
+    if (reply.job.kind == .decide_keys) {
+        if (reply.key_error == null and !reply.cancelled and !reply.unauthorized) {
+            if (reply.bytes) |notice| {
+                app_state.g_account_busy = true;
+                showSyncMessage(notice, false);
+                app_state.g_account_busy = false;
+            }
+        }
+        return;
+    }
+    if (reply.job.kind == .device_keys) return;
+    const bytes = reply.bytes orelse {
+        @import("room_frontend.zig").setAccount(null);
+        accountSyncFailed(reply.has_token or app_state.g_account_has_token);
+        return;
+    };
+    if (reply.job.kind == .devices or reply.job.kind == .revoke) {
+        accountDevices(bytes);
+        return;
+    }
+    var room_layout_applied = false;
+    var room_prepare_ok = true;
+    defer if (!room_layout_applied) @import("room_frontend.zig").setAccount(null);
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const server = session_layout.parse(alloc, bytes) catch return;
+    defer server.deinit();
+    g_palette8_supported = reply.palette8_supported;
+    app_state.g_account_colors_supported = reply.colors_supported;
+    app_state.g_account_groups_supported = reply.groups_supported;
+    app_state.g_account_group_order_supported = reply.group_order_supported;
+    app_state.g_account_starred_groups_supported = reply.starred_groups_supported;
+    app_state.g_account_appearance_supported = reply.appearance_supported;
+    var to_apply = bytes;
+    if (!reply.colors_supported and reply.job.edited != null) {
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.colorsFrom(alloc, server.value, edited.value) catch return) catch return;
+    }
+    if (!reply.appearance_supported and reply.job.edited != null) {
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, edited.value) catch return) catch return;
+    }
+    if (!reply.appearance_supported and reply.job.edited == null and !app_state.g_account_bootstrapping) {
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        const current = captureSessionLayout(alloc, false) catch return;
+        to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, current) catch return) catch return;
+    }
+    if (!g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.pendingWhiteWorkspaces(alloc, current_apply.value, base.value, edited.value) catch return) catch return;
+    }
+    var local_ack: ?[]u8 = null;
+    if (!app_state.g_account_bootstrapping and reply.job.edited != null) {
+        const edit = reply.job.edited.?;
+        const sent = session_layout.parse(alloc, edit) catch return;
+        defer sent.deinit();
+        var ownership: [MAX_SHELLS]bool = undefined;
+        const previous = session_layout.parse(alloc, app_state.g_account_base orelse bytes) catch return;
+        defer previous.deinit();
+        for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
+        var ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
+        if (!reply.colors_supported) ack = account_layout.withoutColors(alloc, ack) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            ack = account_layout.unacknowledgedWhiteWorkspaces(alloc, ack, old_base.value, sent.value) catch return;
+        }
+        if (!reply.appearance_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            ack = account_layout.appearanceFrom(alloc, ack, old_base.value) catch return;
+        }
+        local_ack = session_layout.encode(alloc, ack) catch return;
+        const current = accountCapturePush(alloc, sent.value) catch return;
+        var apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
+        if (!reply.appearance_supported) apply_remote = account_layout.appearanceFrom(alloc, apply_remote, sent.value) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            apply_remote = account_layout.pendingWhiteWorkspaces(alloc, apply_remote, old_base.value, sent.value) catch return;
+        }
+        const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
+        to_apply = session_layout.encode(alloc, rebased) catch return;
+    }
+    if (app_state.g_account_bootstrapping and !reply.appearance_supported and reply.job.base != null) {
+        const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer old_base.deinit();
+        const ack = account_layout.appearanceFrom(alloc, server.value, old_base.value) catch return;
+        local_ack = session_layout.encode(alloc, ack) catch return;
+    }
+    if (!app_state.g_account_bootstrapping and reply.job.edited == null) {
+        if (app_state.g_account_local_base) |baseline_bytes| {
+            const baseline = session_layout.parse(alloc, baseline_bytes) catch return;
+            defer baseline.deinit();
+            const current = accountCapturePush(alloc, baseline.value) catch return;
+            const remote = session_layout.parse(alloc, to_apply) catch return;
+            defer remote.deinit();
+            const owned = alloc.alloc(bool, baseline.value.tabs.len) catch return;
+            for (baseline.value.tabs, 0..) |tab, bi| {
+                owned[bi] = false;
+                for (app_state.shells[0..app_state.shell_count]) |shell| {
+                    if (tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], tab.tmux_host, tab.tmux_session)) {
+                        owned[bi] = shell.sync_owned;
+                        break;
+                    }
+                }
+            }
+            var ack = account_layout.apply(alloc, baseline.value, owned, remote.value, MAX_LWS, MAX_SHELLS) catch return;
+            var ack_tabs: std.ArrayList(session_layout.Tab) = .empty;
+            var promoted: std.ArrayList(session_layout.Tab) = .empty;
+            for (ack.tabs) |tab| {
+                var promote = false;
+                if (account_layout.find(server.value.tabs, tab) == null) {
+                    if (account_layout.find(baseline.value.tabs, tab)) |bi| {
+                        if (account_layout.find(current.tabs, tab)) |ci| {
+                            const old = baseline.value.tabs[bi];
+                            const now = current.tabs[ci];
+                            promote = !std.mem.eql(u8, old.name, now.name) or old.manual != now.manual or old.favorite != now.favorite or old.muted != now.muted or !std.mem.eql(u8, old.workspace, now.workspace);
+                            for (baseline.value.tabs, 0..) |other, oi| {
+                                const current_other = account_layout.find(current.tabs, other) orelse continue;
+                                if ((oi < bi and current_other > ci) or (oi > bi and current_other < ci)) {
+                                    promote = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    for (g_appearance orelse &.{}) |intent| {
+                        if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent)) promote = true;
+                    }
+                }
+                if (promote) {
+                    promoted.append(alloc, tab) catch return;
+                } else {
+                    ack_tabs.append(alloc, tab) catch return;
+                }
+            }
+            var base_tabs: std.ArrayList(session_layout.Tab) = .empty;
+            for (baseline.value.tabs) |tab| {
+                if (account_layout.find(promoted.items, tab) == null) base_tabs.append(alloc, tab) catch return;
+            }
+            var rebase_base = baseline.value;
+            rebase_base.tabs = base_tabs.items;
+            const rebased = account_layout.rebase(alloc, rebase_base, current, remote.value) catch return;
+            to_apply = session_layout.encode(alloc, rebased) catch return;
+            ack.tabs = ack_tabs.items;
+            local_ack = session_layout.encode(alloc, ack) catch return;
+        }
+    }
+    const target_before_intents = session_layout.parse(alloc, to_apply) catch return;
+    defer target_before_intents.deinit();
+    const target_with_intents = appearance_intent.overlay(alloc, target_before_intents.value, g_appearance orelse &.{}) catch return;
+    to_apply = session_layout.encode(alloc, target_with_intents) catch return;
+    if (app_state.g_account_bootstrapping) {
+        to_apply = accountPrepareRestore(alloc, to_apply, !reply.colors_supported and reply.job.edited == null, !reply.appearance_supported and reply.job.edited == null) catch blk: {
+            room_prepare_ok = false;
+            app_state.g_account_status = "Could not reconcile saved layout. Local cache kept.";
+            _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+            break :blk to_apply;
+        };
+    } else if (g_applied_layout.changed(bytes)) {
+        app_state.g_account_locked = false;
+        applyServerLayout(to_apply) catch {
+            accountSyncFailed(true);
+            if (app_state.active_shell < app_state.shell_count) switchToShell(app_state.active_shell);
+            return;
+        };
+        g_applied_layout.remember(a, bytes);
+    }
+    const final_target = session_layout.parse(alloc, to_apply) catch return;
+    defer final_target.deinit();
+    var remaining: std.ArrayList(appearance_intent.Intent) = .empty;
+    remaining.appendSlice(alloc, g_appearance orelse &.{}) catch return;
+    if (reply.appearance_confirmable and !reply.cancelled) {
+        for (reply.job.appearance orelse &.{}) |submitted| {
+            var remote_tab: ?session_layout.Tab = null;
+            for (server.value.tabs) |tab| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, submitted)) { remote_tab = tab; break; }
+            }
+            const confirmed = remote_tab orelse continue;
+            var survives = false;
+            for (final_target.value.tabs) |tab| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, submitted)) { survives = true; break; }
+            }
+            if (!survives) continue;
+            var later: u8 = 0;
+            for (g_after_submit.items) |touch| {
+                if (touch.tmux_host == submitted.tmux_host and std.ascii.eqlIgnoreCase(touch.tmux_session, submitted.tmux_session)) later |= touch.touched;
+            }
+            for (remaining.items) |*intent| {
+                if (!appearance_intent.same(submitted.tmux_host, submitted.tmux_session, intent.*)) continue;
+                if (submitted.touched & appearance_intent.face_bit != 0 and later & appearance_intent.face_bit == 0 and confirmed.face == submitted.face) intent.touched &= ~appearance_intent.face_bit;
+                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color and (submitted.color != 7 or g_palette8_supported)) intent.touched &= ~appearance_intent.color_bit;
+                break;
+            }
+        }
+    }
+    if (reply.job.base != null and reply.job.edited != null) {
+        const sent_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer sent_base.deinit();
+        const sent_edit = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer sent_edit.deinit();
+        for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |closed| {
+            const probe = session_layout.Tab{ .name = "", .tmux_session = closed.session[0..closed.len], .tmux_host = closed.host, .workspace = "" };
+            if (account_layout.find(sent_base.value.tabs, probe) == null or account_layout.find(sent_edit.value.tabs, probe) != null) continue;
+            if (account_layout.find(server.value.tabs, probe) != null or account_layout.find(final_target.value.tabs, probe) != null) continue;
+            var alive = false;
+            for (app_state.shells[0..app_state.shell_count]) |shell| {
+                if (tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], probe.tmux_host, probe.tmux_session)) {
+                    alive = true;
+                    break;
+                }
+            }
+            if (alive) continue;
+            for (remaining.items) |*intent| {
+                if (appearance_intent.same(probe.tmux_host, probe.tmux_session, intent.*)) intent.touched = 0;
+            }
+        }
+    }
+    var remaining_index: usize = 0;
+    while (remaining_index < remaining.items.len) {
+        if (remaining.items[remaining_index].touched == 0) {
+            _ = remaining.orderedRemove(remaining_index);
+        } else {
+            remaining_index += 1;
+        }
+    }
+    const owned_remaining = appearance_intent.clone(a, remaining.items) catch return;
+    var installed_remaining = false;
+    defer if (!installed_remaining) appearance_intent.free(a, owned_remaining);
+    if (app_state.g_account_bootstrapping and !g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer old_base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const ack = session_layout.parse(alloc, local_ack orelse bytes) catch return;
+        defer ack.deinit();
+        local_ack = session_layout.encode(alloc, account_layout.unacknowledgedWhiteWorkspaces(alloc, ack.value, old_base.value, edited.value) catch return) catch return;
+    }
+    const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, bytes) catch return;
+    defer ack_parsed.deinit();
+    const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
+    accountWritePending(.{ .base = ack_parsed.value, .edited = edited_now, .appearance = owned_remaining }) catch {
+        syncLogThrottled("account-sync: pending layout write failed after apply");
+        return;
+    };
+    if (g_appearance) |old| appearance_intent.free(a, old);
+    g_appearance = owned_remaining;
+    installed_remaining = true;
+    var keep_closed: usize = 0;
+    for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |c| {
+        const probe = session_layout.Tab{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
+        if (account_layout.find(server.value.tabs, probe) == null) continue;
+        app_state.g_account_closed[keep_closed] = c;
+        keep_closed += 1;
+    }
+    app_state.g_account_closed_count = keep_closed;
+    app_state.g_account_has_token = true;
+    app_state.g_account_reauth = false;
+    app_state.g_account_retry.succeeded();
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    if (app_state.g_account_base) |old| a.free(old);
+    app_state.g_account_base = a.dupe(u8, bytes) catch return;
+    if (app_state.g_search_pick_repo_mode) {
+        @import("vps.zig").requestAllRepoRefresh();
+        @import("command_palette.zig").updateSearchResults();
+    }
+    if (room_prepare_ok and @import("room_frontend.zig").enabled) {
+        room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
+    }
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        shell.synced_input = 0;
+        shell.input_publish_pending = false;
+        const probe = session_layout.Tab{ .name = "", .tmux_session = shell.tmux_session[0..shell.tmux_session_len], .tmux_host = shell.tmux_host, .workspace = "" };
+        if (account_layout.find(server.value.tabs, probe)) |i| shell.synced_input = server.value.tabs[i].input orelse 0;
+    }
+    app_state.g_account_dirty_at = 0;
+    app_state.g_account_locked = false;
+    @import("room_frontend.zig").accountReady();
+    if (app_state.g_account_local_base) |old| a.free(old);
+    app_state.g_account_local_base = session_layout.encode(a, ack_parsed.value) catch null;
+    if (!app_state.g_account_bootstrapping) publishSessionLayout();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+pub fn paintAccountLock(hwnd: HANDLE) void {
+    var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
+    const hdc = BeginPaint(hwnd, &ps);
+    defer _ = EndPaint(hwnd, &ps);
+    defer @import("window_frame.zig").paint(hwnd, hdc);
+    var rc: RECT = undefined;
+    _ = GetClientRect(hwnd, &rc);
+    const bg = CreateSolidBrush(themeSidebarBg());
+    defer _ = DeleteObject(bg);
+    _ = FillRect(hdc, &rc, bg);
+    const font = CreateFontW(uiScaled(22), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L(@import("fonts.zig").UI_FACE));
+    const old = SelectObject(hdc, font);
+    defer {
+        _ = SelectObject(hdc, old);
+        _ = DeleteObject(font);
+    }
+    _ = SetBkMode(hdc, TRANSPARENT);
+    _ = SetTextColor(hdc, RGB(140, 140, 150));
+    var title = rc;
+    title.top = @divTrunc(rc.bottom, 2) - uiScaled(110);
+    title.bottom = title.top + uiScaled(36);
+    _ = DrawTextW(hdc, L("Multi Bot"), -1, &title, DT_CENTER | DT_SINGLELINE);
+    var status = title;
+    status.top += uiScaled(48);
+    status.bottom += uiScaled(68);
+    var wide: [256]u16 = undefined;
+    const n = std.unicode.utf8ToUtf16Le(&wide, app_state.g_account_status) catch 0;
+    _ = DrawTextW(hdc, &wide, @intCast(n), &status, DT_CENTER | DT_WORDBREAK);
+    var button = accountButtonRect(hwnd);
+    const fill = CreateSolidBrush(RGB(48, 96, 192));
+    defer _ = DeleteObject(fill);
+    _ = FillRect(hdc, &button, fill);
+    _ = SetTextColor(hdc, RGB(255, 255, 255));
+    _ = DrawTextW(hdc, if (app_state.g_account_busy) L("Working...") else if (app_state.g_account_has_token and !app_state.g_account_reauth) L("Retry") else L("Sign in"), -1, &button, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+pub fn accountButtonRect(hwnd: HANDLE) RECT {
+    var rc: RECT = undefined;
+    _ = GetClientRect(hwnd, &rc);
+    const x = @divTrunc(rc.right, 2);
+    const y = @divTrunc(rc.bottom, 2) + uiScaled(40);
+    return .{ .left = x - uiScaled(90), .right = x + uiScaled(90), .top = y, .bottom = y + uiScaled(48) };
+}
+pub const SecondLaunchAction = enum { focus, replace, refuse };
+
+pub fn secondLaunchAction(owner_alive: bool, owner_is_app: bool, has_window: bool, responsive: bool) SecondLaunchAction {
+    if (!owner_alive or !owner_is_app) return .refuse;
+    if (has_window and responsive) return .focus;
+    return .replace;
+}
+
+test "second launch refuses stale or foreign owners, focuses live owners and replaces missing or hung windows" {
+    try std.testing.expectEqual(SecondLaunchAction.refuse, secondLaunchAction(false, true, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.refuse, secondLaunchAction(true, false, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.focus, secondLaunchAction(true, true, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, true, false));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, false, false));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, false, true));
+}
+
+pub fn accountClaim(hwnd: HANDLE) bool {
+    var dir: [512]u8 = undefined;
+    if (getSessionDir(&dir)) |path| win32MakeDir(path);
+    var env: [8]u8 = undefined;
+    const len = GetEnvironmentVariableA("MULTIPROMPT_NO_LOGIN", &env, env.len);
+    if (len == 1 and env[0] == '1') {
+        app_state.g_account_bypass = true;
+        app_state.g_account_locked = false;
+        app_state.g_account_bootstrapping = false;
+        return true;
+    }
+    var token_path_buf: [512]u8 = undefined;
+    const token_path = syncAuthPath(&token_path_buf, "account-device.dat") orelse return false;
+    var mutex_name_buf: [96]u8 = undefined;
+    const mutex_name = std.fmt.bufPrint(&mutex_name_buf, "Local\\ZigShell-account{s}-{x}", .{ if (IS_DEV) "-dev" else "", std.hash.Wyhash.hash(0, token_path) }) catch return false;
+    var mutex_name_wide: [96]u16 = @splat(0);
+    for (mutex_name, 0..) |c, i| mutex_name_wide[i] = c;
+    const mutex = CreateMutexW(null, 0, @ptrCast(&mutex_name_wide)) orelse return false;
+    var result = WaitForSingleObject(mutex, 0);
+    var instance_path_buf: [512]u8 = undefined;
+    const instance_path = syncAuthPath(&instance_path_buf, if (IS_DEV) "account-instance-dev.pid" else "account-instance.pid") orelse {
+        _ = CloseHandle(mutex);
+        return false;
+    };
+    if (result != 0 and result != 0x80) {
+        var pid: DWORD = 0;
+        var owner_hwnd: HANDLE = null;
+        if (readFileAllocWin32(instance_path, 128)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            var fields = std.mem.tokenizeAny(u8, bytes, " \r\n\t");
+            pid = std.fmt.parseInt(DWORD, fields.next() orelse "", 10) catch 0;
+            const hwnd_value = std.fmt.parseInt(usize, fields.next() orelse "", 10) catch 0;
+            if (hwnd_value != 0) owner_hwnd = @ptrFromInt(hwnd_value);
+        }
+        const owner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid);
+        defer if (owner != null) {
+            _ = CloseHandle(owner);
+        };
+        const alive = owner != null and WaitForSingleObject(owner, 0) == 0x102;
+        var image: [1024]u16 = undefined;
+        var image_len: DWORD = image.len;
+        var is_app = false;
+        if (alive and QueryFullProcessImageNameW(owner, 0, &image, &image_len) != 0) {
+            var basename: usize = 0;
+            for (image[0..image_len], 0..) |*c, i| {
+                if (c.* == '\\' or c.* == '/') basename = i + 1;
+                if (c.* >= 'A' and c.* <= 'Z') c.* += 'a' - 'A';
+            }
+            const name = image[basename..image_len];
+            const other_is_dev = std.mem.indexOf(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("-dev")) != null;
+            is_app = other_is_dev == IS_DEV and
+                (std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multiprompt")) or
+                    std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("zigshell")));
+        }
+        var window_pid: DWORD = 0;
+        const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
+        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 8000, null) != 0;
+        const action = secondLaunchAction(alive, is_app, has_window, responsive);
+        var log_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log_buf, "second-launch: {s} pid={d} reason={s}", .{ @tagName(action), pid, if (!alive) "not_alive" else if (!is_app) "not_app" else if (!has_window) "no_window" else if (!responsive) "hung" else "responsive" }) catch "second-launch");
+        switch (action) {
+            .focus => {
+                app_state.g_focus_authorized_hwnd = owner_hwnd;
+                app_state.g_focus_authorized_until = GetTickCount64() + 1500;
+                _ = ShowWindow(owner_hwnd, SW_RESTORE);
+                keybd_event(VK_MENU, 0, 0, 0);
+                _ = SetForegroundWindow(owner_hwnd);
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+                _ = PostMessageW(owner_hwnd, WM_APP_FOCUS, 0, 0);
+                _ = CloseHandle(mutex);
+                return false;
+            },
+            .replace => {
+                const process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+                if (process != null) {
+                    defer _ = CloseHandle(process);
+                    if (TerminateProcess(process, 1) != 0 and WaitForSingleObject(process, 5000) == 0) {
+                        result = WaitForSingleObject(mutex, 5000);
+                    }
+                }
+            },
+            .refuse => result = WaitForSingleObject(mutex, 3000),
+        }
+    }
+    if (result != 0 and result != 0x80) {
+        _ = CloseHandle(mutex);
+        _ = MessageBoxW(hwnd, L("Multi Bot is already open for this account on this device."), L("Multi Bot"), 0x40);
+        return false;
+    }
+    app_state.g_account_instance_mutex = mutex;
+    var instance_buf: [96]u8 = undefined;
+    const instance = std.fmt.bufPrint(&instance_buf, "{d} {d}\n", .{ GetCurrentProcessId(), @intFromPtr(hwnd) }) catch return false;
+    if (!writeFileAtomicW(instance_path, instance)) debugLog("second-launch: owner record write failed");
+    return true;
+}
+
+pub fn accountBootstrap(hwnd: HANDLE) bool {
+    if (app_state.g_account_bypass) return true;
+    app_state.g_account_locked = false;
+    app_state.g_account_bootstrapping = false;
+    startAccountJob(.{ .kind = .startup });
+    _ = SetTimer(hwnd, TIMER_ACCOUNT, 5000, null);
+    return true;
+}
+
+fn syncAuthPath(buf: *[512]u8, suffix: []const u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, buf.len);
+    if (appdata_len == 0) return null;
+    const start: usize = @intCast(appdata_len);
+    const prefix = "\\ZigShell\\";
+    if (start + prefix.len + suffix.len >= buf.len) return null;
+    @memcpy(buf[start .. start + prefix.len], prefix);
+    @memcpy(buf[start + prefix.len .. start + prefix.len + suffix.len], suffix);
+    return buf[0 .. start + prefix.len + suffix.len];
+}
+
+fn ensureSyncAuthConfig() ?[]const u8 {
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, "sync-auth.json") orelse return null;
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return null;
+    if (GetFileAttributesW(wide.ptr) == 0xFFFF_FFFF and !writeFileAtomicW(path, SYNC_AUTH_CONFIG_TEMPLATE)) return null;
+    const stable = std.heap.page_allocator.dupe(u8, path) catch return null;
+    return stable;
+}
+
+fn openSyncAuthConfig() void {
+    const path = ensureSyncAuthConfig() orelse return;
+    defer std.heap.page_allocator.free(path);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, path) catch return;
+    defer std.heap.page_allocator.free(wide);
+    _ = ShellExecuteW(null, L("open"), wide.ptr, null, null, SW_SHOW);
+}
+
+fn loadSyncAuthConfig() ?sync_auth.Config {
+    var path_buf: [512]u8 = undefined;
+    if (syncAuthPath(&path_buf, "sync-auth.json")) |path| {
+        if (readFileAllocWin32(path, 64 * 1024)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            if (sync_auth.parseConfig(std.heap.page_allocator, bytes)) |config| return config else |_| {}
+        }
+    }
+    return sync_auth.defaultConfig(std.heap.page_allocator) catch null;
+}
+
+fn writeDpapiFile(suffix: []const u8, plaintext: []const u8) bool {
+    const protected = sync_auth.protect(std.heap.page_allocator, plaintext) catch return false;
+    defer std.heap.page_allocator.free(protected);
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, suffix) orelse return false;
+    return writeFileAtomicW(path, protected);
+}
+
+fn readDpapiFile(suffix: []const u8, max_len: usize) ?[]u8 {
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, suffix) orelse return null;
+    const protected = readFileAllocWin32(path, max_len) orelse return null;
+    defer std.heap.page_allocator.free(protected);
+    return sync_auth.unprotect(std.heap.page_allocator, protected) catch null;
+}
+
+pub fn hasMultipromptLogin() bool {
+    const token = readDpapiFile("sync-auth-tokens.dat", 512 * 1024) orelse return false;
+    defer freeSecret(token);
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, token, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .object) return false;
+    const access = parsed.value.object.get("access_token") orelse return false;
+    return access == .string and access.string.len > 0;
+}
+
+fn allowedSyncRedirect(uri: []const u8) bool {
+    return std.mem.eql(u8, uri, "multiprompt://auth/callback") or std.mem.eql(u8, uri, "multiprompt-dev://auth/callback");
+}
+
+fn registerSyncAuthProtocol(redirect_uri: []const u8) bool {
+    if (!allowedSyncRedirect(redirect_uri)) return false;
+    const scheme = redirect_uri[0 .. std.mem.indexOf(u8, redirect_uri, "://") orelse return false];
+    var exe_w: [520]u16 = undefined;
+    const exe_len = GetModuleFileNameW(null, &exe_w, exe_w.len);
+    if (exe_len == 0 or exe_len >= exe_w.len) return false;
+    var command: [1100]u16 = std.mem.zeroes([1100]u16);
+    command[0] = '"';
+    @memcpy(command[1 .. exe_len + 1], exe_w[0..exe_len]);
+    const tail = L("\" \"%1\"");
+    var pos: usize = exe_len + 1;
+    var ti: usize = 0;
+    while (tail[ti] != 0) : (ti += 1) {
+        command[pos] = tail[ti];
+        pos += 1;
+    }
+    command[pos] = 0;
+
+    var scheme_path_ascii: [160]u8 = undefined;
+    const scheme_path = std.fmt.bufPrint(&scheme_path_ascii, "Software\\Classes\\{s}", .{scheme}) catch return false;
+    const scheme_path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, scheme_path) catch return false;
+    defer std.heap.page_allocator.free(scheme_path_w);
+    var root: HANDLE = null;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, scheme_path_w.ptr, 0, null, 0, KEY_SET_VALUE, null, &root, null) != 0) return false;
+    defer _ = RegCloseKey(root);
+    var label_ascii: [128]u8 = undefined;
+    const label = std.fmt.bufPrint(&label_ascii, "URL:{s} Protocol", .{scheme}) catch return false;
+    const label_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, label) catch return false;
+    defer std.heap.page_allocator.free(label_w);
+    if (RegSetValueExW(root, null, 0, REG_SZ, @ptrCast(label_w.ptr), @intCast((label_w.len + 1) * 2)) != 0) return false;
+    if (RegSetValueExW(root, L("URL Protocol"), 0, REG_SZ, @ptrCast(L("")), 2) != 0) return false;
+
+    var command_path_ascii: [220]u8 = undefined;
+    const command_path = std.fmt.bufPrint(&command_path_ascii, "Software\\Classes\\{s}\\shell\\open\\command", .{scheme}) catch return false;
+    const command_path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, command_path) catch return false;
+    defer std.heap.page_allocator.free(command_path_w);
+    var command_key: HANDLE = null;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, command_path_w.ptr, 0, null, 0, KEY_SET_VALUE, null, &command_key, null) != 0) return false;
+    defer _ = RegCloseKey(command_key);
+    return RegSetValueExW(command_key, null, 0, REG_SZ, @ptrCast(&command), @intCast((pos + 1) * 2)) == 0;
+}
+
+fn startMultipromptLogin() bool {
+    const config = loadSyncAuthConfig() orelse {
+        showHeaderNoticeAscii("Could not start sign-in. Try again.", 6500, true);
+        return false;
+    };
+    defer sync_auth.deinitConfig(std.heap.page_allocator, config);
+    if (!allowedSyncRedirect(config.redirect_uri) or !registerSyncAuthProtocol(config.redirect_uri)) {
+        showHeaderNoticeAscii("Desktop login redirect must use multiprompt://auth/callback", 6500, true);
+        return false;
+    }
+    var verifier_buf: [64]u8 = undefined;
+    var state_buf: [43]u8 = undefined;
+    var challenge_buf: [43]u8 = undefined;
+    const pkce = sync_auth.generatePkce(&verifier_buf, &state_buf, &challenge_buf) catch return false;
+    var pending_buf: [160]u8 = undefined;
+    const pending = std.fmt.bufPrint(&pending_buf, "{s}\n{s}", .{ pkce.state, pkce.verifier }) catch return false;
+    if (!writeDpapiFile("sync-auth-pending.dat", pending)) return false;
+    const url = sync_auth.buildAuthorizationUrl(std.heap.page_allocator, config, pkce.state, pkce.challenge) catch return false;
+    defer std.heap.page_allocator.free(url);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, url) catch return false;
+    defer std.heap.page_allocator.free(wide);
+    const co = CoInitializeEx(null, COINIT_APARTMENTTHREADED);
+    const did_init = (co == 0 or co == 1);
+    const launched = ShellExecuteW(null, L("open"), wide.ptr, null, null, SW_SHOW);
+    if (did_init) CoUninitialize();
+    return @intFromPtr(launched) > 32;
+}
+
+pub fn parseSyncAuthCallbackArg() ?[]const u8 {
+    const cmdline = GetCommandLineA();
+    var len: usize = 0;
+    while (cmdline[len] != 0) : (len += 1) {}
+    const args = cmdline[0..len];
+    const prefixes = [_][]const u8{ "multiprompt://auth/callback", "multiprompt-dev://auth/callback" };
+    for (prefixes) |prefix| {
+        const at = std.mem.indexOf(u8, args, prefix) orelse continue;
+        var end = at;
+        while (end < args.len and args[end] != '"' and args[end] != ' ' and args[end] != '\r' and args[end] != '\n') : (end += 1) {}
+        return args[at..end];
+    }
+    return null;
+}
+
+fn parseHttpsTarget(url: []const u8) ?HttpsTarget {
+    const prefix = "https://";
+    if (!std.mem.startsWith(u8, url, prefix)) return null;
+    const rest = url[prefix.len..];
+    const slash = std.mem.indexOfScalar(u8, rest, '/') orelse rest.len;
+    var host = rest[0..slash];
+    var port: u16 = 443;
+    if (std.mem.lastIndexOfScalar(u8, host, ':')) |colon| {
+        port = std.fmt.parseInt(u16, host[colon + 1 ..], 10) catch return null;
+        host = host[0..colon];
+    }
+    if (host.len == 0) return null;
+    return .{ .host = host, .path = if (slash < rest.len) rest[slash..] else "/", .port = port };
+}
+
+fn exchangeSyncAuthCode(config: sync_auth.Config, code: []const u8, verifier: []const u8) ?[]u8 {
+    const target = parseHttpsTarget(config.token_endpoint) orelse return null;
+    const host_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, target.host) catch return null;
+    defer std.heap.page_allocator.free(host_w);
+    const path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, target.path) catch return null;
+    defer std.heap.page_allocator.free(path_w);
+    const form = sync_auth.buildTokenForm(std.heap.page_allocator, config, code, verifier) catch return null;
+    defer std.heap.page_allocator.free(form);
+    const session = WinHttpOpen(L("multiprompt/0.28"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0);
+    if (session == null) return null;
+    defer _ = WinHttpCloseHandle(session);
+    _ = WinHttpSetTimeouts(session, 10_000, 10_000, 15_000, 15_000);
+    const connection = WinHttpConnect(session, host_w.ptr, target.port, 0);
+    if (connection == null) return null;
+    defer _ = WinHttpCloseHandle(connection);
+    const request = WinHttpOpenRequest(connection, L("POST"), path_w.ptr, null, null, null, WINHTTP_FLAG_SECURE);
+    if (request == null) return null;
+    defer _ = WinHttpCloseHandle(request);
+    const headers = L("Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n");
+    if (WinHttpAddRequestHeaders(request, headers, 0xFFFFFFFF, WINHTTP_ADDREQ_FLAG_ADD) == 0) return null;
+    if (WinHttpSendRequest(request, null, 0, @constCast(form.ptr), @intCast(form.len), @intCast(form.len), 0) == 0) return null;
+    if (WinHttpReceiveResponse(request, null) == 0) return null;
+    var body: std.ArrayList(u8) = .empty;
+    defer body.deinit(std.heap.page_allocator);
+    while (body.items.len < 512 * 1024) {
+        var available: DWORD = 0;
+        if (WinHttpQueryDataAvailable(request, &available) == 0) return null;
+        if (available == 0) break;
+        const take: usize = @min(@as(usize, available), 512 * 1024 - body.items.len);
+        const old_len = body.items.len;
+        body.resize(std.heap.page_allocator, old_len + take) catch return null;
+        var read: DWORD = 0;
+        if (WinHttpReadData(request, body.items[old_len..].ptr, @intCast(take), &read) == 0) return null;
+        body.shrinkRetainingCapacity(old_len + read);
+        if (read == 0) break;
+    }
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, body.items, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const access = parsed.value.object.get("access_token") orelse return null;
+    if (access != .string or access.string.len == 0) return null;
+    return body.toOwnedSlice(std.heap.page_allocator) catch null;
+}
+
+pub fn handleSyncAuthCallback(url: []const u8) bool {
+    const callback = sync_auth.parseCallback(std.heap.page_allocator, url) catch return false;
+    defer sync_auth.deinitCallback(std.heap.page_allocator, callback);
+    if (callback.oauth_error != null) return false;
+    const code = callback.code orelse return false;
+    const returned_state = callback.state orelse return false;
+    const pending = readDpapiFile("sync-auth-pending.dat", 4096) orelse return false;
+    defer std.heap.page_allocator.free(pending);
+    const newline = std.mem.indexOfScalar(u8, pending, '\n') orelse return false;
+    const expected_state = pending[0..newline];
+    const verifier = pending[newline + 1 ..];
+    if (!std.mem.eql(u8, returned_state, expected_state)) return false;
+    const config = loadSyncAuthConfig() orelse return false;
+    defer sync_auth.deinitConfig(std.heap.page_allocator, config);
+    const tokens = exchangeSyncAuthCode(config, code, verifier) orelse return false;
+    defer std.heap.page_allocator.free(tokens);
+    if (!writeDpapiFile("sync-auth-tokens.dat", tokens)) return false;
+    var pending_path_buf: [512]u8 = undefined;
+    if (syncAuthPath(&pending_path_buf, "sync-auth-pending.dat")) |path| {
+        var wide_buf: [520]u16 = undefined;
+        if (win32WidePath(&wide_buf, path)) |wide| _ = DeleteFileW(wide.ptr);
+    }
+    return true;
+}
+
+fn promptForSecret(message: []const u8, username_prefill: []const u8) ?[]u8 {
+    var message_w: [512]u16 = undefined;
+    var caption_w: [32]u16 = undefined;
+    var target_w: [32]u16 = undefined;
+    var username_w: [256]u16 = std.mem.zeroes([256]u16);
+    var password_w: [256]u16 = std.mem.zeroes([256]u16);
+    defer std.crypto.secureZero(u16, &password_w);
+    const message_z = asciiToWideZ(message, &message_w) orelse return null;
+    const caption_z = asciiToWideZ("Multi Bot sync", &caption_w) orelse return null;
+    const target_z = asciiToWideZ("multiprompt sync", &target_w) orelse return null;
+    const prefill_len = @min(username_prefill.len, username_w.len - 1);
+    for (username_prefill[0..prefill_len], 0..) |c, i| username_w[i] = c;
+
+    const info = CREDUI_INFOW{
+        .cbSize = @sizeOf(CREDUI_INFOW),
+        .hwndParent = null,
+        .pszMessageText = message_z,
+        .pszCaptionText = caption_z,
+        .hbmBanner = null,
+    };
+    const flags = CREDUI_FLAGS_GENERIC_CREDENTIALS | CREDUI_FLAGS_KEEP_USERNAME | CREDUI_FLAGS_DO_NOT_PERSIST | CREDUI_FLAGS_EXCLUDE_CERTIFICATES;
+    const result = CredUIPromptForCredentialsW(&info, target_z, null, 0, &username_w, username_w.len, &password_w, password_w.len, null, flags);
+    if (result != 0) return null;
+    var len: usize = 0;
+    while (len < password_w.len and password_w[len] != 0) : (len += 1) {}
+    if (len == 0) return null;
+    return std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, password_w[0..len]) catch null;
+}
+
+fn freeSecret(secret: []u8) void {
+    std.crypto.secureZero(u8, secret);
+    std.heap.page_allocator.free(secret);
+}
+
+fn httpsBearerRequest(method: []const u8, url: []const u8, bearer: []const u8, body: ?[]const u8) ?HttpsBearerResult {
+    const target = parseHttpsTarget(url) orelse return null;
+    const host_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, target.host) catch return null;
+    defer std.heap.page_allocator.free(host_w);
+    const path_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, target.path) catch return null;
+    defer std.heap.page_allocator.free(path_w);
+    const method_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, method) catch return null;
+    defer std.heap.page_allocator.free(method_w);
+
+    const session = WinHttpOpen(L("multiprompt/sync"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0);
+    if (session == null) return null;
+    defer _ = WinHttpCloseHandle(session);
+    _ = WinHttpSetTimeouts(session, 10_000, 10_000, 15_000, 15_000);
+    const connection = WinHttpConnect(session, host_w.ptr, target.port, 0);
+    if (connection == null) return null;
+    defer _ = WinHttpCloseHandle(connection);
+    const request = WinHttpOpenRequest(connection, method_w.ptr, path_w.ptr, null, null, null, WINHTTP_FLAG_SECURE);
+    if (request == null) return null;
+    defer _ = WinHttpCloseHandle(request);
+
+    for (bearer) |c| if (c < 0x21 or c > 0x7e) return null;
+    const headers = std.fmt.allocPrint(std.heap.page_allocator, "Authorization: Bearer {s}\r\nContent-Type: application/json\r\nAccept: application/json\r\n", .{bearer}) catch return null;
+    defer freeSecret(headers);
+    const header_w = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, headers) catch return null;
+    defer {
+        std.crypto.secureZero(u16, header_w);
+        std.heap.page_allocator.free(header_w);
+    }
+    if (WinHttpAddRequestHeaders(request, header_w.ptr, 0xFFFFFFFF, WINHTTP_ADDREQ_FLAG_ADD) == 0) return null;
+
+    const body_ptr: ?*anyopaque = if (body) |b| @ptrCast(@constCast(b.ptr)) else null;
+    const body_len: DWORD = if (body) |b| @intCast(b.len) else 0;
+    if (WinHttpSendRequest(request, null, 0, body_ptr, body_len, body_len, 0) == 0) return null;
+    if (WinHttpReceiveResponse(request, null) == 0) return null;
+
+    var status: DWORD = 0;
+    var status_size: DWORD = @sizeOf(DWORD);
+    _ = WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null);
+
+    var out_body: std.ArrayList(u8) = .empty;
+    defer out_body.deinit(std.heap.page_allocator);
+    while (out_body.items.len < 512 * 1024) {
+        var available: DWORD = 0;
+        if (WinHttpQueryDataAvailable(request, &available) == 0) break;
+        if (available == 0) break;
+        const take: usize = @min(@as(usize, available), 512 * 1024 - out_body.items.len);
+        const old_len = out_body.items.len;
+        out_body.resize(std.heap.page_allocator, old_len + take) catch break;
+        var read: DWORD = 0;
+        if (WinHttpReadData(request, out_body.items[old_len..].ptr, @intCast(take), &read) == 0) break;
+        out_body.shrinkRetainingCapacity(old_len + read);
+        if (read == 0) break;
+    }
+    const owned = out_body.toOwnedSlice(std.heap.page_allocator) catch return null;
+    return .{ .status = @intCast(status), .body = owned };
+}
+
+fn fetchVault(bearer: []const u8) VaultFetch {
+    const res = httpsBearerRequest("GET", SYNC_VAULT_URL, bearer, null) orelse return .network_error;
+    defer std.heap.page_allocator.free(res.body);
+    if (res.status == 401 or res.status == 403) return .unauthorized;
+    if (res.status == 404) return .not_found;
+    if (res.status != 200) return .network_error;
+    const parsed = sync_vault.parseVaultGetResponse(std.heap.page_allocator, res.body) catch return .network_error;
+    return .{ .found = parsed };
+}
+
+fn putVault(bearer: []const u8, expected_revision: i64, envelope: []const u8) VaultPut {
+    const body = sync_vault.buildVaultPutBody(std.heap.page_allocator, expected_revision, envelope) catch return .network_error;
+    defer std.heap.page_allocator.free(body);
+    const res = httpsBearerRequest("PUT", SYNC_VAULT_URL, bearer, body) orelse return .network_error;
+    defer std.heap.page_allocator.free(res.body);
+    if (res.status == 401 or res.status == 403) return .unauthorized;
+    if (res.status == 409) return .conflict;
+    if (res.status != 200) return .network_error;
+    const revision = sync_vault.parseVaultPutRevision(std.heap.page_allocator, res.body) catch return .network_error;
+    return if (revision > expected_revision) .ok else .conflict;
+}
+
+fn deleteSyncAuthFile(suffix: []const u8) void {
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, suffix) orelse return;
+    var wide_buf: [520]u16 = undefined;
+    if (win32WidePath(&wide_buf, path)) |wide| _ = DeleteFileW(wide.ptr);
+}
+
+fn handleRejectedSyncToken() void {
+    deleteSyncAuthFile("sync-auth-tokens.dat");
+    showSyncMessage("Your Multi Bot sign-in has expired. Open Ctrl+K and choose Sign in to Multi Bot again.", true);
+}
+
+fn loadAccessToken() ?[]u8 {
+    const tokens = readDpapiFile("sync-auth-tokens.dat", 512 * 1024) orelse return null;
+    defer freeSecret(tokens);
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, tokens, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const access = parsed.value.object.get("access_token") orelse return null;
+    if (access != .string or access.string.len == 0) return null;
+    return std.heap.page_allocator.dupe(u8, access.string) catch null;
+}
+
+fn loadSignedInEmail() ?[]u8 {
+    const tokens = readDpapiFile("sync-auth-tokens.dat", 512 * 1024) orelse return null;
+    defer freeSecret(tokens);
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, tokens, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const id_token = parsed.value.object.get("id_token") orelse return null;
+    if (id_token != .string) return null;
+    return sync_auth.extractEmailFromIdToken(std.heap.page_allocator, id_token.string);
+}
+
+fn hasVaultKey() bool {
+    const key = readDpapiFile("sync-vault-key.dat", 256) orelse return false;
+    defer freeSecret(key);
+    return key.len == 32;
+}
+
+fn showSyncMessage(text: []const u8, is_error: bool) void {
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, text) catch return;
+    defer {
+        std.crypto.secureZero(u16, wide);
+        std.heap.page_allocator.free(wide);
+    }
+    _ = MessageBoxW(null, wide.ptr, L("Multi Bot sync"), if (is_error) @as(u32, 0x10) else @as(u32, 0x40));
+}
+
+fn setSecretClipboardText(text: []const u16) bool {
+    const hmem = allocUnicodeClipboardBlock(text);
+    if (hmem == null) return false;
+    var opened = false;
+    var attempt: u8 = 0;
+    while (attempt < 6) : (attempt += 1) {
+        if (OpenClipboard(app_state.g_main_hwnd) != 0) {
+            opened = true;
+            break;
+        }
+        Sleep(15);
+    }
+    if (!opened) {
+        _ = GlobalFree(hmem);
+        return false;
+    }
+    defer _ = CloseClipboard();
+    if (EmptyClipboard() == 0) {
+        _ = GlobalFree(hmem);
+        return false;
+    }
+    const opt_outs = [_]LPCWSTR{ L("ExcludeClipboardContentFromMonitorProcessing"), L("CanIncludeInClipboardHistory"), L("CanUploadToCloudClipboard") };
+    for (opt_outs) |name| {
+        const format = RegisterClipboardFormatW(name);
+        if (format == 0) continue;
+        const flag = GlobalAlloc(GMEM_MOVEABLE, @sizeOf(DWORD));
+        if (flag == null) continue;
+        if (GlobalLock(flag)) |ptr| {
+            const dword: *DWORD = @ptrCast(@alignCast(ptr));
+            dword.* = 0;
+            _ = GlobalUnlock(flag);
+        }
+        if (SetClipboardData(format, flag) == null) _ = GlobalFree(flag);
+    }
+    if (SetClipboardData(CF_UNICODETEXT, hmem) == null) {
+        _ = GlobalFree(hmem);
+        return false;
+    }
+    return true;
+}
+
+fn showRecoveryKeyDialog(recovery_key: [32]u8) void {
+    var encoded = sync_protocol.encodeRecoveryKey(recovery_key);
+    defer std.crypto.secureZero(u8, &encoded);
+    var encoded_w: [80]u16 = undefined;
+    defer std.crypto.secureZero(u16, &encoded_w);
+    for (encoded, 0..) |c, i| encoded_w[i] = c;
+    const copied = setSecretClipboardText(encoded_w[0..encoded.len]);
+
+    var msg_buf: [700]u8 = undefined;
+    defer std.crypto.secureZero(u8, &msg_buf);
+    const msg = std.fmt.bufPrint(
+        &msg_buf,
+        "Your Multi Bot recovery key{s}:\r\n\r\n{s}\r\n\r\nSave this recovery key somewhere safe. It is the only way back in if you forget your passphrase.\r\n\r\nClick OK once you have saved it.",
+        .{ if (copied) " (already copied to the clipboard)" else "", encoded },
+    ) catch return;
+    showSyncMessage(msg, false);
+}
+
+fn runVaultCreateFlow(access_token: []const u8, email: []const u8) void {
+    const first = promptForSecret("Choose a sync passphrase. You'll need it on your other devices too.", email) orelse return;
+    defer freeSecret(first);
+    if (first.len < 8) {
+        showSyncMessage("Use at least 8 characters for your sync passphrase. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    }
+    const second = promptForSecret("Enter your new sync passphrase again to confirm.", email) orelse return;
+    defer freeSecret(second);
+    if (!std.mem.eql(u8, first, second)) {
+        showSyncMessage("Those passphrases didn't match. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    }
+
+    var sealed = sync_protocol.sealNewWithRecovery(std.heap.page_allocator, first, &.{}) catch {
+        showSyncMessage("Could not create your sync vault. Try again.", true);
+        return;
+    };
+    defer std.heap.page_allocator.free(sealed.envelope);
+    defer std.crypto.secureZero(u8, &sealed.vault_key);
+    defer std.crypto.secureZero(u8, &sealed.recovery_key);
+
+    switch (putVault(access_token, 0, sealed.envelope)) {
+        .ok => {},
+        .conflict => {
+            showSyncMessage("Another device just set up this account's sync vault. Try Ctrl+K > Sign in to Multi Bot again to unlock it.", true);
+            return;
+        },
+        .network_error => {
+            showSyncMessage("Could not save your sync vault. Check your connection and try Ctrl+K > Sign in to Multi Bot again.", true);
+            return;
+        },
+        .unauthorized => {
+            handleRejectedSyncToken();
+            return;
+        },
+    }
+    showRecoveryKeyDialog(sealed.recovery_key);
+    if (!writeDpapiFile("sync-vault-key.dat", &sealed.vault_key)) {
+        showSyncMessage("Your vault was created, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again and enter your passphrase.", true);
+        return;
+    }
+}
+
+fn runVaultUnlockWithPassphrase(access_token: []const u8, email: []const u8, envelope: []const u8) void {
+    var attempt: u8 = 0;
+    while (attempt < 3) : (attempt += 1) {
+        const message = if (attempt == 0) "Enter your Multi Bot sync passphrase." else "Wrong passphrase. Try again.";
+        const passphrase = promptForSecret(message, email) orelse return;
+        defer freeSecret(passphrase);
+        var vault_key = sync_protocol.openEnvelopeVaultKey(std.heap.page_allocator, passphrase, envelope) catch |err| {
+            if (err == error.WrongPassphrase) continue;
+            showSyncMessage("Could not open your sync vault. Try Ctrl+K > Sign in to Multi Bot again.", true);
+            return;
+        };
+        defer std.crypto.secureZero(u8, &vault_key);
+        if (!writeDpapiFile("sync-vault-key.dat", &vault_key)) {
+            showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again.", true);
+            return;
+        }
+        _ = access_token;
+        showSyncMessage("Multi Bot sync is unlocked on this computer.", false);
+        return;
+    }
+    showSyncMessage("Wrong passphrase, three times. Use Ctrl+K > Sign in to Multi Bot again and choose the recovery key.", true);
+}
+
+fn runVaultUnlockWithRecoveryKey(access_token: []const u8, email: []const u8, revision: i64, envelope: []const u8) void {
+    const recovery_text = promptForSecret("Enter your Multi Bot recovery key.", email) orelse return;
+    defer freeSecret(recovery_text);
+    var recovered = sync_protocol.openEnvelopeWithRecoveryKey(std.heap.page_allocator, recovery_text, envelope) catch |err| {
+        const text = if (err == error.WrongRecoveryKey or err == error.BadRecoveryKeyFormat)
+            "That recovery key didn't work. Try Ctrl+K > Sign in to Multi Bot again."
+        else
+            "Could not open your sync vault with that recovery key. Try Ctrl+K > Sign in to Multi Bot again.";
+        showSyncMessage(text, true);
+        return;
+    };
+    var vault_key = recovered.vault_key;
+    defer std.crypto.secureZero(u8, &vault_key);
+    std.crypto.secureZero(u8, &recovered.vault_key);
+    sync_protocol.freeRecords(std.heap.page_allocator, recovered.records);
+
+    const new_first = promptForSecret("Choose a new sync passphrase.", email) orelse return;
+    defer freeSecret(new_first);
+    const new_second = promptForSecret("Enter your new sync passphrase again to confirm.", email) orelse return;
+    defer freeSecret(new_second);
+    if (new_first.len < 8 or !std.mem.eql(u8, new_first, new_second)) {
+        showSyncMessage("Those passphrases didn't match or were too short. Your recovery key still works. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    }
+
+    const rewrapped = sync_protocol.rewrapPassphrase(std.heap.page_allocator, vault_key, new_first, envelope) catch {
+        showSyncMessage("Could not set your new passphrase. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    };
+    defer std.heap.page_allocator.free(rewrapped);
+
+    var outcome = putVault(access_token, revision, rewrapped);
+    if (outcome == .conflict) {
+        outcome = retryRecoveryRewrap(access_token, recovery_text, vault_key, new_first);
+    }
+    if (outcome == .unauthorized) {
+        handleRejectedSyncToken();
+        return;
+    }
+    if (outcome != .ok) {
+        showSyncMessage("Your recovery key worked, but saving the new passphrase failed. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    }
+    if (!writeDpapiFile("sync-vault-key.dat", &vault_key)) {
+        showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again.", true);
+        return;
+    }
+    showSyncMessage("Multi Bot sync is unlocked with your new passphrase on this computer.", false);
+}
+
+fn retryRecoveryRewrap(access_token: []const u8, recovery_text: []const u8, vault_key: [32]u8, new_passphrase: []const u8) VaultPut {
+    const latest = switch (fetchVault(access_token)) {
+        .found => |found| found,
+        .unauthorized => return .unauthorized,
+        .not_found, .network_error => return .network_error,
+    };
+    defer std.heap.page_allocator.free(latest.envelope);
+    var reopened = sync_protocol.openEnvelopeWithRecoveryKey(std.heap.page_allocator, recovery_text, latest.envelope) catch return .conflict;
+    defer std.crypto.secureZero(u8, &reopened.vault_key);
+    sync_protocol.freeRecords(std.heap.page_allocator, reopened.records);
+    if (!std.mem.eql(u8, &reopened.vault_key, &vault_key)) return .conflict;
+    const rewrapped = sync_protocol.rewrapPassphrase(std.heap.page_allocator, vault_key, new_passphrase, latest.envelope) catch return .network_error;
+    defer std.heap.page_allocator.free(rewrapped);
+    return putVault(access_token, latest.revision, rewrapped);
+}
+
+pub fn runVaultFlowProcess() void {
+    const access_token = loadAccessToken() orelse {
+        showSyncMessage("Sign in to Multi Bot first (Ctrl+K > Sign in to Multi Bot).", true);
+        return;
+    };
+    defer freeSecret(access_token);
+
+    if (hasVaultKey()) {
+        showSyncMessage("Multi Bot sync is already unlocked on this computer.", false);
+        return;
+    }
+
+    const email = loadSignedInEmail() orelse (std.heap.page_allocator.dupe(u8, "your multiprompt account") catch return);
+    defer std.heap.page_allocator.free(email);
+
+    switch (fetchVault(access_token)) {
+        .network_error => showSyncMessage("Could not reach multiprompt sync. Check your connection and try again.", true),
+        .unauthorized => handleRejectedSyncToken(),
+        .not_found => runVaultCreateFlow(access_token, email),
+        .found => |found| {
+            defer std.heap.page_allocator.free(found.envelope);
+            const choice = @import("dialog.zig").show(
+                null,
+                L("Choose how to unlock your saved sessions on this computer."),
+                L("Unlock sync"),
+                &.{
+                    .{ .label = L("Later"), .result = 2 },
+                    .{ .label = L("Use recovery key"), .result = 7 },
+                    .{ .label = L("Enter passphrase"), .result = 6 },
+                },
+                2,
+            );
+            const IDYES = 6;
+            const IDNO = 7;
+            if (choice == IDYES) {
+                runVaultUnlockWithPassphrase(access_token, email, found.envelope);
+            } else if (choice == IDNO) {
+                runVaultUnlockWithRecoveryKey(access_token, email, found.revision, found.envelope);
+            }
+        },
+    }
+}
+
+pub fn parseSyncVaultUnlockArg() bool {
+    const cmdline = GetCommandLineA();
+    var len: usize = 0;
+    while (cmdline[len] != 0) : (len += 1) {}
+    return sync_auth.commandLineIsExactly(cmdline[0..len], "--sync-vault-unlock");
+}
+
+fn spawnSyncVaultUnlockHelper() bool {
+    var exe_w: [520]u16 = undefined;
+    const exe_len = GetModuleFileNameW(null, &exe_w, exe_w.len);
+    if (exe_len == 0 or exe_len >= exe_w.len) return false;
+    var cmd: [560]u16 = std.mem.zeroes([560]u16);
+    cmd[0] = '"';
+    @memcpy(cmd[1 .. exe_len + 1], exe_w[0..exe_len]);
+    const tail = L("\" --sync-vault-unlock");
+    var pos: usize = exe_len + 1;
+    var ti: usize = 0;
+    while (tail[ti] != 0) : (ti += 1) {
+        cmd[pos] = tail[ti];
+        pos += 1;
+    }
+    cmd[pos] = 0;
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    var pi = std.mem.zeroes(PROCESS_INFORMATION);
+    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 0, 0, null, null, &si, &pi) == 0) return false;
+    _ = CloseHandle(pi.hThread);
+    _ = CloseHandle(pi.hProcess);
+    return true;
+}
+
+fn syncSignOut() void {
+    const suffixes = [_][]const u8{ "sync-auth-tokens.dat", "sync-vault-key.dat", "sync-auth-pending.dat" };
+    for (suffixes) |suffix| deleteSyncAuthFile(suffix);
+    app_state.g_multiprompt_logged_in = false;
+}
+
+fn showSyncStatus() void {
+    if (!hasMultipromptLogin()) {
+        showSyncMessage("Not signed in to multiprompt sync.", false);
+        return;
+    }
+    const email = loadSignedInEmail();
+    defer if (email) |e| std.heap.page_allocator.free(e);
+    const email_text: []const u8 = if (email) |e| e else "unknown email";
+    const vault_text: []const u8 = if (hasVaultKey()) "unlocked on this computer" else "signed in, not yet unlocked on this computer";
+    var buf: [400]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "Signed in as {s}.\r\n\r\nVault: {s}.", .{ email_text, vault_text }) catch return;
+    showSyncMessage(msg, false);
+}
+
+test "account lock prevents restore and every shell spawn entry point" {
+    const old = app_state.g_account_locked;
+    app_state.g_account_locked = true;
+    defer app_state.g_account_locked = old;
+    const before = app_state.shell_count;
+    try std.testing.expectEqual(@as(u32, 0), restoreSession());
+    try std.testing.expect(!spawnShell(.cmd));
+    try std.testing.expect(!spawnShellWithSession(.tmux, "never-spawn", null, null));
+    try std.testing.expectEqual(before, app_state.shell_count);
+}
+
+test "cloud cache rewriting preserves localized local titles in the legacy reader" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cache = try account_layout.prepareCache(arena.allocator(), "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Krak\\u00f3w\"}]}", .{ .workspaces = &.{.{ .name = "Other" }}, .tabs = &.{} });
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 1), parseSessionTabs(cache, &tabs));
+    try std.testing.expectEqualSlices(u16, &.{ 'K', 'r', 'a', 'k', 0xF3, 'w' }, tabs[0].name[0..tabs[0].name_len]);
+}
+
+test "synchronized provenance is parsed independently and defaults off" {
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    const json = "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"Cloud\",\"tmux_session\":\"cloud-session\",\"sync_owned\":true},{\"kind\":\"cmd\",\"name\":\"Local\"}]}";
+    try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
+    try std.testing.expect(tabs[0].sync_owned);
+    try std.testing.expect(!tabs[1].sync_owned);
+}
+
+test "account offline startup unlocks local restore while invalid mid-session credentials preserve shells" {
+    const old_locked = app_state.g_account_locked;
+    const old_bootstrapping = app_state.g_account_bootstrapping;
+    const old_reauth = app_state.g_account_reauth;
+    const old_has_token = app_state.g_account_has_token;
+    const old_retry = app_state.g_account_retry;
+    const old_count = app_state.shell_count;
+    const old_shell = app_state.shells[0];
+    defer {
+        app_state.g_account_locked = old_locked;
+        app_state.g_account_bootstrapping = old_bootstrapping;
+        app_state.g_account_reauth = old_reauth;
+        app_state.g_account_has_token = old_has_token;
+        app_state.g_account_retry = old_retry;
+        app_state.shell_count = old_count;
+        app_state.shells[0] = old_shell;
+    }
+    app_state.g_account_bootstrapping = true;
+    app_state.g_account_locked = true;
+    app_state.g_account_retry = .{};
+    accountSyncFailed(true);
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_retry.notified);
+    app_state.g_account_bootstrapping = false;
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 123;
+    app_state.shells[0].browser_enabled = true;
+    const reply = try std.heap.page_allocator.create(LayoutReply);
+    reply.* = .{ .job = .{ .kind = .pull }, .unauthorized = true };
+    handleLayoutReply(@bitCast(@intFromPtr(reply)));
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_reauth);
+    try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
+    try std.testing.expectEqual(@as(u32, 123), app_state.shells[0].shell_id);
+    try std.testing.expect(app_state.shells[0].browser_enabled);
+}
+
+test "Esc cancels account sign-in and transport exits before opening a browser" {
+    const old_active = app_state.g_account_login_active;
+    defer {
+        app_state.g_account_login_active = old_active;
+        app_state.g_account_cancel.store(false, .release);
+    }
+    app_state.g_account_login_active = true;
+    accountCancelSignIn();
+    try std.testing.expect(app_state.g_account_cancel.load(.acquire));
+    try std.testing.expectError(error.Cancelled, account_client.signIn(&app_state.g_account_cancel));
+    const reply = try std.heap.page_allocator.create(LayoutReply);
+    reply.* = .{ .job = .{ .kind = .login }, .cancelled = true };
+    app_state.g_account_busy = true;
+    handleLayoutReply(@bitCast(@intFromPtr(reply)));
+    try std.testing.expect(!app_state.g_account_busy);
+    try std.testing.expect(!app_state.g_account_login_active);
+}
+
+test "authenticated layout capacity failure cannot relock an already running process" {
+    const old_locked = app_state.g_account_locked;
+    const old_bootstrapping = app_state.g_account_bootstrapping;
+    const old_token = app_state.g_account_has_token;
+    const old_retry = app_state.g_account_retry;
+    const old_count = app_state.shell_count;
+    defer {
+        app_state.g_account_locked = old_locked;
+        app_state.g_account_bootstrapping = old_bootstrapping;
+        app_state.g_account_has_token = old_token;
+        app_state.g_account_retry = old_retry;
+        app_state.shell_count = old_count;
+    }
+    app_state.g_account_locked = true;
+    app_state.g_account_bootstrapping = false;
+    app_state.shell_count = 0;
+    var workspaces: [MAX_LWS + 1]session_layout.Workspace = undefined;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (&workspaces, 0..) |*ws, i| ws.* = .{ .name = try std.fmt.allocPrint(arena.allocator(), "Cloud{d}", .{i}) };
+    const reply = try std.heap.page_allocator.create(LayoutReply);
+    reply.* = .{ .job = .{ .kind = .login }, .has_token = true, .bytes = try session_layout.encode(std.heap.page_allocator, .{ .workspaces = &workspaces, .tabs = &.{} }) };
+    handleLayoutReply(@bitCast(@intFromPtr(reply)));
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_has_token);
+}
+
+test "device key errors stay silent for background jobs and explicit jobs retain one plain message" {
+    for ([_]AccountJobKind{ .startup, .login, .pull, .push, .devices, .revoke, .signout, .device_keys, .decide_keys, .remove_host }) |kind| {
+        var reply: LayoutReply = .{ .job = .{ .kind = kind } };
+        defer if (reply.key_error) |text| std.heap.page_allocator.free(text);
+        accountDeviceKeyError(&reply, "The public key file id_ed25519.pub is missing next to your private key.");
+        accountDeviceKeyError(&reply, "Generic fallback");
+        if (kind == .device_keys or kind == .decide_keys) {
+            try std.testing.expectEqualStrings("The public key file id_ed25519.pub is missing next to your private key.", reply.key_error.?);
+        } else try std.testing.expect(reply.key_error == null);
+    }
+}
+
+test "device prompt guard blocks nested rounds and background jobs until decision completion" {
+    const old_busy = app_state.g_account_busy;
+    const old_guard = g_account_key_prompt_active;
+    const old_status = app_state.g_account_status;
+    const old_login = app_state.g_account_login_active;
+    defer {
+        app_state.g_account_busy = old_busy;
+        g_account_key_prompt_active = old_guard;
+        app_state.g_account_status = old_status;
+        app_state.g_account_login_active = old_login;
+    }
+    app_state.g_account_busy = false;
+    g_account_key_prompt_active = true;
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[{\"device_id\":\"other\",\"name\":\"Laptop\",\"public_key\":\"ssh-ed25519 AAAA\",\"status\":\"pending\"}]}", true);
+    try std.testing.expect(g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
+    startAccountJob(.{ .kind = .pull });
+    try std.testing.expect(!app_state.g_account_busy);
+    const reply = try std.heap.page_allocator.create(LayoutReply);
+    reply.* = .{ .job = .{ .kind = .decide_keys }, .cancelled = true };
+    handleLayoutReply(@bitCast(@intFromPtr(reply)));
+    try std.testing.expect(!g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[]}", true);
+    try std.testing.expect(!g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
+}
+
+test "ISSUE-502 optimistic account startup blocks only a confirmed signed out result" {
+    const locked = app_state.g_account_locked;
+    const bootstrapping = app_state.g_account_bootstrapping;
+    const reauth = app_state.g_account_reauth;
+    const token = app_state.g_account_has_token;
+    const count = app_state.shell_count;
+    const shell = app_state.shells[0];
+    const status = app_state.g_account_status;
+    const retry = app_state.g_account_retry;
+    defer {
+        app_state.g_account_locked = locked;
+        app_state.g_account_bootstrapping = bootstrapping;
+        app_state.g_account_reauth = reauth;
+        app_state.g_account_has_token = token;
+        app_state.shell_count = count;
+        app_state.shells[0] = shell;
+        app_state.g_account_status = status;
+        app_state.g_account_retry = retry;
+    }
+    app_state.g_account_bootstrapping = false;
+    app_state.g_account_locked = false;
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 42;
+    accountSyncFailed(true);
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
+    const signed_in = try std.heap.page_allocator.create(LayoutReply);
+    signed_in.* = .{ .job = .{ .kind = .startup }, .has_token = true, .bytes = try std.heap.page_allocator.dupe(u8, "not a layout") };
+    handleLayoutReply(@bitCast(@intFromPtr(signed_in)));
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_has_token);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
+    const signed_out = try std.heap.page_allocator.create(LayoutReply);
+    signed_out.* = .{ .job = .{ .kind = .startup }, .unauthorized = true };
+    handleLayoutReply(@bitCast(@intFromPtr(signed_out)));
+    try std.testing.expect(app_state.g_account_locked);
+    try std.testing.expectEqualStrings("Sign in to Multi Bot to open your workspaces.", app_state.g_account_status);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
+}

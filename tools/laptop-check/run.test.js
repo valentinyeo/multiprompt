@@ -1,0 +1,90 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const folder = path.dirname(fileURLToPath(import.meta.url));
+const runner = path.join(folder, 'run.mjs');
+const checkScript = path.join(folder, 'check.ps1');
+const setupScript = path.join(folder, 'setup.sh');
+const requiredChecks = ['install', 'start', 'chats', 'computer-view', 'sync', 'memory', 'crashes'];
+
+const run = (...args) => spawnSync(process.execPath, [runner, ...args], { encoding: 'utf8', timeout: 120000 });
+
+test('the runner proves its own tag, ticket, verdict and comment rules', () => {
+  const result = run('--self-test');
+  assert.equal(result.status, 0, 'runner self-test');
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.selfTest, 'pass');
+  assert.equal(report.cases, 12);
+});
+
+test('the runner explains its flags without touching a laptop', () => {
+  const result = run('--help');
+  assert.equal(result.status, 0, 'runner usage');
+  for (const flag of ['--host', '--tag', '--no-post', '--state-dir', '--self-test']) assert.match(result.stdout, new RegExp(flag));
+});
+
+test('the check script publishes exactly the required checks in order', () => {
+  assert.ok(fs.existsSync(checkScript), 'check.ps1 is shipped');
+  const source = fs.readFileSync(checkScript, 'utf8');
+  assert.deepEqual([...source.matchAll(/Add-Check '([a-z-]+)'/g)].map(match => match[1]), requiredChecks);
+});
+
+test('the check script writes one result block and fails the run when a check fails', () => {
+  assert.ok(fs.existsSync(checkScript), 'check.ps1 is shipped');
+  const source = fs.readFileSync(checkScript, 'utf8');
+  assert.equal((source.match(/LAPTOP_CHECK_JSON_BEGIN/g) || []).length, 1);
+  assert.equal((source.match(/LAPTOP_CHECK_JSON_END/g) || []).length, 1);
+  assert.match(source, /-not \$_\.ok \}\)\.Count -gt 0\) \{ exit 1 \}/);
+  assert.doesNotMatch(source, /Remove-Item/);
+});
+
+test('the setup script installs a ten minute timer that runs the runner and can be stopped', () => {
+  assert.ok(fs.existsSync(setupScript), 'setup.sh is shipped');
+  const source = fs.readFileSync(setupScript, 'utf8');
+  assert.match(source, /OnUnitActiveSec=10min/);
+  assert.match(source, /systemctl --user enable --now/);
+  assert.match(source, /tools\/laptop-check\/run\.mjs/);
+  assert.doesNotMatch(source, /push|commit/);
+});
+
+test('the setup script keeps a runner name that contains a space', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'laptop-check-setup-'));
+  try {
+    const bin = path.join(dir, 'bin');
+    const home = path.join(dir, 'home');
+    const repo = path.join(dir, 'repo');
+    fs.mkdirSync(bin);
+    fs.mkdirSync(home);
+    fs.mkdirSync(repo);
+    fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'lh'), '#!/bin/sh\n[ "$1" = machines ] && echo laptop2\nexit 0\n', { mode: 0o755 });
+    const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'check', GIT_AUTHOR_EMAIL: 'check@example.com', GIT_COMMITTER_NAME: 'check', GIT_COMMITTER_EMAIL: 'check@example.com' };
+    const git = (...args) => execFileSync('git', args, { env: gitEnv });
+    git('init', '-q', repo);
+    git('-C', repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('-C', repo, 'branch', '-q', '-M', 'master');
+    git('-C', repo, 'remote', 'add', 'origin', repo);
+
+    const result = spawnSync('bash', [setupScript], {
+      encoding: 'utf8',
+      timeout: 120000,
+      env: {
+        ...process.env, HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        LAPTOP_CHECK_REPO: repo, LAPTOP_CHECK_HOST: 'laptop2', LAPTOP_CHECK_AGENT: 'RUNNER 14',
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const unit = fs.readFileSync(path.join(home, '.config/systemd/user/multiprompt-laptop-check.service'), 'utf8');
+    assert.match(unit, /^Environment="LAPTOP_CHECK_AGENT=RUNNER 14"$/m);
+    assert.match(unit, /^ExecStartPre=-\/usr\/bin\/git -C \S+ fetch --depth 1 origin master$/m);
+    assert.match(unit, /^ExecStartPre=-\/usr\/bin\/git -C \S+ checkout -q --detach origin\/master$/m);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

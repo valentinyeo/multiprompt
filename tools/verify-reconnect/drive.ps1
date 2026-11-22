@@ -1,0 +1,271 @@
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Ssh, [Parameter(Mandatory)][string]$Output)
+$ErrorActionPreference = 'Stop'
+New-Item -ItemType Directory -Force $Output | Out-Null
+$Output = (Resolve-Path $Output).Path
+$Exe = (Resolve-Path $Exe).Path
+$Ssh = (Resolve-Path $Ssh).Path
+Start-Transcript "$Output/driver.log"
+Add-Type -AssemblyName System.Drawing
+Add-Type -Path "$PSScriptRoot/desktop.cs"
+[void][ReconnectDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+[ReconnectDesktop]::StartSpy()
+$profile = Join-Path $env:RUNNER_TEMP ("reconnect-" + [guid]::NewGuid().ToString('N'))
+$state = "$profile/state"
+$settings = "$profile/roaming/ZigShell"
+$log = "$settings/debug.log"
+$results = [Collections.Generic.List[object]]::new()
+$app = $null
+$failure = $null
+function Read-Log {
+    if (!(Test-Path $log)) { return '' }
+    for ($retry = 0; $retry -lt 100; $retry++) {
+        $stream = $null
+        $reader = $null
+        try {
+            $stream = [IO.File]::Open($log, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+            $reader = [IO.StreamReader]::new($stream)
+            return $reader.ReadToEnd()
+        } catch [IO.IOException] {
+            if ($retry -eq 99) { throw }
+            Start-Sleep -Milliseconds 10
+        } finally {
+            if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() }
+        }
+    }
+}
+function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 200 } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Timed out: $Description"
+}
+function Shot([string]$Name) {
+    $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Output/$Name.png", [Drawing.Imaging.ImageFormat]::Png) }
+    finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Tab([int]$Number) {
+    [ReconnectDesktop]::Activate($main)
+    Start-Sleep -Milliseconds 250
+    [ReconnectDesktop]::Key(0x11, $false)
+    [ReconnectDesktop]::Key([ushort](0x30 + $Number), $false)
+    [ReconnectDesktop]::Key([ushort](0x30 + $Number), $true)
+    [ReconnectDesktop]::Key(0x11, $true)
+    Start-Sleep -Milliseconds 800
+}
+function Transport([string]$Name) {
+    foreach ($file in Get-ChildItem "$state/transport-*.txt" -ErrorAction SilentlyContinue) {
+        if ([IO.File]::ReadAllText($file.FullName).Trim() -eq $Name) {
+            $id = [int]($file.BaseName -replace '^transport-', '')
+            $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+            if ($process -and $process.Path -eq $Ssh) { return $process }
+        }
+    }
+    return $null
+}
+function Publish($Result) {
+    $results.Add($Result)
+    $line = '{0} case={1} reposition_lines={2} focus_changed={3} focus_events={4} typed_chars_lost={5} session_gone_count={6} attempts_after_gone={7}' -f $(if ($Result.pass) { 'PASS' } else { 'FAIL' }), $Result.case, $Result.reposition_lines, $Result.focus_changed.ToString().ToLower(), $Result.focus_events, $Result.typed_chars_lost, $Result.session_gone_count, $Result.attempts_after_gone
+    Write-Output $line
+    if ($env:GITHUB_STEP_SUMMARY) { Add-Content $env:GITHUB_STEP_SUMMARY $line }
+    $results.ToArray() | ConvertTo-Json -Depth 8 -AsArray | Set-Content "$Output/summary.json"
+}
+function Measure-Reconnect([string]$Case, [string]$Suffix, $Before, [IntPtr]$Composer) {
+    $offset = (Read-Log).Length
+    $old = Transport 'verify-two'
+    $baseText = if ($Composer -ne [IntPtr]::Zero) { [ReconnectDesktop]::Text($Composer) } else { $null }
+    $typed = [Text.StringBuilder]::new()
+    $eventStart = [ReconnectDesktop]::EventCount()
+    @{case=$Case; action='kill background transport'; pid=$old.Id; log_offset=$offset; typing=($Composer -ne [IntPtr]::Zero); utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-$Case.json"
+    Stop-Process -Id $old.Id -Force
+    $samples = [Collections.Generic.List[object]]::new()
+    $deadline = [DateTime]::UtcNow.AddSeconds(100)
+    $connected = $false
+    do {
+        $focus = [ReconnectDesktop]::Focus($main)
+        $samples.Add(@{utc=[DateTime]::UtcNow.ToString('o'); foreground=$focus[0]; focus=$focus[1]})
+        if ($Composer -ne [IntPtr]::Zero -and $typed.Length -lt 400) {
+            $letter = [char](0x61 + ($typed.Length % 26))
+            [ReconnectDesktop]::Type([ushort](0x41 + ($typed.Length % 26)))
+            [void]$typed.Append($letter)
+        }
+        $slice = (Read-Log).Substring($offset)
+        $match = [regex]::Match($slice, 'respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)=(\d+)')
+        $current = Transport 'verify-two'
+        if ($match.Success -and $current -and $current.Id -ne $old.Id -and $slice -match "ssh-reconnect ok id=$($match.Groups[1].Value)\b") { $connected = $true; break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Start-Sleep -Seconds 2
+    $after = [ReconnectDesktop]::Focus($main)
+    $samples.Add(@{utc=[DateTime]::UtcNow.ToString('o'); foreground=$after[0]; focus=$after[1]})
+    $events = [ReconnectDesktop]::EventsSince($eventStart)
+    $text = if ($Composer -ne [IntPtr]::Zero) { [ReconnectDesktop]::Text($Composer) } else { $null }
+    $slice = (Read-Log).Substring($offset)
+    [IO.File]::WriteAllText("$Output/case-$Case.log", $slice)
+    @{before=$Before; after=$after; samples=$samples.ToArray(); events=@($events); connected=$connected; base_text=$baseText; typed=$typed.ToString(); text=$text} | ConvertTo-Json -Depth 6 | Set-Content "$Output/focus$Suffix.json"
+    $reposition = @($slice -split "`n" | Where-Object { $_ -match '\[reposition\]|posBrowser|posMasks' }).Count
+    $sampled = @($samples | Where-Object { $_.foreground -ne $Before[0] -or $_.focus -ne $Before[1] }).Count -gt 0
+    $focusEvents = @($events | Where-Object { ($_.ev -eq 3 -and $_.hwnd -ne $Before[0]) -or ($_.ev -eq 0x8005 -and $_.hwnd -ne $Before[1]) }).Count
+    $changed = $sampled -or $focusEvents -gt 0
+    $lost = 0
+    if ($Composer -ne [IntPtr]::Zero) {
+        $added = if ($text.StartsWith($baseText)) { $text.Substring($baseText.Length) } else { '' }
+        $lost = if ($added -ceq $typed.ToString()) { 0 } else { [Math]::Max(1, $typed.Length - $added.Length) }
+    }
+    Shot "case-$Case"
+    Publish @{case=$Case; pass=($connected -and $reposition -eq 0 -and !$changed -and $lost -eq 0); reposition_lines=$reposition; focus_changed=$changed; focus_events=$focusEvents; typed_chars=$typed.Length; typed_chars_lost=$lost; session_gone_count=0; attempts_after_gone=0; reconnected=$connected; log_offset=$offset}
+    if (!$connected) { throw "Background tab never completed reconnect in case $Case" }
+}
+try {
+    New-Item -ItemType Directory -Force $settings, $state, "$profile/local" | Out-Null
+    $env:APPDATA = "$profile/roaming"
+    $env:LOCALAPPDATA = "$profile/local"
+    $env:MULTIPROMPT_NO_LOGIN = '1'
+    $env:ZIGSHELL_DEBUG = '1'
+    $env:MP_VERIFY_STATE = $state
+    [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
+    [IO.File]::WriteAllText("$state/sessions.txt", "verify-one`nverify-two`n")
+    @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(
+        @{kind='tmux'; name='Verify one'; manual=$true; tmux_host=0; tmux_session='verify-one'; cv=$false; pid=0},
+        @{kind='tmux'; name='Verify two'; manual=$true; tmux_host=0; tmux_session='verify-two'; cv=$false; pid=0}
+    )} | ConvertTo-Json -Depth 6 | Set-Content "$settings/session.json"
+    Copy-Item "$settings/session.json" "$Output/seed-session.json"
+    $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
+    $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'two owned transports and attach commands' {
+        $text = Read-Log
+        if ((Transport 'verify-one') -and (Transport 'verify-two') -and
+            ($text -match "session='verify-one'") -and ($text -match "session='verify-two'")) { $true }
+    })
+    [void][ReconnectDesktop]::SetForegroundWindow($main)
+    Start-Sleep -Seconds 18
+    foreach ($number in 1, 2) {
+        $readyOffset = (Read-Log).Length
+        $readyName = if ($number -eq 1) { 'verify-one' } else { 'verify-two' }
+        $readyTransport = Transport $readyName
+        Stop-Process -Id $readyTransport.Id -Force
+        [void](Wait-For "tab $number confirmed connected" {
+            $ready = (Read-Log).Substring($readyOffset)
+            $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) (?:new_id|id)=(\d+)")
+            if ($spawn.Success -and $ready -match "ssh-reconnect ok id=$($spawn.Groups[1].Value)\b") { $true }
+        })
+    }
+    Tab 1
+    $identity = [regex]::Matches((Read-Log), 'respawnShellInPlace ok kind=tmux idx=0 (?:new_id|id)=(\d+)')[-1].Groups[1].Value
+    $sessionsBefore = (Get-FileHash "$state/sessions.txt" -Algorithm SHA256).Hash
+    [ReconnectDesktop]::Activate($main)
+    $paletteOffset = (Read-Log).Length
+    [ReconnectDesktop]::Key(0x11, $false)
+    [ReconnectDesktop]::Type(0x4B)
+    [ReconnectDesktop]::Key(0x11, $true)
+    [void](Wait-For 'owned Ctrl+K palette' { (Read-Log).Substring($paletteOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' } 20)
+    foreach ($letter in 'REATTACH'.ToCharArray()) { [ReconnectDesktop]::Type([ushort][char]$letter) }
+    [void](Wait-For 'Reattach command selected' { (Read-Log).Substring($paletteOffset) -match '\[palette\] ready chars=8 count=[1-9]\d* target=6206(?:\r?\n|$)' } 20)
+    Shot 'reattach-palette'
+    $reattachOffset = (Read-Log).Length
+    $dropped = Transport 'verify-one'
+    Stop-Process -Id $dropped.Id -Force
+    $recovery = [Diagnostics.Stopwatch]::StartNew()
+    [ReconnectDesktop]::Type(0x0D)
+    [void](Wait-For 'same tab reattached after Enter' {
+        $trace = (Read-Log).Substring($reattachOffset)
+        $transport = Transport 'verify-one'
+        $surface = [ReconnectDesktop]::InputSurface($main)
+        if ($transport -and $transport.Id -ne $dropped.Id -and $surface -ne [IntPtr]::Zero -and
+            $surface.ToInt64() -eq [long]([IO.File]::ReadAllText("$state/window-$($transport.Id).txt").Trim()) -and
+            $trace -match "ssh-reconnect ok id=$identity\b") { $true }
+    } 5)
+    $recovery.Stop()
+    $reattachTrace = (Read-Log).Substring($reattachOffset)
+    $respawn = [regex]::Match($reattachTrace, 'respawnShellInPlace ok kind=tmux idx=0 id=(\d+)')
+    $sameTab = $respawn.Success -and $respawn.Groups[1].Value -eq $identity
+    $recovered = Transport 'verify-one'
+    $invocation = [IO.File]::ReadAllText("$state/invocation-$($recovered.Id).txt")
+    $attachOnly = $invocation -match "tmux attach -t '?=verify-one" -and $invocation -notmatch 'tmux new-session'
+    $unchanged = $sessionsBefore -eq (Get-FileHash "$state/sessions.txt" -Algorithm SHA256).Hash
+    $pass = $sameTab -and $attachOnly -and $unchanged -and $recovery.Elapsed.TotalMilliseconds -le 5000
+    [IO.File]::WriteAllText("$Output/reattach.log", $reattachTrace)
+    @{pass=$pass; elapsed_ms=$recovery.Elapsed.TotalMilliseconds; tab_id_before=$identity; tab_id_after=$respawn.Groups[1].Value; session='verify-one'; sessions_unchanged=$unchanged; attach_only=$attachOnly; transport_before=$dropped.Id; transport_after=$recovered.Id; ssh_command=$invocation; boundary='ephemeral SSH stand-in; production attach command and native palette'} | ConvertTo-Json -Depth 4 | Set-Content "$Output/reattach.json"
+    Shot 'reattach-recovered'
+    if (!$pass) { throw 'Reattach replaced a session, changed tab identity or exceeded five seconds' }
+    Write-Output 'REATTACH_PALETTE_SAME_TAB_OK'
+    Tab 1
+    $inputSurface = Wait-For 'visible native console' { $h = [ReconnectDesktop]::InputSurface($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [ReconnectDesktop]::Click($inputSurface)
+    Start-Sleep -Seconds 3
+    $before = [ReconnectDesktop]::Focus($main)
+    if ($before[0] -ne $main.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: app or embedded console must be foreground' }
+    if ($before[1] -ne $inputSurface.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
+    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; transport_paths=@((Transport 'verify-one').Path, (Transport 'verify-two').Path); two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    $positiveControl = @([regex]::Matches((Read-Log), '\[reposition\]')).Count
+    if ($positiveControl -lt 1) { throw 'Doctor: console layout positive control missing' }
+    if ([ReconnectDesktop]::Owner($inputSurface) -ne (Transport 'verify-one').Id) { throw 'Doctor: active console is not tab one' }
+    @{layout_positive_control=$positiveControl} | ConvertTo-Json | Set-Content "$Output/layout-control.json"
+    Shot 'before'
+    Measure-Reconnect 'A' '' $before ([IntPtr]::Zero)
+    [ReconnectDesktop]::Activate($main)
+    Start-Sleep -Milliseconds 250
+    [ReconnectDesktop]::Key(0x12, $false)
+    [ReconnectDesktop]::Type(0x43)
+    [ReconnectDesktop]::Key(0x12, $true)
+    $composer = Wait-For 'chat composer' { $h = [ReconnectDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 30
+    Start-Sleep -Seconds 1
+    [ReconnectDesktop]::Click($composer)
+    Start-Sleep -Seconds 3
+    $beforeF = [ReconnectDesktop]::Focus($main)
+    if ($beforeF[0] -ne $main.ToInt64()) { throw 'Doctor: app must be foreground in Chat View' }
+    if ($beforeF[1] -ne $composer.ToInt64()) { throw 'Doctor: chat composer must own typing focus' }
+    @{main=$main.ToInt64(); composer=$composer.ToInt64(); focus=$beforeF; chat_view=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor-F.json"
+    Shot 'before-F'
+    Measure-Reconnect 'F' '-F' $beforeF $composer
+    $offsetB = (Read-Log).Length
+    $current = Transport 'verify-two'
+    [IO.File]::WriteAllText("$state/sessions.next", "")
+    Move-Item "$state/sessions.next" "$state/sessions.txt" -Force
+    @{case='B'; action='delete last sessions then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
+    Stop-Process -Id $current.Id -Force
+    $deadline = [DateTime]::UtcNow.AddSeconds(40)
+    $ended = $null
+    do {
+        $sliceB = (Read-Log).Substring($offsetB)
+        $ended = [regex]::Match($sliceB, 'ssh-reconnect ended id=(\d+) reason=session-gone')
+        if ($ended.Success) { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $observeOffset = (Read-Log).Length
+    $observationTimer = [Diagnostics.Stopwatch]::StartNew()
+    Start-Sleep -Seconds 60
+    while ($observationTimer.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 10 }
+    $observationTimer.Stop()
+    $observeSeconds = $observationTimer.Elapsed.TotalSeconds
+    $sliceB = (Read-Log).Substring($offsetB)
+    $observation = (Read-Log).Substring($observeOffset)
+    $goneCount = @([regex]::Matches($sliceB, 'ssh-reconnect ended id=\d+ reason=session-gone')).Count
+    $idPattern = if ($ended.Success) { [regex]::Escape($ended.Groups[1].Value) } else { '\d+' }
+    $attempts = @([regex]::Matches($observation, "ssh-reconnect attempt=\d+ id=$idPattern\b")).Count
+    [IO.File]::WriteAllText("$Output/case-B.log", $sliceB)
+    [IO.File]::WriteAllText("$Output/after-gone.log", $observation)
+    Tab 2
+    Start-Sleep -Seconds 1
+    Shot 'case-B-session-ended'
+    Publish @{case='B'; pass=($ended.Success -and $goneCount -eq 1 -and $attempts -eq 0 -and $observeSeconds -ge 60); reposition_lines=0; focus_changed=$false; focus_events=0; typed_chars=0; typed_chars_lost=0; session_gone_count=$goneCount; attempts_after_gone=$attempts; observed_seconds=$observeSeconds; ended_id=$(if ($ended.Success) { $ended.Groups[1].Value } else { $null })}
+} catch {
+    $failure = $_.ToString()
+    Write-Output "HARNESS ERROR $failure"
+    $failure | Set-Content "$Output/error.txt"
+} finally {
+    try { Shot 'final' } catch { Write-Output "Screenshot error: $_" }
+    if ($app -and !$app.HasExited) { & taskkill /PID $app.Id /T /F | Out-Null }
+    foreach ($file in Get-ChildItem "$state/transport-*.txt" -ErrorAction SilentlyContinue) {
+        $id = [int]($file.BaseName -replace '^transport-', '')
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($process -and $process.Path -eq $Ssh) { Stop-Process -Id $id -Force }
+    }
+    if (Test-Path $log) { Copy-Item $log "$Output/debug.log" }
+    if (Test-Path $state) { Copy-Item $state "$Output/stand-in" -Recurse -Force }
+    $alive = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Ssh -or ($app -and $_.ProcessId -eq $app.Id) })
+    @{app_pid=$(if ($app) { $app.Id } else { $null }); remaining_owned_processes=$alive.Count; evidence_preserved=(Test-Path "$Output/debug.log")} | ConvertTo-Json | Set-Content "$Output/cleanup.json"
+    Remove-Item $profile -Recurse -Force -ErrorAction SilentlyContinue
+    Stop-Transcript
+}
+if ($failure -or $results.Count -ne 3 -or @($results | Where-Object { !$_.pass }).Count -gt 0) { exit 1 }

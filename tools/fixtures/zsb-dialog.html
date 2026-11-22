@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ZSB pending dialog</title>
+<button id="leave-page" type="button" onclick="location.href='/tools/fixtures/zsb-dialog-target.html'">Leave page</button>
+<script>
+  addEventListener("beforeunload", event => {
+    event.preventDefault();
+    event.returnValue = "";
+  });
+</script>

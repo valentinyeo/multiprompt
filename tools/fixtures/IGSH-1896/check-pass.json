@@ -1,0 +1,15 @@
+{
+  "host": "Z16-TEST",
+  "version": "0.28.900",
+  "expected": "0.28.900",
+  "at": "2026-11-09T18:30:00.0000000Z",
+  "checks": [
+    { "name": "install", "ok": true, "detail": "installed 0.28.900, expected 0.28.900" },
+    { "name": "start", "ok": true, "detail": "1 process, window 'ZigShell' 'multiprompt v0.28.900'" },
+    { "name": "chats", "ok": true, "detail": "3 tabs published in inbox-default.json" },
+    { "name": "computer-view", "ok": true, "detail": "bridge status {\"ok\":true,\"transport\":\"local\",\"bridge\":\"1.0.41\"}" },
+    { "name": "sync", "ok": true, "detail": "account signed in, no layout pending" },
+    { "name": "memory", "ok": true, "detail": "412 MB working set, cap 3000 MB" },
+    { "name": "crashes", "ok": true, "detail": "0 crashes since the app started" }
+  ]
+}

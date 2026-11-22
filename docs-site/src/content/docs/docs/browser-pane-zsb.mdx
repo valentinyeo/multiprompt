@@ -1,0 +1,181 @@
+---
+title: Browser Pane & multiprompt-browser
+description: Native Edge/Chrome pane behavior and command-line browser control.
+---
+
+## Browser Pane Model
+
+multiprompt docks a native Microsoft Edge or Google Chrome window beside the shell. The selected browser stays native: profile, tabs, extensions, cookies, password managers, and page behavior are not reimplemented by multiprompt.
+
+Use `Ctrl+K → Browser Engine` to switch every pane globally. Edge uses
+`%LOCALAPPDATA%\ZigShell\EdgeUserData`; Chrome uses the separate
+`%LOCALAPPDATA%\ZigShell\ChromeUserData`. Logins and browser state therefore do
+not leak between engines. The switch closes all old-engine pane windows before
+the active pane relaunches, and future focus, navigation, screenshots, and theme
+commands follow the selected engine.
+
+multiprompt owns:
+
+- pane visibility
+- pane geometry
+- border masks
+- focus routing
+- multiprompt-browser binding files
+- URL state persistence
+- isolated-profile Chromium theme selection
+
+multiprompt does not own Chromium internals.
+
+## Theme Synchronization
+
+The selected isolated Edge or Chrome profile follows the active multiprompt theme. Dark, Mid,
+Light, AMOLED, Edge Grey, multiprompt, and Dev Blue each have a matching browser
+theme for the browser frame, tab strip, toolbar, bookmarks, and new-tab surface.
+
+Choose **System** in `Ctrl+K → Themes…` to follow the Windows app appearance.
+The preference remains System across restarts, while multiprompt resolves it to
+Light or Dark whenever Windows changes and updates the app, native consoles,
+browser masks, and selected isolated profile together. Choosing a named theme keeps
+that palette fixed instead. Windows can omit the appearance broadcast, so
+System also performs a lightweight one-second check and repairs a missed
+change; named themes skip that check.
+
+This synchronization is deliberately profile-scoped. It does not change normal
+Edge or Chrome profiles, Windows appearance settings, or force arbitrary websites into light or
+dark mode. Site content continues to use its own settings and CSS.
+
+The selected theme package is loaded when the isolated Chromium process starts.
+Changing the app theme closes only that dedicated profile's normal windows;
+multiprompt's pane self-heal immediately reopens the selected browser with the
+new package. Ordinary browser profiles remain running and untouched.
+
+## Border Masks
+
+Chromium draws non-client frame areas that can appear as grey borders. multiprompt covers those areas with narrow mask windows that match the active multiprompt theme.
+
+Rules:
+
+- Masks must stay inside multiprompt’s window.
+- Masks must hide when overlays are open.
+- Masks must not cover changelog, inbox, Ctrl+K, or URL picker overlays.
+- AMOLED theme should use black masks.
+- Light theme masks inherit the neutral app background, never the retired peach
+  browser surround.
+- The active browser focus border must not expose grey Chromium frame strips.
+
+## Opening And Reconnecting
+
+Use `Ctrl+Shift+O` to open or reconnect the active shell’s browser pane.
+
+Use Ctrl+K actions when available:
+
+- Open browser URL
+- Insert multiprompt-browser instructions
+- Force-refresh the multiprompt-browser pane binding
+
+## multiprompt-browser
+
+`Alt+E` hides a session and its docked browser window but does not close the pane or remove its browser binding. The normal browser auto-suspend policy may close an inactive pane after 20 minutes. Any later `multiprompt-browser` command can trigger relaunch and rebinding of a configured missing pane. The remote `status` probe stops waiting after 5 seconds by default; use `doctor` to allow up to 20 seconds for selected-browser adoption.
+
+`multiprompt-browser` is the browser-control CLI available inside multiprompt-spawned shells. The former `zsb` command remains as a compatibility alias.
+
+Common commands:
+
+- `multiprompt-browser navigate <url>` always opens a fresh tab in the session's bound browser pane. Existing tabs are never overwritten; `--new-tab` remains accepted only for compatibility.
+- A physical Ctrl+click on a URL in Bash or another hosted console opens its fresh tab active and moves focus into the docked browser. This explicit-user behavior does not apply to agent navigation.
+- `multiprompt-browser tabs` lists the bound pane's tabs, and `multiprompt-browser activate <tabId>` brings one of those same-pane tabs forward.
+- `multiprompt-browser close-tab <id|match>`, `tab close <id|match>`, and `tabs --close <id|match>` close one tab in the bound pane. Text matches must identify one title or URL; the CLI refuses ambiguous matches and refuses to close the final tab.
+- `multiprompt-browser url` reports the exact targeted tab URL. Read, screenshot, find, and click commands accept `--tab <id|url-substring>` so a background tab can be inspected without activation. `multiprompt-browser console [-n N]` returns recent page console and browser log entries; add `--clear` to clear the captured buffer.
+- `multiprompt-browser click <selector>`, `key <combo>`, and both `type <text>` and `type <selector> <text>` use trusted CDP input. Selector-based type clicks and replaces the target; one-argument type inserts at the focused editable.
+- Text, links, find, snapshots, and selector lookup traverse same-origin and cross-origin frames. Snapshot controls include visible menu items, options, list rows, tab controls, and icon-only controls with accessible labels.
+- A page scripting failure returns top-level `ok:false` with `error:"page_error"`. Ordinary extension actions time out after 15 seconds; the remote wrapper also enforces a total reply deadline, even if the app or bridge hangs or sends a trickle of bytes.
+- Screenshots validate PNG bytes and retry with a fresh debugger session up to three times before returning the real capture error.
+- `multiprompt-browser open` preserves signed URLs up to 8 KiB, and the remote transport accepts decoded requests up to 48 KiB within Windows' command-line limit.
+- `multiprompt-browser theme <name>` is the internal profile-wide theme command used by the app; when the selected browser does not already have that one package, the command restarts only the isolated profile. System is resolved by the app before this boundary, so valid bridge names remain `dark`, `mid`, `light`, `amoled`, `edgegray`, `multiprompt`, and `devblue`.
+- Background driven tabs automatically receive CDP focus emulation so SPAs continue rendering while another tab is visible.
+
+```bash
+multiprompt-browser navigate "https://example.com"
+multiprompt-browser text
+multiprompt-browser snapshot
+multiprompt-browser snapshot --tab "example.com"
+multiprompt-browser click "button" --tab "example.com"
+multiprompt-browser type "query at the focused cursor"
+multiprompt-browser type "input[name=q]" "query"
+multiprompt-browser key "Ctrl+K"
+multiprompt-browser screenshot --tab "example.com" -o out.png
+multiprompt-browser url --tab "example.com"
+multiprompt-browser close-tab "example.com"
+multiprompt-browser console -n 50
+multiprompt-browser status
+multiprompt-browser doctor
+multiprompt-browser sidebar
+```
+
+## Remote reply deadlines
+
+The remote `zsb` / `multiprompt-browser` wrapper measures total reply time from sending, not time since the last byte. Defaults are **15 seconds**, **5** for `status` and `version`, **20** for `doctor`, **30** for `text` / `get-text` / `snapshot` / `cdp` / `eval` / `script`, **60** for `screenshot` / `shoturl`, and **180** for the whole `selftest`, including cleanup. Connecting to the IPv4 tunnel has a separate 5-second maximum.
+
+Longer defaults accommodate pane recovery, page scripts, and screenshot retries. Set `ZSB_TIMEOUT=2.5 zsb open https://example.com` to override any default in seconds. Values must be finite, greater than zero and at most 86400; invalid or empty values return JSON `error:"bad_args"` before sending. App-side limits still apply independently. The CLI currently has no per-command `--timeout` flag; CDP JSON parameters pass through unchanged.
+
+Expiry exits nonzero with the usual JSON error shape: `ok:false`, `error:"reply_timeout"`, `message` containing elapsed seconds and the deadline, plus `session`, `port`, and a recovery `hint`. Reconnect the SSH session, open/rebind its pane, then retry `status`. A timeout does not cancel app-side work; inspect tabs before repeating `open`. Selftest's timeout hint warns if cleanup may be incomplete.
+
+## Workspace and tmux session commands
+
+These app-level commands work through the same reverse SSH bridge (port 19548 by default), without a browser pane, browser extension, current tmux session, or `ZSB_SESSION`. Both `zsb` and `multiprompt-browser` accept them:
+
+```bash
+zsb workspace-list
+zsb session-open --workspace "Research" --group "Ops" --host "remote-1" --tmux "runner-7" --name "Runner 7"
+zsb workspace-list --help
+zsb session-open --help
+```
+
+`workspace-list` returns `{"ok":true,"hosts":[...],"workspaces":[...]}`. Every workspace has a numeric slot `id`, `name`, `active`, `groups`, and `tabs`. Each group has its saved `id`, `name`, and workspace-local `tabs`; the workspace's own `tabs` array contains ungrouped tabs. Group definitions are shared by the app, so empty groups are included as valid destinations. Each tab has a stable `id`, `title`, SSH host alias in `host` (or `null` for local shells), `tmux` session name (or `null`), and `active`. Inactive workspaces and collapsed groups are included.
+
+`session-open` requires all five flags, in any order. Workspace, group, and host names match exactly; use the names and SSH aliases returned by `workspace-list`. It attaches to an **existing** remote tmux session using the normal SSH/tmux tab path; it does not create a remote session. The tab opens in the background without changing the current tab, workspace, group expansion, or foreground window. Its manual title and group placement are saved like a hand-made tab. There is no activation flag.
+
+A new tab returns `{"ok":true,"created":true,"tab":42}`. If that host and tmux session already have a tab in any workspace, it returns `{"ok":true,"existing":true,"tab":42,"workspace":"Research"}` with that tab's workspace name, without renaming, moving, or activating it. Session identity is global across workspaces.
+
+Unknown names return `{"ok":false,"error":"unknown_workspace"|"unknown_group"|"unknown_host","valid_names":[...]}` and a nonzero exit status. A tmux name must be 1–63 ASCII letters, digits, `-`, `_`, or `.`. A title must be 1–63 UTF-16 units with no control characters; spaces and Unicode are supported. Missing, repeated, or unknown flags are rejected. Transport failures still report tunnel errors; no keys or tokens are needed in these commands.
+
+## Repairing tabs from the command line
+
+Four more app-level commands fix a tab layout without a keyboard, a restart or a window switch. Each runs in the background, never changes the active tab, workspace or foreground window, and saves the layout at once so a restart keeps it. Every reply is JSON, and a refusal exits nonzero with `ok:false` and an `error` code.
+
+```bash
+zsb session-rename --tab 42 --name "Runner 7"
+zsb session-rebind --tab 42 --host "remote-1" --tmux "runner-9"
+zsb session-move --tab 42 --workspace "Research" --group "Ops"
+zsb session-move --tab 42 --ungrouped
+zsb session-close --tab 42
+```
+
+- `session-rename` sets a manual title (1–63 UTF-16 units, no control characters) and replies `{"ok":true,"renamed":true,"tab":42}`.
+- `session-rebind` points an existing remote tab at another tmux session and reconnects it, keeping its title, group and place. `--host` is optional and defaults to the tab's own host. It replies `{"ok":true,"rebound":true,"tab":42,"state":"connecting"}`; follow it with `session-status --tab 42`. A session another tab already uses returns `{"ok":false,"error":"duplicate_session","tab":43}` with that tab's id and changes nothing. A tab that is not a remote tab returns `not_remote_tab`, and a locked account returns `account_locked`.
+- `session-move` takes `--workspace`, `--group` or `--ungrouped` (one of them is required, `--group` and `--ungrouped` are exclusive) and matches names exactly, like `session-open`. Moving to another workspace without `--group` leaves the tab ungrouped. Unknown names return `unknown_workspace` or `unknown_group` with `valid_names`, and a snoozed workspace returns `workspace_snoozed`.
+- `session-close` closes one tab and replies `{"ok":true,"closed":true,"tab":42}`. It does not touch the remote tmux session.
+
+`session-move`, `session-rebind` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.
+
+## Routing Rule
+
+Browser-control commands must target the browser pane owned by the current shell’s exact session. The app-level `workspace-list` and `session-open` commands above do not route through a browser pane.
+
+It must never steal a pane from another active agent just because a browser exists elsewhere. If no matching pane is bound, multiprompt-browser should return a useful status/error or trigger a rebind flow.
+
+## Binding Files
+
+multiprompt publishes local binding files under the compatibility path `%APPDATA%\ZigShell`, including:
+
+- `panewin-<tmux-session>.txt`
+- `panewin-zss-<shell-id>.txt`
+- `browserwin-<shell-id>.txt`
+
+The remote VPS shim uses these identities to route browser commands back to the owning multiprompt tab.
+
+`End tmux session` removes the owning tab's browser binding files as part of teardown. A plain tab close does not kill the remote tmux session; use `End tmux session` when the remote session and its browser routing should both be destroyed.
+
+## Tunnel Failures
+
+When a remote multiprompt-browser command fails because the tunnel is down, the error should say so directly. Agents should not keep retrying blind browser commands for minutes.

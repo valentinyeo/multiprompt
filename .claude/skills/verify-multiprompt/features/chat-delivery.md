@@ -1,0 +1,173 @@
+# Chat delivery
+
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
+
+## Sub-features
+
+- `busy-send`: a message typed in the real Chat View composer reaches an agent buffer as exactly that text followed by Enter within 15 seconds while the scripted agent remains busy (`esc to interrupt`).
+- `idle-suggestion`: the same path delivers only the typed message, not the nonempty grey suggestion following Claude's `❯` prompt glyph. The fake box is stateful: the editable buffer starts empty and the suggestion is shown after `❯` only while the buffer is empty, so Ctrl+U and Ctrl+K cannot remove it. The reader may clear first with any number of C-u and C-k presses. The case passes when exactly one submission equals the typed text and no suggestion text is ever typed or submitted.
+- `steer-chord`: Ctrl+X then Ctrl+S submits the composer text, then the channel sends the native `C-x C-s` after the text and Enter.
+- `wrapped-leftover`: the remote prompt box already holds an earlier long single-line message that wraps into three screen rows plus a trailing line break (its Enter became a newline). Sending a new message must submit exactly the typed text once, never the first leftover row glued in front of it (IGSH-608).
+- `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
+- `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and every sent text reached Claude's queue exactly once, in send order, within the same 10 seconds.
+
+### Hosted feedback boundary
+
+The GitHub Linux reader suite runs `tools/chat-history-reader-test.py`. Its Claude, Codex and Pi process stand-ins capture the startup guidance and child environment. Its feedback cases run the real command against a fake Hypertask executable, including denial and failed-vote controls. These cases do not prove the Windows build's embedded version, a live provider, real board writes or the existing desktop delivery journey. Those require separate exact-build and authorized-agent evidence.
+
+## How to get to it (user POV)
+
+Select an existing remote tmux tab with Ctrl+1. Press Alt+C to open Chat View, type a message in its composer and press Enter. To ask Claude to take a queued message immediately, type in the composer and press Ctrl+X then Ctrl+S instead of Enter.
+
+## Driving it with control.ps1
+
+Dispatch on GitHub Windows only:
+
+```sh
+gh workflow run verify.yml --ref ceo/IGSH-595 -f feature=chat-delivery -f tag=v0.28.811
+gh workflow run verify.yml --ref ceo/IGSH-595 -f feature=chat-delivery -f tag=v0.28.821
+gh workflow run verify.yml --ref ceo/IGSH-595 -f feature=chat-delivery
+```
+
+After merge, omit `--ref` to dispatch the default branch. Verify the exact harness SHA and release tag in `build.json`; watch with `gh run watch <id> --interval 60`, then download `verify-chat-delivery`. Release runs use the checksum-verified published app and embedded version; Zig compiles only the remote-shell launcher. Branch runs also build the app. The workflow installs Python 3.12 for the supplied remote reader.
+
+`control.ps1 -Feature chat-delivery` delegates to `tools/verify-chat-delivery/drive.ps1`. Each case gets a separate unique RUNNER_TEMP profile, a saved tmux tab seeded exactly through the reconnect harness's `session.json` mechanism, and the production `ssh-path.txt` override. This explicit exception to baseline empty-session rules replaces only the remote-shell system boundary. The console-backed stand-in renders a Claude-like busy or idle screen, with a dark-grey suggestion on the actual prompt row for idle. Fake `tmux capture-pane` returns the same characters without colour escapes, as ordinary capture-pane does. The state file belongs solely to the stand-in; it is never an app-state setter.
+
+The app starts its own persistent host channel, supplies its embedded `chat_history_reader.py` over stdin, and sends ordinary JSON requests. The boundary launches Python with that supplied command and unmodified stdin, not a substitute reader from the checkout. The real app composer, outbox, channel and reader issue literal `tmux send-keys`, Enter and `send_queued` operations. Fake tmux independently logs every raw send-keys argv and wall-clock timestamp to `agent-buffer.jsonl`; it does not know the expected message text. For `wrapped-leftover` and `idle-suggestion` (not `busy-send` or `steer-chord`, which keep the strict raw-argv oracle), fake tmux keeps a stateful input box; `wrapped-leftover` additionally carries the seeded `leftover` line in the state file. The box lives in `box.json`: the seeded leftover plus a trailing newline (empty for idle-suggestion) with the cursor at the end, wrapped at 30 characters per row. It applies Claude Code's Ctrl+U (delete only a newline when one precedes the cursor, otherwise delete back to the start of the current wrapped row, and from column 0 of a later row back to the start of the previous row), appends `send-keys -l` text, and treats Enter as submit, logging the submitted buffer as `submitted` on that `agent-buffer.jsonl` row (null for every other key). `capture-pane` renders the box like Claude: `❯` plus row one, further rows indented two spaces, then a line starting with `─`. The console stand-in mirrors the seeded screen. Any other key in that case is logged to `unsupported.jsonl` and fails the case.
+
+Doctor checks the original process, executable path/hash/version, owned visible ZigShell HWND through UI Automation, published tmux shell and foreground composer focus. Only real SendInput keyboard events select the tab, open Chat View, type and submit. Every case runs even if a previous one fails. Cases use separate app lifetimes so 811's blocked outbox cannot contaminate later cases. The `wrapped-leftover` and `idle-suggestion` cases pass only when exactly one row in `agent-buffer.jsonl` has a `submitted` buffer and that buffer equals the typed composer text; a glued leftover row, a second submission or no submission fails it. A complete 15-second observation window catches extra writes as well as missing or delayed delivery.
+
+Require root `result.json` status `passed` and all four `{name, passed, detail}` entries passed. The independent Node evidence checker requires exact raw writes and ordering, the matching fake capture/console screens, the supplied persistent-reader bootstrap, Doctor identity, valid screenshots, and successful owned-job cleanup. `before.png`, `after.png`, and `<case>-before/action/after/final.png` show the real desktop. Root `agent-buffer.jsonl`, `invocations.jsonl`, `debug.log`, `actions.json` and `cleanup.json` accompany each case's raw stand-in logs, reader stderr, observation, Doctor, saved session and process-tree accounting. Missing evidence fails; it is never a skipped pass. Cleanup stops only each case's owned kernel job, requires zero active processes, preserves evidence and removes its profile.
+
+The expected regression comparison is 811 failing busy-send and idle-suggestion at its pre-channel gate, versus master/821 delivering immediately; master/821 must also pass steer-chord and idle-suggestion (the reader clears the box before typing, so the oracle checks the submitted text rather than a fixed key order). On the same master release `wrapped-leftover` must fail (the production reader presses Ctrl+U once per counted row, which leaves the first leftover row, so the agent receives that row glued to the new text), while the IGSH-608 fixed branch must pass it. A release launch or infrastructure error is not a demonstrated regression. Inspect screenshots and buffer evidence from the first paired runs before making any runtime claim.
+
+### queue-draft-sync (IGSH-682)
+
+The fake Claude behind this case is stateful. The stand-in keeps `claude.json` (mode, input box text, queue) and mutates it under a lock from three sources: the app's fake `tmux send-keys` (origin `app`), the driver's `python boundary.py shell ...` calls that stand for a person typing in the shell (origin `shell`), and the driver's `idle` call that stands for Claude finishing its turn. Typed text lands after the `❯` prompt glyph; Enter while busy queues the text, `Up` pulls every queued message back into the box (`popAll`), `C-u` clears the box, and `idle` takes the queue first-in first-out. Every change appends one frame (queue, box, plain and `-e` screen) to `frames.jsonl`. When the mode is idle and the box is empty the screen shows a grey suggestion, rendered with SGR 2 in `capture-pane -e` and as plain characters otherwise, so a reader that counts it as draft text is caught.
+
+Claude's own transcript events are written to the session file the reader tails: `queue-operation` `enqueue`, `dequeue`, `remove` (reason `absorbed_mid_turn`) and `popAll`, plus a `queued_command` attachment for every message Claude takes. The driver builds the same discovery chain the reader uses on a real server: fake `tmux list-panes` returns a pane pid, a `\proc\<pid>` directory on the profile drive holds the `stat` and `cmdline` that `process_table` reads, `~/.claude/sessions/<pid>.json` maps the pid to the session and the project folder holds the transcript. The reader opens `Path("/proc")`, which Windows resolves against the current drive of the reader process; the app starts with the profile as its working directory and the remote-shell stand-in inherits it, so `\proc` is created at the root of the profile's drive. The directory is removed in cleanup, and the unit test replays the whole discovery chain (`process_table`, `agent_pid_for_panes`, `claude_session_metadata`, `conversation_path`) from the production reader source against the stand-in's files.
+
+How each view is read:
+
+- Shell view: the fake's frames and `claude.json` (what `capture-pane` returns), compared with the exact Claude events in the copied `transcript.jsonl`.
+- Chat View queue: the app's debug log (`ZIGSHELL_DEBUG=1`, copied per case as `debug.log`) must carry one line per change of the queue list shown in Chat View, in this exact form: `CHAT_QUEUE items=[{"text":"<message>","state":"queued"|"sent"}, ...]`, first item first. The line names no private data beyond the message text. Master emits no such line, so every Chat View queue step fails there.
+- Chat View composer: `WM_GETTEXT` on the real Edit control, as the other cases do.
+- Shell input box: the fake's `box` value, plus the reader's own `capture-pane -p -J` calls recorded in `capture.jsonl`.
+
+Ordered steps, all recorded in `observation.json` and re-derived by `check-evidence.js` from raw files: `chat-view-read-transcript` (positive control: the app loaded the fake transcript, so a later failure is the feature and not the boundary), `chat-lists-shell-queued`, `chat-lists-both-in-order`, `shell-lists-both-in-order`, `queue-pulled-into-box`, `chat-lists-edited-in-order`, `shell-lists-edited-in-order`, `chat-marks-both-sent`, `shell-took-both`, `suggestion-not-draft`, `composer-ignores-agent-paste`, `shell-box-shows-chat-draft`, `draft-survives-agent-paste`. Editing is what real Claude does: `Up` returns both queued messages to the box as one draft, `C-u` clears it and the first message is retyped with a change and queued again, then the second.
+
+Expected result on current master: `chat-view-read-transcript`, the shell steps and the clean-up steps pass; `chat-lists-shell-queued`, `chat-lists-both-in-order`, `chat-lists-edited-in-order`, `chat-marks-both-sent`, `composer-ignores-agent-paste` and `shell-box-shows-chat-draft` fail. `node --test tools/verify-chat-delivery.test.js` runs the stand-in as a real Linux process, checks the evidence oracle on a green tree and on a master-like tree, and never starts the app.
+
+### missing-transcript (IGSH-973)
+
+Dispatch with `-f feature=chat-delivery -f missing_note_proof=true`. The saved tmux tab shows the idle Claude-like screen but no transcript file exists, so the reader answers `missing`. The case passes only when the app logs `[chat] note shown: Chat not available for this session, use the shell view` and the text Chat View copies after select-all holds none of the stand-in's terminal text (`Claude Code`, `Ready`, the grey suggestion, the `❯` glyph). `tools/chat-missing-note-proof.mjs` re-derives both from `observation.json`, `debug.log` and the stand-in's `console.jsonl`. Dispatching it with `-f tag=<release before the fix>` is the red run: that release paints the screen as a chat block. The three delivery cases and this one use host 0; second-host transcript following is the `remote_sync_proof` run (IGSH-950).
+
+For long second-host session and workspace timing, run the [remote switch performance journey](../diagnostics/remote-switch-speed.md). It uses this SSH boundary with an alternate remote home and copies all 2,000 messages before measuring.
+
+### send-stays-gone (IGSH-960)
+
+It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message the driver types, presses Enter, then runs the gating step `send-stays-gone` (10 seconds of 250 ms samples of the composer text and the draft files). It also records whether the fake Claude queue ended with the sent text (`reached`), which is a gate, and, after every fourth message, whether the fake took the queue (`tookQueue`); the fake then goes busy again so the Chat View queue list never exceeds its 16 rows. At the end the step `outbox-snapshot` saves the Chat View outbox. `check-evidence.js` re-derives the 20 texts and 20 real Enter presses from the raw files and fails if any send did not reach the fake Claude within 10 seconds or if the sent texts were not enqueued exactly once in send order (IGSH-986), so neither a build that throws text away nor one that leaves sends pending can pass. To prove the case can fail, run it against a build from before IGSH-930, where shell text pulled back into the box on every poll.
+
+### Instant saved chat (IGSH-1289)
+
+Dispatch `verify.yml` on the branch with `feature=chat-instant`.
+This feature selects the existing chat-delivery driver.
+The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
+It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer.
+Before releasing SSH or issuing either message to the host, it forcibly terminates the owned job, checks the stopped outbox retains both pending wire IDs, and restarts the app with the same profile while SSH remains held.
+The real native transcript must copy both pending messages after reload; the outbox alone is not proof of rendering.
+The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.
+It also checks the absent startup sync banner and zero owned processes after cleanup.
+Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-reloaded.png`, `instant-delivered.png`, `startup-timing.json`, the unchanged `offline-outbox.json`, `crash-outbox.json`, `reloaded-outbox.json`, `reloaded-copied.txt`, crash and reload process receipts, and both store snapshots in `verify-chat-delivery`.
+The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
+Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
+
+### Three sent messages and cancellation (IGSH-1624)
+
+Run the same harness revision against the released executable and the branch build:
+
+```sh
+gh workflow run held-queue.yml --ref <branch> -f tag=v0.28.1490
+gh workflow run held-queue.yml --ref <branch>
+```
+
+The wrapper also runs four hosted terminal queue checks: desktop and Android, each against candidate and control readers. The branch must first contain these capture changes. The tag selects the published executable, not its old harness. The driver types three messages, opens the actual middle-message context menu, cancels it, and verifies the other two arrive in order. It selects Light, AMOLED and Edge Grey through Themes before and after cancellation, waits for each app-written theme token and a sampled stable transcript, then restores the initial theme. Edge Grey is not Graphite 2.
+
+The artifact contains `cancel-held-{held,cancelled}-{light,amoled,edgegray}.png`, matching `-transcript.bmp` crops, and `cancel-held/cancel-held-<stage>-<theme>-frame.json` viewport and stability observations. Compare the two runs and retain the existing outbox, transcript, input, Doctor and cleanup evidence. An independent reviewer must inspect the images. The current oracle checks cancellation behavior and the original screenshots; it does not measure these themed pixels or assert the absence of status labels. A green run is not visual proof. The intended old-release visual control is the visible Cancelled label or resulting spacing, but this must be established from the artifact, not inferred from a setup failure. The SSH/tmux and agent are synthetic; no real network or agent is tested.
+
+### Handed-off recall (IGSH-1828)
+
+The terminal queue journey above cancels a message before the host receives it. This journey uses the published executable and the production host. A local stand-in accepts three messages, stays silent, and answers `cancel_async_message` with `cancelled:true`. It is not a live Claude account.
+
+```sh
+gh workflow run recall-handed.yml --ref <branch> -f tag=v0.28.1677
+```
+
+The driver sends three messages, cancels the middle one from its menu, then presses Up and Delete on the last one. The stand-in must record those two targeted recalls and answer only the remaining message. The answered message must no longer offer Cancel. Evidence is `verify-chat-delivery`, including `recall-handed/recall-agent.jsonl` and `recall-handed-*.png`.
+
+## Gotchas
+
+Queue reconciliation and guarded draft transfer now exist in the reader; older statements below about missing CHAT_QUEUE support or a mandatory wrapped Ctrl+U leftover describe historical behavior, not this candidate. Clearing re-reads until empty. Palette queue/retry/discard reachability is specified in chat-message-sending.md; labels/handlers alone are not offered rows.
+
+
+- Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
+- `agentBoundary` honestly records: stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. This proves that real Chat View input reaches the production tmux-channel system boundary, not that Claude consumes it, generates a response, or persists a real conversation.
+- No real SSH networking, authentication, server, Claude process or remote rendering is verified. The three delivery cases use no transcript; `queue-draft-sync` supplies a synthetic Claude transcript through the production reader's pane-process discovery and verifies that the app turns its queue events into the Chat View queue list. No credentials, synthetic transcript files, account data or test-only app setters are supplied.
+- The launcher preserves an attached console for screen reads and uses `CREATE_NO_WINDOW` when no console is attached, including SSH probes with non-pipe stdout. Child startup uses `SW_SHOWNOACTIVATE`. Foreground acquisition uses the same Alt/thread-attachment routine as the other journeys; each Press retries it if foreground was lost, then still refuses keyboard input unless the owned app is foreground.
+- The app's screen read for 811's outbox gate is the attached console, not a reader `screen` opcode. The stand-in mirrors fake capture-pane characters into that console so the old busy and nonblank-input checks remain exercised. The production reader separately calls capture-pane while sending.
+- The known local direct-input gap is not covered: the local console route still rejects a prompt row holding a suggestion, even on master/821. This journey deliberately exercises remote tmux channel delivery, the route relevant to the reported remote Claude sessions.
+- Multiline paste-buffer, slash commands, real transcript confirmation, local console paste, permission prompts and other entry points remain outside these four cases. Branch/release runs have not passed merely because source contracts pass locally.
+
+### Remote session changes (IGSH-950)
+
+```sh
+gh workflow run verify.yml --ref ceo/IGSH-950-poll -f feature=chat-delivery -f remote_sync_proof=true
+```
+
+This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must appear in copied rendered text within two seconds. The timed check uses the real Select All palette command and Ctrl+C, not the deliberately delayed disk cache or composer text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.
+
+The SSH host and remote home are synthetic boundaries, not a real server or OS login. The desktop, embedded reader, pane discovery and rendered transcript are real. Reader regressions separately cover noninteractive cross-user discovery and inaccessible or missing live transcripts. The Linux chat sync audit repeats the two-turn/resume case against its real renderer and requires zero drift.
+
+
+### Fresh skills proof (IGSH-923)
+
+Dispatch `feature=chat-delivery` with `chat_skills_proof=true`. This selects only the fresh-skills plan; normal chat delivery cases remain unchanged when the option is false. Download `verify-chat-delivery` evidence.
+
+The owned native composer uses real `mp_complete.py` discovery over isolated `SKILL.md` files, without running a provider. Warm the cache with zebra and yak, then add alpha. Reopen suggestions and select cached yak while the response is delayed. Require alpha within five seconds, keep yak selected after alpha changes its row index, and accept alpha with Tab. Add beta after typing reload-plugins, send it, and require another discovery before reopening suggestions.
+
+The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exactly the new-skill timeout after successful cache warm, Doctor and cleanup. The fixed app must pass `chat-skills-proof.mjs`, with screenshots, actual inserted composer text, discovery records and zero remaining owned processes. Release proof supplies the published tag, uses its checksum-verified executable, and repeats the identical journey. The deliberate 800 ms transport delay is not a real-network speed measurement.
+
+### Accepted message brightness
+
+Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
+The owned Windows app sends while busy. The stand-in runs the production message dispatcher and connector polling in a Windows-hosted thread, with Windows file locks and notification polling. The queued message must reach the host's `accepted` state and appear once, dimmed. The simulated agent removes it from the queue while busy and delays the transcript: the same bubble must turn normal within one second with working dots. The stand-in then writes a `queued_command` attachment. Timed frames must keep the same bubble normal throughout the handoff, and the rendered transcript must contain it once. The composer stays empty. Screenshots, copied transcripts, host outbox, transcript, executable doctor and cleanup receipts remain in the artifact. The stand-in is not a real agent or SSH server. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
+
+### Quoted reactions (IGSH-975)
+
+Dispatch `feature=chat-delivery` with `chat_reactions_proof=true`. Supply a published `tag` for the identical signed-executable journey. The fixture supplies two assistant replies sharing an 80-character prefix but different provider IDs. The owned Windows app receives genuine right-click input on the first reply. Its existing menu must offer thumbs-up, thumbs-down and heart. Choose thumbs-up with a real mouse click while keeping a populated composer draft.
+
+Require exactly one quoted transport enqueue and one consumed transcript attachment. Pixel checks require one painted badge attached below the first reply, no additional normal or dim reaction bubble, and the same target after gracefully restarting the owned app with the same profile. An unmatched reaction must remain an ordinary user bubble. `reactions-*.png`, `reactions-proof.json`, the raw transcript, app identity and cleanup receipts remain in `verify-chat-delivery`. The pre-fix signed executable must fail specifically with `IGSH975_REACTIONS_MISSING`, after painting both fixture replies and opening its real menu. The pixel oracle mutation tests reject missing glyphs, moved targets and extra bubbles. This journey uses the existing synthetic remote-shell boundary, not a paid Claude process or real SSH authentication.
+
+### Ordinary answer after reacting (IGSH-1590)
+
+The quoted-reaction journey keeps every existing menu, transport, badge, restart, fallback, emoji-copy and 140-wheel assertion. Its Windows-only worker adapter schedules the unchanged production poll/dispatch functions; fake tmux implements named load/paste/delete buffers, with Enter still required to submit. Reaction reader calls execute those same fake commands in-process to avoid nested Windows process overhead expiring the unchanged production send deadline. The released v0.28.1500 baseline reaches pending/delivered badges but loses the untouched mirrored composer draft at restart. The focused reader regression covers all three existing reaction glyphs without changing ordinary stale-draft cleanup.
+
+After the existing long-history workload, real composer input submits an ordinary follow-up. Only that idle agent submission emits the synthetic ordinary answer. The driver scrolls away, then to newest before inspecting pixels. A real right-click on the painted newest assistant bubble and Copy must return its exact answer text. The independent checker requires one source question/answer, the fully visible newest pair and successful scrolling, while the earlier strict badge frames still reject extra automatic reaction acknowledgements. Missing, clipped, queued and extra answers have negative controls. Keep `reactions-followup*.png`, `followup-copied.txt`, raw transcript, identity and cleanup receipts. This is native desktop/reader verification against simulated SSH/tmux and an agent transcript, not a real provider or network claim.
+
+Android counterpart: https://app.hypertask.ai/detail/project-2060/1551. Its published0.1.390 journey https://github.com/valentinyeo/multiprompt-android/actions/runs/41580387063 already scrolls newest before capture. The desktop fix uses the unchanged reaction wire format; old and new clients remain compatible. The branch journey https://github.com/valentinyeo/multiprompt/actions/runs/41996386948 passes the full original reaction sequence and the ordinary follow-up. Its restart and copied-answer screenshots were inspected; one reaction enqueue, one ordinary question/answer, exact copied answer, 140 moved wheels and zero remaining owned processes were independently read from evidence. A published desktop replay remains required before claiming the release complete.
+
+### Runner message parity (IGSH-1030)
+
+Desktop counterpart of Android IGSH-1005. Uses the existing chat-delivery boundary: synthetic agent transcript and simulated SSH/tmux, real Windows app history parsing, measurement, drawing and owned native mouse input. Never drive Valentin's desktop.
+
+The public Runner message parity workflow reuses verify.yml. Manual equivalent:
+
+```sh
+gh workflow run verify.yml --ref <branch> -f feature=chat-delivery -f chat_notes_proof=true
+```
+
+The same driver must first reject the checksum-pinned released v0.28.946 app because five runner notes are not five compact rows. Cleanup must succeed. The current app then shows five dim rows in dark and light, opens the first row using native mouse input, retains its body through an ordinary transcript poll, and folds it with a second native click. Source controls retain the user's question and assistant reply. Expanded links use the production hit-testing contract in test-main; this journey does not launch an external browser.
+
+Inspect all eight notes-<theme>-<state>.png screenshots and the independent pixel probes. Five compact painted labels must occupy at most 180 scaled pixels; expanded body spacing must exceed that span and remain after a source turn/poll. app-cache.jsonl retains all five full source notes. Check actions.json for four owned native clicks, doctor.json for exact app identity, result.json for passed, and cleanup.json for zero owned processes and removed scratch data. No screenshot alone certifies working body links or remote account synchronization.
+
+Use the Android IGSH-1005 native chip screenshots beside desktop: the label is `sender to recipient · TICKET`, with existing dim text and an expansion arrow. Only viewport sizing differs. No Android product change is needed for this desktop parity ticket.

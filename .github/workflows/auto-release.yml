@@ -1,0 +1,55 @@
+name: auto-release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/release.yml
+    secrets:
+      MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
+      HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+
+  queue-newer:
+    needs: release
+    if: always() && github.ref == 'refs/heads/master' && (needs.release.result == 'success' || needs.release.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Queue a release for a newer master commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILT: ${{ github.sha }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          SELF_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          tip=$(git rev-parse origin/master)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow auto-release.yml --limit 30 --json databaseId,headSha,status,conclusion)
+          [ -n "$runs" ] || runs='[]'
+          decision=$(node tools/release-follow.cjs <<EOF
+          {"tip":"$tip","built":"$BUILT","releaseResult":"$RELEASE_RESULT","selfId":"$SELF_ID","runs":$runs}
+          EOF
+          )
+          [ "$decision" = dispatch ] || exit 0
+          gh workflow run auto-release.yml --ref master

@@ -1,0 +1,10 @@
+{
+  "ts": 1793040000,
+  "mode": "codex",
+  "override": "auto",
+  "accounts": [
+    { "id": "claude-primary", "label": "Claude", "provider": "claude", "week": { "used": 65, "pace": { "verdict": "unknown" } }, "five_hour": { "used": null, "pace": { "verdict": "unknown" } }, "stale": false },
+    { "id": "codex", "label": "Codex", "provider": "codex", "week": { "used": 43, "pace": { "verdict": "unknown" } }, "five_hour": { "used": null, "pace": { "verdict": "unknown" } }, "stale": false },
+    { "id": "claude-secondary", "label": "Claude 2", "provider": "claude", "week": { "used": 45, "pace": { "verdict": "unknown" } }, "five_hour": { "used": null, "pace": { "verdict": "unknown" } }, "stale": false }
+  ]
+}

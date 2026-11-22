@@ -1,0 +1,315 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const geometry = {
+  transcript: { left: 10, top: 40, width: 320, height: 150 },
+  rows: { left: 10, top: 10, width: 320, height: 28 },
+  working: { left: 10, top: 190, width: 320, height: 14 },
+};
+
+function frame(rows = true, messages = true, working = false) {
+  const width = 360;
+  const height = 220;
+  const pixels = Buffer.alloc(width * height * 4, 24);
+  for (const [paint, rect] of [[messages, geometry.transcript], [rows, geometry.rows], [working, geometry.working]]) {
+    if (!paint) continue;
+    for (let y = rect.top + 5; y < Math.min(rect.top + 20, rect.top + rect.height); y++) {
+      for (let x = rect.left + 20; x < rect.left + 180; x++) {
+        const i = (y * width + x) * 4;
+        pixels[i] = 60 + x % 160;
+        pixels[i + 1] = 70 + y % 160;
+        pixels[i + 2] = 90;
+      }
+    }
+  }
+  return { width, height, pixels };
+}
+
+test('IGSH-816 rejects the old-oracle input with footer rows still painted in CLEAN', async () => {
+  const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
+  assert.throws(() => compareCleanChat(frame(), frame(), frame(), geometry), /CLEAN chat ON still paints status\/outbox\/footer rows/);
+});
+
+test('IGSH-816 accepts the same messages with only footer rows removed and ignores alpha', async () => {
+  const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
+  const on = frame(false);
+  for (let i = 3; i < on.pixels.length; i += 4) on.pixels[i] = 255;
+  const result = compareCleanChat(frame(), on, frame(), geometry);
+  assert.equal(result.messages.changedPixels, 0);
+  assert.equal(result.rows.onInk, 0);
+  assert.ok(result.rows.offInk > 0);
+  assert.equal(result.working.onInk, 0);
+  assert.equal(result.working.offInk, 0);
+});
+
+test('IGSH-816 rejects retained rows without requiring an obsolete live footer', async () => {
+  const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
+  const on = frame(false);
+  on.pixels[(geometry.rows.top * on.width + geometry.rows.left) * 4]++;
+  assert.throws(() => compareCleanChat(frame(), on, frame(), geometry), /ON still paints/);
+  assert.equal(compareCleanChat(frame(false), frame(false), frame(false), geometry).rows.offInk, 0);
+  const changed = frame();
+  changed.pixels[(geometry.rows.top * changed.width + geometry.rows.left) * 4]++;
+  assert.throws(() => compareCleanChat(frame(), frame(false), changed, geometry), /OFF did not restore today's/);
+});
+
+test('IGSH-816 rejects message displacement, blank captures and any reintroduced working strip', async () => {
+  const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
+  const shifted = frame(false);
+  shifted.pixels[(50 * shifted.width + 40) * 4]++;
+  assert.throws(() => compareCleanChat(frame(), shifted, frame(), geometry), /messages changed, shifted or are blank/);
+  assert.throws(() => compareCleanChat(frame(), frame(false, false), frame(), geometry), /messages changed, shifted or are blank/);
+  assert.throws(() => compareCleanChat(frame(true, false), frame(false, false), frame(true, false), geometry), /blank transcript/);
+  for (const mode of ['on', 'off']) {
+    assert.throws(() => compareCleanChat(frame(), frame(false, true, mode === 'on'), frame(true, true, mode === 'off'), geometry), /still paints the removed working strip/);
+  }
+  const changedGap = frame();
+  changedGap.pixels[(geometry.working.top * changedGap.width + geometry.working.left) * 4]++;
+  assert.throws(() => compareCleanChat(changedGap, frame(false), frame(), geometry), /composer gap changed/);
+  for (const name of ['rows', 'working']) {
+    assert.throws(() => compareCleanChat(frame(), frame(false), frame(), { ...geometry, [name]: { ...geometry[name], left: 350 } }), /out-of-window/);
+    assert.throws(() => compareCleanChat(frame(), frame(false), frame(), { ...geometry, [name]: geometry.transcript }), /overlaps messages/);
+  }
+});
+
+function bmp(image) {
+  const bytes = Buffer.alloc(54 + image.pixels.length);
+  bytes.write('BM');
+  bytes.writeUInt32LE(bytes.length, 2);
+  bytes.writeUInt32LE(54, 10);
+  bytes.writeUInt32LE(40, 14);
+  bytes.writeInt32LE(image.width, 18);
+  bytes.writeInt32LE(-image.height, 22);
+  bytes.writeUInt16LE(1, 26);
+  bytes.writeUInt16LE(32, 28);
+  image.pixels.copy(bytes, 54);
+  return bytes;
+}
+
+test('IGSH-816 default evidence evaluation requires the CLEAN pair and rejects the old passing evidence', async t => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { evaluate } = await import('./chat-messages-only-proof.mjs');
+  const messages = [{ role: 'user', text: 'start the fake session' }, { role: 'assistant', text: 'The fake session is ready.' }];
+  const tools = Array.from({ length: 12 }, (_, id) => ({ role: 'tool', id, status: 'ok', detail: 'verified', text: id === 0 ? 'TodoWrite' : ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head'][id % 3] }));
+  const rows = values => [{}, ...values].map(row => JSON.stringify(row)).join('\n');
+  const files = new Map([
+    ['messages-only/observation.json', JSON.stringify({ error: null, composerText: 'composer stays usable', transcript: geometry.transcript, cleanChat: { rows: geometry.rows, working: geometry.working } })],
+    ['messages-only/app-cache-before.jsonl', rows(messages)],
+    ['messages-only/app-cache.jsonl', rows([...messages, ...tools])],
+    ['messages-only-before-tools.bmp', bmp(frame())],
+    ['messages-only-after-tools.bmp', bmp(frame())],
+    ['clean-chat-on.bmp', bmp(frame(false))],
+    ['clean-chat-off.bmp', bmp(frame())],
+  ]);
+  const root = path.resolve('synthetic-clean-evidence');
+  t.mock.method(fs, 'readFileSync', file => {
+    const name = path.relative(root, file).split(path.sep).join('/');
+    assert.ok(files.has(name), `missing synthetic evidence: ${name}`);
+    return files.get(name);
+  });
+  assert.equal(evaluate(root, false).cleanChat.rows.onInk, 0);
+  files.set('clean-chat-native.log', 'No CLEAN tests ran');
+  assert.throws(() => evaluate(root, true), /Missing passing CLEAN pixel tests/);
+  const withoutTodo = rows([...messages, ...tools.map(row => row.id === 0 ? { ...row, text: 'Ran Check app-smoke state' } : row)]);
+  const withTodo = files.get('messages-only/app-cache.jsonl');
+  files.set('messages-only/app-cache.jsonl', withoutTodo);
+  assert.throws(() => evaluate(root, false), /TodoWrite/);
+  files.set('messages-only/app-cache.jsonl', withTodo);
+  files.set('clean-chat-on.bmp', bmp(frame()));
+  assert.throws(() => evaluate(root, false), /ON still paints status\/outbox\/footer rows/);
+  files.delete('clean-chat-on.bmp');
+  assert.throws(() => evaluate(root, false), /missing synthetic evidence/);
+  assert.equal(evaluate(root, false, true).cleanChat, null);
+  assert.throws(() => evaluate(root, true, true), /complete proof cannot skip CLEAN chat/);
+});
+
+test('IGSH-816 extends only the existing messages-only journey using checked palette input', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const journey = driver.slice(driver.indexOf("Shot 'messages-only-after-tools'"), driver.indexOf('$fillLogStart ='));
+  assert.match(driver, /proof.mjs" \$Evidence --geometry/);
+  assert.match(driver, /\$observation.cleanChat = @\{rows=\$geometry.rows; working=\$geometry.working\}/);
+  assert.match(journey, /--tools-only[\s\S]*foreach \(\$mode in @\('on', 'off'\)\)/);
+  assert.match(journey, /Press @\(0x11, 0x4B\)/);
+  assert.match(journey, /foreach \(\$letter in 'clean chat'\.ToCharArray\(\)\) \{ Press/);
+  assert.match(journey, /ready chars=10 count=1/);
+  assert.match(journey, /Press @\(0x0D\)/);
+  assert.match(journey, /Doctor \$true[\s\S]*Properties\['clean_chat'\][\s\S]*\$enabled -ne \(\$mode -eq 'on'\)/);
+  assert.match(journey, /Shot "clean-chat-\$mode"[\s\S]*Save \$observation[\s\S]*proof.mjs" \$Evidence\s/);
+  assert.doesNotMatch(journey, /Start-Sleep|::(?:Type|Chord|FocusOwnedWindow)|PostMessage|SetFocus|SetWindowText/);
+  assert.match(driver, /'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off'/);
+  assert.match(read('src/command_palette.zig'), /"chat view toggle CLEAN chat"/);
+  assert.match(read('src/command_palette.zig'), /fn labelsMatchQuery[\s\S]*asciiContainsQueryInsensitive\(label, query\)/);
+  assert.match(read('src/main.zig'), /WM_APP_SEARCH_CHAR => \{[\s\S]*g_search_sel = 0;/);
+  assert.match(read('.github/workflows/verify.yml'), /Parser\]::ParseFile\("\$pwd\/tools\/verify-chat-delivery\/drive.ps1"/);
+  assert.match(read('.github/workflows/verify.yml'), /run: node --test[^\n]*tools\/chat-messages-only-proof.test.mjs tools\/chat-messages-only-proof.test.js/);
+});
+
+test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and the full gate list', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+  const map = read('.claude/skills/verify-multiprompt/features/chat-messages-only.md');
+  for (const file of ['clean-chat-on.png', 'clean-chat-on.bmp', 'clean-chat-off.png', 'clean-chat-off.bmp']) assert.ok(map.includes(file), file);
+  for (const step of ['Ctrl+K', '`clean chat`', 'Enter without an arrow-key selection step', '--tools-only', '--complete', 'background-only', 'permission controls', 'identical', 'off-mode', ['changelog.d', 'IGSH-816-clean-chat.md'].join('/')]) assert.ok(map.toLowerCase().includes(step.toLowerCase()), step);
+  const gates = [...map.matchAll(/^(\d+)\. (.+)$/gm)];
+  assert.deepEqual(gates.map(([, number]) => Number(number)), Array.from({ length: gates.length }, (_, i) => i + 1));
+  assert.equal(gates.length, 10);
+  const { readChangelogEntry } = require('./changelog-entry.js');
+  assert.equal(readChangelogEntry('IGSH-816').trim(), 'IGSH-816 Multiprompt Chat View: CLEAN chat option showing only messages');
+});
+
+test('IGSH-857 the stand-in agent writes the todo before the baseline so the status row never appears mid-proof', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  const todo = driver.indexOf("Shell-Input 'todo'");
+  assert.ok(todo > 0 && todo < driver.indexOf("Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript'"));
+  assert.ok(todo < driver.indexOf('$observation.transcript = @{'));
+  assert.match(driver.slice(todo, driver.indexOf('$observation.transcript = @{')), /Wait-For 'owned status row inside the transcript host once the todo is read'/);
+  assert.match(boundary, /if op == "todo":[\s\S]*?name="TodoWrite"/);
+  assert.match(boundary, /if op == "activity":[\s\S]*?for i in range\(11\):/);
+});
+
+
+test('IGSH-1055 measures visible content inside the expanded transcript host', async () => {
+  const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
+  assert.equal(typeof transcriptGeometry, 'function', 'owned viewport measurement is available');
+  const host = { left: 30, top: 40, width: 960, height: 800 };
+  const status = { left: 30, top: 80, width: 960, height: 28 };
+  const composer = { left: 80, top: 750, width: 800, height: 60 };
+  const viewport = { left: 30, top: 80, width: 960, height: 644 };
+  assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
+    transcript: { left: 30, top: 108, width: 960, height: 616 },
+    rows: status,
+    working: { left: 30, top: 724, width: 960, height: 14 },
+  });
+  assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
+  assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
+  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /working strip/);
+  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /working strip/);
+  const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
+  assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),
+    Object.fromEntries(Object.entries(transcriptGeometry(host, status, composer, viewport)).map(([key, value]) => [key, scale(value)])));
+});
+
+
+test('IGSH-1055 live clean-chat proof requires every real native painter positive control', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  assert.match(fs.readFileSync(path.join(__dirname, 'check-clean-chat-output.mjs'), 'utf8'), /export function verifyCleanCoverage/);
+  const { verifyCleanCoverage } = await import('./check-clean-chat-output.mjs');
+  assert.equal(typeof verifyCleanCoverage, 'function', 'native positive controls are reusable by the complete live oracle');
+  const source = fs.readdirSync(path.join(__dirname, '../src')).filter(file => file.endsWith('.zig')).map(file => fs.readFileSync(path.join(__dirname, '../src', file), 'utf8')).join('\n');
+  const names = [...source.matchAll(/^test "(IGSH-816 CLEAN[^"\n]+)"/gm)].map(match => match[1]);
+  const output = names.map((name, i) => `${i + 1}/${names.length} chat_render.test.${name}...OK`).join('\n');
+  assert.equal(verifyCleanCoverage(output), names.length);
+  for (const name of names) {
+    assert.throws(() => verifyCleanCoverage(output.replace(`${name}...OK`, `${name}...FAIL`)), /Missing passing CLEAN pixel tests/);
+  }
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /zig build test-clean-chat --summary all 2>&1 \| tee evidence\/clean-chat-native.log/);
+  assert.match(workflow, /node tools\/check-clean-chat-output.mjs evidence\/clean-chat-native.log/);
+});
+
+
+test('IGSH-1055 unread measurements use the visible viewport, never the expanded host', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const shot = source.slice(source.indexOf("if ($Name -eq 'new-messages-visible')"), source.indexOf('function Doctor('));
+  assert.match(shot, /\$bounds = Transcript-Viewport/);
+  assert.match(source, /\$bounds = Transcript-Viewport\s+\$pillOrigin =/);
+  assert.match(source, /\$visibleTop = \[int\]\(\$visibleBounds.Top - \$bounds.Top\)/);
+  assert.match(source, /\$f.y -ge \$f.scroll \+ \$visibleTop -and \$f.y -lt \$f.scroll \+ \$visibleTop \+ \$viewH - 40/);
+});
+
+test('IGSH-1055 viewport follows current app frames and maps native screen coordinates', { skip: process.platform !== 'win32' }, () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const helper = source.match(/function Transcript-Viewport \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(helper, 'visible viewport reader exists');
+  const guard = source.match(/if \(\$f -and \$f.count -eq 1 -and \$f.y -ge[^\n]+\{ return \$f \}/)?.[0];
+  assert.ok(guard && guard.includes('$visibleTop'));
+  const script = `Add-Type -AssemblyName System.Drawing
+Add-Type 'public static class ChatDeliveryDesktop { public struct Point { public int X; public int Y; } public static Point ScreenPoint(System.IntPtr h, int x, int y) { return new Point { X=8, Y=31 }; } }'
+$settings='fixture'; $main=[IntPtr]1
+function Read-Shared([string]$Path) { $script:fixture }
+${helper}
+$script:fixture='[chat] frame transcript 234,62,1006,644 edit'
+$r=Transcript-Viewport
+if ($r.Left -ne 242 -or $r.Top -ne 93 -or $r.Right -ne 1014 -or $r.Bottom -ne 675) { throw 'wrong screen mapping' }
+$script:fixture += "\n[chat] frame transcript 234,62,1006,614 edit"
+$r=Transcript-Viewport
+if ($r.Bottom -ne 645 -or 616 + 31 -lt $r.Bottom) { throw 'pill compared with stale host bounds' }
+$visibleTop=44; $viewH=582
+function Visible-Divider($f) { ${guard}; return $null }
+if (Visible-Divider @{count=1;y=100;scroll=88}) { throw 'Divider hidden behind the session header was accepted' }
+if (-not (Visible-Divider @{count=1;y=100;scroll=50})) { throw 'Visible divider was rejected' }
+if (Visible-Divider @{count=1;y=700;scroll=50}) { throw 'Divider below the content was accepted' }
+Write-Host 'CURRENT_VIEWPORT_OK'`;
+  const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /CURRENT_VIEWPORT_OK/);
+});
+
+
+test('IGSH-1055 two independent app revisions share the identical branch verifier', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { journeyMatrix } = require('./verify-features.cjs');
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const base = '5d2a820355969173090f0fcd0c72a7b3bd222141';
+  const comparison = journeyMatrix(['browser-pane-stuck', 'chat-messages-only'], base);
+  assert.equal(comparison.length, 2);
+  assert.ok(comparison.every(row => row['app-revision'] === base));
+  assert.deepEqual(journeyMatrix(['appearance'], ''), [{ feature: 'appearance', 'app-revision': '', 'caption-dpi': 96, 'caption-browser-theme': 'light' }]);
+  assert.match(workflow, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
+  assert.match(workflow, /path: app-source/);
+  assert.match(workflow, /working-directory: \$\{\{ matrix.app-revision && 'app-source' \|\| '\.' \}\}/);
+  assert.match(workflow, /git -C app-source rev-parse HEAD/);
+  assert.match(workflow, /harnessRevision = \$harnessRevision/);
+  assert.match(workflow, /if \(\$env:VERIFY_APP_REVISION\) \{ \$revision = \(git -C app-source rev-parse HEAD\).Trim\(\) \}/);
+  assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
+  assert.match(workflow, /embeddedRevision = \$embeddedRevision/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}\$\{\{ matrix.app-revision/);
+});
+
+
+test('IGSH-1055 historical activity control reaches strict pixel checks before current CLEAN layout', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const legacy = source.indexOf('if ($statusBounds.Bottom -eq $hostBounds.Top)');
+  assert.ok(legacy >= 0, 'old status-above-host geometry remains observable');
+  const baseline = source.indexOf("Shot 'messages-only-before-tools'", legacy);
+  assert.match(source.slice(legacy, baseline), /\$observation.transcript = @\{left=\[int\]\$bounds.Left/);
+  const pixels = source.indexOf('proof.mjs" $Evidence --tools-only', baseline);
+  const complete = source.indexOf("Complete CLEAN proof requires current measured layout", pixels);
+  assert.ok(pixels > baseline && complete > pixels);
+  assert.match(source.slice(pixels, complete), /if \(\$LASTEXITCODE -ne 0\) \{ throw/);
+});
+
+
+test('IGSH-1055 completion requires paired successful results in current and legacy caches', async () => {
+  const { completedToolCalls } = await import('./chat-messages-only-proof.mjs');
+  assert.equal(typeof completedToolCalls, 'function');
+  const call = { role: 'tool', id: 'activity-1', status: 'running', detail: 'input' };
+  const result = { role: 'tool_result', id: call.id, status: 'ok', detail: 'verified' };
+  assert.equal(completedToolCalls([call]).length, 0);
+  assert.equal(completedToolCalls([call, result]).length, 1);
+  assert.equal(completedToolCalls([result, call]).length, 1);
+  assert.equal(completedToolCalls([call, { ...result, id: 'unrelated' }]).length, 0);
+  assert.equal(completedToolCalls([call, { ...result, status: 'error' }]).length, 0);
+  assert.equal(completedToolCalls([call, { ...result, detail: 'different output' }]).length, 0);
+  assert.equal(completedToolCalls([call, result, result]).length, 0);
+  assert.equal(completedToolCalls([{ ...call, status: 'ok', detail: 'verified' }]).length, 1);
+  assert.equal(completedToolCalls([{ ...call, status: 'ok', detail: 'verified' }, { ...result, status: 'error' }]).length, 0);
+});

@@ -1,0 +1,142 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
+const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'utf8');
+const session = read('chat_session.zig');
+const history = read('chat_history.zig');
+const consoleSource = read('console.zig');
+function between(source, start, end) {
+  const a = source.indexOf(start), b = source.indexOf(end, a + start.length);
+  assert.ok(a >= 0 && b > a, start);
+  return source.slice(a, b);
+}
+
+test('IGSH-1754 opening a chat clears the last batch time', () => {
+  assert.match(between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)'), /g_chat_batch_boundary = \.\{}/);
+});
+
+test('IGSH-871 unread divider stays above the first unread reply until leaving the tab', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-unread-visit-'));
+  try {
+    copyZig(['switch_timing.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'win32.zig'), `pub const FILETIME = extern struct { dwLowDateTime: u32 = 0, dwHighDateTime: u32 = 0 };
+pub const SYSTEMTIME = extern struct { year: u16 = 0, month: u16 = 0, day_of_week: u16 = 0, day: u16 = 0, hour: u16 = 0, minute: u16 = 0, second: u16 = 0, milliseconds: u16 = 0 };
+pub fn FileTimeToLocalFileTime(_: *const FILETIME, _: *FILETIME) i32 { return 0; }
+pub fn FileTimeToSystemTime(_: *const FILETIME, _: *SYSTEMTIME) i32 { return 0; }
+pub fn GetLocalTime(_: *SYSTEMTIME) void {}
+`);
+    const source = `const std = @import("std");
+const switch_timing = struct {
+  const Step = @import("switch_timing.zig").Step;
+  fn start() i64 { return 0; }
+  fn record(_: Step, _: i64) void {}
+};
+const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64 = 0, start: usize = 0, len: usize = 1, stamp_ms: i64 = 0 };
+const md = struct { const Block = ThisBlock; };
+const ThisBlock = Block;
+const chat_history = struct {
+${between(history, 'pub const ReadBoundary =', 'test "IGSH-814 history gap')}
+${between(history, 'pub const NewMessages =', 'pub const Anchor =')}
+};
+const RECT = struct { bottom: i32 = 600 };
+fn GetClientRect(_: ?usize, _: *RECT) i32 { return 1; }
+fn chatViewClientRect(rc: *RECT) void { _ = GetClientRect(null, rc); }
+fn saveSession() void {}
+const app_state = struct {
+  var active_shell: usize = 0;
+  var shell_count: usize = 1;
+  var shells = [_]struct { shell_id: u32 = 7, last_read_message_id: u64 = 11 }{.{}};
+  var g_chat_active = true;
+  var g_chat_blocks_from_file = true;
+  var g_chat_cache_shell_id: u32 = 7;
+  var g_chat_read_visit_shell_id: u32 = 0;
+  var g_chat_read_visit_marker: u64 = 0;
+  var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
+  var g_chat_read_hold = false;
+  var g_chat_read_open_pending = false;
+  var g_chat_read_open_ready = true;
+  var g_chat_read_boundary: chat_history.ReadBoundary = .{};
+  var g_chat_read_divider_y: i32 = 0;
+  var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+  var g_chat_batch_divider_y: i32 = 0;
+  var g_chat_transcript_hwnd: ?usize = 1;
+  var g_chat_scroll_y: i32 = 0;
+  var g_chat_top_pad: i32 = 0;
+  var g_chat_layout_reuse: usize = 0;
+  var g_chat_layout_dirty = false;
+  var g_chat_new_messages: chat_history.NewMessages = .{};
+  var g_chat_blocks = [_]Block{.{ .message_id = 11 }, .{ .message_id = 22 }, .{ .message_id = 22, .first = false }, .{ .message_id = 33 }, .{ .message_id = 44 }};
+  var g_chat_block_count: usize = 4;
+  var g_chat_layout_rects = [_]RECT{ .{}, .{}, .{}, .{}, .{} };
+};
+${between(session, 'pub fn chatReadBoundary()', 'pub fn chatDeferTranscriptLoad()').replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect')}
+fn openTab() void {
+${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)')}
+  app_state.g_chat_read_open_pending = false;
+  app_state.g_chat_read_open_ready = true;
+}
+fn leaveTab(idx: u32, prev: u32) void {
+${between(consoleSource, '    if (idx != prev) {\n        const timing_started = switch_timing.start();', '    app_state.active_shell = idx;').replaceAll('@import("chat_session.zig").', '')}
+}
+test "divider stays at first unread after reading and clears on all-read revisit" {
+  openTab();
+  try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  app_state.g_chat_read_hold = false;
+  app_state.g_chat_layout_reuse = 2000;
+  app_state.g_chat_layout_dirty = false;
+  try std.testing.expect(chatReadMark(true));
+  try std.testing.expectEqual(@as(usize, 2000), app_state.g_chat_layout_reuse);
+  try std.testing.expect(!app_state.g_chat_layout_dirty);
+  try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
+  try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  openTab();
+  try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  leaveTab(0, 0);
+  try std.testing.expectEqual(@as(u32, 7), app_state.g_chat_read_visit_shell_id);
+  leaveTab(1, 0);
+  openTab();
+  try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
+  app_state.g_chat_block_count = 5;
+  try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
+  try std.testing.expectEqual(@as(u64, 33), app_state.g_chat_read_visit_marker);
+}
+test "background visit retains unread arrivals until a complete foreground read" {
+  app_state.shells[0].last_read_message_id = 33;
+  app_state.g_chat_read_visit_marker = 33;
+  app_state.g_chat_read_visit_state = .all_read;
+  app_state.g_chat_block_count = 4;
+  app_state.g_chat_read_open_ready = true;
+  app_state.g_chat_read_hold = false;
+  chatReadDeactivate();
+  try std.testing.expectEqual(@as(u64, 33), app_state.g_chat_read_visit_marker);
+  try std.testing.expect(!app_state.g_chat_read_open_ready);
+  app_state.g_chat_block_count = 5;
+  try std.testing.expect(!chatReadMark(true));
+  try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
+  app_state.g_chat_read_open_ready = true;
+  try std.testing.expectEqual(@as(?usize, 4), chatReadBoundary().index);
+}
+test "count tracks arrivals above bottom, not repaint or reaching bottom" {
+  var count: chat_history.NewMessages = .{};
+  count.arrive(0, true);
+  count.arrive(2, true);
+  count.arrive(1, true);
+  try std.testing.expectEqual(@as(usize, 3), count.count());
+  count.atBottom(true);
+  try std.testing.expectEqual(@as(usize, 3), count.count());
+  count.atBottom(false);
+  count.arrive(1, false);
+  try std.testing.expectEqual(@as(usize, 0), count.count());
+}
+`;
+    fs.writeFileSync(path.join(dir, 'test.zig'), source);
+    const result = spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, JSON.stringify(result));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

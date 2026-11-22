@@ -1,0 +1,80 @@
+---
+title: Troubleshooting
+description: How to diagnose common multiprompt failures.
+---
+
+## Stuck Spinner
+
+Use the visible title first:
+
+```text
+fix the big bad query (tmux: project-50)
+```
+
+Check the published state:
+
+```powershell
+$inbox = Get-Content "$env:APPDATA\ZigShell\inbox-default.json" -Raw | ConvertFrom-Json
+$inbox.shells | Where-Object { $_.act -eq 1 -or $_.att -eq 1 } |
+  Select-Object name,sub,act,att,pv
+```
+
+Then inspect the tmux pane:
+
+```bash
+ssh my-server "tmux capture-pane -pt my-session:0.0 -S -40 | tail -40"
+```
+
+If the pane is visibly at the Claude prompt, the spinner is stale and the `DONE` event was missed or mismatched.
+
+## Missing Blue Dot
+
+Confirm the tab was inactive when `DONE` arrived. Blue dots should not show on the active tab.
+
+Check that the `DONE:<session>` token exactly matches the tab’s tmux session id.
+
+## multiprompt-browser Cannot See Browser Pane
+
+Run:
+
+```bash
+multiprompt-browser status
+multiprompt-browser doctor
+```
+
+Check:
+
+- Is the browser pane open for this exact tab?
+- Does `%APPDATA%\ZigShell\panewin-<session>.txt` exist?
+- Is the remote SSH tunnel up?
+- Is multiprompt-browser running from inside the tmux session that owns the pane?
+
+Use Ctrl+K -> force browser-pane rebind, or `Alt+A` to reconnect the pane.
+
+## Browser Pane Missing Until Resize
+
+This usually means the Edge pane exists but visibility or positioning did not settle after restore.
+
+Actions:
+
+1. Switch away and back.
+2. Resize the multiprompt window.
+3. Use `Ctrl+Shift+O` to reconnect.
+4. If reproducible, inspect browser visibility timers and pane binding files.
+
+## Edge Border Masks Leak Outside multiprompt
+
+Masks must be hidden when multiprompt is not foreground, minimized, or covered by modal overlays. They must also hide for changelog, inbox, Ctrl+K, and URL picker overlays.
+
+If masks appear over other apps, inspect `updateBrowserVisibility`, `hideBrowserEdgeMasks`, and overlay gates.
+
+## Workspace Opens Without Sessions
+
+Check:
+
+- `%APPDATA%\ZigShell\windows.json`
+- `%APPDATA%\ZigShell\session-{workspace-id}.json`
+- restore flags
+- whether the workspace is remembered but not marked for startup restore
+
+Closing a workspace should keep its session file.

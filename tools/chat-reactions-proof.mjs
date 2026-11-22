@@ -1,0 +1,211 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readBmp } from './chat-code-font-proof.mjs';
+
+export function inspect(image, area) {
+  const pixel = (x, y) => image.pixels.readUIntLE((y * image.width + x) * 4, 3);
+  const bg = pixel(area.left, area.top);
+  const shifted = delta => [0, 8, 16].reduce((n, shift) => n | Math.min(255, ((bg >> shift) & 255) + delta) << shift, 0);
+  const width = area.right - area.left, height = area.bottom - area.top;
+  const seen = new Uint8Array(width * height), queue = new Int32Array(width * height);
+  const groups = { agent: [], user: [], dim: [], pill: [] };
+  const colors = new Map();
+  const reader = bg === 0x101010;
+  const badgeDelta = reader ? 37 : 56;
+  const ranges = reader ? [['agent', 14, 22], ['user', 42, 50], ['dim', 26, 29], ['pill', 37, 37]] : [['agent', 36, 48], ['user', 53, 65], ['dim', 26, 33]];
+  for (const [kind, low, high] of ranges) {
+    for (let delta = low; delta <= high; delta++) colors.set(shifted(delta), kind);
+  }
+  if (reader) colors.set(0x353535, 'pill');
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const start = y * width + x;
+    if (seen[start]) continue;
+    const color = pixel(x + area.left, y + area.top), kind = colors.get(color);
+    if (!kind) continue;
+    let head = 0, tail = 1, left = x, right = x, top = y, bottom = y, solidPill = 0;
+    queue[0] = start; seen[start] = 1;
+    while (head < tail) {
+      const pos = queue[head++], px = pos % width, py = Math.floor(pos / width);
+      if (pixel(px + area.left, py + area.top) === shifted(badgeDelta)) solidPill++;
+      left = Math.min(left, px); right = Math.max(right, px); top = Math.min(top, py); bottom = Math.max(bottom, py);
+      for (const next of [px > 0 ? pos - 1 : -1, px + 1 < width ? pos + 1 : -1, py > 0 ? pos - width : -1, py + 1 < height ? pos + width : -1]) {
+        if (next < 0 || seen[next]) continue;
+        if (colors.get(pixel(next % width + area.left, Math.floor(next / width) + area.top)) !== kind) continue;
+        seen[next] = 1; queue[tail++] = next;
+      }
+    }
+    if (tail < 100 || right - left < 20 || bottom - top < 8 || (kind === 'dim' && right - left <= 80)) continue;
+    const group = kind === 'user' && right - left < 100 && bottom - top < 40 && solidPill > tail * 0.6 ? 'pill' : kind;
+    if (group !== 'pill' && right - left < 80) continue;
+    if (reader && group === 'agent' && (left < 8 || left > 80)) continue;
+    let ink = 0;
+    for (let iy = top + 3; iy < bottom - 3; iy++) for (let ix = left + 5; ix < right - 5; ix++) {
+      const value = pixel(ix + area.left, iy + area.top);
+      if ([0, 8, 16].every(shift => ((value >> shift) & 255) > ((shifted(badgeDelta) >> shift) & 255) + 20)) ink++;
+    }
+    groups[group].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
+  }
+  for (const list of Object.values(groups)) list.sort((a, b) => a.top - b.top);
+  if (groups.user.length) groups.agent = groups.agent.filter(reply => reply.top >= groups.user[0].bottom);
+  return groups;
+}
+
+export function assertBadge(frame, users = 1) {
+  assert.equal(frame.agent.length, 2, 'only the two original replies remain; the reaction answer stays hidden');
+  assert.equal(frame.user.length, users, 'reaction must not add an ordinary bubble');
+  assert.equal(frame.dim.length, 0, 'reaction must not add a queued bubble');
+  assert.equal(frame.pill.length, 1, 'exactly one reaction badge');
+  const [first, second] = frame.agent, [pill] = frame.pill;
+  assert.ok(pill.top >= first.top && pill.bottom <= first.bottom && pill.bottom < second.top && pill.left >= first.left && pill.right <= first.right, 'badge stays inside the first same-prefix reply');
+  assert.ok(pill.right - pill.left < 100 && pill.bottom - pill.top < 40, 'small badge, not a bubble');
+  assert.ok(pill.ink > 8, 'badge glyph must actually be painted');
+}
+
+export function assertNoBadge(frame) {
+  assert.equal(frame.agent.length, 2, 'both original replies remain');
+  assert.equal(frame.user.length, 1, 'no ordinary reaction bubble');
+  assert.equal(frame.dim.length, 0, 'no queued reaction bubble');
+  assert.equal(frame.pill.length, 0, 'no reaction badge remains');
+}
+
+export function assertDoubleClick({ before, added, removed, delivered }, events, observation, cleanup) {
+  assertNoBadge(before);
+  assertBadge(added);
+  assertNoBadge(removed);
+  assertNoBadge(delivered);
+  assert.equal(observation.error, null);
+  for (const stage of ['double-click-added', 'double-click-removed']) {
+    assert.equal(observation[stage].queueCount, 1, 'removing a badge must not enqueue another reaction');
+    assert.equal(observation[stage].composerText, 'draft stays here');
+  }
+  assert.equal(observation.doubleClickDelivered, true);
+  const expected = '👍 to: Same first words for this example for this example for this example for this…';
+  const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
+  assert.equal(sends.length, 1, 'exactly one reaction transport submission');
+  assert.match(sends[0].content, /\n\[mp:[0-9a-f]{16}\]$/);
+  assert.equal(sends[0].content.replace(/\n\[mp:[0-9a-f]{16}\]$/, ''), expected);
+  assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === sends[0].content).length, 1);
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.scratch_removed, true);
+}
+
+export function assertFollowup(frame, area) {
+  const question = frame.user.at(-1);
+  assert.ok(question, 'ordinary follow-up question is visible');
+  const answers = frame.agent.filter(reply => reply.top >= question.bottom);
+  assert.equal(answers.length, 1, 'one ordinary answer follows the newest question');
+  const [answer] = answers;
+  assert.ok(question.top >= area.top && answer.bottom <= area.bottom, 'newest question and answer are fully inside the viewport');
+  assert.equal(frame.dim.length, 0, 'follow-up is not left queued');
+  return { x: answer.left + 30, y: Math.floor((answer.top + answer.bottom) / 2) };
+}
+
+export function assertHoverActions(image, first) {
+  const y = first.bottom - 14;
+  for (let cell = 0; cell < 3; cell++) {
+    let ink = 0;
+    for (let py = y - 10; py < y + 10; py++) for (let px = first.right + 6 + cell * 28; px < first.right + 6 + (cell + 1) * 28; px++) {
+      const color = image.pixels.readUIntLE((py * image.width + px) * 4, 3);
+      if ([0, 8, 16].every(shift => ((color >> shift) & 255) >= 70)) ink++;
+    }
+    assert.ok(ink >= (cell === 2 ? 3 : 7), `hover action ${cell} is painted`);
+  }
+  return { insideX: first.left + 30, insideY: y, emojiX: first.right + 20, moreX: first.right + 76, y };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const root = process.argv[2];
+  const json = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, ''));
+  if (process.argv[3] === '--hover') {
+    const image = readBmp(path.join(root, 'reactions-hover.bmp'));
+    const frame = inspect(image, json('reactions/area.json'));
+    assert.ok(frame.agent.length >= 2);
+    const first = frame.agent[0];
+    console.log(JSON.stringify(assertHoverActions(image, first)));
+  } else if (process.argv[3] === '--locate') {
+    const stage = process.argv[4] || 'before';
+    assert.ok(['before', 'delivered'].includes(stage));
+    const frame = inspect(readBmp(path.join(root, `reactions-${stage}.bmp`)), json('reactions/area.json'));
+    assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
+    const first = frame.agent[0];
+    console.log(JSON.stringify({ x: first.left + 30, y: first.top + 20 }));
+  } else if (process.argv[3] === '--followup') {
+    const area = json('reactions/area.json');
+    console.log(JSON.stringify(assertFollowup(inspect(readBmp(path.join(root, 'reactions-followup.bmp')), area), area)));
+  } else if (process.argv[3] === '--frame') {
+    const name = process.argv[4];
+    const frame = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), json('reactions/area.json'));
+    if (['double-click-removed', 'double-click-delivered'].includes(name)) assertNoBadge(frame);
+    else assertBadge(frame, name === 'fallback' ? 2 : 1);
+  } else if (process.argv[3] === '--double-click') {
+    try {
+      const observation = json('reactions/observation.json');
+      assert.equal(observation.error, null);
+      const area = json('reactions/area.json');
+      const stages = { before: 'before', added: 'double-click-added', removed: 'double-click-removed', delivered: 'double-click-delivered' };
+      const frames = Object.fromEntries(Object.entries(stages).map(([key, stage]) => [key, inspect(readBmp(path.join(root, `reactions-${stage}.bmp`)), area)]));
+      const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
+      assertDoubleClick(frames, events, observation, json('cleanup.json'));
+      fs.writeFileSync(path.join(root, 'double-click-proof.json'), JSON.stringify(frames, null, 2));
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-double-click', status: 'passed', transportCount: 1, checks: ['double-click-add', 'double-click-remove-without-send', 'removed-after-delivery', 'draft-preserved'], cleanup: 'zero owned processes; scratch removed' }, null, 2));
+    } catch (error) {
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-double-click', status: 'failed', error: error.message }, null, 2));
+      throw error;
+    }
+  } else {
+    try {
+      const observation = json('reactions/observation.json');
+      assert.equal(observation.error, null);
+      assert.equal(observation.composerText, 'draft stays here');
+      assert.equal(observation.restartComposerText, 'draft stays here');
+      assert.equal(observation.copiedRequestId, 'msg_first');
+      assert.equal(observation.hoverMenusMatch, true);
+      assert.equal(observation.groupedHoverStable, true, 'one fixed action row for both paragraphs');
+      const groupedSource = 'Same first words ' + 'for this example '.repeat(8) + '\n\nFIRST REPLY ✓ ⚠ 👍 👍🏽 👨‍👩‍👧 ❤️';
+      const normalize = text => text.replaceAll('\r\n', '\n').split('\n').map(line => line.trimEnd()).join('\n');
+      assert.equal(normalize(observation.groupedCopied), normalize(groupedSource), 'whole-bubble selection copies both paragraphs only');
+      assert.equal(observation.groupedContextCopied, observation.groupedCopied, 'context Copy uses the whole bubble without a text selection');
+      assert.equal(observation.groupedQuoteChars, observation.groupedCopied.replaceAll('\r\n', '\n').length, 'Reply uses the entire selected bubble');
+      const groupedArea = json('reactions/area.json');
+      for (const name of ['first', 'last']) {
+        const image = readBmp(path.join(root, `message-block-hover-${name}.bmp`));
+        const frame = inspect(image, groupedArea);
+        assertHoverActions(image, frame.agent[0]);
+      }
+      const clean = json('cleanup.json');
+      assert.equal(clean.remaining_owned_processes, 0);
+      assert.equal(clean.scratch_removed, true);
+      const expected = '👍 to: Same first words for this example for this example for this example for this…';
+      const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
+      const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
+      assert.deepEqual(sends.map(e => e.content), [expected], 'exactly one genuine transport submission');
+      assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === expected).length, 1);
+      assert.ok(events.some(e => e.message?.content === '👍 to: Unavailable reply [mp:0000000000000000]'));
+      assert.ok(events.some(e => e.message?.content?.some?.(part => part.text === 'Done with the queued messages.')), 'the session answered the delivered reaction');
+      const area = json('reactions/area.json');
+      const frames = {};
+      for (const name of ['before', 'pending', 'delivered', 'restart', 'fallback']) frames[name] = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), area);
+      assert.ok(frames.before.agent.length >= 2, 'fixture replies visible before reacting');
+      assert.equal(frames.before.user.length, 1);
+      assert.equal(frames.before.pill.length, 0);
+      for (const name of ['pending', 'delivered', 'restart']) assertBadge(frames[name]);
+      assertBadge(frames.fallback, 2);
+      const question = 'What should I do next?';
+      const answer = 'The next answer stays visible after reacting.';
+      assert.equal(events.filter(e => e.type === 'user' && e.message?.content === question).length, 1, 'one real ordinary follow-up submission');
+      assert.equal(events.filter(e => e.type === 'assistant' && e.message?.id === 'msg_followup' && e.message?.content?.some?.(part => part.text === answer)).length, 1);
+      assert.equal(observation.followupCopied, answer, 'the visible newest answer copies its exact ordinary text');
+      assert.ok(observation.followupNewestMoved > 0, 'real scrolling reached the newest answer');
+      frames.followup = inspect(readBmp(path.join(root, 'reactions-followup.bmp')), area);
+      assertFollowup(frames.followup, area);
+      fs.writeFileSync(path.join(root, 'reactions-proof.json'), JSON.stringify({ expected, frames }, null, 2));
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-reactions', status: 'passed', transportCount: sends.length, sameTargetAfterRestart: true }, null, 2));
+      console.log('QUOTED_REACTION_BADGE_RESTART_PROVEN');
+    } catch (error) {
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-reactions', status: 'failed', error: error.message }, null, 2));
+      throw error;
+    }
+  }
+}
