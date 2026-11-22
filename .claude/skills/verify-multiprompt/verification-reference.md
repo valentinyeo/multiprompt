@@ -49,7 +49,9 @@ gh workflow run pr-verifier.yml --ref master -f pr=<number>
 gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 ```
 
-Changed files match `Source files:` ownership in feature maps. A changed map selects its own journey. Shared core (`src/main.zig`, `src/command_palette.zig` when listed on more than five maps) selects no journey alone; bare `src/` changes run `appearance` as smoke. Tool paths select only owning journeys. Cap and drop rules live in `tools/pr-verifier.cjs` and `tools/touched-journeys.test.js`.
+Changed files match `Source files:` ownership in feature maps. A changed map selects its own journey; a wide map-maintenance pull request therefore drives up to eight capped desktop journeys from edited `features/*.md` files, independent of whether `Source files:` breadth changed on that stem. Shared core (`src/main.zig`, `src/command_palette.zig` when listed on more than five maps) selects no journey alone; bare `src/` changes run `appearance` as smoke. Tool paths select only owning journeys. Cap and drop rules live in `tools/pr-verifier.cjs` and `tools/touched-journeys.test.js`.
+
+When `pstack-verifier` blocks on Tests while every selected head journey passed, read the PR head's `test.yml` run: `test-vps (1)` and the aggregate `test` job sometimes fail on unrelated flakes (for example `run chat echo CPU budgets` or a duplicate `bot-photo` matrix job) and are not caused by map-only edits. Same-named jobs must fail on master's latest completed `test.yml` for `wait-for-tests` to treat the failure as inherited.
 
 `verify.yml` on PRs runs the selected set on head only. Journeys already red on the latest master nightly are inherited (named, non-blocking). Formal non-desktop checks with `CI workflow:` use the same ownership rules and require a successful exact-head PR run plus artifact `summary.json`.
 

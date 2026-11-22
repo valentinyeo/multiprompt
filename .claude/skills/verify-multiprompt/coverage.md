@@ -140,6 +140,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 - master nightly [44866859649](https://github.com/valentinyeo/multiprompt/actions/runs/44866859649) at `cb71094`, 65 passed and 13 failed.
 - branch dispatch [44931544248](https://github.com/valentinyeo/multiprompt/actions/runs/44931544248) at `b6d2d79` (the same app source), 65 passed and 13 failed.
+- PR 1181 map-only verifier [44943330221](https://github.com/valentinyeo/multiprompt/actions/runs/44943330221) at `c0dcf88ee`: eight capped head journeys (including `bot-photo` at 96 and 144) passed with artifacts; the `pstack-verifier` FAIL came from `test-vps (1)` (`chat echo CPU budgets`) and a second `head / verify (bot-photo)` matrix job, not from map selection or journey checks.
 
 Read the table before trusting a "passed" sentence in a recipe: a recipe describes a journey, it is not a current green board. `bot-photo`, `group-rail` and `command-palette` differ between the two runs, so those three are flaky rather than stable. Dispatch `feature=all` on your own branch when a journey's result decides your change.
 
