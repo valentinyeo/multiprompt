@@ -1358,6 +1358,7 @@ def terminal_frame(session, size):
 
 def terminal_reader():
     import base64
+    import binascii
     import threading
 
     box = dict(size=[24, 80], opening=None, closed=False)
@@ -1381,6 +1382,14 @@ def terminal_reader():
                 elif isinstance(value.get("size"), list):
                     box["size"] = value["size"]
                     changed.set()
+                elif isinstance(value.get("input"), str) and state().get("name") == "server-shell-input":
+                    try:
+                        data = base64.b64decode(value["input"], validate=True)
+                    except (ValueError, binascii.Error):
+                        continue
+                    if b"\x03" in data:
+                        (ROOT / "interrupt.json").write_text(json.dumps(dict(bytes=len(data))), encoding="utf-8")
+                        changed.set()
         except (OSError, ValueError):
             pass
         finally:
@@ -1406,6 +1415,13 @@ def terminal_reader():
     if (ROOT / "console-detached").exists():
         return 0
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    if state().get("name") == "server-shell-input":
+        marker = "SOFT3048SCROLL-42"
+        for index in range(50):
+            send(f"scroll-{index:02d}\r\n".encode())
+        send((marker + "\r\n").encode())
+        send(b"INTERRUPTIBLE\r\n")
+        (ROOT / "scroll-ready.json").write_text(json.dumps(dict(marker=marker, lines=50)), encoding="utf-8")
     previous = None
     while not box["closed"]:
         if (ROOT / "console-detached").exists():

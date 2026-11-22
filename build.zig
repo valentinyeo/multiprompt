@@ -843,6 +843,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
     const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
     test_step.dependOn(&native_session_tests.step);
+    const server_shell_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/server-shell-input.test.js" });
+    test_step.dependOn(&server_shell_input_tests.step);
     vps_test_step.dependOn(&native_session_tests.step);
     const harness_alt_tap_tests = b.addSystemCommand(&.{ "node", "--test", "tools/harness-alt-tap.test.js" });
     test_step.dependOn(&harness_alt_tap_tests.step);

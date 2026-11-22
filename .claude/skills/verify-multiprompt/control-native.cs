@@ -691,6 +691,19 @@ public static class VerifyNative {
             Thread.Sleep(35);
         }
     }
+    public static void DragSelectClient(IntPtr hwnd, int x0, int y0, int x1, int y1) {
+        Point start = new Point { X = x0, Y = y0 };
+        Point end = new Point { X = x1, Y = y1 };
+        if (!ClientToScreen(hwnd, ref start) || !ClientToScreen(hwnd, ref end)) throw new InvalidOperationException("Selection endpoints unavailable");
+        if (WindowFromPoint(start) != hwnd || WindowFromPoint(end) != hwnd) throw new InvalidOperationException("Selection is not in the owned window");
+        MouseAt(start.X, start.Y, 2);
+        try {
+            for (int step = 1; step <= 10; step++) {
+                MouseAt(start.X + (end.X - start.X) * step / 10, start.Y + (end.Y - start.Y) * step / 10, 0);
+                Thread.Sleep(15);
+            }
+        } finally { MouseAt(end.X, end.Y, 4); }
+    }
     public static void RightClickTranscript(IntPtr hwnd, uint pid, IntPtr owner, Point point) {
         uint actualPid;
         GetWindowThreadProcessId(hwnd, out actualPid);
