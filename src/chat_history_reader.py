@@ -2773,7 +2773,6 @@ HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
-HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
@@ -4552,7 +4551,7 @@ def host_switch_ai(provider, sid, target):
 
 
 def host_session_reset(session, agent=None):
-    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
+    session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
                    control_wait={})
@@ -6263,18 +6262,12 @@ def host_loop(provider, sid, tmux, session, server, agent):
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
                     return
-            idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
-            if idle and idle_expired:
-                host_log(provider, sid, "idle_stop")
-                return
             for key, _ in selector.select(host_flush_timeout(session)):
                 if key.data == "agent":
                     try:
                         chunk = agent.stdout.read1(65536)
                     except (OSError, ValueError):
                         chunk = b""
-                    if chunk:
-                        session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
                         owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
@@ -6283,7 +6276,6 @@ def host_loop(provider, sid, tmux, session, server, agent):
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
-                    session["idle"] = time.time()
                     host_accept_client(provider, sid, tmux, session, server)
             host_flush(provider, sid, tmux, session)
 
@@ -8611,7 +8603,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 145
+RUNTIME_GENERATION = 146
 
 if __name__ == '__main__':
     import base64 as _base64
