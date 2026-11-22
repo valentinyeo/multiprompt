@@ -1,0 +1,1 @@
+Fresh start loses the handover after a skill reload
