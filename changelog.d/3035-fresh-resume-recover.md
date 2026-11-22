@@ -1,0 +1,1 @@
+A chat that could not finish reading a fresh-start handover accepts new messages again after one automatic retry instead of staying blocked forever.

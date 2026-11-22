@@ -231,7 +231,7 @@ print('FRESH_START_PASS')
 `);
 });
 
-test('a failed first handover read keeps incoming work gated until explicit retry succeeds', () => {
+test('a failed resume auto-retries once then delivers again after the second failure', () => {
   python(String.raw`
 import io, tempfile
 from pathlib import Path
@@ -256,15 +256,42 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_fresh_prepare'](provider, sid, state)
     session = dict(state=state)
     r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
-    with patch.dict(r, host_control_send=lambda *args: False):
+    events = []
+    with patch.dict(r, host_control_send=lambda *args: False, host_event=lambda *a: events.append(a)):
         r['host_fresh_resume'](provider, sid, tmux, session)
-    assert state['fresh_start']['phase'] == 'resume_failed'
+    assert state['fresh_start']['phase'] == 'resume' and state['fresh_start']['resume_retried']
     assert r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver'))['reason'] == 'fresh_start_pending'
-    assert r['host_fresh_start'](provider, sid, tmux, session)['status'] == 'started'
+    retries = []
+    with patch.dict(r, host_fresh_send=lambda *args: retries.append(args) or False, host_event=lambda *a: events.append(a)):
+        r['host_fresh_error'](provider, sid, tmux, session, 'Could not deliver the saved handover.')
+    assert retries == [] and 'fresh_start' not in state
+    work = dict(op='deliver', id='after-resume-fail', attempt='after', epoch=1, text='hello again')
+    with patch.dict(r, host_attempt=lambda *args: dict(status='claimed')):
+        assert r['host_handle_request'](provider, sid, tmux, session, work)['status'] == 'sent'
+    assert any('Your previous work is saved' in str(e) for e in events)
+    session['db'].close()
+print('FRESH_START_PASS')
+`);
+});
+
+test('a stuck resume_failed state from an older host retries resume once instead of blocking deliver forever', () => {
+  python(String.raw`
+import io, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    provider, sid, tmux = 'claude', '11111111-2222-4333-8444-555555555555', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    r['host_write'](paths['config'], dict(enabled=True, tmux=tmux, cwd=directory))
+    r['host_write'](paths['root'] / 'saved.json', dict(text='Finish the draft.'))
+    state = dict(context_session='new-native', fresh_start=dict(phase='resume_failed', file='saved.json'))
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    r['host_fresh_resume'](provider, sid, tmux, session)
+    assert state['fresh_start']['phase'] == 'resume' and not state['fresh_start'].get('resume_retried')
     r['host_fresh_resume'](provider, sid, tmux, session)
     assert 'Finish the draft.' in session['agent'].stdin.getvalue().decode()
-    r['host_turn_end'](provider, sid, tmux, session, dict(status='completed'), {})
-    assert 'fresh_start' not in state
     session['db'].close()
 print('FRESH_START_PASS')
 `);
