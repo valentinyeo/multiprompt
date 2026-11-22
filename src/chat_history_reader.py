@@ -2597,7 +2597,7 @@ def message_expire(db, provider, sid):
         return [row for row in rows if row[0] not in held]
     now = time.time()
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND deadline IS NOT NULL AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
-        db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt=CASE WHEN receipt IS NULL OR receipt='' THEN 'waiting_too_long' ELSE receipt END WHERE id=? AND state IN ('queued','sent')", (row[0],))
+        db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state IN ('queued','sent')", (row[0],))
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND created<=? ORDER BY position", (provider, sid, now - 600)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt='waiting_too_long' WHERE id=? AND state IN ('queued','sent')", (row[0],))
@@ -2891,15 +2891,19 @@ def host_key(provider, sid):
 def host_socket_root():
     import tempfile
     root = Path(tempfile.gettempdir()) / ("mp-agent-host-" + str(getattr(os, "getuid", lambda: 0)()))
-    root.mkdir(mode=0o700, exist_ok=True)
-    root.chmod(0o700)
+    if root.is_dir():
+        root.chmod(0o700)
+    else:
+        root.mkdir(mode=0o700)
     return root
 
 
 def host_paths(provider, sid):
     root = HOME / ".local/state/multiprompt/agent-host"
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    root.chmod(0o700)
+    if root.is_dir():
+        root.chmod(0o700)
+    else:
+        root.mkdir(mode=0o700, parents=True)
     key = host_key(provider, sid)
     return dict(root=root, key=key, config=root / (key + ".config.json"), lock=root / (key + ".owner.lock"),
                 owner=root / (key + ".owner.json"), socket=host_socket_root() / (key + ".sock"),
@@ -5512,7 +5516,7 @@ def host_codex_write(provider, sid, session, token, text):
     return sent
 
 
-def host_unsent(provider, sid, tmux, session, token, reason=None):
+def host_unsent(provider, sid, tmux, session, token):
     entry = next((item for item in session.get("sends") or [] if item["id"] == token and not item.get("accepted")), None)
     if entry is None:
         return
@@ -5520,8 +5524,6 @@ def host_unsent(provider, sid, tmux, session, token, reason=None):
     digest = hashlib.sha256(("host:" + sid + ":" + token + ":" + entry["attempt"]).encode()).hexdigest()
     fact = dict(kind="not_sent", sid=sid, id=token, attempt=entry["attempt"], event_id="host:not_sent:" + digest,
                 provenance=HOST_ADAPTERS[provider]["provenance"])
-    if isinstance(reason, str) and reason.strip():
-        fact["reason"] = reason
     try:
         host_apply(provider, sid, tmux, [fact])
     except (OSError, ValueError):
@@ -5915,8 +5917,7 @@ def host_pi_event(provider, sid, tmux, session, event):
             return
         if event.get("success") is False:
             host_log(provider, sid, "pi_prompt", dict(success=False, disposition=data.get("disposition")))
-            disposition = data.get("disposition")
-            host_unsent(provider, sid, tmux, session, event.get("id"), disposition if isinstance(disposition, str) else None)
+            host_unsent(provider, sid, tmux, session, event.get("id"))
             if not session.get("pi_run") and not session.get("sends"):
                 host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="prompt_failed", usage={}),
                               dict(subtype="prompt_failed"))
@@ -6037,7 +6038,7 @@ def host_hax_event(provider, sid, tmux, session, event):
     if kind == "bridge_start" and isinstance(token, str):
         host_accept(provider, sid, tmux, session, event, token)
     elif kind == "bridge_busy" and isinstance(token, str):
-        host_unsent(provider, sid, tmux, session, token, "owner_busy")
+        host_unsent(provider, sid, tmux, session, token)
     elif kind == "hax" and isinstance(event.get("record"), dict):
         host_hax_record(provider, sid, tmux, session, event["record"])
     elif kind == "bridge_end":
@@ -7018,12 +7019,7 @@ def message_store_transaction(q):
             if current_epoch == epoch:
                 message_apply_connector(db, provider, sid, epoch, result)
                 if result.get('handoff') == 'not_sent':
-                    refused = result.get('reason')
-                    if isinstance(refused, str) and refused.strip():
-                        refused = json.dumps(dict(kind='not_sent', sid=sid, id=row['id'], attempt=row['attempt'], reason=refused), separators=(',', ':'))
-                    else:
-                        refused = 'not_sent'
-                    changed = db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt=? WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (refused, row['id'], row['attempt'], epoch)).rowcount
+                    changed = db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt='not_sent' WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (row['id'], row['attempt'], epoch)).rowcount
                     if changed:
                         message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone())
@@ -8588,7 +8584,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 140
+RUNTIME_GENERATION = 138
 
 if __name__ == '__main__':
     import base64 as _base64

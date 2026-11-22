@@ -4070,35 +4070,6 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
 
-    def test_soft_2989_connector_not_sent_keeps_the_reason_it_returned(self):
-        connector = dict(
-            capabilities=lambda ctx: dict(protocol=1, provider='claude'),
-            submit=lambda ctx, row, state, services: dict(handoff='not_sent', facts=[], state=state, reason='draft_present'),
-        )
-        self.submit()
-        with patch.object(reader, 'message_connector', return_value=connector):
-            self.request('dispatch')
-        message = self.status()
-        self.assertEqual(message['state'], 'failed')
-        self.assertIn('draft_present', message['receipt'])
-
-    def test_soft_2989_a_busy_desktop_bridge_says_the_chat_was_busy(self):
-        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', accepted=False)])
-        with patch.object(reader, 'host_apply', return_value=True) as apply:
-            reader.host_hax_event('claude', 'sid', 'fixture', session, dict(type='bridge_busy', id='message_fixture_0001'))
-        self.assertEqual(apply.call_args.args[3][0].get('reason'), 'owner_busy')
-
-    def test_soft_2989_a_message_that_runs_out_of_time_says_why(self):
-        self.submit()
-        db = reader.message_store_db('fixture')
-        with db:
-            db.execute("UPDATE shared_messages SET state='sent',deadline=? WHERE id='message_fixture_0001'", (time.time() - 1,))
-        reader.message_expire(db, 'claude', 'sid')
-        receipt = db.execute("SELECT receipt FROM shared_messages WHERE id='message_fixture_0001'").fetchone()[0]
-        db.close()
-        self.assertEqual(self.status()['state'], 'failed')
-        self.assertEqual(receipt, 'waiting_too_long')
-
     def test_remove_works_for_failed_unknown_and_reset_messages(self):
         self.submit()
         with patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'not_sent', 'reason': 'draft_present'}):
