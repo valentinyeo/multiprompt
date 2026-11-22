@@ -6429,6 +6429,7 @@ test "SOFT-3051 folder_host overrides primary repo host" {
     }
     const cwd = "/home/x/projects/travel";
     app_state.shell_count = 1;
+    app_state.shells[0].kind = .tmux;
     app_state.shells[0].workspace = 0;
     app_state.shells[0].tmux_host = 0;
     app_state.shells[0].tmux_session_len = 4;
