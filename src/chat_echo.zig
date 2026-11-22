@@ -285,10 +285,17 @@ const Normalized = struct {
     }
 };
 
+const mention_wire_note = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
+
+fn trimMentionWireNote(text: []const u16) []const u16 {
+    const mark = mention_wire_note[0..mention_wire_note.len];
+    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
+    return text[0..idx];
+}
+
 pub fn sameText(a: []const u16, b: []const u16) bool {
-    const mention = @import("chat_mention.zig");
-    const at = mention.trimWireNote(a);
-    const bt = mention.trimWireNote(b);
+    const at = trimMentionWireNote(a);
+    const bt = trimMentionWireNote(b);
     var left = Normalized{ .text = at };
     var right = Normalized{ .text = bt };
     while (true) {
