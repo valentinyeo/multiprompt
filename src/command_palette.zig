@@ -1262,7 +1262,7 @@ fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, n
         if (key_delete != prev_delete) return key_delete;
         const key_open = key < app_state.shell_count;
         const prev_open = prev < app_state.shell_count;
-        if (key_open != prev_open and (paletteRowIsArchived(key) or paletteRowIsArchived(prev))) return key_open;
+        if (key_open != prev_open) return key_open;
         const key_workspace = paletteWorkspaceRank(key);
         const prev_workspace = paletteWorkspaceRank(prev);
         if (key_workspace != prev_workspace) return key_workspace > prev_workspace;
@@ -1416,6 +1416,47 @@ test "SOFT-2355 typing del ranks Delete session before Delete workspace" {
     sortSearchResultsByRank();
     try std.testing.expectEqual(SEARCH_TABCTX_END_TMUX, app_state.g_search_results[0]);
     try std.testing.expectEqual(SEARCH_WORKSPACE_DELETE_MENU_OFFSET, app_state.g_search_results[1]);
+}
+
+test "SOFT-3065 session Token Ladder ranks above Token Ladder commands for query token" {
+    const old_shell_name = app_state.shells[0].name;
+    const old_shell_name_len = app_state.shells[0].name_len;
+    const old_shell_count = app_state.shell_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    defer {
+        app_state.shells[0].name = old_shell_name;
+        app_state.shells[0].name_len = old_shell_name_len;
+        app_state.shell_count = old_shell_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    app_state.shell_count = 1;
+    const session_name = "Token Ladder";
+    for (session_name, 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = session_name.len;
+    for ("token", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 5;
+    app_state.g_palette_usage_count = 2;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_LADDER_AUTO_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) };
+    app_state.g_palette_usage[1] = .{ .key = SEARCH_LADDER_DASH_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) - 1 };
+    app_state.g_search_results[0] = SEARCH_LADDER_AUTO_OFFSET;
+    app_state.g_search_results[1] = SEARCH_LADDER_DASH_OFFSET;
+    app_state.g_search_results[2] = 0;
+    app_state.g_search_result_count = 3;
+    sortSearchResultsByRank();
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_search_results[0]);
+    try std.testing.expect(paletteResultOutranks(0, SEARCH_LADDER_AUTO_OFFSET, 0, 0, std.math.maxInt(u64)));
+    try std.testing.expect(paletteResultOutranks(0, SEARCH_LADDER_DASH_OFFSET, 0, 0, std.math.maxInt(u64)));
+    try std.testing.expect(!paletteResultOutranks(SEARCH_LADDER_AUTO_OFFSET, 0, 0, 0, std.math.maxInt(u64)));
 }
 
 fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
