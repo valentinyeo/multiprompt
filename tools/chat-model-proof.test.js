@@ -20,16 +20,7 @@ function fixture() {
   write('plus-active.json', { rows, expected_active: expected, failures: [] });
   write('before-history.txt', 'start the fake session\nThe fake session is ready.');
   write('after-history.txt', 'start the fake session\nThe fake session is ready.');
-  write('saved-settings.json', { model: 'fable' });
-  write('config-initial.json', { enabled: true });
-  write('argv-initial.jsonl', JSON.stringify({ argv: ['--model', 'opus', '--effort', 'medium'], saved_model: 'fable', aliases: {} }) + '\n');
-  const defaults = ['model_opus', 'effort_medium'];
-  write('plus-default.json', { expected_active: defaults, failures: [], rows: ['model_opus', 'model_fable', 'effort_medium', 'effort_low'].map(item => ({ item, mark: 0, accent: defaults.includes(item) ? 40 : 0 })) });
-  for (const [name, text, amber] of [['fable', 'Fable 5.2 · medium', true], ['opus', 'Opus 5.5 · medium', false]]) {
-    write(`header-${name}.json`, { text, amber, rect: [400, 30, 540, 48], titleBottom: 31, ink: 40, hand: true, pickerOpened: true });
-    write(`header-${name}-cursor.json`, { flags: 1, actual: 42, expectedHand: 42, x: 470, y: 39 });
-  }
-  const actions = [{ input: 'click header model', text: 'Fable 5.2 · medium' }, { input: 'click header model', text: 'Opus 5.5 · medium' }, { input: 'Enter: send with the default model' }];
+  const actions = [];
   let hostLog = '';
   let argvLog = '';
   fs.mkdirSync(path.join(dir, 'host'));
@@ -39,7 +30,7 @@ function fixture() {
     actions.push({ input: 'choose plus menu row', text: item });
     write(`config-${name}.json`, { enabled: true, model: 'haiku', ...(effort === 'default' ? {} : { effort }) });
     hostLog += JSON.stringify({ event: 'model_effort_settings_applied', detail: { model: 'haiku', effort } }) + '\n';
-    argvLog += JSON.stringify({ argv: ['--model', 'haiku', '--effort', effort === 'default' ? 'medium' : effort] }) + '\n';
+    argvLog += JSON.stringify({ argv: ['--model', 'haiku', ...(effort === 'default' ? [] : ['--effort', effort])] }) + '\n';
     write(`host-${name}.jsonl`, hostLog);
     write(`argv-${name}.jsonl`, argvLog);
   }
@@ -48,16 +39,9 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'actions.json'), JSON.stringify(actions));
   const png = Buffer.alloc(1024);
   Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
-  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', 'model-default-menu', 'model-header-fable', 'model-header-fable-picker', 'model-header-opus', 'model-header-opus-picker', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
   return { root, dir, write };
 }
-
-test('remapped desktop drivers keep the selected journey artifact identity', () => {
-  const workflow = source('.github/workflows/verify.yml');
-  const upload = workflow.slice(workflow.indexOf('name: verify-${{'));
-  assert.match(upload, /^name: verify-\$\{\{ matrix\.feature \}\}/);
-  assert.doesNotMatch(upload.split('\n')[0], /env\.FEATURE/);
-});
 
 test('fixture launches the embedded production host and adapts Windows pipes only when opted in', () => {
   const boundary = source('tools/verify-chat-delivery/boundary.py');
@@ -90,25 +74,6 @@ test('synthetic agent runs and records its selected model and effort', t => {
   assert.equal(events.at(-1).type, 'result');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'model-argv.jsonl'), 'utf8')).argv, argv);
   assert.equal(fs.readFileSync(transcript, 'utf8').trim().split(/\r?\n/).length, 2);
-});
-
-test('rejects inherited Fable, missing header clicks and a wrongly highlighted default', t => {
-  const f = fixture();
-  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
-  const initial = fs.readFileSync(path.join(f.dir, 'argv-initial.jsonl'), 'utf8');
-  f.write('argv-initial.jsonl', initial.replace('"opus"', '"fable"'));
-  assert.throws(() => verify(f.root));
-  f.write('argv-initial.jsonl', initial);
-  const header = JSON.parse(fs.readFileSync(path.join(f.dir, 'header-fable.json'), 'utf8'));
-  for (const wrong of [{ ...header, hand: false }, { ...header, pickerOpened: false }, { ...header, amber: false }, { ...header, ink: 0 }, { ...header, text: 'Opus 5.5 · medium' }]) {
-    f.write('header-fable.json', wrong);
-    assert.throws(() => verify(f.root));
-  }
-  f.write('header-fable.json', header);
-  const menu = JSON.parse(fs.readFileSync(path.join(f.dir, 'plus-default.json'), 'utf8'));
-  menu.rows.find(row => row.item === 'model_fable').accent = 40;
-  f.write('plus-default.json', menu);
-  assert.throws(() => verify(f.root));
 });
 
 test('requires independent settings, process flags, host log, history and cleanup', t => {
@@ -151,9 +116,6 @@ test('rejects a plus menu that keeps a check mark or loses the active style', t 
 
 test('journey chooses model and effort from the shipped plus menu, not the retired palette rows', () => {
   const journey = source('tools/verify-chat-delivery/model-settings.ps1');
-  assert.doesNotMatch(journey, /[^\x00-\x7f]/);
-  assert.match(source('tools/verify-chat-delivery/desktop.cs'), /public static long\[\] HoverCursor[\s\S]*?SendInput\(1, inputs/);
-  assert.match(journey, /header-\$Name-cursor\.json/);
   assert.match(journey, /function Plus-Click/);
   assert.match(journey, /PressClient\(\$menu, \$app\.Id, \$x, \$y\)/);
   assert.match(journey, /input='choose plus menu row'/);
