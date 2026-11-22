@@ -957,8 +957,8 @@ public static class VerifyNative {
     public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)); }
     static int[] SampleRectPixels(int left, int top, int width, int height) {
         if (width <= 0 || height <= 0) throw new InvalidOperationException("Caret sample rectangle is empty");
-        Bitmap bitmap = new Bitmap(width, height);
-        using (Graphics graphics = Graphics.FromImage(bitmap)) {
+        System.Drawing.Bitmap bitmap = new System.Drawing.Bitmap(width, height);
+        using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap)) {
             graphics.CopyFromScreen(left, top, 0, 0, bitmap.Size);
         }
         int[] colors = new int[width * height];

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define CLASS_NAME L"MPTerminal"
+#define CARET_BLINK_TIMER 7
 
 typedef struct {
     HWND hwnd;
@@ -19,12 +20,20 @@ typedef struct {
     int caret_created;
     int caret_w, caret_h;
     int caret_x, caret_y;
+    int caret_visible;
 } TerminalWindow;
 
 typedef struct { TerminalWindow *window; int attached; } Creation;
 
 static TerminalWindow *get(HWND hwnd) { return (TerminalWindow *)GetWindowLongPtrW(hwnd, GWLP_USERDATA); }
 static int clamp(int value, int lo, int hi) { return value < lo ? lo : value > hi ? hi : value; }
+
+static void caret_blink_arm(TerminalWindow *t, int arm) {
+    UINT interval = GetCaretBlinkTime();
+    if (interval == 0xFFFFFFFF) return;
+    if (arm) SetTimer(t->hwnd, CARET_BLINK_TIMER, interval, NULL);
+    else KillTimer(t->hwnd, CARET_BLINK_TIMER);
+}
 
 static int modifiers(void) {
     int result = 0;
@@ -50,8 +59,10 @@ static void caret(TerminalWindow *t) {
     int visible = mp_terminal_cursor(t->model, &row, &col) && !t->scroll;
     if (!visible) {
         if (t->caret_created) {
+            caret_blink_arm(t, 0);
             DestroyCaret();
             t->caret_created = 0;
+            t->caret_visible = 0;
             t->caret_x = t->caret_y = -1;
         }
         return;
@@ -59,8 +70,10 @@ static void caret(TerminalWindow *t) {
     int x = col * t->width;
     int y = row * t->height;
     if (!t->caret_created || t->caret_w != t->width || t->caret_h != t->height) {
+        caret_blink_arm(t, 0);
         DestroyCaret();
         t->caret_created = 0;
+        t->caret_visible = 0;
         t->caret_x = t->caret_y = -1;
         if (CreateCaret(t->hwnd, NULL, t->width, t->height)) {
             t->caret_created = 1;
@@ -70,10 +83,8 @@ static void caret(TerminalWindow *t) {
             t->caret_x = x;
             t->caret_y = y;
             ShowCaret(t->hwnd);
-            if (GetCaretBlinkTime() != 0xFFFFFFFF) {
-                HideCaret(t->hwnd);
-                ShowCaret(t->hwnd);
-            }
+            t->caret_visible = 1;
+            caret_blink_arm(t, 1);
         }
         return;
     }
@@ -88,10 +99,11 @@ void mp_terminal_window_repair_caret(HWND hwnd) {
     TerminalWindow *t = get(hwnd);
     if (!t || GetFocus() != t->hwnd) return;
     if (!t->caret_created) caret(t);
-    else if (GetCaretBlinkTime() != 0xFFFFFFFF) {
-        HideCaret(t->hwnd);
+    else {
         ShowCaret(t->hwnd);
-    } else ShowCaret(t->hwnd);
+        t->caret_visible = 1;
+        caret_blink_arm(t, 1);
+    }
 }
 
 static void resize(TerminalWindow *t, int force) {
@@ -339,7 +351,19 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
         case WM_SIZE: resize(t, 0); return 0;
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
         case WM_SETFOCUS: caret(t); return 0;
-        case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); t->caret_created = 0; t->caret_x = t->caret_y = -1; return 0;
+        case WM_TIMER:
+            if (wp == CARET_BLINK_TIMER && t->caret_created) {
+                if (t->caret_visible) {
+                    HideCaret(t->hwnd);
+                    t->caret_visible = 0;
+                } else {
+                    ShowCaret(t->hwnd);
+                    t->caret_visible = 1;
+                }
+                return 0;
+            }
+            break;
+        case WM_KILLFOCUS: caret_blink_arm(t, 0); t->surrogate = 0; DestroyCaret(); t->caret_created = 0; t->caret_visible = 0; t->caret_x = t->caret_y = -1; return 0;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int mod = modifiers();
             if ((mod & (VTERM_MOD_CTRL | VTERM_MOD_SHIFT)) == (VTERM_MOD_CTRL | VTERM_MOD_SHIFT) && (wp == 'C' || wp == 'V')) {
