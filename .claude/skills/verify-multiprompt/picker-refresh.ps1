@@ -40,9 +40,13 @@ try {
     Save-Json (Read-Session) 'ctrl-t-mul-selected-session.json'
     Save-Json @{ before = $beforeRows; after = $afterRows; query = 'mul'; selectedHost = 2; selectedPath = $folder; boundary = 'SSH listing stand-in; released app paints and selects all rows; no real server or agent' } 'ctrl-t-mul-refresh.json'
     $result.checks += @{ name = 'ctrl-t-mul-highlight-stable'; cwd = $folder; host = 2; beforeCount = 27; afterCount = 28 }
-    Invoke-JourneyCommand 'Archive chat' -Confirm { Press @(0x0D) 'Enter: hide refresh-proof chat' }
+    Invoke-JourneyCommand 'Archive chat' -Confirm {
+        Press @(0x0D) 'Enter: hide refresh-proof chat'
+    }
     Wait-Until { @((Read-Session).tabs).Count -eq 3 } 'refresh-proof chat hidden'
-    Invoke-JourneyCommand 'Second' -Session -Confirm { Press @(0x0D) 'Enter: return to seeded host 2' }
+    Invoke-JourneyCommand 'Second' -Session -Confirm {
+        Press @(0x0D) 'Enter: return to seeded host 2'
+    }
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_session -ceq 'second' -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'seeded host 2 restored after refresh proof'
 } finally {
     [void]$refreshEvent.Set()
