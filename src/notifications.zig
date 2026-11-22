@@ -703,7 +703,7 @@ pub fn pollNotifications() void {
                 const name_part = after[0..ksep];
                 const kind_part = after[ksep + 1 ..];
                 const agent_val: u8 =
-                    if (std.mem.eql(u8, kind_part, "claude")) 1 else if (std.mem.eql(u8, kind_part, "codex")) 2 else if (std.mem.eql(u8, kind_part, "pi")) 3 else if (std.mem.eql(u8, kind_part, "kimi")) 4 else if (std.mem.eql(u8, kind_part, "hax")) 5 else if (std.mem.eql(u8, kind_part, "grok")) 6 else if (std.mem.eql(u8, kind_part, "cursor")) 7 else 0;
+                    if (std.mem.eql(u8, kind_part, "claude")) 1 else if (std.mem.eql(u8, kind_part, "codex")) 2 else if (std.mem.eql(u8, kind_part, "pi")) 3 else if (std.mem.eql(u8, kind_part, "kimi")) 4 else if (std.mem.eql(u8, kind_part, "hax")) 5 else if (std.mem.eql(u8, kind_part, "grok")) 6 else if (std.mem.eql(u8, kind_part, "cursor")) 7 else if (std.mem.eql(u8, kind_part, "antigravity")) 8 else 0;
                 if (agent_val != 0 and name_part.len > 0) {
                     var agent_matched = false;
                     for (0..app_state.shell_count) |i| {
@@ -1067,6 +1067,7 @@ fn etaAgentSlug(ai_agent: u8) []const u8 {
         5 => "hax",
         6 => "grok",
         7 => "cursor",
+        8 => "antigravity",
         else => "unknown",
     };
 }

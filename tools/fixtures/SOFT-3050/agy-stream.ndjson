@@ -1,0 +1,7 @@
+{"event":"init","conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","init":{"model":"gemini-4-neon-high"}}
+{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"}}}}
+{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":1,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"},"output":"hi"}}}
+{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"All "}}
+{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"good"}}
+{"event":"result","result":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","status":"SUCCESS","response":"All good","usage":{"input_tokens":10,"output_tokens":2}}}

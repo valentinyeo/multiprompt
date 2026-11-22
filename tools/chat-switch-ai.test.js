@@ -118,6 +118,30 @@ with tempfile.TemporaryDirectory() as directory:
 `);
 });
 
+test('switching Claude to Antigravity and back keeps the chat address and refuses a busy chat', () => {
+  python(setup + String.raw`
+with tempfile.TemporaryDirectory() as directory:
+    transcript = prepare(directory)
+    with patch.dict(r, host_turn_busy=lambda *args: True):
+        assert r['host_reply'](dict(op='switch_ai', provider='claude', sid=sid, to='antigravity'))['status'] == 'busy'
+    to_agy, started = switch('claude', sid, 'antigravity', transcript)
+    assert to_agy['status'] == 'switched' and to_agy['provider'] == 'antigravity' and to_agy['tmux'] == tmux, to_agy
+    assert to_agy['sid'] != sid and started == [('antigravity', to_agy['sid'])], started
+    chats = [chat for chat in r['host_chats']() if chat['name'] == tmux]
+    assert len(chats) == 1 and chats[0]['provider'] == 'antigravity' and chats[0]['sid'] == to_agy['sid'], chats
+    assert r['host_sid_for_tmux']('antigravity', tmux) == to_agy['sid']
+    shown = r['host_paths']('antigravity', to_agy['sid'])['history'].read_text()
+    assert 'OLD-QUESTION' in shown and 'Switched AI: Claude to Antigravity' in shown
+    back, _ = switch('antigravity', to_agy['sid'], 'claude', transcript)
+    assert back['status'] == 'switched' and back['provider'] == 'claude' and back['tmux'] == tmux, back
+    chats = [chat for chat in r['host_chats']() if chat['name'] == tmux]
+    assert len(chats) == 1 and chats[0]['provider'] == 'claude' and chats[0]['sid'] == back['sid'], chats
+    shown = r['host_paths']('claude', back['sid'])['history'].read_text()
+    assert 'OLD-QUESTION' in shown and 'Switched AI: Antigravity to Claude' in shown
+    print('SWITCH_AI_PASS')
+`);
+});
+
 test('history for the shell provider stays acceptable after a switch', () => {
   python(setup + String.raw`
 with tempfile.TemporaryDirectory() as directory:

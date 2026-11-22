@@ -3378,6 +3378,7 @@ pub fn aiAgentLabelValue(agent: u8) []const u8 {
         5 => "hax",
         6 => "grok",
         7 => "cursor",
+        8 => "antigravity",
         else => "none",
     };
 }

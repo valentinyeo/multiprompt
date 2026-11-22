@@ -856,7 +856,7 @@ pub fn shellLooksLikeCodingAgent(idx: u32) bool {
     if (sh.ai_agent != 0 or sh.claude_session) return true;
     if (sh.name_len > 0) {
         const name = sh.name[0..sh.name_len];
-        if (u16ContainsU8Insensitive(name, "claude") or u16ContainsU8Insensitive(name, "codex") or u16ContainsU8Insensitive(name, "hax") or u16ContainsU8Insensitive(name, "grok") or u16ContainsU8Insensitive(name, "cursor")) return true;
+        if (u16ContainsU8Insensitive(name, "claude") or u16ContainsU8Insensitive(name, "codex") or u16ContainsU8Insensitive(name, "hax") or u16ContainsU8Insensitive(name, "grok") or u16ContainsU8Insensitive(name, "cursor") or u16ContainsU8Insensitive(name, "antigravity")) return true;
     }
     if (sh.last_title_len > 0) {
         const last_len: usize = @intCast(sh.last_title_len);

@@ -8,6 +8,7 @@ pub const Provider = enum {
     codex,
     pi,
     cursor,
+    antigravity,
 
     pub fn wire(self: Provider) []const u8 {
         return @tagName(self);
@@ -19,6 +20,7 @@ pub const Provider = enum {
             .codex => "Codex",
             .pi => "Pi",
             .cursor => "Cursor",
+            .antigravity => "Antigravity",
         };
     }
 
@@ -28,6 +30,7 @@ pub const Provider = enum {
             .codex => 2,
             .pi => 3,
             .cursor => 7,
+            .antigravity => 8,
         };
     }
 };
@@ -35,6 +38,7 @@ pub const Provider = enum {
 pub fn hostedWorkspaceProvider(program: []const u8) ?Provider {
     if (std.mem.startsWith(u8, program, "claude")) return .claude;
     if (std.mem.eql(u8, program, "cursor") or std.mem.eql(u8, program, "agent") or std.mem.startsWith(u8, program, "cursor ")) return .cursor;
+    if (std.mem.eql(u8, program, "antigravity") or std.mem.eql(u8, program, "agy") or std.mem.startsWith(u8, program, "antigravity ") or std.mem.startsWith(u8, program, "agy ")) return .antigravity;
     return null;
 }
 
@@ -146,7 +150,7 @@ pub fn movedReply(body: []const u8) bool {
 }
 
 fn safeProvider(value: []const u8) bool {
-    for ([_][]const u8{ "claude", "codex", "pi", "hax", "cursor" }) |name| {
+    for ([_][]const u8{ "claude", "codex", "pi", "hax", "cursor", "antigravity" }) |name| {
         if (std.mem.eql(u8, value, name)) return true;
     }
     return false;
@@ -197,6 +201,8 @@ test "IGSH-1921 a restart asks the reader for one chat or for every idle chat" {
         restartRequest(&out, 7, 1, "claude", sid, "live-abc") orelse return error.TestUnexpectedResult);
     try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"cursor\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
         restartRequest(&out, 9, 0, "cursor", sid, "live-abc") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"antigravity\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
+        restartRequest(&out, 9, 0, "antigravity", sid, "live-abc") orelse return error.TestUnexpectedResult);
     try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"all\":true}",
         restartAllRequest(&out, 9, 0) orelse return error.TestUnexpectedResult);
     try std.testing.expect(restartRequest(&out, 9, 0, "claude", "short", "live-abc") == null);
@@ -289,6 +295,8 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
     try std.testing.expect(!eligible("pi"));
     try std.testing.expect(eligible("cursor"));
     try std.testing.expect(eligible("agent"));
+    try std.testing.expect(eligible("antigravity"));
+    try std.testing.expect(eligible("agy"));
     try std.testing.expect(!eligible(""));
     try std.testing.expect(!eligible("bash"));
 }
@@ -321,6 +329,10 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     try std.testing.expect(std.mem.indexOf(u8, cursor, "host enable cursor ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, cursor, "host start cursor ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, cursor, "permission-mode") == null);
+    const antigravity = launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, antigravity, "host enable antigravity ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, antigravity, "host start antigravity ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, antigravity, "permission-mode") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
     try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
@@ -331,9 +343,12 @@ test "IGSH-1546 each provider maps to the agent kind its tab shows" {
     try std.testing.expectEqual(@as(u8, 2), Provider.codex.aiAgent());
     try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
     try std.testing.expectEqual(@as(u8, 7), Provider.cursor.aiAgent());
+    try std.testing.expectEqual(@as(u8, 8), Provider.antigravity.aiAgent());
     try std.testing.expectEqualStrings("Codex", Provider.codex.label());
+    try std.testing.expectEqualStrings("Antigravity", Provider.antigravity.label());
     try std.testing.expectEqualStrings("pi", Provider.pi.wire());
     try std.testing.expectEqualStrings("cursor", Provider.cursor.wire());
+    try std.testing.expectEqualStrings("antigravity", Provider.antigravity.wire());
 }
 
 test "IGSH-1666 hosted resumes retain provider and host identity" {
