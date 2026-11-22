@@ -62,7 +62,8 @@ test "deadline" {
 
 test('SOFT-3038 a grey host message can submit again after reopen or a lost send job', () => {
   const load = body(send, 'chatOutboxParseJson');
-  assert.match(load, /chat_echo\.v1PhaseUnconfirmed/, 'relaunched outbox rows with queued or sent phase clear write_started');
+  assert.match(load, /chat_echo\.v1PhaseUnconfirmed/, 'relaunched outbox rows with queued or sent phase can submit again');
+  assert.match(load, /entry\.message_phase\[0\] == 0/, 'only rows without a saved phase reset to queued');
   const attempt = body(send, 'chatOutboxTrySendEntry');
   assert.match(attempt, /chat_echo\.v1NeedsResubmit/, 'an unconfirmed v1 row may bypass mayType and submit again');
   const tick = body(send, 'chatOutboxTick');
