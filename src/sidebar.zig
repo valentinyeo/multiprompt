@@ -357,6 +357,8 @@ const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_B
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const pickRepoPresentedRows = @import("command_palette.zig").pickRepoPresentedRows;
+const pickRepoFolderName = @import("command_palette.zig").pickRepoFolderName;
+const pickRepoColumns = @import("command_palette.zig").pickRepoColumns;
 const workspaceFolderCurrent = @import("command_palette.zig").workspaceFolderCurrent;
 const activeWorkspaceSlot = @import("command_palette.zig").activeWorkspaceSlot;
 const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
@@ -4056,19 +4058,31 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const repo_count = repo_rows.len;
                         const repo_idx = result_idx - SEARCH_PICK_REPO_ROW_OFFSET;
                         if (repo_idx < repo_count) {
-                            _ = SelectObject(hdc, palette_font);
                             const row = &repo_rows[repo_idx];
-                            _ = SetTextColor(hdc, if (row.available) primary_color else RGB(120, 120, 130));
-                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 180, .bottom = ry + row_h };
-                            drawAscii(hdc, row.path[0..row.path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, palette_hint_font);
-                            _ = SetTextColor(hdc, RGB(120, 120, 130));
+                            const name = pickRepoFolderName(row.path[0..row.path_len]);
                             var label_buf: [160]u8 = undefined;
                             const label = std.fmt.bufPrint(&label_buf, "{s}{s}", .{ row.host_name[0..row.host_name_len], if (row.available) "" else "  Offline" }) catch "";
-                            var wide: [160]u16 = undefined;
-                            const wide_len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
-                            var host_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            if (wide_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(wide_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            var name_wide: [256]u16 = undefined;
+                            const name_len = std.unicode.utf8ToUtf16Le(&name_wide, name) catch 0;
+                            var host_wide: [160]u16 = undefined;
+                            const host_len = std.unicode.utf8ToUtf16Le(&host_wide, label) catch 0;
+                            _ = SelectObject(hdc, palette_font);
+                            const name_w = @import("dwrite_text.zig").measureWidth(hdc, name_wide[0..name_len]);
+                            _ = SelectObject(hdc, palette_hint_font);
+                            const host_w = @import("dwrite_text.zig").measureWidth(hdc, host_wide[0..host_len]);
+                            const columns = pickRepoColumns(text_left, ox + overlay_w, name_w, host_w);
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, if (row.available) primary_color else RGB(120, 120, 130));
+                            var name_rc = RECT{ .left = columns.name_left, .top = ry, .right = columns.name_right, .bottom = ry + row_h };
+                            if (name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &name_wide, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, RGB(120, 120, 130));
+                            if (columns.path_right - columns.path_left >= 12) {
+                                var path_rc = RECT{ .left = columns.path_left, .top = ry, .right = columns.path_right, .bottom = ry + row_h };
+                                drawAscii(hdc, row.path[0..row.path_len], &path_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            }
+                            var host_rc = RECT{ .left = columns.host_left, .top = ry, .right = columns.host_right, .bottom = ry + row_h };
+                            if (host_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &host_wide, @intCast(host_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
                     } else if (result_idx == SEARCH_PICK_REPO_OFFSET or result_idx == SEARCH_SET_FOLDER_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
