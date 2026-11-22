@@ -2739,6 +2739,7 @@ pub fn chatScrollBy(delta_px: i32) void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const max_scroll = chatMaxScroll();
     const new_y = std.math.clamp(app_state.g_chat_scroll_y - delta_px, chatMinScroll(), max_scroll);
+    if (delta_px > 0 and new_y < app_state.g_chat_scroll_y) app_state.g_chat_scroll_bottom_pending = false;
     if (delta_px > 0 and new_y <= uiScaled(80)) {
         if (chatHistoryEntry(chatFileIdentity())) |entry| {
             if (!entry.pending and entry.history.start > 0) {

@@ -108,7 +108,9 @@ def check(root, replay_code=False):
             anchor = symbolic(expression, values)
             selected = z3.If(drop, z3.If(after >= 0, divider - pad - delta, new_h - viewport), anchor)
             scroll = z3.If(new_h <= viewport, new_h - viewport, z3.If(selected < 0, 0, z3.If(selected > new_h - viewport, new_h - viewport, selected)))
+            scrolled_up = z3.Bool("scrolled_up")
             solver = z3.Solver()
+            solver.add(scrolled_up)
             solver.add(viewport >= 100, viewport <= 1000, old_h > viewport, old_h <= 10000,
                        new_h > viewport, new_h <= 10000, old_scroll >= 0, old_scroll <= old_h - viewport,
                        old_top >= old_scroll, old_top < old_scroll + viewport, new_top >= 0, new_top < new_h,
@@ -134,6 +136,7 @@ def check(root, replay_code=False):
                 solver.add(before == after)
             if event == "live append":
                 solver.add(new_top == old_top, new_h >= old_h)
+            solver.add(old_scroll < old_h - viewport - 4)
             solver.add(new_newest - scroll != old_newest - old_scroll)
             outcome = solver.check()
             label = name + "/" + event

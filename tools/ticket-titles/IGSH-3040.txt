@@ -1,0 +1,1 @@
+Desktop Chat View pins to the bottom when you send and while the reply streams in

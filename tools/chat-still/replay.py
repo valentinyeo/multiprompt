@@ -28,7 +28,7 @@ const app_state = struct {
     var g_chat_read_open_pending = false;
     var g_chat_read_open_ready = false;
     var g_chat_scroll_bottom_pending = false;
-    var g_chat_scrolled_up = false;
+    var g_chat_scrolled_up = true;
     var g_chat_read_hold = true;
     var g_chat_prepend_pending = false;
     var g_chat_block_count: usize = 2;
@@ -42,6 +42,10 @@ var next_height: i32 = 0;
 var next_newest: i32 = 0;
 var next_boundary: chat_history.ReadBoundary = .{};
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{ .bottom = viewport }; }
+fn atBottom(scroll_y: i32, content_h: i32, viewport_h: i32, slack: i32) bool {
+    return scroll_y >= content_h - viewport_h - slack;
+}
+fn uiScaled(v: i32) i32 { return v; }
 fn refreshChatBlockCache(_: bool) bool { return true; }
 fn chatEchoMatchActive() void {}
 fn chatReadBoundary() chat_history.ReadBoundary { return next_boundary; }
@@ -56,7 +60,9 @@ fn chatRelayout(_: i32) void {
 }
 '''
     for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll"):
-        source += function(session, name).replace('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect') + "\n"
+        body = function(session, name).replace('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect')
+        body = body.replace('@import("chat_scrollbar.zig").atBottom', 'atBottom').replace('@import("drawing.zig").uiScaled', 'uiScaled')
+        source += body + "\n"
     for index, w in enumerate(witnesses):
         before = "null" if w["previous_boundary"] < 0 else str(w["previous_boundary"])
         after = "null" if w["next_boundary"] < 0 else str(w["next_boundary"])
