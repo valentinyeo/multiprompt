@@ -35,6 +35,10 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
+## Linux journey
+
+- [Agent name sync](agent-sync.md) runs the installed tools, official CLI and actual user timer against a loopback Hypertask HTTP boundary. It is selectable by the PR verifier but does not join Windows smoke matrices. Head and merge base use the same harness. No desktop screenshot or live-account claim applies.
+
 ## Features
 
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
