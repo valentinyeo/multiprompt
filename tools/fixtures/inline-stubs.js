@@ -82,6 +82,12 @@ pub fn currentLive(_: ?u32) []const Chat {
 pub fn spanAt(_: []const u16, _: usize, _: []const Chat) ?Span {
     return null;
 }
+pub fn plainNameLinkAt(_: []const u16, _: usize) ?struct { start: usize, end: usize } {
+    return null;
+}
+pub fn liveSessionForName(_: []const u16) ?[]const u8 {
+    return null;
+}
 pub fn hasMarker(_: []const u16) bool {
     return false;
 }

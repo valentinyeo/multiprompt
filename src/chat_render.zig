@@ -526,6 +526,14 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
                         const source = if (source_map) |map| (if (map.len == 0) @as(usize, 0) else if (at > span.start and at == span.visible_end) map[at - 1] + 1 else if (at < map.len) map[at] else map[map.len - 1] + 1) else at;
                         nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + source);
                     }
+                    if (pt.find == null and pointInRect(rect, pt.x, pt.y)) {
+                        if (span.end > span.visible_end and span.visible_end < text.len and text[span.visible_end] == '{' and span.end > span.visible_end + 1) {
+                            const session = text[span.visible_end + 1 .. span.end - 1];
+                            if (chatSessionKnown(session)) return .{ .start = offset + span.visible_end + 1, .end = offset + span.end - 1 };
+                        } else if (chatSessionKnownByName(text[span.start..span.visible_end])) {
+                            return .{ .start = offset + span.start, .end = offset + span.visible_end };
+                        }
+                    }
                 }
                 if (paint) {
                     _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatUserBubbleColor()));
@@ -708,10 +716,44 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     var x: i32 = 0;
     var y: i32 = 0;
     var raw_link = link_detect.next(text, 0);
-    for (spans[0..n]) |span| {
+    for (spans[0..n]) |raw_span| {
+        const span = raw_span;
         var style = span.style;
         style.bold = style.bold or force_bold;
         _ = SelectObject(hdc, chatRichFont(style, level));
+        if (span.target != null and sessionLinkKnown(text, span)) {
+            const visible = text[span.text.start..span.text.end];
+            const chip_w = chatTextWidth(hdc, visible);
+            if (chip_w <= max_w) {
+                if (x > 0 and chip_w > max_w - x) {
+                    x = 0;
+                    y += line_h;
+                }
+                const rect = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + chip_w, .bottom = area.top + y + line_h };
+                if (hit) |pt| {
+                    if (pt.find) |find| {
+                        for (visible, 0..) |_, unit| {
+                            if (find.position == offset + span.text.start + unit) find.y.* = rect.top;
+                        }
+                    }
+                    if (pt.char != null) {
+                        const at = span.text.start + (if (pt.y >= rect.top and pt.y < rect.bottom) chatCharAtX(hdc, visible, pt.x - rect.left) else if (pt.y < rect.top or pt.x <= rect.left) @as(usize, 0) else visible.len);
+                        nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + at);
+                    }
+                    if (pt.find == null and pointInRect(rect, pt.x, pt.y)) return sessionLinkClickRange(text, span, offset);
+                }
+                if (paint) {
+                    _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatAgentBubbleColor()));
+                    if (app_state.g_chat_find_open) @import("chat_find_ui.zig").paintRun(hdc, visible, offset + span.text.start, rect.left, rect.top, line_h);
+                    if (app_state.g_chat_sel_active) chatPaintSelectionRun(hdc, visible, offset + span.text.start, rect.left, rect.top, line_h);
+                    var draw = rect;
+                    _ = chatDrawText(hdc, visible.ptr, @intCast(visible.len), &draw, DT_SINGLELINE | DT_NOPREFIX);
+                    _ = SelectObject(hdc, chatRichFont(style, level));
+                }
+                x += chip_w;
+                continue;
+            }
+        }
         const space_w = chatTextWidth(hdc, &.{' '});
         var pos = span.text.start;
         while (pos < span.text.end) {
@@ -5233,7 +5275,121 @@ test "IGSH-403 clicked links encode Unicode and preserve ASCII" {
     for (ascii, bytes[0..n]) |unit, byte| try std.testing.expectEqual(unit, byte);
 }
 
+fn shellForTmux(session: []const u8) ?u32 {
+    var first: ?u32 = null;
+    const active_host: ?u8 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].tmux_host else null;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.tmux_session_len == 0 or shell.tmux_session_len > shell.tmux_session.len) continue;
+        const name = shell.tmux_session[0..shell.tmux_session_len];
+        if (name.len != session.len or !std.ascii.eqlIgnoreCase(name, session)) continue;
+        if (active_host) |host| if (shell.tmux_host == host) return @intCast(i);
+        if (first == null) first = @intCast(i);
+    }
+    return first;
+}
+
+fn chatSessionKnown(id: []const u16) bool {
+    var buf: [64]u8 = undefined;
+    if (id.len == 0 or id.len > buf.len) return false;
+    const n = std.unicode.utf16LeToUtf8(&buf, id) catch return false;
+    if (!chat_markdown.sessionId(buf[0..n])) return false;
+    return shellForTmux(buf[0..n]) != null;
+}
+
+fn chatSessionKnownByName(name: []const u16) bool {
+    if (@import("chat_mention.zig").liveSessionForName(name)) |session| return shellForTmux(session) != null;
+    return false;
+}
+
+fn sessionLinkKnown(text: []const u16, span: chat_markdown.Span) bool {
+    const target = span.target orelse return false;
+    if (chat_markdown.sessionBrace(text, target)) return chatSessionKnown(text[target.start..target.end]);
+    if (target.start == span.text.start and target.end == span.text.end) return chatSessionKnownByName(text[target.start..target.end]);
+    return false;
+}
+
+fn sessionLinkClickRange(text: []const u16, span: chat_markdown.Span, offset: usize) link_detect.Range {
+    const target = span.target.?;
+    if (chat_markdown.sessionBrace(text, target)) return .{ .start = offset + target.start, .end = offset + target.end };
+    return .{ .start = offset + span.text.start, .end = offset + span.text.end };
+}
+
+fn openTmuxLink(url: []const u16) bool {
+    var buf: [192]u8 = undefined;
+    if (url.len == 0 or url.len > buf.len) return false;
+    const n = std.unicode.utf16LeToUtf8(&buf, url) catch return false;
+    const body = buf[0..n];
+    if (chat_markdown.sessionId(body)) {
+        if (shellForTmux(body)) |idx| {
+            @import("console.zig").switchToShellByUser(idx);
+            return true;
+        }
+        return false;
+    }
+    if (@import("chat_mention.zig").liveSessionForName(url)) |session| {
+        if (shellForTmux(session)) |idx| {
+            @import("console.zig").switchToShellByUser(idx);
+            return true;
+        }
+    }
+    return false;
+}
+
+test "SOFT-2464 a clicked session link switches the active shell" {
+    const count = app_state.shell_count;
+    const active = app_state.active_shell;
+    const Snap = struct {
+        name: [64]u16,
+        name_len: u32,
+        tmux_session: [64]u8,
+        tmux_session_len: u32,
+        chat_view_on: bool,
+    };
+    var prior: [2]Snap = undefined;
+    for (0..2) |i| prior[i] = .{
+        .name = app_state.shells[i].name,
+        .name_len = app_state.shells[i].name_len,
+        .tmux_session = app_state.shells[i].tmux_session,
+        .tmux_session_len = app_state.shells[i].tmux_session_len,
+        .chat_view_on = app_state.shells[i].chat_view_on,
+    };
+    defer {
+        app_state.shell_count = count;
+        app_state.active_shell = active;
+        for (0..2) |i| {
+            app_state.shells[i].name = prior[i].name;
+            app_state.shells[i].name_len = prior[i].name_len;
+            app_state.shells[i].tmux_session = prior[i].tmux_session;
+            app_state.shells[i].tmux_session_len = prior[i].tmux_session_len;
+            app_state.shells[i].chat_view_on = prior[i].chat_view_on;
+        }
+    }
+    app_state.shell_count = 2;
+    const set = struct {
+        fn chat(index: u32, name: []const u8, session: []const u8, view: bool) void {
+            const shell = &app_state.shells[index];
+            shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, name) catch 0);
+            @memset(&shell.tmux_session, 0);
+            @memcpy(shell.tmux_session[0..session.len], session);
+            shell.tmux_session_len = @intCast(session.len);
+            shell.chat_view_on = view;
+        }
+    };
+    set.chat(0, "Home", "live-here", true);
+    set.chat(1, "Peer Chat", "live-peer", false);
+    app_state.active_shell = 0;
+    const peer = std.unicode.utf8ToUtf16LeStringLiteral("live-peer");
+    try std.testing.expect(openTmuxLink(peer));
+    try std.testing.expectEqual(@as(u32, 1), app_state.active_shell);
+    const plain = std.unicode.utf8ToUtf16LeStringLiteral("Peer Chat");
+    app_state.active_shell = 0;
+    try std.testing.expect(openTmuxLink(plain));
+    try std.testing.expectEqual(@as(u32, 1), app_state.active_shell);
+}
+
 pub fn openClickedLink(url: []const u16) void {
+    if (openTmuxLink(url)) return;
     if (app_state.active_shell >= app_state.shell_count) return;
     var bytes: [8192]u8 = undefined;
     const n = clickedLinkUrl(url, &bytes) orelse return;
