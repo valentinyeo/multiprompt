@@ -25,7 +25,7 @@ test('IGSH-1812 a host message sending in one chat does not gate sends in other 
 test('IGSH-1812 the outbox settle loop gives host messages a sending deadline', () => {
   const tick = body(send, 'chatOutboxTick');
   assert.ok(tick.length > 0, 'chatOutboxTick exists');
-  assert.match(tick, /if \(entry\.message_v1\) \{\s*if \(chat_echo\.v1SendingAbandoned\(/, 'v1 entries are checked for an abandoned send before being skipped');
+  assert.match(tick, /if \(entry\.message_v1\) \{[\s\S]*chat_echo\.v1SendingAbandoned\(/, 'v1 entries are checked for an abandoned send before being skipped');
 });
 
 test('IGSH-1812 abandoned-send deadline behaves at its edges', (t) => {
@@ -44,11 +44,12 @@ const OutboxState = enum(u8) { queued = 0, sending = 1, not_sent = 2, delivered 
 ${deadline}
 ${predicate}
 test "deadline" {
-    try std.testing.expect(v1SendingAbandoned(.sending, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS - 1));
-    try std.testing.expect(!v1SendingAbandoned(.sending, true, 5_000, 5_000 + V1_SENDING_DEADLINE_MS * 3));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 3));
-    try std.testing.expect(!v1SendingAbandoned(.queued, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS * 3));
+    try std.testing.expect(v1SendingAbandoned(.sending, false, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS - 1));
+    try std.testing.expect(!v1SendingAbandoned(.sending, true, true, 5_000, 5_000 + V1_SENDING_DEADLINE_MS * 3));
+    try std.testing.expect(v1SendingAbandoned(.sending, true, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 0, V1_SENDING_DEADLINE_MS * 3));
+    try std.testing.expect(!v1SendingAbandoned(.queued, false, false, 5_000, 5_000 + V1_SENDING_DEADLINE_MS * 3));
     try std.testing.expect(V1_SENDING_DEADLINE_MS <= 120_000);
 }
 `);
@@ -57,4 +58,16 @@ test "deadline" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('SOFT-3038 a grey host message can submit again after reopen or a lost send job', () => {
+  const load = body(send, 'chatOutboxParseJson');
+  assert.match(load, /chat_echo\.v1PhaseUnconfirmed/, 'relaunched outbox rows with queued or sent phase clear write_started');
+  const attempt = body(send, 'chatOutboxTrySendEntry');
+  assert.match(attempt, /chat_echo\.v1NeedsResubmit/, 'an unconfirmed v1 row may bypass mayType and submit again');
+  const tick = body(send, 'chatOutboxTick');
+  assert.match(tick, /chat_echo\.v1ChannelOrphaned/, 'orphan channel_pending is cleared when no send job is running');
+  const helpers = echo.match(/pub fn v1NeedsResubmit[\s\S]*?^}/m);
+  assert.ok(helpers, 'v1NeedsResubmit exists');
+  assert.match(helpers[0], /v1PhaseUnconfirmed/, 'resubmit only applies to queued or sent phases');
 });

@@ -1253,7 +1253,9 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         }
                         entry.retry_nonce = json_reader.uintDefault(mobj, "retry_nonce", 0);
                         entry.reset_pending = json_reader.uintDefault(mobj, "reset_pending", 0) != 0;
-                        if (entry.message_v1 and entry.message_phase[0] == 0 and !entry.reset_pending and entry.state != .cancelled) {
+                        if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and
+                            chat_echo.v1PhaseUnconfirmed(std.mem.sliceTo(&entry.message_phase, 0)))
+                        {
                             entry.state = .queued;
                             entry.write_started = false;
                             entry.channel_sent = false;
@@ -2974,7 +2976,14 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
             if (GetTickCount64() < history.send_next_tick) return false;
         }
     }
-    if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
+    const send_entry = &app_state.g_chat_outbox.items[e];
+    const resubmit = chat_echo.v1NeedsResubmit(
+        send_entry.message_v1,
+        send_entry.write_started,
+        std.mem.sliceTo(&send_entry.message_phase, 0),
+        send_entry.state,
+    );
+    if (!resubmit and !chat_echo.mayType(send_entry.state, send_entry.write_started, false, false)) return false;
     if (chatOutboxSendBlockedIn(&app_state.g_chat_outbox, app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)]) or app_state.g_chat_tmux_send_job != null) return false;
     const channel = chatTmuxSendEligible(shell_index);
     if (chatOutboxHeldByLink(chatLinkLooksDown(shell_index), app_state.g_chat_outbox.items[e].message_v1, channel)) return false;
@@ -3058,9 +3067,14 @@ pub fn chatOutboxTick() void {
         if (key.len > 0 and reply_ms > 0 and chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, reply_ms, now_ms, false, true)) changed = true;
     }
     if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, "", 0, now_ms, false, true)) changed = true;
+    const send_job_active = app_state.g_chat_tmux_send_job != null;
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS)) {
+            if (chat_echo.v1ChannelOrphaned(entry.channel_pending, send_job_active)) {
+                entry.channel_pending = false;
+                changed = true;
+            }
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, send_job_active, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS)) {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;

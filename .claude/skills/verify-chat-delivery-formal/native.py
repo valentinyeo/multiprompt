@@ -17,12 +17,12 @@ def tick(source):
     body = function(source, "chatOutboxTick")
     start = body.index("            if (chat_echo.v1SendingAbandoned(")
     end = body.index("\n            }", start) + len("\n            }")
-    return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n" + body[start:end] + "\n    return changed;\n}\n"
+    return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n    const send_job_active = false;\n" + body[start:end] + "\n    return changed;\n}\n"
 
 
 def load(source):
     body = function(source, "chatOutboxParseJson")
-    start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
+    start = body.index("                        if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and")
     end = body.index("\n                        }", start) + len("\n                        }")
     return "fn restoreEntry(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
 
