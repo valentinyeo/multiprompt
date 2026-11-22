@@ -1,0 +1,1 @@
+Assistant replies in a skill-command turn no longer appear twice in the chat view.
