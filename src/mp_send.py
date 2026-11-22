@@ -191,12 +191,17 @@ def live_chats():
         tmux, sid, provider = config.get("tmux"), state.get("sid"), state.get("provider")
         if not isinstance(tmux, str) or TMUX_NAME.match(tmux) is None or not isinstance(sid, str) or SESSION_ID.match(sid) is None:
             continue
-        if provider not in PROVIDERS or not pid_alive(state.get("pid")):
+        if provider not in PROVIDERS:
             continue
         if sessions is not None and tmux not in sessions:
             continue
+        alive = pid_alive(state.get("pid"))
         started = state.get("started") if isinstance(state.get("started"), (int, float)) else 0
-        row = dict(name=names.get(tmux), provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state="busy" if state.get("inflight") else "idle", started=started)
+        if alive:
+            row_state = "busy" if state.get("inflight") else "idle"
+        else:
+            row_state = "stopped"
+        row = dict(name=names.get(tmux), provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state, started=started)
         if tmux not in best or started >= best[tmux]["started"]:
             best[tmux] = row
     rows = sorted(best.values(), key=lambda row: ((row["name"] or row["tmux"]).casefold(), row["tmux"]))
