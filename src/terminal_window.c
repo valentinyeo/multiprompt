@@ -18,6 +18,7 @@ typedef struct {
     uint32_t background;
     int caret_created;
     int caret_w, caret_h;
+    int caret_x, caret_y;
 } TerminalWindow;
 
 typedef struct { TerminalWindow *window; int attached; } Creation;
@@ -51,6 +52,7 @@ static void caret(TerminalWindow *t) {
         if (t->caret_created) {
             DestroyCaret();
             t->caret_created = 0;
+            t->caret_x = t->caret_y = -1;
         }
         return;
     }
@@ -59,17 +61,23 @@ static void caret(TerminalWindow *t) {
     if (!t->caret_created || t->caret_w != t->width || t->caret_h != t->height) {
         DestroyCaret();
         t->caret_created = 0;
+        t->caret_x = t->caret_y = -1;
         if (CreateCaret(t->hwnd, NULL, t->width, t->height)) {
             t->caret_created = 1;
             t->caret_w = t->width;
             t->caret_h = t->height;
             SetCaretPos(x, y);
+            t->caret_x = x;
+            t->caret_y = y;
             ShowCaret(t->hwnd);
         }
         return;
     }
-    SetCaretPos(x, y);
-    ShowCaret(t->hwnd);
+    if (t->caret_x != x || t->caret_y != y) {
+        SetCaretPos(x, y);
+        t->caret_x = x;
+        t->caret_y = y;
+    }
 }
 
 void mp_terminal_window_repair_caret(HWND hwnd) {
@@ -324,7 +332,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
         case WM_SIZE: resize(t, 0); return 0;
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
         case WM_SETFOCUS: caret(t); return 0;
-        case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); t->caret_created = 0; return 0;
+        case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); t->caret_created = 0; t->caret_x = t->caret_y = -1; return 0;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int mod = modifiers();
             if ((mod & (VTERM_MOD_CTRL | VTERM_MOD_SHIFT)) == (VTERM_MOD_CTRL | VTERM_MOD_SHIFT) && (wp == 'C' || wp == 'V')) {
@@ -422,6 +430,7 @@ HWND mp_terminal_window_new(HWND parent, const LOGFONTW *font, uint32_t fg, uint
     TerminalWindow *t = calloc(1, sizeof(*t));
     if (!t) return NULL;
     t->width = t->height = 1;
+    t->caret_x = t->caret_y = -1;
     t->rows = 24; t->cols = 80;
     t->resize = on_resize; t->user = user; t->background = bg;
     t->model = mp_terminal_new(t->rows, t->cols, output, user);

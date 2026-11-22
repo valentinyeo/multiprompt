@@ -45,7 +45,7 @@ test('SOFT-3046 journey registration and workflow contract', () => {
   assert.match(driver, /ValidateSet\([^\n]*'session-caret'/);
   assert.match(driver, /'session-caret' \{/);
   const recipe = driver.slice(driver.indexOf("        'session-caret' {"), driver.indexOf("        'session-tabs' {"));
-  assert.match(recipe, /GetGUIThreadInfo|CaretRect/);
+  assert.match(recipe, /GuiCaretSnapshot|CaretBlinkTime/);
   assert.match(recipe, /notepad/i);
   assert.match(recipe, /0x12, 0x43|Alt\+C/);
   assert.ok(featureMatrix(workflow).available.includes('session-caret'));

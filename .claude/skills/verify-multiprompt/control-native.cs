@@ -944,14 +944,22 @@ public static class VerifyNative {
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         return info.Focus;
     }
-    public static Rect CaretRect(IntPtr hwnd) {
-        uint pid;
-        uint thread = GetWindowThreadProcessId(hwnd, out pid);
-        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
+    [DllImport("user32.dll")] static extern uint GetCaretBlinkTime();
+    public static uint CaretBlinkTime() => GetCaretBlinkTime();
+    [StructLayout(LayoutKind.Sequential)] public struct CaretSnapshot { public IntPtr Caret; public Rect CaretRect; }
+    static CaretSnapshot CaretSnapshotForThread(uint thread) {
         GuiThreadInfo info = new GuiThreadInfo();
         info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        return info.CaretRect;
+        return new CaretSnapshot { Caret = info.Caret, CaretRect = info.CaretRect };
+    }
+    public static Rect CaretRect(IntPtr hwnd) => CaretSnapshotForThread(WindowThread(hwnd)).CaretRect;
+    public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) => CaretSnapshotForThread(WindowThread(hwnd));
+    static uint WindowThread(IntPtr hwnd) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
+        return thread;
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");

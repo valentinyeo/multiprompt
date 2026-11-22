@@ -1,20 +1,41 @@
 
+            function Save-CaretSample([string]$Label, [VerifyNative+CaretSnapshot]$Sample) {
+                Save-Json @{ label = $Label; left = $Sample.CaretRect.Left; top = $Sample.CaretRect.Top; right = $Sample.CaretRect.Right; bottom = $Sample.CaretRect.Bottom; caret = $Sample.Caret.ToInt64() } ("caret-$Label.json")
+            }
+            function CaretSampleNonEmpty([VerifyNative+CaretSnapshot]$Sample) {
+                return $Sample.CaretRect.Right -gt $Sample.CaretRect.Left -and $Sample.CaretRect.Bottom -gt $Sample.CaretRect.Top
+            }
             function Get-CaretRect {
                 param([string]$Label)
                 Doctor
                 Assert-Foreground
-                $rect = [VerifyNative]::CaretRect($script:window)
-                Save-Json @{ label = $Label; left = $rect.Left; top = $rect.Top; right = $rect.Right; bottom = $rect.Bottom } ("caret-$Label.json")
-                if ($rect.Right -le $rect.Left -or $rect.Bottom -le $rect.Top) { throw "session-caret: $Label caret rectangle is empty" }
-                return $rect
+                $sample = [VerifyNative]::GuiCaretSnapshot($script:window)
+                Save-CaretSample $Label $sample
+                if (-not (CaretSampleNonEmpty $sample)) { throw "session-caret: $Label caret rectangle is empty" }
+                return $sample.CaretRect
+            }
+            function Test-CaretMotion([VerifyNative+CaretSnapshot]$First, [VerifyNative+CaretSnapshot]$Second) {
+                if ($First.Caret -ne $Second.Caret) { return $true }
+                $firstEmpty = -not (CaretSampleNonEmpty $First)
+                $secondEmpty = -not (CaretSampleNonEmpty $Second)
+                if ($firstEmpty -ne $secondEmpty) { return $true }
+                if ($firstEmpty) { return $false }
+                if ($First.CaretRect.Left -ne $Second.CaretRect.Left -or $First.CaretRect.Top -ne $Second.CaretRect.Top -or $First.CaretRect.Right -ne $Second.CaretRect.Right -or $First.CaretRect.Bottom -ne $Second.CaretRect.Bottom) { return $true }
+                return $false
             }
             function Assert-CaretBlink {
-                $first = Get-CaretRect 'blink-a'
-                Start-Sleep -Milliseconds 500
-                $second = Get-CaretRect 'blink-b'
-                if ($first.Left -eq $second.Left -and $first.Top -eq $second.Top -and $first.Right -eq $second.Right -and $first.Bottom -eq $second.Bottom) {
-                    throw 'session-caret: caret did not blink within 500ms'
-                }
+                if ([VerifyNative]::CaretBlinkTime() -eq [uint32]::MaxValue) { return }
+                Doctor
+                Assert-Foreground
+                $first = [VerifyNative]::GuiCaretSnapshot($script:window)
+                Save-CaretSample 'blink-a' $first
+                if (-not (CaretSampleNonEmpty $first)) { throw 'session-caret: blink-a caret rectangle is empty' }
+                Start-Sleep -Milliseconds 600
+                Doctor
+                Assert-Foreground
+                $second = [VerifyNative]::GuiCaretSnapshot($script:window)
+                Save-CaretSample 'blink-b' $second
+                if (-not (Test-CaretMotion $first $second)) { throw 'session-caret: caret did not blink within 600ms' }
             }
             Wait-Until { $null -ne (Read-Session) -and @((Read-Session).tabs).Count -ge 1 } 'initial CMD session'
             Type-Text 'abc'
