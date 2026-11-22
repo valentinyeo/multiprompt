@@ -90,6 +90,7 @@ const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
+const SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -210,6 +211,7 @@ const SEARCH_CHAT_FRESH_START_OFFSET = @import("app_state.zig").SEARCH_CHAT_FRES
 const SEARCH_CHAT_SWITCH_CLAUDE_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CLAUDE_OFFSET;
 const SEARCH_CHAT_SWITCH_CODEX_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_CODEX_OFFSET;
 const SEARCH_CHAT_SWITCH_PI_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_PI_OFFSET;
+const SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET = @import("app_state.zig").SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -551,7 +553,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -559,7 +561,7 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
@@ -567,6 +569,7 @@ test "IGSH-1266 new session rows keep the approved order" {
     try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Cursor chat", palettePrimaryLabel(SEARCH_NEW_CURSOR_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Antigravity Sessions", palettePrimaryLabel(SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
     try std.testing.expectEqualStrings("Open session...", palettePrimaryLabel(SEARCH_OPEN_SESSION_MENU_OFFSET) orelse "");
     try std.testing.expectEqualStrings("More shells...", palettePrimaryLabel(SEARCH_SHELLS_MENU_OFFSET) orelse "");
@@ -725,6 +728,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_PI_LOGIN_OFFSET) return "Log in";
     if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) return "New Cursor chat";
+    if (target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) return "New Antigravity Sessions";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
     if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
@@ -751,6 +755,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) return "Switch AI to Claude keep chat name picture address history";
     if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) return "Switch AI to Codex keep chat name picture address history";
     if (target == app_state.SEARCH_TABCTX_SWITCH_PI) return "Switch AI to Pi keep chat name picture address history";
+    if (target == app_state.SEARCH_TABCTX_SWITCH_ANTIGRAVITY) return "Switch AI to Antigravity keep chat name picture address history";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -945,6 +950,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
         SEARCH_NEW_CURSOR_CHAT_OFFSET => "new cursor chat session agent cli",
+        SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET => "new antigravity sessions chat session agy agent cli",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
         SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
@@ -1006,6 +1012,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
+        SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET => "Chat View: Switch AI to Antigravity keep chat name picture address history subscription",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1476,7 +1483,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
-    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
         target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
         target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
         (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
@@ -1494,7 +1501,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2264,6 +2271,8 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
     try std.testing.expect(!newTabOpensChatView("pi"));
     try std.testing.expect(newTabOpensChatView("cursor"));
     try std.testing.expect(newTabOpensChatView("agent"));
+    try std.testing.expect(newTabOpensChatView("antigravity"));
+    try std.testing.expect(newTabOpensChatView("agy"));
     try std.testing.expect(!newTabOpensChatView("bash"));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
@@ -2480,8 +2489,19 @@ test "IGSH-1921 a live chat with a session and a chat name can restart" {
     try std.testing.expect(!canRestartChat(1, 36, 0));
 }
 
+fn switchAiAgentTarget(agent: u8) ?u8 {
+    return switch (agent) {
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        8 => 4,
+        else => null,
+    };
+}
+
 fn switchAiVisible(agent: u8, target: u8) bool {
-    return agent >= 1 and agent <= 3 and agent != target;
+    const current = switchAiAgentTarget(agent) orelse return false;
+    return current != target;
 }
 
 fn switchAiTab(tab: u32, target: u8) bool {
@@ -2505,6 +2525,7 @@ fn switchAiName(target: u8) []const u8 {
         1 => "claude",
         2 => "codex",
         3 => "pi",
+        4 => "antigravity",
         else => "",
     };
 }
@@ -2513,6 +2534,7 @@ fn switchAgentId(name: []const u8) ?u8 {
     if (std.mem.eql(u8, name, "claude")) return 1;
     if (std.mem.eql(u8, name, "codex")) return 2;
     if (std.mem.eql(u8, name, "pi")) return 3;
+    if (std.mem.eql(u8, name, "antigravity")) return 8;
     return null;
 }
 
@@ -2599,6 +2621,7 @@ fn switchAiDone(target: u8) []const u8 {
         1 => "Chat switched to Claude",
         2 => "Chat switched to Codex",
         3 => "Chat switched to Pi",
+        4 => "Chat switched to Antigravity",
         else => "Chat switched",
     };
 }
@@ -3122,6 +3145,7 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
         .codex => "new Codex session",
         .pi => "new Pi session",
         .cursor => "new Cursor session",
+        .antigravity => "new Antigravity session",
         .claude => "new Claude session",
     };
     if (!capacityAdmitNewAgent(host, workspace, .user, reason)) return false;
@@ -3187,6 +3211,10 @@ pub fn spawnPiTmuxSession() bool {
 
 pub fn spawnCursorTmuxSession() bool {
     return spawnHostedChatSession(.cursor);
+}
+
+pub fn spawnAntigravityTmuxSession() bool {
+    return spawnHostedChatSession(.antigravity);
 }
 
 test "IGSH-1546 Codex and Pi chats are live chats that never type into a terminal" {
@@ -3993,6 +4021,12 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CURSOR_CHAT_OFFSET;
             app_state.g_search_result_count += 1;
         }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new antigravity sessions chat session agy agent cli", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             keywordsMatchAll("new terminal shell plain", app_state.g_search_buf[0..app_state.g_search_len]))
         {
@@ -4395,6 +4429,7 @@ pub fn updateSearchResults() void {
         .{ .id = SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, .target = 1, .name = "Chat View: Switch AI to Claude" },
         .{ .id = SEARCH_CHAT_SWITCH_CODEX_OFFSET, .target = 2, .name = "Chat View: Switch AI to Codex" },
         .{ .id = SEARCH_CHAT_SWITCH_PI_OFFSET, .target = 3, .name = "Chat View: Switch AI to Pi" },
+        .{ .id = SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET, .target = 4, .name = "Chat View: Switch AI to Antigravity" },
     };
     for (switch_rows) |sw| {
         if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -5619,6 +5654,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         .{ .id = app_state.SEARCH_TABCTX_SWITCH_CLAUDE, .target = 1, .name = "Switch AI to Claude" },
         .{ .id = app_state.SEARCH_TABCTX_SWITCH_CODEX, .target = 2, .name = "Switch AI to Codex" },
         .{ .id = app_state.SEARCH_TABCTX_SWITCH_PI, .target = 3, .name = "Switch AI to Pi" },
+        .{ .id = app_state.SEARCH_TABCTX_SWITCH_ANTIGRAVITY, .target = 4, .name = "Switch AI to Antigravity" },
     };
     for (switch_tab_rows) |sw| {
         if (tc_idx != null and switchAiTab(tc_idx.?, sw.target) and app_state.g_search_result_count < app_state.g_search_results.len and

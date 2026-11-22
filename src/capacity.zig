@@ -226,7 +226,7 @@ fn agentSessionBreakdownForHost(entries: []const TmuxSessionEntry, host: u8) Age
         switch (entry.agent) {
             1 => result.claude +|= 1,
             2 => result.codex +|= 1,
-            3, 4, 5, 6, 7 => result.other +|= 1,
+            3, 4, 5, 6, 7, 8 => result.other +|= 1,
             else => {},
         }
     }
