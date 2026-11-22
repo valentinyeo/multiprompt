@@ -2104,6 +2104,13 @@ class HistoryReaderTest(unittest.TestCase):
                     settled = reader.settle_response(dict(self.query, op='settle', texts=[expected], after_ms=0)).splitlines()
                     self.assertEqual(json.loads(settled[1])['line'], 2)
 
+    def test_soft_3047_interleaved_skill_reply_emits_one_assistant_text(self):
+        self.path.write_text((ROOT / 'tools/fixtures/SOFT-3047/skill-command-reply.jsonl').read_text())
+        _, rows = self.read()
+        replies = [row for row in rows if row.get('role') == 'assistant' and row.get('text', '').startswith('Got it:')]
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(replies[0]['id'], 'msg_011ChHiRgJTM6EkNMSTr75nP')
+
     def test_soft_2423_skill_quote_shows_as_user_bubble(self):
         self.path.write_text((ROOT / 'tools/fixtures/SOFT-2423/skill-quote.jsonl').read_text())
         _, rows = self.read()
