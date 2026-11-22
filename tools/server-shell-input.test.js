@@ -45,3 +45,12 @@ test('SOFT-3048 copy-or-interrupt keeps using the shared clipboard path for nati
   assert.match(verify, /server-shell-input/);
   assert.match(verify, /Driving it with control\.ps1/);
 });
+
+test('SOFT-3048 the verify boundary accepts native VPS login shells', () => {
+  const boundary = fs.readFileSync(root('tools/verify-chat-delivery/boundary.py'), 'utf8');
+  assert.match(
+    boundary,
+    /server-shell-input[\s\S]*exec \$\{SHELL:-bash\} -l/,
+    'native shared-server shells must open the terminal fixture',
+  );
+});

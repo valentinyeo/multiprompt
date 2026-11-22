@@ -1317,6 +1317,9 @@ def run_message_worker():
 
 def terminal_session(command):
     value = state()
+    if value.get("name") == "server-shell-input" and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="server-shell")
+        return "server-shell", None
     if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
         record("invocations.jsonl", kind="login", session="workspace")
         return "workspace", None
