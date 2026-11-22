@@ -314,14 +314,12 @@ test('a pull request with no independent verifier FAILs and names the reason', (
   }
 });
 
-test('the DeepSeek verdict uses the same format and names its engine', () => {
+test('the ladder verdict uses the same format and names its lane', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek' });
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek', lane: 'opencode-go' });
   assert.equal(final, 'PASS');
   assert.match(body, new RegExp(`^pstack-verifier: PASS @ ${head}\\n`));
-  assert.match(body, new RegExp(`Judge: deepseek ${verifier.DEEPSEEK_MODEL}`));
-  assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-flash');
-  assert.doesNotMatch(verifier.DEEPSEEK_MODEL, /pro/);
+  assert.match(body, /^Judge: ladder opencode-go$/m);
 });
 
 test('the OpenAI verdict uses the same format and names its engine', () => {
@@ -342,12 +340,12 @@ test('the OpenAI judge uses the same verdict schema as Claude', () => {
   assert.match(prompt, /material/);
 });
 
-test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinking', () => {
-  const body = verifier.deepseekRequestBody(verifier.judgeMessages('evidence'));
-  assert.equal(body.model, 'deepseek-flash');
-  assert.deepEqual(body.thinking, { type: 'disabled' });
+test('the ladder request uses JSON output from the shared judge messages', () => {
+  const body = verifier.ladderRequestBody('evidence');
   assert.deepEqual(body.response_format, { type: 'json_object' });
   assert.equal(body.temperature, 0);
+  assert.equal(body.max_tokens, 4000);
+  assert.equal('model' in body, false);
   assert.match(body.messages[0].content, /JSON/);
   assert.match(body.messages[0].content, /empty selection\.features.*CI-only plan, not missing journey evidence/);
   assert.match(body.messages[0].content, /FAIL for a regression shown by the patch or checks/);
@@ -369,82 +367,54 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the gateway backup judge only runs when every other judge wrote no verdict', () => {
-  assert.equal(typeof verifier.judgeVercel, 'function');
-  assert.match(workflow, /id: gateway\n        if: [^\n]*steps\.deepseek\.outcome != 'success' && steps\.openai\.outcome != 'success' && steps\.claude\.outcome != 'success'\n        continue-on-error: true\n        env:\n          AI_GATEWAY_API_KEY: /);
-  assert.equal([...workflow.matchAll(/secrets\.AI_GATEWAY_API_KEY/g)].length, 1);
-  assert.match(workflow, /ENGINE: \$\{\{ steps\.gateway\.outputs\.structured_output != '' && 'vercel'/);
+test('the ladder backup judge only runs when every other judge wrote no verdict', () => {
+  assert.match(workflow, /id: ladder_backup\n        if: [^\n]*steps\.deepseek\.outcome != 'success' && steps\.openai\.outcome != 'success' && steps\.claude\.outcome != 'success'\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
+  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 2);
+  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.gateway\.outputs\.ladder_lane \|\| steps\.deepseek\.outputs\.ladder_lane \|\| '' \}\}/);
   assert.match(workflow, /VERDICT: \$\{\{ steps\.gateway\.outputs\.structured_output \|\| /);
-  assert.equal(verifier.VERCEL_MODEL, 'deepseek/deepseek-v4.1-flash');
+  assert.match(workflow, /build-ladder-request verifier-out/);
 });
 
-asyncTest('a gateway verdict is used when both primary judges fail', async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
-  fs.writeFileSync(path.join(out, 'judge-inputs.md'), '### pr.md\n# Pull request 1');
-  const prior = { CLAUDE_VERDICT: 'is_error', OPENAI_VERDICT: 'Codex did not complete (1)', DEEPSEEK_VERDICT: '', AI_GATEWAY_API_KEY: 'test-key' };
-  const calls = [];
-  const originalFetch = global.fetch;
-  global.fetch = async (url, init) => {
-    calls.push({ url, body: JSON.parse(init.body) });
-    return {
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ verdict: 'PASS', evidence: ['result.json shows every check passed'] }) } }] }),
-    };
-  };
+test('a ladder answer is turned into the same verdict shape', () => {
+  const answer = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-answer-')), 'answer.json');
+  fs.writeFileSync(answer, JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ verdict: 'PASS', evidence: ['result.json shows every check passed'] }) } }],
+  }));
+  const prev = process.env.GITHUB_OUTPUT;
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-out-'));
+  process.env.GITHUB_OUTPUT = path.join(output, 'out');
   try {
-    assert.equal(await verifier.judgeVercel({ ...prior, CLAUDE_VERDICT: JSON.stringify({ verdict: 'FAIL', evidence: [] }) }, out), '');
-    assert.equal(calls.length, 0);
-    const verdict = JSON.parse(await verifier.judgeVercel(prior, out));
+    verifier.parseLadderAnswer({ LADDER_ANSWER_FILE: answer, LADDER_LANE: 'opencode-go' });
+    const lines = Object.fromEntries(fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8').trim().split('\n').map(line => line.split('=')));
+    const verdict = JSON.parse(lines.structured_output);
     assert.equal(verdict.verdict, 'PASS');
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://ai-gateway.vercel.sh/v1/chat/completions');
-    assert.equal(calls[0].body.model, 'deepseek/deepseek-v4.1-flash');
-    assert.equal(calls[0].body.response_format.type, 'json_schema');
-    assert.deepEqual(calls[0].body.response_format.json_schema.schema.properties.verdict.enum, ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED']);
-    assert.match(calls[0].body.messages[0].content, /cannot see screenshots/);
     assert.match(verdict.evidence.join(' '), /no screenshot was read/);
+    assert.equal(lines.ladder_lane, 'opencode-go');
     const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'vercel' });
+    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'claude', lane: 'opencode-go' });
     assert.equal(result.final, 'PASS');
-    assert.match(result.body, /^Judge: vercel-deepseek$/m);
+    assert.match(result.body, /^Judge: ladder opencode-go$/m);
   } finally {
-    global.fetch = originalFetch;
+    process.env.GITHUB_OUTPUT = prev;
   }
 });
 
-asyncTest('a missing gateway key keeps the verdict BLOCKED and says so in one line', async () => {
+test('build-ladder-request writes judge messages for ladder-call', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
   fs.writeFileSync(path.join(out, 'judge-inputs.md'), '### pr.md\n# Pull request 1');
-  let requested = 0;
-  const originalFetch = global.fetch;
-  global.fetch = async () => {
-    requested += 1;
-    throw new Error('the gateway must not be called without a key');
-  };
-  try {
-    const verdict = JSON.parse(await verifier.judgeVercel({ CLAUDE_VERDICT: 'is_error', OPENAI_VERDICT: 'Codex did not complete (1)' }, out));
-    assert.equal(requested, 0);
-    assert.equal(verdict.verdict, 'BLOCKED');
-    assert.equal(verdict.evidence.length, 1);
-    assert.equal(verdict.evidence[0], verifier.GATEWAY_MISSING_KEY);
-    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'vercel' });
-    assert.equal(result.final, 'BLOCKED');
-    assert.match(result.body, /AI_GATEWAY_API_KEY is not set, so the Vercel AI Gateway backup judge could not run and verification stays BLOCKED\./);
-    assert.doesNotMatch(result.body, /^pstack-verifier: PASS/m);
-  } finally {
-    global.fetch = originalFetch;
-  }
+  verifier.buildLadderRequest(out);
+  const body = JSON.parse(fs.readFileSync(path.join(out, 'ladder-request.json'), 'utf8'));
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+  assert.match(body.messages[0].content, /cannot see screenshots/);
 });
 
-test('selection is deterministic and only the independent judge receives the DeepSeek key', () => {
-  const lines = workflow.split('\n');
-  const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
-  assert.equal(uses.length, 1);
+test('selection is deterministic and model keys reach ladder-call only', () => {
   assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
+  assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-deepseek /);
+  assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-vercel /);
   assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
-  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: deepseek_ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
+  assert.match(workflow, /DEEPSEEK_API_KEY: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
   assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'openai'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'claude'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
