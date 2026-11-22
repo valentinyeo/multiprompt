@@ -55,7 +55,7 @@ const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 const ChatPendingReset = struct { key: chat_transcript.Identity = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
 var g_chat_pending_reset: ?ChatPendingReset = null;
 var g_chat_reset_next: u64 = 0;
-const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, name: [64]u16 = @splat(0), name_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, name: [64]u16 = @splat(0), name_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
