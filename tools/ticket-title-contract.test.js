@@ -35,9 +35,7 @@ test('checked-in visible history has authoritative titles and release notes pres
   for (const [, literal, id] of rows) assert.equal(JSON.parse(literal), ticketLine(ticketRecord(id, titles[id])));
   const version = /\.ver = "([^"]+)"/.exec(source)[1];
   const notes = releaseNotes(source, `v${version}`);
-  const { userFacingReleaseLine } = await import('./version-stamp.mjs');
-  const visibleRows = rows.filter(([, literal]) => userFacingReleaseLine(JSON.parse(literal)));
-  assert.equal(notes.releases.flatMap(row => row.changes).length, visibleRows.length);
+  assert.equal(notes.releases.flatMap(row => row.changes).length, rows.length);
   assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes, no visible change/);
 });
 
@@ -48,8 +46,8 @@ test('CI tickets remain linked alongside product tickets', async () => {
   const titles = { 'IGSH-7': 'Product title', 'HYCI-9': 'Build title' };
   const source = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'a', subject: 'IGSH-7: Change' }, { sha: 'b', subject: 'HYCI-9: Change' }], titles);
   const release = releaseNotes(source, 'v0.28.1100').releases[0];
-  assert.deepEqual(release.changes, ['IGSH-7 Product title']);
-  assert.match(source, /HYCI-9 Build title/);
+  assert.deepEqual(release.changes, ['IGSH-7 Product title', 'HYCI-9 Build title']);
+  assert.equal(release.tickets[1], 'https://app.hypertask.ai/detail/project-11514/9');
 });
 
 test('modern releases cannot publish an empty ticket list', async () => {

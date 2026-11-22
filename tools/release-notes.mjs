@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTicketId } from './ticket-id.js';
 import { ticketLine, ticketRecord } from './ticket-titles.mjs';
-import { compareTags, userFacingReleaseLine } from './version-stamp.mjs';
+import { compareTags } from './version-stamp.mjs';
 
 export function releaseNotes(source, tag) {
   const releases = [...source.matchAll(/\.\{ \.ver = "(\d+\.\d+\.\d+)",[^\n]*?\.items = &\.\{([\s\S]*?)\n    \}(?:, \.ticket = "(?:\\.|[^"\\])*")? \},/g)].map(match => {
@@ -25,11 +25,10 @@ export function releaseNotes(source, tag) {
       item.ticket = record.id;
       item.text = ticketLine(record);
     }
-    const visible = kept.filter(item => userFacingReleaseLine(item.text));
     return {
       version: match[1],
-      changes: visible.map(item => item.text),
-      tickets: visible.map(item => {
+      changes: kept.map(item => item.text),
+      tickets: kept.map(item => {
         const ticket = parseTicketId(item.ticket);
         return `https://app.hypertask.ai/detail/project-${ticket.boardId}/${ticket.number}`;
       }),

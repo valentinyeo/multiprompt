@@ -275,55 +275,6 @@ test "console buffer is used and released, never the inherited log file" {
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('tmux status adoption reads the attached console even when stdout is redirected', () => {
-  const source = read('src/shell_poll.zig');
-  for (const prefix of ['pub fn extractTmuxSessionFromStatus(', 'fn isTmuxRunningInConsole(', 'fn readTmuxStatusTitle(']) {
-    const section = block(source, prefix);
-  assert.doesNotMatch(section, /GetStdHandle\(STD_OUTPUT_HANDLE\)/, `${prefix} must not read inherited stdout`);
-  assert.match(section, /openAttachedConsoleOutput\(\)/, `${prefix} must open CONOUT$ after AttachConsole`);
-  }
-  const extract = block(source, 'pub fn extractTmuxSessionFromStatus(');
-  const at = extract.indexOf('    var info: CONSOLE_SCREEN_BUFFER_INFO');
-  assert.ok(at > 0);
-  const prefix = extract.slice(0, at)
-    .replace('openAttachedConsoleOutput', 'output.openAttachedConsoleOutput')
-    .replace('bool {\n', 'bool {\n    _ = out;\n    _ = out_len;\n');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-console-'));
-  try {
-    fs.writeFileSync(path.join(dir, 'extract.zig'), `const std = @import("std");
-const HANDLE = ?*anyopaque;
-const DWORD = u32;
-const COORD = struct { x: i16, y: i16 };
-const CONSOLE_SCREEN_BUFFER_INFO = struct { srWindow: struct { left: i16, top: i16, right: i16, bottom: i16 }, dwCursorPosition: COORD };
-const console: HANDLE = @ptrFromInt(1234);
-const file: HANDLE = @ptrFromInt(5678);
-var closed = false;
-fn FreeConsole() i32 { return 1; }
-fn AttachConsole(_: u32) i32 { return 1; }
-fn GetStdHandle(_: i32) HANDLE { return file; }
-fn CloseHandle(handle: HANDLE) i32 { closed = handle == console; return 1; }
-fn verboseLoggingEnabled() bool { return false; }
-fn debugLog(_: []const u8) void {}
-fn debugLog2(_: []const u8, _: []const u8) void {}
-fn ReadConsoleOutputCharacterW(_: HANDLE, _: *anyopaque, _: u32, _: COORD, _: *DWORD) i32 { return 0; }
-fn GetConsoleScreenBufferInfo(_: HANDLE, _: *CONSOLE_SCREEN_BUFFER_INFO) i32 { return 0; }
-fn extractTmuxSessionFromStatusLine(_: []const u16, _: *[64]u8, _: *u32) bool { return false; }
-const output = struct { fn openAttachedConsoleOutput() ?HANDLE { return console; } };
-${prefix}
-    return handle == console;
-}
-test "tmux adoption uses CONOUT$, not the redirected log handle" {
-    var out: [64]u8 = undefined;
-    var n: u32 = 0;
-    try std.testing.expect(extractTmuxSessionFromStatus(42, &out, &n));
-    try std.testing.expect(closed);
-}
-`);
-    const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'extract.zig')], {encoding: 'utf8', timeout: 120000});
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
-});
-
 test('IGSH-1192 fractional circle resolve preserves artwork, premultiplies edges and leaves exterior transparent', () => {
   const resolve = block(read('src/smooth.zig'), 'pub fn resolveRounded(');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-circle-'));

@@ -1,1 +1,0 @@
-Server sessions are detected again when the app log is redirected to a file.
