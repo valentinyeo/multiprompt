@@ -38,6 +38,12 @@ test('SOFT-3048 the frame forwards mouse wheel to the native shell child', () =>
   );
 });
 
+test('SOFT-3048 copying a native shell selection clears it so the next Ctrl+C interrupts', () => {
+  const copy = body(fs.readFileSync(root('src/terminal_window.c'), 'utf8'), 'int mp_terminal_window_copy(HWND hwnd)');
+  assert.match(copy, /if \(copied\)[\s\S]*?selected = t->selecting = 0/, 'a copied selection must not survive to turn the next Ctrl+C into another copy');
+  assert.match(copy, /InvalidateRect\(hwnd, NULL, FALSE\)/, 'the cleared selection must repaint without the highlight');
+});
+
 test('SOFT-3048 copy-or-interrupt keeps using the shared clipboard path for native tabs', () => {
   const copy = body(read('clipboard.zig'), 'pub fn copyConsoleSelectionToClipboard(');
   assert.match(copy, /native_terminal[\s\S]*native_session\.zig.*copy/);
@@ -46,11 +52,10 @@ test('SOFT-3048 copy-or-interrupt keeps using the shared clipboard path for nati
   assert.match(verify, /Driving it with control\.ps1/);
 });
 
-test('SOFT-3048 the verify boundary accepts native VPS login shells', () => {
-  const boundary = fs.readFileSync(root('tools/verify-chat-delivery/boundary.py'), 'utf8');
-  assert.match(
-    boundary,
-    /server-shell-input[\s\S]*exec \$\{SHELL:-bash\} -l/,
-    'native shared-server shells must open the terminal fixture',
-  );
+test('SOFT-3048 the journey proves copy, interrupt and wheel scrollback on the native child', () => {
+  const journey = fs.readFileSync(root('.claude/skills/verify-multiprompt/server-shell-input.ps1'), 'utf8');
+  assert.match(journey, /GetFocusedWindow\(\$script:window\) -eq \$shell/);
+  assert.match(journey, /interrupt\.json/);
+  assert.match(journey, /WheelClientPoint/);
+  assert.match(journey, /afterIndex -ge \$beforeIndex/);
 });

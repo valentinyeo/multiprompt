@@ -1418,20 +1418,18 @@ def terminal_reader():
     if (ROOT / "console-detached").exists():
         return 0
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    transcript = ""
     if state().get("name") == "server-shell-input":
         marker = "SOFT3048SCROLL-42"
-        for index in range(50):
-            send(f"scroll-{index:02d}\r\n".encode())
-        send((marker + "\r\n").encode())
-        send(b"INTERRUPTIBLE\r\n")
-        (ROOT / "scroll-ready.json").write_text(json.dumps(dict(marker=marker, lines=50)), encoding="utf-8")
+        transcript = "".join(f"scroll-{index:03d}\r\n" for index in range(200)) + marker + "\r\nINTERRUPTIBLE\r\n"
+        (ROOT / "scroll-ready.json").write_text(json.dumps(dict(marker=marker, lines=200)), encoding="utf-8")
     previous = None
     while not box["closed"]:
         if (ROOT / "console-detached").exists():
             return 0
         key, shown, text, grey, row = terminal_frame(session, box["size"])
         if key != previous:
-            send(text.encode("utf-8"))
+            send((text + "\r\n" + transcript).encode("utf-8") if transcript else text.encode("utf-8"))
             rows = [line.rstrip() for line in shown.splitlines()]
             record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=8 if grey else 7, promptRow=row, greySuggestion=grey)
             (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")

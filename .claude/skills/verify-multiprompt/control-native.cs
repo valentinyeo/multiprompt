@@ -659,6 +659,18 @@ public static class VerifyNative {
         input.data.mouse = new Mouse { data = unchecked((uint)delta), flags = 0x0800 };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Sidebar wheel input failed");
     }
+    public static void WheelClientPoint(IntPtr owner, uint pid, IntPtr target, int x, int y, int delta) {
+        uint actualPid;
+        GetWindowThreadProcessId(owner, out actualPid);
+        if (actualPid != pid || Class(owner) != "ZigShell" || GetAncestor(GetForegroundWindow(), 3) != owner) throw new InvalidOperationException("Wheel owner mismatch");
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(target, ref point) || WindowFromPoint(point) != target) throw new InvalidOperationException("Wheel target is not in the owned pane");
+        if (delta == 0 || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
+        MouseAt(point.X, point.Y, 0);
+        Input input = new Input(); input.type = 0;
+        input.data.mouse = new Mouse { data = unchecked((uint)delta), flags = 0x0800 };
+        if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Pane wheel input failed");
+    }
     public static void ClickBrowserContent(IntPtr pane, IntPtr owner) {
         Rect rect;
         if (!GetClientRect(pane, out rect)) throw new InvalidOperationException("Browser client rectangle unavailable");
