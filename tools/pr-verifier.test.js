@@ -367,12 +367,16 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the ladder backup judge only runs when every other judge wrote no verdict', () => {
-  assert.match(workflow, /id: ladder_backup\n        if: [^\n]*steps\.deepseek\.outcome != 'success' && steps\.openai\.outcome != 'success' && steps\.claude\.outcome != 'success'\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
-  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 2);
-  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.gateway\.outputs\.ladder_lane \|\| steps\.deepseek\.outputs\.ladder_lane \|\| '' \}\}/);
-  assert.match(workflow, /VERDICT: \$\{\{ steps\.gateway\.outputs\.structured_output \|\| /);
+test('the judge order is ladder-call then Codex then Claude with one ladder-call step', () => {
+  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
+  assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
+  assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
+  assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
+  assert.doesNotMatch(workflow, /ladder_backup/);
 });
 
 test('a ladder answer is turned into the same verdict shape', () => {
@@ -408,16 +412,15 @@ test('build-ladder-request writes judge messages for ladder-call', () => {
   assert.match(body.messages[0].content, /cannot see screenshots/);
 });
 
-test('selection is deterministic and model keys reach ladder-call only', () => {
+test('selection is deterministic and ladder keys are always available to the first judge', () => {
   assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
   assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-deepseek /);
   assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-vercel /);
   assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
-  assert.match(workflow, /id: deepseek_ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /DEEPSEEK_API_KEY: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'openai'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/);
+  assert.doesNotMatch(workflow, /needs\.resolve\.outputs\.engine ==/);
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'claude'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);

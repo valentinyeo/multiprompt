@@ -193,17 +193,12 @@ jobs:
         run: |
           node verifier-tools/tools/pr-verifier.cjs download verifier-out/selection.json evidence
           node verifier-tools/tools/pr-verifier.cjs summarize evidence verifier-out/selection.json verifier-out
-      - name: Install pinned Codex client
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'openai'
-        env:
-          CLIENTS: ${{ runner.temp }}/clients
-        run: npm install --prefix "$CLIENTS" --no-audit --no-fund @openai/codex@0.169.0
       - name: Build ladder judge request
         if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
         run: node verifier-tools/tools/pr-verifier.cjs build-ladder-request verifier-out
       - name: Judge the evidence with ladder-call
-        id: deepseek_ladder
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'deepseek'
+        id: ladder_call
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
         continue-on-error: true
         uses: valentinyeo/token-ladder/.github/actions/ladder-call@main
         env:
@@ -214,17 +209,22 @@ jobs:
         with:
           request-file: verifier-out/ladder-request.json
           purpose: pr-verifier
-      - name: Record the deepseek ladder verdict
-        id: deepseek
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'deepseek' && steps.deepseek_ladder.outcome == 'success'
+      - name: Record the ladder verdict
+        id: ladder
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder_call.outcome == 'success'
         continue-on-error: true
         env:
-          LADDER_ANSWER_FILE: ${{ steps.deepseek_ladder.outputs.answer-file }}
-          LADDER_LANE: ${{ steps.deepseek_ladder.outputs.lane }}
+          LADDER_ANSWER_FILE: ${{ steps.ladder_call.outputs.answer-file }}
+          LADDER_LANE: ${{ steps.ladder_call.outputs.lane }}
         run: node verifier-tools/tools/pr-verifier.cjs parse-ladder-answer verifier-out
+      - name: Install pinned Codex client
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
+        env:
+          CLIENTS: ${{ runner.temp }}/clients
+        run: npm install --prefix "$CLIENTS" --no-audit --no-fund @openai/codex@0.169.0
       - name: Judge the evidence with OpenAI Codex
         id: openai
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'openai'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
         continue-on-error: true
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -235,7 +235,7 @@ jobs:
         run: node verifier-tools/tools/pr-verifier.cjs judge-openai verifier-out
       - name: Judge the evidence against the Done-when lines
         id: claude
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'claude'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && steps.openai.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
@@ -269,27 +269,6 @@ jobs:
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","PASS+NOTES","FAIL","BLOCKED"]},"evidence":{"type":"array","items":{"type":"string"},"maxItems":8}},"required":["verdict","evidence"]}'
-      - name: Judge the evidence with ladder-call backup
-        id: ladder_backup
-        if: always() && steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.deepseek.outcome != 'success' && steps.openai.outcome != 'success' && steps.claude.outcome != 'success'
-        continue-on-error: true
-        uses: valentinyeo/token-ladder/.github/actions/ladder-call@main
-        env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        with:
-          request-file: verifier-out/ladder-request.json
-          purpose: pr-verifier-backup
-      - name: Record the ladder backup verdict
-        id: gateway
-        if: steps.ladder_backup.outcome == 'success'
-        continue-on-error: true
-        env:
-          LADDER_ANSWER_FILE: ${{ steps.ladder_backup.outputs.answer-file }}
-          LADDER_LANE: ${{ steps.ladder_backup.outputs.lane }}
-        run: node verifier-tools/tools/pr-verifier.cjs parse-ladder-answer verifier-out
       - name: Compose the verdict comment
         id: final
         if: always()
@@ -299,10 +278,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           JOB_RESULTS: ${{ toJSON(needs) }}
           PR_NUMBER: ${{ needs.resolve.outputs.number || inputs.pr || github.event.pull_request.number }}
-          JUDGE_RESULT: ${{ steps.gateway.outcome != 'skipped' && steps.gateway.outcome || needs.resolve.outputs.engine == 'deepseek' && steps.deepseek.outcome || needs.resolve.outputs.engine == 'openai' && steps.openai.outcome || steps.claude.outcome }}
-          VERDICT: ${{ steps.gateway.outputs.structured_output || steps.claude.outputs.structured_output || steps.openai.outputs.structured_output || steps.deepseek.outputs.structured_output }}
-          ENGINE: ${{ needs.resolve.outputs.engine }}
-          LADDER_LANE: ${{ steps.gateway.outputs.ladder_lane || steps.deepseek.outputs.ladder_lane || '' }}
+          JUDGE_RESULT: ${{ steps.ladder.outcome == 'success' && steps.ladder.outcome || steps.openai.outcome == 'success' && steps.openai.outcome || steps.claude.outcome }}
+          VERDICT: ${{ steps.ladder.outputs.structured_output || steps.openai.outputs.structured_output || steps.claude.outputs.structured_output }}
+          ENGINE: ${{ steps.ladder.outcome == 'success' && 'ladder' || steps.openai.outcome == 'success' && 'openai' || steps.claude.outcome == 'success' && 'claude' || '' }}
+          LADDER_LANE: ${{ steps.ladder.outputs.ladder_lane || '' }}
           AUTHOR_MODEL_PROBLEM: ${{ needs.resolve.outputs.author_model_problem }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha || github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
