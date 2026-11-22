@@ -7,6 +7,20 @@
 - The full-file hash identifies the client artifact.
 - The inner-source hash identifies the selected runtime.
 
+## Release updates (SOFT-3037)
+
+- Each release publishes the complete runtime as `multiprompt-runtime.py`.
+- The signed manifest lists it beside the installers.
+- A server fetches it when a host starts, when a host sits idle and before
+  the nightly rotate.
+- The newest release is checked at most once every six hours per user.
+- The manifest signature is verified against the embedded release public key.
+- A missing verifier fails closed and keeps the installed runtime.
+- The payload must match the signed hash and its generation must be newer.
+- A failed check never swaps the selection and never downgrades.
+- The new payload is written before `active.json` changes.
+- Active chats keep their running code until the existing rotate path.
+
 ## Selection
 
 - Each Unix user has a private runtime.

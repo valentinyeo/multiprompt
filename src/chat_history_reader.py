@@ -2777,8 +2777,6 @@ HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
-HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
-HOST_FRESH_RETRY_WAIT = 120
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -4212,35 +4210,17 @@ def host_layout_publish_conversation(provider, sid, conversation_sid):
 
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
-    phase = fresh.get("phase") if isinstance(fresh, dict) else None
-    if phase == "resume" and not fresh.get("resume_retried"):
-        fresh.update(phase="resume_failed", started=time.time(), resume_retried=True)
-        session.pop("fresh_resumed", None)
-        host_state_write(provider, sid, session["state"])
-        host_log(provider, sid, "fresh_resume_retry", dict(reason=reason))
-        return
-    session["state"].pop("fresh_start", None)
-    session.pop("fresh_resumed", None)
+    retry = isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed")
+    if retry:
+        fresh["phase"] = "resume_failed"
+    else:
+        session["state"].pop("fresh_start", None)
     host_state_write(provider, sid, session["state"])
     host_event(provider, sid, tmux, session, "text.done",
-               dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
+               dict(text="Fresh start failed. " + reason + " Your previous work is saved." +
+                         (" Choose Fresh start to retry reading the handover." if retry else "")),
                "fresh-failed-" + uuid.uuid4().hex)
     host_log(provider, sid, "fresh_start_failed", dict(reason=reason))
-
-
-def host_fresh_retry(provider, sid, tmux, session):
-    fresh = session["state"].get("fresh_start")
-    if not isinstance(fresh, dict) or fresh.get("phase") != "resume_failed":
-        return False
-    if host_fresh_busy(session):
-        if time.time() - fresh.get("started", time.time()) <= HOST_FRESH_RETRY_WAIT:
-            return False
-        host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
-        return False
-    fresh.update(phase="resume", started=time.time())
-    session.pop("fresh_resumed", None)
-    host_state_write(provider, sid, session["state"])
-    return True
 
 
 def host_fresh_send(provider, sid, tmux, session, text):
@@ -6206,8 +6186,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
             fresh = session["state"].get("fresh_start")
-            fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
-            if fresh_limit is not None and time.time() - fresh.get("started", time.time()) > fresh_limit:
+            if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset", "resume") and time.time() - fresh.get("started", time.time()) > 180:
                 HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
                 host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
                 fresh = None
@@ -6234,7 +6213,6 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
-            host_fresh_retry(provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
             if (provider == "claude" and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
@@ -6259,7 +6237,12 @@ def host_loop(provider, sid, tmux, session, server, agent):
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
-            if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
+            rotate_now = idle and not session["sends"]
+            restart = rotate_now and host_restart_requested(provider, sid)
+            nightly = rotate_now and host_nightly_due(provider, sid)
+            if idle:
+                runtime_release_refresh(wait=nightly)
+            if restart or nightly:
                 if host_rotate(provider, sid, session, agent):
                     return
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
@@ -6293,6 +6276,7 @@ def host_main(provider, sid):
         return 2
     if not host_enabled(provider, sid):
         return 3
+    runtime_release_refresh()
     tmux = host_chat_name(provider, sid)
     lock = host_lock(provider, sid)
     if lock is None:
@@ -6448,6 +6432,242 @@ def host_published_runtime():
     except OSError:
         pass
     return host_runtime_file()
+
+
+RUNTIME_RELEASE_LATEST = "https://api.github.com/repos/valentinyeo/multiprompt/releases/latest"
+RUNTIME_RELEASE_DOWNLOAD = "https://github.com/valentinyeo/multiprompt/releases/download/"
+RUNTIME_RELEASE_ASSET = "multiprompt-runtime.py"
+RUNTIME_RELEASE_SUMS = "SHA256SUMS.txt"
+RUNTIME_RELEASE_SIGNATURE = "SHA256SUMS.txt.sig"
+RUNTIME_RELEASE_SIGNING_KEY = "9jk+GiMNzkprhdTqubjfY8r1paUS+QORd6vM4JohCwM="
+RUNTIME_RELEASE_STATE = "release-check.json"
+RUNTIME_RELEASE_INTERVAL = 6 * 60 * 60
+RUNTIME_RELEASE_POLL = 60
+RUNTIME_RELEASE_TIMEOUT = 8
+RUNTIME_RELEASE_TRANSFER = 20
+RUNTIME_RELEASE_BYTES = 4 * 1024 * 1024
+RUNTIME_RELEASE_SPKI = "302a300506032b6570032100"
+RUNTIME_RELEASE_TAG = re.compile(r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
+RUNTIME_RELEASE_GENERATION = re.compile(rb"^RUNTIME_GENERATION = (\d+)$", re.MULTILINE)
+RUNTIME_RELEASE_DIGEST = re.compile(rb"^([0-9a-f]{64}) {2}" + re.escape(RUNTIME_RELEASE_ASSET.encode()) + rb"$", re.MULTILINE)
+RUNTIME_RELEASE_PROBE = [0.0]
+RUNTIME_RELEASE_BUSY = threading.Lock()
+
+
+def runtime_release_read(url, limit=RUNTIME_RELEASE_BYTES, timeout=RUNTIME_RELEASE_TIMEOUT):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"User-Agent": "multiprompt-runtime",
+                                                "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise ValueError("release response is too large")
+    return payload
+
+
+def runtime_release_tag():
+    document = json.loads(runtime_release_read(RUNTIME_RELEASE_LATEST, 65536))
+    tag = document.get("tag_name") if isinstance(document, dict) else None
+    if not isinstance(tag, str) or not RUNTIME_RELEASE_TAG.match(tag):
+        raise ValueError("release tag is not a version")
+    return tag
+
+
+def runtime_release_key():
+    return bytes.fromhex(RUNTIME_RELEASE_SPKI) + base64.b64decode(RUNTIME_RELEASE_SIGNING_KEY)
+
+
+def runtime_release_openssl(manifest, signature):
+    tool = shutil.which("openssl")
+    if tool is None:
+        return False
+    import tempfile
+    directory = tempfile.mkdtemp(prefix="mp-release-")
+    try:
+        key = Path(directory) / "key.pem"
+        signed = Path(directory) / RUNTIME_RELEASE_SUMS
+        proof = Path(directory) / RUNTIME_RELEASE_SIGNATURE
+        key.write_text("-----BEGIN PUBLIC KEY-----\n" + base64.b64encode(runtime_release_key()).decode("ascii") +
+                       "\n-----END PUBLIC KEY-----\n", encoding="ascii")
+        signed.write_bytes(manifest)
+        proof.write_bytes(signature)
+        result = subprocess.run([tool, "pkeyutl", "-verify", "-pubin", "-inkey", str(key), "-rawin",
+                                 "-in", str(signed), "-sigfile", str(proof)], capture_output=True)
+        return result.returncode == 0
+    except (OSError, ValueError):
+        return False
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def runtime_release_signed(manifest, signature):
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        return runtime_release_openssl(manifest, signature)
+    try:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(RUNTIME_RELEASE_SIGNING_KEY)).verify(signature, manifest)
+    except (InvalidSignature, TypeError, ValueError):
+        return False
+    return True
+
+
+def runtime_release_generation(payload):
+    found = RUNTIME_RELEASE_GENERATION.search(payload) if isinstance(payload, bytes) else None
+    return int(found.group(1)) if found else None
+
+
+def runtime_release_digest(manifest):
+    found = RUNTIME_RELEASE_DIGEST.search(manifest) if isinstance(manifest, bytes) else None
+    return found.group(1).decode("ascii") if found else None
+
+
+def runtime_release_state():
+    return read_json(HOME / HOST_RUNTIME_TOOLS / RUNTIME_RELEASE_STATE)
+
+
+def runtime_release_publish(root, name, data):
+    import tempfile
+    try:
+        fd, path = tempfile.mkstemp(prefix=".release-", dir=str(root))
+    except OSError:
+        return False
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(path, str(root / name))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def runtime_release_install(payload):
+    import fcntl
+    import stat
+    missing = object()
+    generation = runtime_release_generation(payload)
+    if os.name != "posix" or generation is None:
+        return False
+    digest = hashlib.sha256(payload).hexdigest()
+    root = HOME / HOST_RUNTIME_TOOLS
+    try:
+        limited = root.stat()
+    except OSError:
+        return False
+    if limited.st_uid != os.geteuid() or stat.S_IMODE(limited.st_mode) != 0o700 or root.is_symlink():
+        return False
+    try:
+        directory = os.open(str(root), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        try:
+            lock = os.open("lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        except OSError:
+            return False
+        try:
+            held = os.fstat(lock)
+            if held.st_uid != os.geteuid() or stat.S_IMODE(held.st_mode) != 0o600:
+                return False
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                fd = os.open("active.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+                try:
+                    if stat.S_IMODE(os.fstat(fd).st_mode) != 0o600:
+                        return False
+                    active = json.loads(os.fdopen(fd, "rb", closefd=False).read(4097))
+                finally:
+                    os.close(fd)
+            except FileNotFoundError:
+                active = missing
+            except (OSError, ValueError):
+                return False
+            if active is not missing and (not isinstance(active, dict) or set(active) != {"protocol", "generation", "sha256"} or
+                                          type(active["protocol"]) is not int or active["protocol"] != 1 or
+                                          type(active["generation"]) is not int or active["generation"] < 1 or
+                                          not isinstance(active["sha256"], str) or len(active["sha256"]) != 64):
+                return False
+            if active is not missing and (generation <= active["generation"] or digest == active["sha256"]):
+                return False
+            if not runtime_release_publish(root, digest + ".py", payload):
+                return False
+            if not runtime_release_publish(root, "active.json", json.dumps(dict(protocol=1, generation=generation, sha256=digest),
+                                                                           separators=(",", ":")).encode("utf-8")):
+                return False
+            link = root / "reader.py"
+            try:
+                os.unlink(link)
+            except FileNotFoundError:
+                pass
+            os.symlink(digest + ".py", link)
+            return True
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+    finally:
+        os.close(directory)
+
+
+def runtime_release_update(now=None):
+    root = HOME / HOST_RUNTIME_TOOLS
+    now = time.time() if now is None else now
+    checked = runtime_release_state().get("checked_at")
+    if type(checked) in (int, float) and 0 <= now - checked < RUNTIME_RELEASE_INTERVAL:
+        return False
+    if not runtime_release_publish(root, RUNTIME_RELEASE_STATE, json.dumps(dict(checked_at=now), separators=(",", ":")).encode("utf-8")):
+        return False
+    tag = None
+    updated = False
+    try:
+        tag = runtime_release_tag()
+        base = RUNTIME_RELEASE_DOWNLOAD + tag + "/"
+        manifest = runtime_release_read(base + RUNTIME_RELEASE_SUMS, 65536)
+        signature = runtime_release_read(base + RUNTIME_RELEASE_SIGNATURE, 4096)
+        if not runtime_release_signed(manifest, signature):
+            raise ValueError("release signature rejected")
+        digest = runtime_release_digest(manifest)
+        if digest is None:
+            raise ValueError("release manifest has no runtime payload")
+        payload = runtime_release_read(base + RUNTIME_RELEASE_ASSET, timeout=RUNTIME_RELEASE_TRANSFER)
+        if hashlib.sha256(payload).hexdigest() != digest:
+            raise ValueError("release runtime digest mismatch")
+        updated = runtime_release_install(payload)
+    except (OSError, ValueError):
+        updated = False
+    runtime_release_publish(root, RUNTIME_RELEASE_STATE,
+                            json.dumps(dict(checked_at=now, tag=tag, runtime=updated), separators=(",", ":")).encode("utf-8"))
+    return updated
+
+
+def runtime_release_refresh(wait=False):
+    if os.name != "posix":
+        return False
+    probe = time.monotonic()
+    if probe - RUNTIME_RELEASE_PROBE[0] < RUNTIME_RELEASE_POLL:
+        return False
+    RUNTIME_RELEASE_PROBE[0] = probe
+    if wait:
+        return runtime_release_update()
+    if not RUNTIME_RELEASE_BUSY.acquire(blocking=False):
+        return False
+    threading.Thread(target=runtime_release_worker, daemon=True).start()
+    return True
+
+
+def runtime_release_worker():
+    try:
+        runtime_release_update()
+    finally:
+        RUNTIME_RELEASE_BUSY.release()
 
 
 def host_rotate(provider, sid, session, agent):

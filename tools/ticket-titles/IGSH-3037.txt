@@ -1,0 +1,1 @@
+Hosted chats install the newest released runtime without waiting for the desktop app.

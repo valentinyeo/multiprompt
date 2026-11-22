@@ -1,14 +1,18 @@
 import base64
+import hashlib
+import http.server
 import importlib.util
 import json
 import os
 import re
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest.mock import patch
 
@@ -255,6 +259,167 @@ class ReaderRetireTest(unittest.TestCase):
             self.assertTrue(exited.wait(2), 'idle superseded reader never retired')
             thread.join(1)
         self.assertEqual(exits, [0])
+
+
+class ReleaseHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.server.hits.append(self.path)
+        payload = self.server.files.get(self.path)
+        if payload is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):
+        pass
+
+
+@unittest.skipUnless(shutil.which('openssl'), 'openssl signs the release fixture')
+class ReleaseRuntimeTest(unittest.TestCase):
+    tag = 'v9.9.9'
+
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        self.addCleanup(self.home.cleanup)
+        self.runtime = Path(self.home.name) / '.multiprompt-runtime'
+        self.runtime.mkdir(mode=0o700)
+        self.keys = tempfile.TemporaryDirectory()
+        self.addCleanup(self.keys.cleanup)
+        self.private = os.path.join(self.keys.name, 'key.pem')
+        subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', self.private], check=True, capture_output=True, timeout=30)
+        public = subprocess.run(['openssl', 'pkey', '-in', self.private, '-pubout', '-outform', 'DER'], check=True, capture_output=True, timeout=30).stdout
+        self.public = base64.b64encode(public[-32:]).decode()
+        self.files = {}
+        self.hits = []
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ReleaseHandler)
+        self.server.files = self.files
+        self.server.hits = self.hits
+        self.addCleanup(self.server.server_close)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.shutdown)
+        self.base = 'http://127.0.0.1:%d/' % self.server.server_address[1]
+        self.reader = self.load(re.sub(r'^RUNTIME_RELEASE_SIGNING_KEY = "[^"]+"$', 'RUNTIME_RELEASE_SIGNING_KEY = "%s"' % self.public, SOURCE, count=1, flags=re.MULTILINE))
+        self.reader.RUNTIME_RELEASE_LATEST = self.base + 'latest'
+        self.reader.RUNTIME_RELEASE_DOWNLOAD = self.base + 'download/'
+
+    def load(self, source=SOURCE):
+        module = types.ModuleType('reader_release')
+        with patch.dict(os.environ, {'HOME': self.home.name}):
+            exec(compile(source, '<reader-release>', 'exec'), module.__dict__)
+        return module
+
+    def sign(self, manifest):
+        signed = os.path.join(self.keys.name, 'SHA256SUMS.txt')
+        proof = os.path.join(self.keys.name, 'SHA256SUMS.txt.sig')
+        Path(signed).write_bytes(manifest)
+        subprocess.run(['openssl', 'pkeyutl', '-sign', '-inkey', self.private, '-rawin', '-in', signed, '-out', proof], check=True, capture_output=True, timeout=30)
+        return Path(proof).read_bytes()
+
+    def payload(self, generation, marker=''):
+        return ('RUNTIME_GENERATION = %d\nPAGE_BYTES = 350000%s\n' % (generation, marker)).encode()
+
+    def release(self, payload=None, manifest=None, signature=None):
+        payload = self.payload(135) if payload is None else payload
+        digest = hashlib.sha256(payload).hexdigest()
+        manifest = ('%s  multiprompt-runtime.py\n' % digest).encode() if manifest is None else manifest
+        signature = self.sign(manifest) if signature is None else signature
+        base = 'download/%s/' % self.tag
+        self.files = {'/latest': json.dumps({'tag_name': self.tag}).encode(),
+                      '/' + base + 'SHA256SUMS.txt': manifest,
+                      '/' + base + 'SHA256SUMS.txt.sig': signature,
+                      '/' + base + 'multiprompt-runtime.py': payload}
+        self.server.files = self.files
+        return payload, digest
+
+    def current(self, generation):
+        payload = self.payload(generation, ' selected')
+        digest = hashlib.sha256(payload).hexdigest()
+        for name, data in ((digest + '.py', payload), ('active.json', json.dumps(dict(protocol=1, generation=generation, sha256=digest)).encode())):
+            (self.runtime / name).write_bytes(data)
+            os.chmod(self.runtime / name, 0o600)
+        (self.runtime / 'lock').write_bytes(b'')
+        os.chmod(self.runtime / 'lock', 0o600)
+        (self.runtime / 'reader.py').symlink_to(digest + '.py')
+        return digest
+
+    def state(self):
+        return json.loads((self.runtime / 'active.json').read_text())
+
+    def test_the_newer_released_runtime_is_installed(self):
+        self.current(134)
+        payload, digest = self.release()
+        self.assertTrue(self.reader.runtime_release_update())
+        self.assertEqual(self.state(), dict(protocol=1, generation=135, sha256=digest))
+        self.assertEqual((self.runtime / (digest + '.py')).read_bytes(), payload)
+        self.assertEqual(os.readlink(self.runtime / 'reader.py'), digest + '.py')
+        self.assertEqual(json.loads((self.runtime / 'release-check.json').read_text())['tag'], self.tag)
+
+    def test_an_older_release_never_downgrades(self):
+        selected = self.current(140)
+        payload, _ = self.release(self.payload(139))
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['generation'], 140)
+        self.assertEqual(self.state()['sha256'], selected)
+        self.assertFalse((self.runtime / (hashlib.sha256(payload).hexdigest() + '.py')).exists())
+
+    def test_the_same_generation_is_not_swapped(self):
+        selected = self.current(140)
+        self.release(self.payload(140, ' released'))
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['sha256'], selected)
+
+    def test_a_bad_signature_keeps_the_running_runtime(self):
+        selected = self.current(134)
+        digest = hashlib.sha256(self.payload(135)).hexdigest()
+        manifest = ('%s  multiprompt-runtime.py\n' % digest).encode()
+        self.release(manifest=manifest, signature=self.sign(manifest + b' '))
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['sha256'], selected)
+        self.assertEqual(self.state()['generation'], 134)
+
+    def test_a_manifest_without_the_runtime_keeps_the_running_runtime(self):
+        selected = self.current(134)
+        self.release(manifest=b'%s  release-notes.json\n' % hashlib.sha256(b'notes').hexdigest().encode())
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['sha256'], selected)
+
+    def test_a_payload_that_misses_its_digest_is_rejected(self):
+        selected = self.current(134)
+        self.release(manifest=('%s  multiprompt-runtime.py\n' % ('0' * 64)).encode())
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['sha256'], selected)
+
+    def test_a_corrupt_selection_blocks_the_swap(self):
+        self.current(134)
+        (self.runtime / 'active.json').write_text('null')
+        os.chmod(self.runtime / 'active.json', 0o600)
+        self.release()
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual((self.runtime / 'active.json').read_text(), 'null')
+
+    def test_releases_are_checked_on_an_interval(self):
+        self.current(134)
+        self.release()
+        self.assertTrue(self.reader.runtime_release_update())
+        after = len(self.hits)
+        self.release(self.payload(136))
+        self.assertFalse(self.reader.runtime_release_update())
+        self.assertEqual(len(self.hits), after)
+        (self.runtime / 'release-check.json').unlink()
+        self.assertTrue(self.reader.runtime_release_update())
+        self.assertEqual(self.state()['generation'], 136)
+
+    def test_openssl_verifies_without_the_cryptography_package(self):
+        payload, digest = self.release()
+        manifest = ('%s  multiprompt-runtime.py\n' % digest).encode()
+        with patch.dict(sys.modules, {'cryptography': None, 'cryptography.exceptions': None, 'cryptography.hazmat': None, 'cryptography.hazmat.primitives': None, 'cryptography.hazmat.primitives.asymmetric': None, 'cryptography.hazmat.primitives.asymmetric.ed25519': None}):
+            self.assertTrue(self.reader.runtime_release_signed(manifest, self.sign(manifest)))
+            self.assertFalse(self.reader.runtime_release_signed(manifest + b' ', self.sign(manifest)))
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), digest)
 
 
 if __name__ == '__main__':
