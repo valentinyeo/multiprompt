@@ -1,4 +1,3 @@
-"""Hosted-only native Codex hook smoke; all provider traffic is net-namespaced."""
 import base64
 import http.server
 import importlib.util
