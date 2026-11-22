@@ -1,0 +1,1 @@
+Multiprompt: a mention goes to the named chat, not the typing chat

@@ -1,0 +1,1 @@
+A mention in chat goes to the named chat instead of the typing chat.

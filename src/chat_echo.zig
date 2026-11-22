@@ -286,8 +286,11 @@ const Normalized = struct {
 };
 
 pub fn sameText(a: []const u16, b: []const u16) bool {
-    var left = Normalized{ .text = a };
-    var right = Normalized{ .text = b };
+    const mention = @import("chat_mention.zig");
+    const at = mention.trimWireNote(a);
+    const bt = mention.trimWireNote(b);
+    var left = Normalized{ .text = at };
+    var right = Normalized{ .text = bt };
     while (true) {
         const l = left.next();
         const r = right.next();
