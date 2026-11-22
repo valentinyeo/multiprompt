@@ -34,6 +34,7 @@ regexes = [
   '''^G3RB\-K49M\-1FKG\-7KZ4\-PW74\-8E29\-6NR5\-FC4X\-VKKA\-W6SD\-PPDC\-ZJDK\-9MX0\-V9EG$''',
   '''^wTgOSUtCQd4JWn8KILDa1/V3aiN9hqYr3gxco3O7B0E=$''',
   '''^TdQKLgWd/3o402SCuv3f1cjveLKMwyA4yFerRgp9TRY=$''',
+  '''^9jk\+GiMNzkprhdTqubjfY8r1paUS\+QORd6vM4JohCwM=$''',
 ]
 
 [[allowlists]]

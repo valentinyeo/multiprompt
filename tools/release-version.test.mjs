@@ -156,7 +156,7 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 5);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 4);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
@@ -436,6 +436,8 @@ test('packaging includes extension contents, excludes current themes and covers 
   fs.writeFileSync(path.join(f.dir, 'extension/manifest.json'), '{}');
   fs.writeFileSync(path.join(f.dir, 'extension/.included'), 'included');
   for (const name of ['multiprompt-x64.exe', 'multiprompt-arm64.exe', 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe']) fs.writeFileSync(path.join(f.dir, 'dist', name), name);
+  fs.cpSync(path.join(root, 'src'), path.join(f.dir, 'src'), { recursive: true });
+  execFileSync(process.execPath, [path.join(root, 'tools/runtime-release-asset.mjs'), tag, 'dist/multiprompt-runtime.py'], { cwd: f.dir });
   const result = f.run('Package extension and checksums');
   assert.equal(result.status, 0, result.stderr);
   const entries = execFileSync('unzip', ['-Z1', 'dist/multiprompt-extension.zip'], { cwd: f.dir, encoding: 'utf8' });
@@ -444,8 +446,9 @@ test('packaging includes extension contents, excludes current themes and covers 
   assert.match(entries, /themes\/kept.json/);
   assert.doesNotMatch(entries, /themes\/current/);
   const sums = fs.readFileSync(path.join(f.dir, 'dist/SHA256SUMS.txt'), 'utf8');
-  assert.equal(sums.trim().split('\n').length, 6);
+  assert.equal(sums.trim().split('\n').length, 7);
   assert.match(sums, /^[a-f0-9]{64}  release-notes\.json$/m);
+  assert.match(sums, /^[a-f0-9]{64}  multiprompt-runtime\.py$/m);
   execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: path.join(f.dir, 'dist') });
 });
 
