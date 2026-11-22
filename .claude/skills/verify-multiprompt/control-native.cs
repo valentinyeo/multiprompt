@@ -945,7 +945,7 @@ public static class VerifyNative {
         return info.Focus;
     }
     [DllImport("user32.dll")] static extern uint GetCaretBlinkTime();
-    public static uint CaretBlinkTime() => GetCaretBlinkTime();
+    public static uint CaretBlinkTime() { return GetCaretBlinkTime(); }
     [StructLayout(LayoutKind.Sequential)] public struct CaretSnapshot { public IntPtr Caret; public Rect CaretRect; }
     static CaretSnapshot CaretSnapshotForThread(uint thread) {
         GuiThreadInfo info = new GuiThreadInfo();
@@ -953,8 +953,8 @@ public static class VerifyNative {
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         return new CaretSnapshot { Caret = info.Caret, CaretRect = info.CaretRect };
     }
-    public static Rect CaretRect(IntPtr hwnd) => CaretSnapshotForThread(WindowThread(hwnd)).CaretRect;
-    public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) => CaretSnapshotForThread(WindowThread(hwnd));
+    public static Rect CaretRect(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)).CaretRect; }
+    public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)); }
     static uint WindowThread(IntPtr hwnd) {
         uint pid;
         uint thread = GetWindowThreadProcessId(hwnd, out pid);
