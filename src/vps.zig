@@ -332,20 +332,6 @@ pub fn tmuxAgentFromPaneCommand(command: []const u8) u8 {
     return 0;
 }
 
-fn noteLiveAgent(host: u8, name: []const u8, agent: u8, cache_count: u32) bool {
-    if (agent == 0 or name.len == 0) return false;
-    var i: u32 = 0;
-    while (i < cache_count) : (i += 1) {
-        const old = &app_state.g_tmux_cache[i];
-        if (old.host != host or old.name_len != name.len) continue;
-        if (!std.mem.eql(u8, old.name[0..old.name_len], name)) continue;
-        old.pane_shell = false;
-        if (old.agent == 0) old.agent = agent;
-        return true;
-    }
-    return false;
-}
-
 pub fn paneCommandIsShell(command: []const u8) bool {
     const name = if (command.len > 0 and command[0] == '-') command[1..] else command;
     const shells = [_][]const u8{ "bash", "zsh", "sh", "dash", "fish", "ksh" };
@@ -886,16 +872,13 @@ fn parseHostOutputIntoCache(host: u8, buf: []const u8, cache_count: *u32) u32 {
                             }
                         }
                     }
-                    const live = if (nf >= 5) tmuxAgentFromPaneCommand(fields[4]) else 0;
-                    if (!noteLiveAgent(host, entry.name[0..entry.name_len], live, cache_count.*)) {
-                        app_state.g_tmux_cache[cache_count.*] = entry;
-                        cache_count.* += 1;
-                        added += 1;
-                        capacity.tmux_sessions +|= 1;
-                        if (entry.agent != 0) {
-                            capacity.resident_agents +|= 1;
-                            capacity.resident_ram_mb +|= entry.ram_mb;
-                        }
+                    app_state.g_tmux_cache[cache_count.*] = entry;
+                    cache_count.* += 1;
+                    added += 1;
+                    capacity.tmux_sessions +|= 1;
+                    if (entry.agent != 0) {
+                        capacity.resident_agents +|= 1;
+                        capacity.resident_ram_mb +|= entry.ram_mb;
                     }
                 }
             }
