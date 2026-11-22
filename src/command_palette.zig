@@ -2074,6 +2074,48 @@ fn finishPickRepoSelectionAfterRebuild(query_changed: bool) void {
     capturePickRepoAnchorFromSelection();
 }
 
+pub const PICK_REPO_SCROLL_GUTTER: i32 = 16;
+pub const PICK_REPO_HOST_MIN_W: i32 = 64;
+pub const PICK_REPO_HOST_MAX_W: i32 = 160;
+pub const PICK_REPO_COLUMN_GAP: i32 = 12;
+
+pub const PickRepoColumns = struct {
+    name_left: i32,
+    name_right: i32,
+    path_left: i32,
+    path_right: i32,
+    host_left: i32,
+    host_right: i32,
+};
+
+fn pickRepoPathSeparator(c: u8) bool {
+    return c == '/' or c == '\\';
+}
+
+pub fn pickRepoFolderName(path: []const u8) []const u8 {
+    var end = path.len;
+    while (end > 0 and pickRepoPathSeparator(path[end - 1])) end -= 1;
+    var start = end;
+    while (start > 0 and !pickRepoPathSeparator(path[start - 1])) start -= 1;
+    return path[start..end];
+}
+
+pub fn pickRepoColumns(text_left: i32, overlay_right: i32, name_w: i32, host_w: i32) PickRepoColumns {
+    const host_right = overlay_right - PICK_REPO_SCROLL_GUTTER;
+    const host_left = host_right - std.math.clamp(host_w, PICK_REPO_HOST_MIN_W, PICK_REPO_HOST_MAX_W);
+    const path_right = host_left - PICK_REPO_COLUMN_GAP;
+    const name_right = @min(text_left + @max(name_w, 0), path_right);
+    const path_left = if (name_right + PICK_REPO_COLUMN_GAP <= path_right) name_right + PICK_REPO_COLUMN_GAP else path_right;
+    return .{
+        .name_left = text_left,
+        .name_right = name_right,
+        .path_left = path_left,
+        .path_right = path_right,
+        .host_left = host_left,
+        .host_right = host_right,
+    };
+}
+
 fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
     for (text) |c| {
         if (pos.* + 2 >= out.len) return false;
@@ -6348,6 +6390,45 @@ test "SOFT-2883 pick repo keeps the highlighted folder when the list refreshes" 
     vps.replaceRepoRowsForTest(0, &.{ android, ios });
     updateSearchResults();
     try std.testing.expect(app_state.g_search_sel < app_state.g_search_result_count);
+}
+
+test "SOFT-3075 pick repo folder name comes from the end of the path" {
+    try std.testing.expectEqualStrings("multiprompt-android", pickRepoFolderName("/home/valentin/projects/multiprompt-android"));
+    try std.testing.expectEqualStrings("multiprompt", pickRepoFolderName("/home/valentin/projects/multiprompt/"));
+    try std.testing.expectEqualStrings("repo", pickRepoFolderName("C:\\work\\repo"));
+    try std.testing.expectEqualStrings("multi.clock", pickRepoFolderName("/srv/multi.clock"));
+    try std.testing.expectEqualStrings("", pickRepoFolderName("/"));
+    try std.testing.expectEqualStrings("", pickRepoFolderName(""));
+}
+
+test "SOFT-3075 pick repo columns keep the folder name and the host clear of the scrollbar" {
+    const overlay_right: i32 = 560;
+    const text_left: i32 = 14;
+    const wide = pickRepoColumns(text_left, overlay_right, 132, 78);
+    try std.testing.expectEqual(text_left, wide.name_left);
+    try std.testing.expectEqual(@as(i32, 146), wide.name_right);
+    try std.testing.expectEqual(@as(i32, 158), wide.path_left);
+    try std.testing.expect(wide.path_right > wide.path_left);
+    try std.testing.expectEqual(overlay_right - PICK_REPO_SCROLL_GUTTER, wide.host_right);
+    try std.testing.expectEqual(wide.host_right - 78, wide.host_left);
+    try std.testing.expectEqual(wide.host_left - PICK_REPO_COLUMN_GAP, wide.path_right);
+    try std.testing.expect(wide.host_right <= overlay_right - 12);
+
+    const long_name = pickRepoColumns(text_left, overlay_right, 500, 78);
+    try std.testing.expectEqual(long_name.path_right, long_name.name_right);
+    try std.testing.expectEqual(long_name.path_right, long_name.path_left);
+
+    const short_name = pickRepoColumns(text_left, overlay_right, 20, 9);
+    try std.testing.expectEqual(@as(i32, 34), short_name.name_right);
+    try std.testing.expectEqual(short_name.host_right - PICK_REPO_HOST_MIN_W, short_name.host_left);
+
+    const long_host = pickRepoColumns(text_left, overlay_right, 20, 400);
+    try std.testing.expectEqual(long_host.host_right - PICK_REPO_HOST_MAX_W, long_host.host_left);
+
+    const narrow_overlay = pickRepoColumns(0, 240, 300, 120);
+    try std.testing.expect(narrow_overlay.name_right <= narrow_overlay.path_right);
+    try std.testing.expect(narrow_overlay.path_left >= narrow_overlay.name_right);
+    try std.testing.expect(narrow_overlay.host_right <= 240 - PICK_REPO_SCROLL_GUTTER);
 }
 
 fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
