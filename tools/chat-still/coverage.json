@@ -1,5 +1,5 @@
 {
-  "sync_commit": "52dadca353c962ff860d467f0cda0cb784d3ed70",
+  "sync_commit": "f23ab194cef933ad41fc770507ee25cc5e30be88",
   "functions": {
     "refreshChatTranscript": {
       "file": "src/chat_session.zig",

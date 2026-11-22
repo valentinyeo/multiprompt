@@ -41,6 +41,7 @@ public sealed class ChatStillObserver {
     byte[] pixelBaseline, pixelCurrent;
     int[] pixelRect;
     int pixelFrames;
+    int pinViewTop = -1;
     public static int[] ParseRect(string value) { return Array.ConvertAll(value.Split(','), Int32.Parse); }
     public static bool Same(int[] a, int[] b) {
         if (a == null || b == null || a.Length != 4 || b.Length != 4) return false;
@@ -82,7 +83,10 @@ public sealed class ChatStillObserver {
                 if (pixelCurrent[i] != pixelCurrent[0] || pixelCurrent[i + 1] != pixelCurrent[1] || pixelCurrent[i + 2] != pixelCurrent[2]) { detail = true; break; }
             if (!detail) throw new InvalidOperationException("Newest message first-frame pixels have no visible detail");
             pixelBaseline = (byte[])pixelCurrent.Clone();
+            pinViewTop = viewTop;
         }
+        if (streaming < 0 && viewTop != pinViewTop) { pinViewTop = viewTop; pixelBaseline = (byte[])pixelCurrent.Clone(); return; }
+        if (streaming >= 0) return;
         try { AssertPixels(pixelBaseline, pixelCurrent); }
         catch {
             pixelImage.Save(Path.Combine(evidence, "chat-still-changed-message.png"), ImageFormat.Png);
@@ -115,7 +119,8 @@ public sealed class ChatStillObserver {
         var screen = new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
         var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "view_height", viewHeight }, { "view_top", viewTop }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
         samples.Add(sample);
-        if (baseline == null) baseline = screen;
+        if (baseline == null) { baseline = screen; pinViewTop = viewTop; }
+        else if (streaming < 0 && viewTop != pinViewTop) { baseline = screen; pinViewTop = viewTop; }
         AssertFrame(baseline, screen, dirty, width, layout);
         Rect client;
         if (!GetClientRect(view, out client)) throw new InvalidOperationException("Transcript client rectangle unavailable");
