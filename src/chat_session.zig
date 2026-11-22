@@ -2086,13 +2086,16 @@ pub fn refreshChatTranscript(force: bool) void {
     const old_content_h = app_state.g_chat_content_h;
     const old_top_pad = app_state.g_chat_layout_top_pad;
     const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready;
-    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force, app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
+    const was_at_bottom = !app_state.g_chat_read_hold and old_content_h > viewport_h and
+        @import("chat_scrollbar.zig").atBottom(old_scroll_y, old_content_h, viewport_h, @import("drawing.zig").uiScaled(4));
+    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(force, app_state.g_chat_scroll_bottom_pending or was_at_bottom, app_state.g_chat_scrolled_up);
     const anchor = if (old_content_h > 0 and (!follow_bottom or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y) else null;
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
     if (!refreshed and !restore_read) return;
     if (follow_bottom) app_state.g_chat_scrolled_up = false;
-    app_state.g_chat_scroll_bottom_pending = false;
+    const bottom = app_state.g_chat_content_h - viewport_h;
+    if (!app_state.g_chat_scroll_bottom_pending or app_state.g_chat_scroll_y >= bottom - @import("drawing.zig").uiScaled(4)) app_state.g_chat_scroll_bottom_pending = false;
     const previous_boundary = app_state.g_chat_read_boundary;
     chatRelayout(client_rc.right - client_rc.left);
     const anchor_top = if (app_state.g_chat_prepend_pending) old_scroll_y + app_state.g_chat_content_h - old_content_h else if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
@@ -2117,12 +2120,16 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     const old_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
     const old_top_pad = app_state.g_chat_layout_top_pad;
-    const anchor = if (old_content_h > 0 and (app_state.g_chat_scrolled_up or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y) else null;
+    const was_at_bottom = !app_state.g_chat_read_hold and old_content_h > viewport_h and
+        @import("chat_scrollbar.zig").atBottom(old_y, old_content_h, viewport_h, @import("drawing.zig").uiScaled(4));
+    const follow_bottom = !app_state.g_chat_read_open_pending and chat_history.followBottom(false, app_state.g_chat_scroll_bottom_pending or was_at_bottom, app_state.g_chat_scrolled_up);
+    const anchor = if (old_content_h > 0 and (app_state.g_chat_scrolled_up or app_state.g_chat_read_hold) and !follow_bottom) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y) else null;
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor.?.offset - (app_state.g_chat_layout_top_pad - old_top_pad) else old_y;
-    app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
+    app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, follow_bottom, anchor_top, if (anchor) |p| p.offset else 0);
     if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+    if (follow_bottom and !app_state.g_chat_read_hold) app_state.g_chat_scrolled_up = false;
     chatScrollStateChanged(viewport_h);
 }
 

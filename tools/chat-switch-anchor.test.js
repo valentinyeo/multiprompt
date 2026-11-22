@@ -16,6 +16,12 @@ function between(source, start, end) {
   return source.slice(a, b);
 }
 
+function stripScrollImports(scroll) {
+  return scroll
+    .replaceAll('@import("chat_scrollbar.zig").atBottom', 'atBottom')
+    .replaceAll('@import("drawing.zig").uiScaled(4)', '4');
+}
+
 const harness = (scroll, historySource) => `const std = @import("std");
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 800, bottom: i32 = 600 };
 const chat_history = struct {
@@ -52,6 +58,9 @@ const app_state = struct {
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
 fn chatEchoMatchActive() void {}
+fn atBottom(scroll_y: i32, content_h: i32, viewport_h: i32, slack: i32) bool {
+  return scroll_y >= content_h - viewport_h - slack;
+}
 fn chatScrollStateChanged(viewport_h: i32) void {
   app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - 4;
 }
@@ -182,12 +191,45 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
 }
+test "SOFT-3040 send relayout reaches the echo and working tail" {
+  openTab(40);
+  app_state.g_chat_read_hold = false;
+  app_state.g_chat_scroll_y = app_state.g_chat_content_h - 600;
+  chatScrollStateChanged(600);
+  app_state.g_chat_scrolled_up = true;
+  app_state.g_chat_scroll_bottom_pending = true;
+  const bottom = app_state.g_chat_scroll_y;
+  app_state.tail_h = 48;
+  chatRelayoutPreservingScroll(800, 600);
+  try std.testing.expectEqual(bottom + 48, app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  const hold = dividerTop();
+  app_state.g_chat_scroll_y = hold;
+  app_state.g_chat_scrolled_up = true;
+  app_state.g_chat_read_hold = true;
+  app_state.g_chat_scroll_bottom_pending = false;
+  app_state.tail_h = 96;
+  chatRelayoutPreservingScroll(800, 600);
+  try std.testing.expectEqual(hold, app_state.g_chat_scroll_y);
+}
+test "SOFT-3040 growth at the bottom stays pinned without a fresh send" {
+  openTab(40);
+  app_state.g_chat_read_hold = false;
+  app_state.g_chat_scroll_y = app_state.g_chat_content_h - 600;
+  chatScrollStateChanged(600);
+  const before = app_state.g_chat_scroll_y;
+  app_state.tail_h = 64;
+  chatRelayoutPreservingScroll(800, 600);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+  try std.testing.expect(before < app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+}
 `;
 
 function run(scroll, historySource = history) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-anchor-'));
   try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), harness(scroll, historySource));
+    fs.writeFileSync(path.join(dir, 'test.zig'), harness(stripScrollImports(scroll), historySource));
     return spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 90000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -199,7 +241,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 8 tests passed/);
+  assert.match(result.stderr, /All 10 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {
@@ -237,4 +279,13 @@ test('SOFT-2557 the previous opening path moves the visible row when a New divid
   const result = run(before);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /SOFT-2557 a late New divider[^]*?FAIL \(TestExpectedEqual\)/);
+});
+
+test('SOFT-3040 the old relayout path left the send above the fold', () => {
+  const relayout = stripScrollImports(between(session, 'pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {', 'pub fn chatLatestAgentReply'));
+  const oldRelayout = fs.readFileSync(path.join(__dirname, 'fixtures', 'SOFT-3040', 'before-relayout-preserving-scroll.txt'), 'utf8');
+  const before = stripScrollImports(current).replace(relayout, oldRelayout);
+  const result = run(before);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /SOFT-3040 send relayout[^]*?FAIL \(TestExpectedEqual\)/);
 });

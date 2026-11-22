@@ -841,6 +841,10 @@ pub fn sendChatPrompt() void {
             slot.consumed = true;
         };
     }
+    app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_hold = false;
+    app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_scroll_bottom_pending = true;
     const ei = chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
@@ -848,15 +852,11 @@ pub fn sendChatPrompt() void {
     deliverMentions(app_state.active_shell, app_state.g_chat_outbox.items[ei].id, send_text);
     @import("chat_mention.zig").clearPicks();
     send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
-    app_state.g_chat_read_open_pending = false;
-    app_state.g_chat_read_hold = false;
-    app_state.g_chat_read_open_ready = true;
     _ = @import("chat_session.zig").chatReadMark(true);
     app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;
     _ = UpdateWindow(app_state.g_chat_transcript_hwnd);
     chatAcAfterSend(send_text);
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
-    app_state.g_chat_scroll_bottom_pending = true;
     if (app_state.g_chat_ac_dialog_len > 0 and
         @import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]) and
         std.mem.startsWith(u16, send_text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]))
@@ -882,17 +882,17 @@ pub fn chatSendChoice(text: []const u16) bool {
         return false;
     }
     send_latency.markPressed();
+    app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_hold = false;
+    app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_scroll_bottom_pending = true;
     const ei = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; try again", 3500, true);
         return false;
     };
     send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
-    app_state.g_chat_read_open_pending = false;
-    app_state.g_chat_read_hold = false;
-    app_state.g_chat_read_open_ready = true;
     _ = @import("chat_session.zig").chatReadMark(true);
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
-    app_state.g_chat_scroll_bottom_pending = true;
     chatOutboxTick();
     _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
     return true;

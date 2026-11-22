@@ -1,0 +1,1 @@
+After you send a message, Chat View keeps your message and the typing dots in view above the composer until you scroll away.
