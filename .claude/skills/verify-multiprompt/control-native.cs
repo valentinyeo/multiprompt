@@ -944,6 +944,15 @@ public static class VerifyNative {
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         return info.Focus;
     }
+    public static Rect CaretRect(IntPtr hwnd) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
+        GuiThreadInfo info = new GuiThreadInfo();
+        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+        if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return info.CaretRect;
+    }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
         UIntPtr length;
