@@ -1256,9 +1256,14 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and
                             chat_echo.v1PhaseUnconfirmed(std.mem.sliceTo(&entry.message_phase, 0)))
                         {
-                            entry.state = .queued;
-                            entry.write_started = false;
-                            entry.channel_sent = false;
+                            if (entry.message_phase[0] == 0) {
+                                entry.state = .queued;
+                                entry.write_started = false;
+                                entry.channel_sent = false;
+                            } else {
+                                entry.write_started = true;
+                                entry.channel_sent = false;
+                            }
                         }
                         const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
                         const saved_ms = if (entry.anchor.sent_ms > 0) entry.anchor.sent_ms else entry.anchor.after_ms;
