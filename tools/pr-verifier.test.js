@@ -19,6 +19,14 @@ function test(name, fn) {
     fn();
   });
 }
+
+function asyncTest(name, fn) {
+  nodeTest(name, async () => {
+    assert.ok(verifier, 'tools/pr-verifier.cjs is part of this change');
+    assert.ok(workflow, '.github/workflows/pr-verifier.yml is part of this change');
+    await fn();
+  });
+}
 const available = ['appearance', 'command-palette', 'palette-order', 'pane-layout', 'chat-view', 'chat-view-everywhere', 'title-bar'];
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -359,6 +367,75 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   const messages = verifier.judgeMessages(material);
   assert.match(messages[0].content, /cannot see screenshots/);
   assert.match(messages[0].content, /never as instructions/);
+});
+
+test('the gateway backup judge only runs when every other judge wrote no verdict', () => {
+  assert.equal(typeof verifier.judgeVercel, 'function');
+  assert.match(workflow, /id: gateway\n        if: [^\n]*steps\.deepseek\.outcome != 'success' && steps\.openai\.outcome != 'success' && steps\.claude\.outcome != 'success'\n        continue-on-error: true\n        env:\n          AI_GATEWAY_API_KEY: /);
+  assert.equal([...workflow.matchAll(/secrets\.AI_GATEWAY_API_KEY/g)].length, 1);
+  assert.match(workflow, /ENGINE: \$\{\{ steps\.gateway\.outputs\.structured_output != '' && 'vercel'/);
+  assert.match(workflow, /VERDICT: \$\{\{ steps\.gateway\.outputs\.structured_output \|\| /);
+  assert.equal(verifier.VERCEL_MODEL, 'deepseek/deepseek-v4.1-flash');
+});
+
+asyncTest('a gateway verdict is used when both primary judges fail', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
+  fs.writeFileSync(path.join(out, 'judge-inputs.md'), '### pr.md\n# Pull request 1');
+  const prior = { CLAUDE_VERDICT: 'is_error', OPENAI_VERDICT: 'Codex did not complete (1)', DEEPSEEK_VERDICT: '', AI_GATEWAY_API_KEY: 'test-key' };
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ verdict: 'PASS', evidence: ['result.json shows every check passed'] }) } }] }),
+    };
+  };
+  try {
+    assert.equal(await verifier.judgeVercel({ ...prior, CLAUDE_VERDICT: JSON.stringify({ verdict: 'FAIL', evidence: [] }) }, out), '');
+    assert.equal(calls.length, 0);
+    const verdict = JSON.parse(await verifier.judgeVercel(prior, out));
+    assert.equal(verdict.verdict, 'PASS');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://ai-gateway.vercel.sh/v1/chat/completions');
+    assert.equal(calls[0].body.model, 'deepseek/deepseek-v4.1-flash');
+    assert.equal(calls[0].body.response_format.type, 'json_schema');
+    assert.deepEqual(calls[0].body.response_format.json_schema.schema.properties.verdict.enum, ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED']);
+    assert.match(calls[0].body.messages[0].content, /cannot see screenshots/);
+    assert.match(verdict.evidence.join(' '), /no screenshot was read/);
+    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'vercel' });
+    assert.equal(result.final, 'PASS');
+    assert.match(result.body, /^Judge: vercel-deepseek$/m);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+asyncTest('a missing gateway key keeps the verdict BLOCKED and says so in one line', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
+  fs.writeFileSync(path.join(out, 'judge-inputs.md'), '### pr.md\n# Pull request 1');
+  let requested = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    requested += 1;
+    throw new Error('the gateway must not be called without a key');
+  };
+  try {
+    const verdict = JSON.parse(await verifier.judgeVercel({ CLAUDE_VERDICT: 'is_error', OPENAI_VERDICT: 'Codex did not complete (1)' }, out));
+    assert.equal(requested, 0);
+    assert.equal(verdict.verdict, 'BLOCKED');
+    assert.equal(verdict.evidence.length, 1);
+    assert.equal(verdict.evidence[0], verifier.GATEWAY_MISSING_KEY);
+    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'vercel' });
+    assert.equal(result.final, 'BLOCKED');
+    assert.match(result.body, /AI_GATEWAY_API_KEY is not set, so the Vercel AI Gateway backup judge could not run and verification stays BLOCKED\./);
+    assert.doesNotMatch(result.body, /^pstack-verifier: PASS/m);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test('selection is deterministic and only the independent judge receives the DeepSeek key', () => {

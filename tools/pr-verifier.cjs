@@ -14,6 +14,10 @@ const MARKER = '<!-- pstack-verifier -->';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-flash';
 const CODEX_MODEL = 'gpt-6.1-sol';
+const VERCEL_URL = 'https://ai-gateway.vercel.sh/v1/chat/completions';
+const VERCEL_MODEL = 'deepseek/deepseek-v4.1-flash';
+const GATEWAY_MISSING_KEY = 'AI_GATEWAY_API_KEY is not set, so the Vercel AI Gateway backup judge could not run and verification stays BLOCKED.';
+const GATEWAY_SCREENSHOTS_NOTE = 'The Vercel AI Gateway backup judge read text evidence only, so no screenshot was read for this verdict.';
 const VERIFIER_MODELS = [
   { engine: 'claude', family: 'anthropic' },
   { engine: 'openai', family: 'openai' },
@@ -326,6 +330,7 @@ function pickVerifier(body) {
 function judgeLabel(engine) {
   if (engine === 'deepseek') return `deepseek ${DEEPSEEK_MODEL}`;
   if (engine === 'openai') return `openai ${CODEX_MODEL}`;
+  if (engine === 'vercel') return 'vercel-deepseek';
   return engine === 'claude' ? 'claude' : 'none';
 }
 
@@ -730,7 +735,7 @@ function deepseekRequestBody(messages) {
   };
 }
 
-function parseModelJson(content) {
+function parseModelJson(content, label = 'DeepSeek') {
   const text = String(content ?? '').trim();
   try {
     return JSON.parse(text);
@@ -738,7 +743,7 @@ function parseModelJson(content) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
-    throw new Error('DeepSeek did not return JSON');
+    throw new Error(`${label} did not return JSON`);
   }
 }
 
@@ -873,6 +878,72 @@ async function judgeOpenai(env, outDir) {
   return JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence });
 }
 
+function vercelJudgeRequest(material, format) {
+  const body = {
+    model: VERCEL_MODEL,
+    messages: judgeMessages(material),
+    temperature: 0,
+    max_tokens: 4000,
+  };
+  if (format === 'json_schema') body.response_format = { type: 'json_schema', json_schema: { name: 'verdict', schema: openaiJudgeSchema(), strict: true } };
+  else body.response_format = { type: 'json_object' };
+  return body;
+}
+
+async function askVercel(env, body) {
+  const response = await fetch(VERCEL_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${env.AI_GATEWAY_API_KEY}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180000),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    const error = new Error(`Vercel AI Gateway answered ${response.status}: ${oneLine(raw, 400)}`);
+    error.status = response.status;
+    throw error;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    throw new Error('Vercel AI Gateway response was not JSON');
+  }
+  const choice = payload.choices?.[0] ?? {};
+  const content = choice.message?.content ?? '';
+  if (!String(content).trim()) throw new Error(`Vercel AI Gateway returned empty content (${choice.finish_reason || 'no finish reason'})`);
+  return parseModelJson(content, 'Vercel AI Gateway');
+}
+
+async function completeVercel(env, material) {
+  try {
+    return await askVercel(env, vercelJudgeRequest(material, 'json_schema'));
+  } catch (error) {
+    if (![400, 422].includes(error.status)) throw error;
+    return askVercel(env, vercelJudgeRequest(material, 'json_object'));
+  }
+}
+
+function priorVerdict(raw) {
+  try {
+    const parsed = JSON.parse(String(raw ?? '').trim());
+    return VERDICTS.includes(parsed?.verdict);
+  } catch {
+    return false;
+  }
+}
+
+async function judgeVercel(env, outDir) {
+  if ([env.CLAUDE_VERDICT, env.OPENAI_VERDICT, env.DEEPSEEK_VERDICT].some(priorVerdict)) return '';
+  if (!String(env.AI_GATEWAY_API_KEY || '').trim()) {
+    process.stdout.write(`${GATEWAY_MISSING_KEY}\n`);
+    return JSON.stringify({ verdict: 'BLOCKED', evidence: [GATEWAY_MISSING_KEY] });
+  }
+  const verdict = await completeVercel(env, fs.readFileSync(path.join(outDir, 'judge-inputs.md'), 'utf8'));
+  const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES - 1).map(line => oneLine(line));
+  return JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence: [GATEWAY_SCREENSHOTS_NOTE, ...evidence] });
+}
+
 async function pickDeepseek(env, outDir) {
   const featuresDir = env.FEATURES_DIR || path.join(process.cwd(), '.claude/skills/verify-multiprompt/features');
   const parsed = await completeDeepseek(env, pickerMessages(pickerMaterial(outDir, featuresDir, readDiff(env.BASE_SHA))));
@@ -975,6 +1046,11 @@ async function main(argv, env) {
     setOutputs({ structured_output: structured });
     return undefined;
   }
+  if (command === 'judge-vercel') {
+    const structured = await judgeVercel(env, rest[0]);
+    if (structured) setOutputs({ structured_output: structured });
+    return undefined;
+  }
   if (command === 'download') return download(env, rest[0], rest[1]);
   if (command === 'summarize') {
     const [evidenceDir, selectionFile, outDir] = rest;
@@ -1038,10 +1114,10 @@ async function main(argv, env) {
     setOutputs({ result: final, conclusion: checkConclusion(final) });
     return undefined;
   }
-  throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|pick-deepseek|judge-deepseek|judge-openai|finalize');
+  throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|pick-deepseek|judge-deepseek|judge-openai|judge-vercel|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, CODEX_MODEL, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, CODEX_MODEL, VERCEL_MODEL, GATEWAY_MISSING_KEY, GATEWAY_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, deepseekRequestBody, vercelJudgeRequest, judgeVercel, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
