@@ -1512,6 +1512,16 @@ pub fn requestRepoRefresh(host: u8) void {
     thread.detach();
 }
 
+pub fn replaceRepoRowsForTest(host: u8, paths: []const []const u8) void {
+    const cache = &g_repo_caches[host];
+    repoConfigureCache(cache, paths.len > 0, "test", "Test");
+    cache.allow_shell_roots = false;
+    var count: u32 = 0;
+    for (paths) |path| repoListAdd(host, path, cache.rows[0..], &count);
+    cache.count = count;
+    cache.status = .online;
+}
+
 pub fn requestAllRepoRefresh() void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();

@@ -1,4 +1,3 @@
-"""Hosted replay of allowlisted structural metadata, not raw transcripts."""
 import gzip
 import json
 import sys
