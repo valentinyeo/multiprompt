@@ -34,15 +34,6 @@ test('production publishes the build, startup proof and signature gates without 
   assert.deepEqual(needsOf('queue-newer'), ['prepare', 'release']);
 });
 
-test('symbol files build beside the release and attach after publication', () => {
-  assert.deepEqual(needsOf('symbols'), ['prepare']);
-  assert.deepEqual(needsOf('attach-symbols'), ['prepare', 'release', 'symbols']);
-  assert.doesNotMatch(job('build'), /symbols/);
-  assert.doesNotMatch(job('release'), /symbols/);
-  assert.match(job('symbols'), /name: multiprompt-\$\{\{ matrix.arch \}\}-symbols/);
-  assert.match(job('attach-symbols'), /gh release upload "\$TAG" "\$\{files\[@\]\}"/);
-});
-
 test('a master push never cancels a release already running', () => {
   const auto = fs.readFileSync(new URL('../.github/workflows/auto-release.yml', import.meta.url), 'utf8');
   assert.match(auto, /^concurrency:\n  group: auto-release-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false$/m);

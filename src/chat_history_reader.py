@@ -2777,8 +2777,6 @@ HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
-HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
-HOST_FRESH_RETRY_WAIT = 120
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -4212,35 +4210,17 @@ def host_layout_publish_conversation(provider, sid, conversation_sid):
 
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
-    phase = fresh.get("phase") if isinstance(fresh, dict) else None
-    if phase == "resume" and not fresh.get("resume_retried"):
-        fresh.update(phase="resume_failed", started=time.time(), resume_retried=True)
-        session.pop("fresh_resumed", None)
-        host_state_write(provider, sid, session["state"])
-        host_log(provider, sid, "fresh_resume_retry", dict(reason=reason))
-        return
-    session["state"].pop("fresh_start", None)
-    session.pop("fresh_resumed", None)
+    retry = isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed")
+    if retry:
+        fresh["phase"] = "resume_failed"
+    else:
+        session["state"].pop("fresh_start", None)
     host_state_write(provider, sid, session["state"])
     host_event(provider, sid, tmux, session, "text.done",
-               dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
+               dict(text="Fresh start failed. " + reason + " Your previous work is saved." +
+                         (" Choose Fresh start to retry reading the handover." if retry else "")),
                "fresh-failed-" + uuid.uuid4().hex)
     host_log(provider, sid, "fresh_start_failed", dict(reason=reason))
-
-
-def host_fresh_retry(provider, sid, tmux, session):
-    fresh = session["state"].get("fresh_start")
-    if not isinstance(fresh, dict) or fresh.get("phase") != "resume_failed":
-        return False
-    if host_fresh_busy(session):
-        if time.time() - fresh.get("started", time.time()) <= HOST_FRESH_RETRY_WAIT:
-            return False
-        host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
-        return False
-    fresh.update(phase="resume", started=time.time())
-    session.pop("fresh_resumed", None)
-    host_state_write(provider, sid, session["state"])
-    return True
 
 
 def host_fresh_send(provider, sid, tmux, session, text):
@@ -6206,8 +6186,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
             fresh = session["state"].get("fresh_start")
-            fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
-            if fresh_limit is not None and time.time() - fresh.get("started", time.time()) > fresh_limit:
+            if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset", "resume") and time.time() - fresh.get("started", time.time()) > 180:
                 HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
                 host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
                 fresh = None
@@ -6234,7 +6213,6 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
-            host_fresh_retry(provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
             if (provider == "claude" and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
@@ -8610,7 +8588,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 141
+RUNTIME_GENERATION = 142
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8683,7 +8661,25 @@ if __name__ == '__main__':
                 def publish_named_tool(name, payload):
                     digest = _hashlib.sha256(payload).hexdigest()
                     stem = digest + '-' + name
-                    publish(stem, payload)
+                    reuse = False
+                    try:
+                        fd = _os.open(stem, _os.O_RDONLY | _os.O_NOFOLLOW, dir_fd=directory)
+                    except FileNotFoundError:
+                        publish(stem, payload)
+                    else:
+                        try:
+                            st = _os.fstat(fd)
+                            if _stat.S_ISREG(st.st_mode) and st.st_size == len(payload):
+                                existing = _os.read(fd, len(payload) + 1)
+                                reuse = existing == payload
+                        finally:
+                            _os.close(fd)
+                        if not reuse:
+                            publish(stem, payload)
+                    try:
+                        _os.chmod(stem, 0o700, dir_fd=directory)
+                    except OSError:
+                        pass
                     relink(name, stem)
                     return stem
 
@@ -8697,57 +8693,49 @@ if __name__ == '__main__':
                     mp_send_source = globals().get('MP_SEND_SOURCE')
                     if isinstance(mp_send_source, str) and mp_send_source:
                         try:
-                            published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
+                            publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
                         except (ValueError, OSError):
                             pass
                     feedback_source = globals().get('FEEDBACK_SOURCE')
                     if isinstance(feedback_source, str) and feedback_source:
                         try:
                             publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
-                            _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     helper_source = globals().get('MP_HELPER_SOURCE')
                     if isinstance(helper_source, str) and helper_source:
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
-                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     shell_source = globals().get('MP_SHELL_SOURCE')
                     if isinstance(shell_source, str) and shell_source:
                         try:
                             publish_named_tool('mp-shell', _base64.b64decode(shell_source))
-                            _os.chmod('mp-shell', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     sessions_source = globals().get('MP_SESSIONS_SOURCE')
                     if isinstance(sessions_source, str) and sessions_source:
                         try:
                             publish_named_tool('mp-sessions', _base64.b64decode(sessions_source))
-                            _os.chmod('mp-sessions', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     layout_source = globals().get('MP_LAYOUT_SOURCE')
                     if isinstance(layout_source, str) and layout_source:
                         try:
                             relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
-                            _os.chmod('mp-layout', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     fresh_source = globals().get('MP_FRESH_SOURCE')
                     if isinstance(fresh_source, str) and fresh_source:
                         try:
-                            published = publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
+                            publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
                         except (ValueError, OSError):
                             pass
                     zsb_source = globals().get('ZSB_SOURCE')
                     if isinstance(zsb_source, str) and zsb_source:
                         try:
                             publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
-                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
@@ -8766,7 +8754,6 @@ if __name__ == '__main__':
                     if _hashlib.sha256(installed).hexdigest() != active['sha256']:
                         raise ValueError('corrupt runtime')
                     if active['generation'] > generation:
-                        publish_tools(installed)
                         return installed, active
                     if active['generation'] == generation:
                         if active['sha256'] != digest:

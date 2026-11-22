@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -206,6 +207,33 @@ class RuntimeTest(unittest.TestCase):
         self.assertFalse((runtime / 'mp-send').exists())
         self.assertFalse((runtime / 'mp-sessions').exists())
         self.assertFalse((runtime / 'mp-layout').exists())
+
+    def test_existing_runtime_command_becomes_executable_without_rewriting(self):
+        send = (ROOT / 'src/mp_send.py').read_bytes()
+        prelude = "MP_SEND_SOURCE = '%s'\n" % base64.b64encode(send).decode()
+        source = prelude + SOURCE
+        self.info(source)
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        stem = runtime / (hashlib.sha256(send).hexdigest() + '-mp-send')
+        before = stem.stat().st_mtime_ns
+        stem.chmod(0o600)
+        self.assertEqual(self.info(source), self.info(source))
+        self.assertGreaterEqual(stem.stat().st_mtime_ns, before)
+        self.assertEqual(stem.stat().st_mtime_ns, before)
+        self.assertTrue(os.access(runtime / 'mp-send', os.X_OK))
+
+    def test_older_launcher_cannot_downgrade_runtime_command_permissions(self):
+        send = (ROOT / 'src/mp_send.py').read_bytes()
+        prelude = "MP_SEND_SOURCE = '%s'\n" % base64.b64encode(send).decode()
+        source = prelude + SOURCE
+        self.info(source)
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        stem = runtime / (hashlib.sha256(send).hexdigest() + '-mp-send')
+        self.assertEqual(stem.stat().st_mode & 0o777, 0o700)
+        older = SOURCE.replace('RUNTIME_GENERATION = %s\n' % GENERATION, 'RUNTIME_GENERATION = %s\n' % (GENERATION - 1), 1)
+        result = self.invoke(prelude + older)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(stem.stat().st_mode & 0o777, 0o700)
 
     def test_import_does_not_install(self):
         code = "import importlib.util,sys; s=importlib.util.spec_from_file_location('reader',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); assert m.READER_SOURCE"

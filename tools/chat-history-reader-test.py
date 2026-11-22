@@ -6253,35 +6253,6 @@ class NightlyChatRestartTest(unittest.TestCase):
             if saved is not None:
                 reader.RUNTIME_GENERATION = saved
 
-    def test_rotating_without_a_runtime_generation_global_does_not_raise(self):
-        self.need_restart()
-        runtime = self.home / '.multiprompt-runtime'
-        runtime.mkdir()
-        (runtime / 'reader.py').write_text('# newest reader\n')
-        reader.host_restart_write('claude', self.sid)
-        agent = types.SimpleNamespace(pid=4242)
-        session = dict(pending={}, agent=agent, stop=False)
-        saved = reader.__dict__.pop('RUNTIME_GENERATION', None)
-        had_engine = 'ENGINE_INFO' in reader.__dict__
-        engine = reader.__dict__.get('ENGINE_INFO')
-        reader.__dict__['ENGINE_INFO'] = None
-        logged = []
-        try:
-            with patch.object(reader.os, 'execv'), \
-                    patch.object(reader, 'host_agent_stop'), \
-                    patch.object(reader, 'host_log', side_effect=lambda *args, **kwargs: logged.append(args)):
-                self.assertTrue(reader.host_rotate('claude', self.sid, session, agent))
-        finally:
-            if saved is not None:
-                reader.RUNTIME_GENERATION = saved
-            if had_engine:
-                reader.__dict__['ENGINE_INFO'] = engine
-            else:
-                reader.__dict__.pop('ENGINE_INFO', None)
-        rotate = [entry for entry in logged if entry[2] == 'rotate']
-        self.assertEqual(len(rotate), 1, logged)
-        self.assertEqual(rotate[0][3]['generation'], 0)
-
 
 class HostPaneMarkTest(unittest.TestCase):
     sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef001'

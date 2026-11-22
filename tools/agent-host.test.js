@@ -88,13 +88,11 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
   assert.match(session, /const mp_fresh = @embedFile\("mp_fresh\.py"\);/);
   assert.match(session, /MP_FRESH_SOURCE = '\{s\}'/);
   assert.match(reader, /publish_named_tool\('mp-fresh', _base64\.b64decode\(fresh_source\)\)/);
-  assert.match(reader, /_os\.chmod\('mp-helper', 0o700, dir_fd=directory\)/);
   assert.match(reader, /publish_named_tool\('mp-shell', _base64\.b64decode\(shell_source\)\)/);
-  assert.match(reader, /_os\.chmod\('mp-shell', 0o700, dir_fd=directory\)/);
   assert.match(session, /const zsb = @embedFile\("mp_zsb\.sh"\);/);
   assert.match(session, /ZSB_SOURCE = '\{s\}'\\nMULTIBOT_APP_VERSION/);
   assert.match(reader, /publish_named_tool\('mp-zsb', _base64\.b64decode\(zsb_source\)\)/);
-  assert.match(reader, /_os\.chmod\('mp-zsb', 0o700, dir_fd=directory\)/);
+  assert.match(reader, /_os\.chmod\(stem, 0o700, dir_fd=directory\)/);
   assert.equal(read('src/mp_zsb.sh'), read('tools/vps-multiprompt-browser.sh'), 'the runtime copy of zsb matches the browser wrapper');
   assert.match(reader, /def ensure_runtime_tools\(\):/);
   assert.match(reader, /publish_tools\(source\)/);
@@ -116,10 +114,9 @@ test('SOFT-2838 the runtime bundle publishes the session list and the layout too
 
   const reader = read('src/chat_history_reader.py');
   assert.match(reader, /publish_named_tool\('mp-sessions', _base64\.b64decode\(sessions_source\)\)/);
-  assert.match(reader, /_os\.chmod\('mp-sessions', 0o700, dir_fd=directory\)/);
   assert.match(reader, /publish_named_tool\('mp-layout\.mjs', _base64\.b64decode\(layout_source\)\)/);
   assert.match(reader, /relink\('mp-layout', publish_named_tool\('mp-layout\.mjs'/);
-  assert.match(reader, /_os\.chmod\('mp-layout', 0o700, dir_fd=directory\)/);
+  assert.match(reader, /if active\['generation'\] > generation:\s+return installed, active/);
   assert.equal(read('src/mp_layout.mjs'), read('tools/mp-layout.mjs'), 'the runtime copy of mp-layout matches the installed tool');
   assert.match(read('src/mp_sessions.py'), /with_name\("mp-send"\)/, 'the published session list loads the published sender');
 });
