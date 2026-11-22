@@ -4491,6 +4491,13 @@ def host_switch_handover(rows, provider, target):
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
+def host_switch_abort(target, new_sid, paths=None):
+    paths = paths if paths is not None else host_paths(target, new_sid)
+    pending = host_read(paths["config"])
+    if isinstance(pending, dict):
+        host_write(paths["config"], dict(pending, enabled=False))
+
+
 def host_switch_ai(provider, sid, target):
     moved = host_switch_follow(sid)
     if moved is not None:
@@ -4507,8 +4514,6 @@ def host_switch_ai(provider, sid, target):
         return dict(status="refused", reason="host_handed_over")
     if host_turn_busy(provider, sid):
         return dict(status="busy", reason="chat_busy")
-    if host_owned(provider, sid):
-        host_stop(provider, sid)
     try:
         rows = host_switch_rows(provider, sid, tmux)
         text = host_switch_handover(rows, provider, target)
@@ -4531,6 +4536,16 @@ def host_switch_ai(provider, sid, target):
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
+    except (OSError, ValueError, sqlite3.Error):
+        return dict(status="error", reason="switch_failed")
+    started = host_start(target, new_sid)
+    if started.get("status") not in ("started", "already"):
+        host_switch_abort(target, new_sid, paths)
+        if host_enabled(provider, sid) and not host_alive(provider, sid):
+            host_start(provider, sid)
+        return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
+                    running=HOST_AI_NAMES[provider], start=started)
+    try:
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -4544,9 +4559,12 @@ def host_switch_ai(provider, sid, target):
         host_write(host_switched_path(), moved_map)
         host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        host_stop(target, new_sid)
+        host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
+    if host_owned(provider, sid):
+        host_stop(provider, sid)
     host_log(provider, sid, "switched_ai", dict(to=target, sid=new_sid))
-    started = host_start(target, new_sid)
     return dict(status="switched", provider=target, sid=new_sid, tmux=tmux, start=started.get("status"))
 
 
@@ -8610,7 +8628,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 141
+RUNTIME_GENERATION = 142
 
 if __name__ == '__main__':
     import base64 as _base64
