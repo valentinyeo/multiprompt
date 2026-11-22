@@ -1,0 +1,1 @@
+Reattached server sessions fill the tab again

@@ -231,6 +231,49 @@ print('FRESH_START_PASS')
 `);
 });
 
+test('a resume failure retries once by itself and then lets messages through again', () => {
+  python(String.raw`
+import io, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    provider, sid, tmux = 'claude', '11111111-2222-4333-8444-555555555555', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    r['host_write'](paths['config'], dict(enabled=True, tmux=tmux, cwd=directory))
+    r['host_write'](paths['root'] / 'saved.json', dict(text='Finish the draft.'))
+    assert r['HOST_FRESH_TIMEOUTS']['resume'] >= 300
+    state = dict(native_session=sid, fresh_start=dict(phase='reset', file='saved.json'))
+    assert r['host_fresh_prepare'](provider, sid, state)
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    with patch.dict(r, host_control_send=lambda *args: False):
+        r['host_fresh_resume'](provider, sid, tmux, session)
+    fresh = state['fresh_start']
+    assert fresh['phase'] == 'resume_failed' and fresh['resume_retried'], fresh
+    held = dict(op='deliver', id='during-retry', attempt='one', epoch=1, text='Held while the retry runs')
+    assert r['host_handle_request'](provider, sid, tmux, session, held)['reason'] == 'fresh_start_pending'
+    assert r['host_fresh_retry'](provider, sid, tmux, session)
+    assert fresh['phase'] == 'resume'
+    assert not r['host_fresh_retry'](provider, sid, tmux, session)
+    session['ready'] = True
+    session['agent'].stdin.seek(0)
+    session['agent'].stdin.truncate(0)
+    r['host_fresh_resume'](provider, sid, tmux, session)
+    assert 'Finish the draft.' in session['agent'].stdin.getvalue().decode()
+    r['host_turn_end'](provider, sid, tmux, session, dict(status='failed'), {})
+    assert 'fresh_start' not in state, state
+    assert (paths['root'] / 'saved.json').is_file()
+    delivery = dict(op='deliver', id='after-failed-resume', attempt='two', epoch=1, text='The chat answers again')
+    with patch.dict(r, host_attempt=lambda *args: dict(status='claimed')):
+        assert r['host_handle_request'](provider, sid, tmux, session, delivery)['status'] == 'sent'
+    assert 'The chat answers again' in session['agent'].stdin.getvalue().decode()
+    session['db'].close()
+print('FRESH_START_PASS')
+`);
+});
+
 test('a failed first handover read keeps incoming work gated until explicit retry succeeds', () => {
   python(String.raw`
 import io, tempfile

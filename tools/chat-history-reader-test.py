@@ -4070,6 +4070,35 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
 
+    def test_soft_2989_connector_not_sent_keeps_the_reason_it_returned(self):
+        connector = dict(
+            capabilities=lambda ctx: dict(protocol=1, provider='claude'),
+            submit=lambda ctx, row, state, services: dict(handoff='not_sent', facts=[], state=state, reason='draft_present'),
+        )
+        self.submit()
+        with patch.object(reader, 'message_connector', return_value=connector):
+            self.request('dispatch')
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('draft_present', message['receipt'])
+
+    def test_soft_2989_a_busy_desktop_bridge_says_the_chat_was_busy(self):
+        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', accepted=False)])
+        with patch.object(reader, 'host_apply', return_value=True) as apply:
+            reader.host_hax_event('claude', 'sid', 'fixture', session, dict(type='bridge_busy', id='message_fixture_0001'))
+        self.assertEqual(apply.call_args.args[3][0].get('reason'), 'owner_busy')
+
+    def test_soft_2989_a_message_that_runs_out_of_time_says_why(self):
+        self.submit()
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent',deadline=? WHERE id='message_fixture_0001'", (time.time() - 1,))
+        reader.message_expire(db, 'claude', 'sid')
+        receipt = db.execute("SELECT receipt FROM shared_messages WHERE id='message_fixture_0001'").fetchone()[0]
+        db.close()
+        self.assertEqual(self.status()['state'], 'failed')
+        self.assertEqual(receipt, 'waiting_too_long')
+
     def test_remove_works_for_failed_unknown_and_reset_messages(self):
         self.submit()
         with patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'not_sent', 'reason': 'draft_present'}):
@@ -5983,7 +6012,7 @@ class MoveToTerminalTest(unittest.TestCase):
 
 
 RESTART_NAMES = ('host_restart', 'host_restart_idle', 'host_restart_requested', 'host_restart_write',
-                 'host_rotate', 'host_nightly_due', 'host_nightly_mark', 'host_nightly_day',
+                 'host_rotate', 'host_generation', 'host_nightly_due', 'host_nightly_mark', 'host_nightly_day',
                  'host_published_runtime', 'HOST_RESTART_STALE')
 
 
@@ -6210,6 +6239,48 @@ class NightlyChatRestartTest(unittest.TestCase):
             self.assertFalse(reader.host_rotate('claude', self.sid, session, session['agent']))
         execv.assert_not_called()
         self.assertIsNotNone(session['agent'])
+
+    def test_host_generation_reads_active_json_without_runtime_generation_global(self):
+        self.need_restart()
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir(parents=True)
+        (runtime / 'active.json').write_text(json.dumps(dict(protocol=1, generation=77, sha256='a' * 64)))
+        saved = reader.__dict__.pop('RUNTIME_GENERATION', None)
+        reader.__dict__['ENGINE_INFO'] = None
+        try:
+            self.assertEqual(reader.host_generation(), 77)
+        finally:
+            if saved is not None:
+                reader.RUNTIME_GENERATION = saved
+
+    def test_rotating_without_a_runtime_generation_global_does_not_raise(self):
+        self.need_restart()
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        (runtime / 'reader.py').write_text('# newest reader\n')
+        reader.host_restart_write('claude', self.sid)
+        agent = types.SimpleNamespace(pid=4242)
+        session = dict(pending={}, agent=agent, stop=False)
+        saved = reader.__dict__.pop('RUNTIME_GENERATION', None)
+        had_engine = 'ENGINE_INFO' in reader.__dict__
+        engine = reader.__dict__.get('ENGINE_INFO')
+        reader.__dict__['ENGINE_INFO'] = None
+        logged = []
+        try:
+            with patch.object(reader.os, 'execv'), \
+                    patch.object(reader, 'host_agent_stop'), \
+                    patch.object(reader, 'host_log', side_effect=lambda *args, **kwargs: logged.append(args)):
+                self.assertTrue(reader.host_rotate('claude', self.sid, session, agent))
+        finally:
+            if saved is not None:
+                reader.RUNTIME_GENERATION = saved
+            if had_engine:
+                reader.__dict__['ENGINE_INFO'] = engine
+            else:
+                reader.__dict__.pop('ENGINE_INFO', None)
+        rotate = [entry for entry in logged if entry[2] == 'rotate']
+        self.assertEqual(len(rotate), 1, logged)
+        self.assertEqual(rotate[0][3]['generation'], 0)
 
 
 class HostPaneMarkTest(unittest.TestCase):
@@ -6750,6 +6821,144 @@ class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(self.events('text.delta'), [])
 
 
+class LiveSnapshotTest(HostEventStreamFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.db = reader.message_store_db(self.tmux)
+        self.addCleanup(self.db.close)
+        with self.db:
+            self.db.execute('INSERT INTO message_chats(provider,sid) VALUES (?,?)', (self.provider, self.sid))
+
+    def publish(self, kind, payload=None, item=None, turn='latest'):
+        with self.db:
+            return reader.message_event(self.db, self.provider, self.sid,
+                                        dict(v=1, sid=self.sid, turn=turn, kind=kind, at=1, item=item, payload=payload or {}))
+
+    def snapshot(self):
+        return reader.live_snapshot(self.provider, self.sid)['live_snapshot']
+
+    def test_cold_open_only_reads_the_saved_latest_turn_and_open_requests(self):
+        self.publish('host.settings', dict(model='sonnet', effort='high'))
+        for turn in range(100):
+            self.publish('turn.started', turn=str(turn))
+            for delta in range(10):
+                self.publish('text.delta', dict(text='old answer ' + str(delta)), item='old', turn=str(turn))
+            self.publish('approval.request', dict(request_id='old-' + str(turn)))
+            self.publish('approval.resolved', dict(request_id='old-' + str(turn)))
+            self.publish('turn.ended', dict(status='completed'), turn=str(turn))
+        self.publish('turn.started', dict(message_id='sent-latest', uuids=['native-latest']))
+        self.publish('text.delta', dict(text='newest answer'), item='answer')
+        head = self.publish('question.request', dict(request_id='open', questions=[]))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['seq'], head)
+        self.assertLessEqual(len(snapshot['events']), 4)
+        self.assertEqual([event['payload']['text'] for event in snapshot['events'] if event['kind'] == 'text.delta'], ['', 'newest answer'])
+        self.assertEqual([event['payload']['request_id'] for event in snapshot['requests']], ['open'])
+        self.assertNotIn('old answer', json.dumps(snapshot))
+        with patch.object(reader, 'live_state_apply', side_effect=AssertionError('replayed saved events')):
+            self.assertEqual(self.snapshot(), snapshot)
+        legacy = reader.message_events_page(self.provider, self.sid, 0)
+        self.assertEqual(len(legacy['events']), reader.HOST_EVENTS_PAGE)
+        self.assertNotIn('live_snapshot', legacy)
+
+    def test_upgrade_materializes_only_the_latest_turn_and_latest_request_decisions(self):
+        self.publish('host.settings', dict(model='sonnet'))
+        for turn in range(20):
+            self.publish('turn.started', turn=str(turn))
+            self.publish('text.done', dict(text='past turn'), item='past', turn=str(turn))
+            self.publish('turn.ended', dict(status='completed'), turn=str(turn))
+        self.publish('approval.request', dict(request_id='answered'))
+        self.publish('approval.resolved', dict(request_id='answered'))
+        self.publish('question.request', dict(request_id='open', questions=[]))
+        self.publish('turn.started')
+        self.publish('text.done', dict(text='current'), item='current')
+        self.publish('turn.ended', dict(status='completed'))
+        expected = self.snapshot()
+        with self.db:
+            self.db.execute('DELETE FROM live_state')
+            self.db.execute('DELETE FROM live_cursors')
+        with patch.object(reader, 'live_state_apply', wraps=reader.live_state_apply) as apply:
+            rebuilt = self.snapshot()
+        self.assertEqual(rebuilt, expected)
+        self.assertLess(apply.call_count, 10)
+
+    def test_answered_plans_keep_their_text_without_reopening_the_card(self):
+        self.publish('turn.started')
+        self.publish('plan.proposed', dict(request_id='plan', markdown='The saved plan'))
+        self.assertEqual(len(self.snapshot()['requests']), 1)
+        self.publish('plan.resolved', dict(request_id='plan'))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['requests'], [])
+        plans = [event for event in snapshot['events'] if event['kind'] == 'plan.snapshot']
+        self.assertEqual([event['payload']['markdown'] for event in plans], ['The saved plan'])
+        self.assertNotIn('plan.proposed', [event['kind'] for event in snapshot['events']])
+
+    def test_tool_labels_completion_and_repeated_text_do_not_grow_the_snapshot(self):
+        self.publish('turn.started')
+        for index in range(110):
+            item = 'tool-' + str(index)
+            self.publish('item.started', dict(title=item, input='not needed for display'), item=item)
+            self.publish('item.done', dict(status='failed', output='not needed for display'), item=item)
+        snapshot = self.snapshot()
+        self.assertEqual(len(snapshot['events']), 1 + 96 * 2)
+        self.assertEqual(len([event for event in snapshot['events'] if event['kind'] == 'item.started']), 96)
+        self.assertEqual(len([event for event in snapshot['events'] if event['kind'] == 'item.done']), 96)
+        self.assertNotIn('not needed for display', json.dumps(snapshot))
+        self.publish('turn.started', turn='next')
+        self.assertEqual(len(self.snapshot()['events']), 1)
+
+    def test_daily_retention_keeps_2000_events_per_chat(self):
+        self.publish('turn.started')
+        self.publish('approval.request', dict(request_id='answered'))
+        self.publish('approval.resolved', dict(request_id='answered'))
+        self.publish('question.request', dict(request_id='still-open', questions=[]))
+        with self.db:
+            for index in range(2100):
+                reader.message_event(self.db, self.provider, self.sid,
+                                     dict(kind='text.delta', sid=self.sid, item='answer', payload=dict(text=str(index))))
+        expected = self.snapshot()
+        count = lambda: self.db.execute('SELECT COUNT(*) FROM message_events WHERE provider=? AND sid=?', (self.provider, self.sid)).fetchone()[0]
+        reader.message_events_trim(now=86400)
+        self.assertEqual(count(), 2000)
+        self.assertEqual(self.snapshot(), expected)
+        self.assertEqual([event['payload']['request_id'] for event in self.snapshot()['requests']], ['still-open'])
+        repaired = reader.message_events_page(self.provider, self.sid, 1, snapshot=True)
+        self.assertEqual(repaired['live_snapshot'], expected)
+        boundary = reader.message_events_floor(self.db, self.provider, self.sid)
+        self.assertNotIn('live_snapshot', reader.message_events_page(self.provider, self.sid, boundary, snapshot=True))
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            queue = reader.message_store_request(dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux, op='message_events', after=1))
+        self.assertTrue(queue['resync_required'])
+        self.assertEqual(queue['events'], [])
+        self.publish('text.done', dict(text='final'), item='answer')
+        reader.message_events_trim(now=86401)
+        self.assertEqual(count(), 2001)
+        reader.message_events_trim(now=2 * 86400)
+        self.assertEqual(count(), 2000)
+        self.assertEqual(self.snapshot()['seq'], expected['seq'] + 1)
+
+    def test_empty_snapshot_push_does_not_write_or_repeat_itself(self):
+        subscriptions = {1: dict(provider=self.provider, sid=self.sid, after=0, snapshot=True)}
+        self.snapshot()
+        before = self.db.execute('PRAGMA data_version').fetchone()[0]
+        with patch.object(reader, 'serve_print') as output:
+            reader.events_push(subscriptions)
+            reader.events_push(subscriptions)
+        output.assert_not_called()
+        self.assertEqual(self.db.execute('PRAGMA data_version').fetchone()[0], before)
+
+    def test_snapshot_cursor_covers_delivery_events_and_new_events_follow_it(self):
+        self.publish('turn.started')
+        with self.db:
+            head = reader.message_event(self.db, self.provider, self.sid, dict(reset_epoch=1))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['seq'], head)
+        self.assertEqual(len(snapshot['events']), 1)
+        next_seq = self.publish('text.delta', dict(text='after snapshot'), item='answer')
+        page = reader.message_events_page(self.provider, self.sid, snapshot['seq'])
+        self.assertEqual([entry['seq'] for entry in page['events']], [next_seq])
+
+
 class ServeEventPushTest(unittest.TestCase):
     provider = 'claude'
     sid = 'serve-events-session'
@@ -6816,6 +7025,27 @@ class ServeEventPushTest(unittest.TestCase):
         self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'pushed')
         self.ask(dict(id=89, op='engine_info'))
         self.assertEqual(self.line()['id'], 89)
+
+    def test_snapshot_subscription_skips_the_backlog_then_pushes_only_new_events(self):
+        for index in range(20):
+            self.publish('old text ' + str(index))
+        head = self.publish('current text')
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0, snapshot=True))
+        reply = self.line()['result']
+        snapshot = reply['live_snapshot']
+        self.assertEqual(reply['events'], [])
+        self.assertEqual(reply['next_after'], head)
+        self.assertEqual(snapshot['seq'], head)
+        self.assertEqual([event['payload']['text'] for event in snapshot['events']], ['', 'current text'])
+        self.assertEqual(snapshot['requests'], [])
+        next_seq = self.publish('pushed once')
+        pushed = self.line()['result']
+        self.assertNotIn('live_snapshot', pushed)
+        self.assertEqual([entry['seq'] for entry in pushed['events']], [next_seq])
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=next_seq, snapshot=True))
+        resumed = self.line()['result']
+        self.assertEqual(resumed['events'], [])
+        self.assertNotIn('live_snapshot', resumed)
 
     def test_a_subscription_is_refused_for_an_unknown_chat_identity(self):
         self.ask(dict(id=88, op='events_subscribe', provider='claude', sid='bad sid', after=0))
@@ -6957,6 +7187,59 @@ class AgentHostStreamTest(AgentHostStreamFixture, unittest.TestCase):
 
 class AgentHostStreamContractTest(AgentHostStreamFixture, AgentHostTest):
     pass
+
+
+class HostHandoverLockTest(unittest.TestCase):
+    def test_terminal_ownership_waits_for_the_previous_owner_lock(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(reader, 'HOME', Path(temporary)):
+            provider, sid = 'claude', 'handover-lock-fixture'
+            previous = reader.host_lock(provider, sid)
+            self.assertIsNotNone(previous)
+            reached = threading.Event()
+            returned = threading.Event()
+            replies, failures = [], []
+            lock = reader.host_lock
+            write = reader.host_write
+            owner_path = reader.host_paths(provider, sid)['owner']
+
+            def observe_lock(*args, **kwargs):
+                reached.set()
+                return lock(*args, **kwargs)
+
+            def observe_write(path, value):
+                result = write(path, value)
+                if path == owner_path:
+                    reached.set()
+                return result
+
+            def handover():
+                try:
+                    replies.append(reader.host_handover(provider, sid))
+                except BaseException as error:
+                    failures.append(error)
+                finally:
+                    returned.set()
+
+            with patch.object(reader, 'host_stop', return_value=dict(status='stopped')), \
+                    patch.object(reader, 'host_lock', side_effect=observe_lock), \
+                    patch.object(reader, 'host_write', side_effect=observe_write):
+                worker = threading.Thread(target=handover)
+                worker.start()
+                try:
+                    self.assertTrue(reached.wait(10), 'handover must reach ownership transfer')
+                    self.assertFalse(reader.host_handed_over(provider, sid),
+                                     'terminal ownership must not be published while the old host still holds the lock')
+                    self.assertFalse(returned.is_set(), 'handover must not finish before the old host releases its lock')
+                finally:
+                    reader.host_release(previous)
+                    worker.join(10)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(failures, [])
+                self.assertEqual(replies, [dict(status='handover', previous='stopped')])
+                self.assertTrue(reader.host_handed_over(provider, sid))
+                acquired = lock(provider, sid)
+                self.assertIsNotNone(acquired, 'completed handover must leave the lock available')
+                reader.host_release(acquired)
 
 
 class HostControlFixture(HostEventStreamFixture):
@@ -7325,43 +7608,19 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertNotIn('message', decision)
         self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
 
-    def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):
+    def test_a_quiet_host_keeps_its_agent_running_past_the_old_idle_limit(self):
         import socket as module
-        path = self.home / 'loop.sock'
+        path = self.home / 'still-here.sock'
         listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
         listener.bind(str(path))
         listener.listen(1)
         self.addCleanup(listener.close)
         read_end, write_end = os.pipe()
         self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            time.sleep(0.2)
-            session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
-            time.sleep(0.8)
-            self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
-            session['parked'].clear()
-            running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_IGSH_1907_a_host_quiet_for_ten_minutes_keeps_its_bot_warm(self):
-        import socket as module
-        path = self.home / 'warm.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        signals = []
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0),
+                                      wait=lambda timeout=None: signals.append('wait'),
+                                      kill=lambda: signals.append('kill'))
         self.addCleanup(agent.stdout.close)
         session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
@@ -7369,49 +7628,13 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         running.start()
         self.addCleanup(stop_fixture_host_loop, self, running, session)
         self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-        session['idle'] = time.time() - 600
-        time.sleep(1.5)
-        self.assertTrue(running.is_alive(), 'a host quiet for ten minutes stopped its bot, so the next message pays a cold start')
-        self.assertEqual([row for row in self.host_events('idle_stop')], [])
         session['idle'] = time.time() - 7200
-        running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'a host quiet for two hours must still stop its bot')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
-        import socket as module
-        path = self.home / 'long-turn.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
-            session['state']['inflight'] = session['inflight']
-            time.sleep(0.5)
-            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
-            for _ in range(6):
-                os.write(write_end, b'x')
-                time.sleep(0.15)
-            self.assertTrue(running.is_alive(), 'an open turn must survive the idle timer while the agent writes output')
-            self.assertEqual([row for row in self.host_events('idle_stop')], [],
-                             'the host must never stop itself while its turn is open')
-            session['turn'], session['inflight'], session['state']['inflight'] = None, None, None
-            running.join(timeout=10)
-        self.assertFalse(running.is_alive(), 'a host quiet after its turn must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-
+        time.sleep(2)
+        self.assertTrue(running.is_alive(), 'a hosted chat with no turn and nothing inflight stopped itself after two quiet hours')
+        self.assertEqual(signals, [], 'the agent process must not be signalled while the chat is quiet')
+        self.assertFalse(agent.stdin.closed, 'the host must keep the agent stdin open while the chat is quiet')
+        self.assertFalse(session['stop'], 'the host must stay up until an explicit stop, fresh start, Switch AI or a crash')
+        self.assertEqual([row for row in self.host_events('idle_stop')], [])
 
 
 class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):

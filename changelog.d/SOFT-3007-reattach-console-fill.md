@@ -1,0 +1,1 @@
+After reattaching a server session, the terminal fills the tab again instead of staying a small box.

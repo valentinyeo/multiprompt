@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
-python_tools="mp-send:mp_send.py mp-sessions:mp_sessions.py mp-helper:mp_helper.py multibot-feedback:multibot_feedback.py"
+python_tools="mp-send:mp_send.py mp-fresh:mp_fresh.py mp-sessions:mp_sessions.py mp-helper:mp_helper.py mp-shell:mp_shell.py multibot-feedback:multibot_feedback.py"
 node_tools="mp-layout:mp-layout.mjs"
 script=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 

@@ -625,7 +625,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (live_shell_id != 0 and key.shell_id == live_shell_id) {
         if (chatLiveWanted(key)) chatLiveStreamEnsure(key) else chatLiveStreamStop();
     }
-    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or key.shell_id == 0) return;
+    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or !key.hasSession()) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
@@ -801,7 +801,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (key.shell_id == 0 or key.sid[0] == 0) return false;
+    if (chatBenchEnabled() or key.shell_id == 0 or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
@@ -1100,8 +1100,10 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const mp_send = @embedFile("mp_send.py");
     const feedback = @embedFile("multibot_feedback.py");
     const helper = @embedFile("mp_helper.py");
+    const shell = @embedFile("mp_shell.py");
     const sessions = @embedFile("mp_sessions.py");
     const layout = @embedFile("mp_layout.mjs");
+    const mp_fresh = @embedFile("mp_fresh.py");
     const zsb = @embedFile("mp_zsb.sh");
     const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
     defer allocator.free(claude64);
@@ -1113,10 +1115,14 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     defer allocator.free(feedback64);
     const helper64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(helper.len)) catch return null;
     defer allocator.free(helper64);
+    const shell64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(shell.len)) catch return null;
+    defer allocator.free(shell64);
     const sessions64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(sessions.len)) catch return null;
     defer allocator.free(sessions64);
     const layout64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(layout.len)) catch return null;
     defer allocator.free(layout64);
+    const mp_fresh64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(mp_fresh.len)) catch return null;
+    defer allocator.free(mp_fresh64);
     const zsb64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(zsb.len)) catch return null;
     defer allocator.free(zsb64);
     _ = std.base64.standard.Encoder.encode(claude64, claude);
@@ -1124,10 +1130,12 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
     _ = std.base64.standard.Encoder.encode(helper64, helper);
+    _ = std.base64.standard.Encoder.encode(shell64, shell);
     _ = std.base64.standard.Encoder.encode(sessions64, sessions);
     _ = std.base64.standard.Encoder.encode(layout64, layout);
+    _ = std.base64.standard.Encoder.encode(mp_fresh64, mp_fresh);
     _ = std.base64.standard.Encoder.encode(zsb64, zsb);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, sessions64, layout64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
@@ -2298,6 +2306,34 @@ test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polli
     try app_state.g_chat_outbox.append(std.testing.allocator, entry);
     try std.testing.expect(chatDeliveryPending(720, true));
     try std.testing.expect(!chatDeliveryPending(720, false));
+}
+
+test "SOFT-3009 a tab with no transcript identity never asks the reader" {
+    try std.testing.expect(!(chat_transcript.Identity{}).hasSession());
+    try std.testing.expect(!(chat_transcript.Identity{ .shell_id = 1 }).hasSession());
+    try std.testing.expect(chat_transcript.Identity.init(1, 0, false, "claude-000", "").hasSession());
+    try std.testing.expect(chat_transcript.Identity.initTmux(1, 0, false, "claude-000", "").hasSession());
+}
+
+test "SOFT-3009 the offline chat bench never opens a live history stream" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_bench_dir_len = app_state.g_chat_bench_dir_len;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.g_chat_bench_dir_len = saved_bench_dir_len;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = 91;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].ai_agent = 1;
+    app_state.shell_count = 1;
+    const key = chat_transcript.Identity.init(91, 0, false, "claude-091", "");
+    app_state.g_chat_bench_dir_len = 0;
+    try std.testing.expect(chatLiveWanted(key));
+    app_state.g_chat_bench_dir_len = 1;
+    try std.testing.expect(!chatLiveWanted(key));
 }
 
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {

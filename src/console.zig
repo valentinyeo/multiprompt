@@ -90,6 +90,7 @@ const CreateToolhelp32Snapshot = @import("win32.zig").CreateToolhelp32Snapshot;
 const Process32FirstW = @import("win32.zig").Process32FirstW;
 const Process32NextW = @import("win32.zig").Process32NextW;
 const GetExitCodeProcess = @import("win32.zig").GetExitCodeProcess;
+const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
 const STILL_ACTIVE = @import("win32.zig").STILL_ACTIVE;
 const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
@@ -419,6 +420,24 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
     registerShellExitWait(idx);
     debugLog("reclaimShell: successfully reclaimed process");
     return true;
+}
+
+pub fn killSavedOrphanIfStale(pid: DWORD, kind: ShellKind) void {
+    if (pid == 0 or pid == GetCurrentProcessId()) return;
+    const proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE, 0, pid) orelse return;
+    defer _ = CloseHandle(proc);
+    var exit_code: DWORD = 0;
+    if (GetExitCodeProcess(proc, &exit_code) == 0 or exit_code != STILL_ACTIVE) return;
+    const still_a_shell = if (kind == .gitbash)
+        findWindowByClassAndPid(pid, "mintty") != null
+    else
+        findConsoleWindowByPid(pid) != null;
+    if (!still_a_shell) return;
+    killProcessTree(pid);
+}
+
+test "saved orphan cleanup leaves the app process alone" {
+    killSavedOrphanIfStale(GetCurrentProcessId(), .cmd);
 }
 
 pub const BundledConsoleFonts = struct {
@@ -1871,6 +1890,17 @@ pub fn notifyTabCapReached() void {
 }
 
 pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) bool {
+    const old_cmd_len = app_state.g_pending_tmux_cmd_len;
+    const old_resurrect_len = app_state.g_pending_resurrect_len;
+    app_state.g_pending_tmux_cmd_len = 0;
+    app_state.g_pending_resurrect_len = 0;
+    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session);
+    app_state.g_pending_tmux_cmd_len = old_cmd_len;
+    app_state.g_pending_resurrect_len = old_resurrect_len;
+    return ok;
+}
+
+pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8) bool {
     const old_host = app_state.g_pending_tmux_host;
     const old_workspace = app_state.g_pending_background_workspace;
     defer {
@@ -1885,9 +1915,11 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
         app_state.g_pending_tmux_cmd_len = old_cmd_len;
         app_state.g_pending_resurrect_len = old_resurrect_len;
     }
-    app_state.g_pending_tmux_cmd_len = 0;
-    app_state.g_pending_resurrect_len = 0;
-    return spawnShellWithSession(.tmux, session, null, null);
+    if (kind != .tmux) {
+        app_state.g_pending_tmux_cmd_len = 0;
+        app_state.g_pending_resurrect_len = 0;
+    }
+    return spawnShellWithSession(kind, tmux_session, null, null);
 }
 
 fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
@@ -2486,24 +2518,40 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 pub fn showReconnectedConsole(idx: u32) void {
     if (!@import("ssh_reconnect.zig").eventEffects(@import("drawing.zig").reconnectTabVisible(idx)).invalidate_content or
         !@import("chat_composer.zig").shellConsoleShouldBeVisible(idx)) return;
-    if (positionReconnectedConsole(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+    if (!layoutReconnectedConsole(idx)) return;
+    _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+}
+
+pub fn layoutReconnectedConsole(idx: u32) bool {
+    if (!@import("drawing.zig").reconnectConsoleLayoutAllowed(idx)) return false;
+    return positionReconnectedConsole(idx);
+}
+
+fn finalizeReconnectedConsoleLayout(idx: u32, left: i32, top: i32, w: i32, h: i32) void {
+    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return;
+    @import("focus.zig").verifyShellWindowSize(app_state.shells[idx].hwnd, left, top, w, h);
+    if (shellProcessAliveForRead(idx)) _ = normalizeConsoleFont(idx, app_state.shells[idx].pid);
 }
 
 fn positionReconnectedConsole(idx: u32) bool {
-    if (!@import("drawing.zig").reconnectTabVisible(idx)) return false;
     const shell = &app_state.shells[idx];
     if (shell.hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return false;
     const pane = @import("browser_pane.zig");
     var rc: RECT = std.mem.zeroes(RECT);
     if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
     rc = @import("window_layout.zig").activePaneContentRect(rc);
-    rc.top += pane.threadTitleHeight();
+    const con_top = rc.top + pane.threadTitleHeight();
     if (!shell.full_width) {
         const col = pane.centeredConsoleColumn(rc.right, rc.left, 0, pane.consoleCellW());
         rc.left = col.left;
         rc.right = col.left + col.width;
     }
-    return SetWindowPos(shell.hwnd, null, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW) != 0;
+    const w = rc.right - rc.left;
+    const h = rc.bottom - con_top;
+    if (w <= 0 or h <= 0) return false;
+    if (SetWindowPos(shell.hwnd, null, rc.left, con_top, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW) == 0) return false;
+    finalizeReconnectedConsoleLayout(idx, rc.left, con_top, w, h);
+    return true;
 }
 
 pub fn markSshTabDisconnected(idx: u32) void {
@@ -3256,8 +3304,11 @@ pub fn finishStartupShell(job: *StartupShell) void {
     }
     if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);
     if (job.reconnect) {
-        if (idx == app_state.active_shell and @import("drawing.zig").reconnectTabVisible(idx)) {
-            if (positionReconnectedConsole(idx)) showReconnectedConsole(idx);
+        if (idx == app_state.active_shell and layoutReconnectedConsole(idx) and
+            @import("drawing.zig").reconnectTabVisible(idx) and
+            @import("chat_composer.zig").shellConsoleShouldBeVisible(idx))
+        {
+            _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "startup-reconnect-ready");
         }
         @import("chat_send.zig").sshRequestSessionProbe();
         return;

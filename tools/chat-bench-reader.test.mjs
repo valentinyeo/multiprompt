@@ -28,7 +28,7 @@ test('IGSH-993 offline pinned requests read benchmark histories and appended mes
       assert.match(response.wire, /"role":"assistant"/);
       const header = response.wire.split('\n')[0].split('\t');
       assert.equal(header[4], tab.sid);
-      assert.equal(header[10], '-');
+      assert.equal(header[10], tab.sid);
       fs.appendFileSync(tab.file, records(tab.provider, tab.sid, tab.turns + 1, true).map(row => JSON.stringify(row) + '\n').join(''));
       jobs.push({ job: query.id, protocol: 'history', request: JSON.stringify({ ...query, cached_sid: tab.sid, inode: Number(header[7]), offset: Number(header[6]), start: Number(header[5]), mtime: Number(header[11]), probe: header[12] }) });
     }
@@ -39,7 +39,8 @@ test('IGSH-993 offline pinned requests read benchmark histories and appended mes
     const otherPinned = { ...codexQuery, id: 998, sid: codex[1].sid };
     const emptySid = { ...codexQuery, id: 997, sid: '' };
     const stale = { ...codexQuery, id: 996, cached_sid: codex[1].sid };
-    for (const query of [missing, otherPinned, emptySid, stale]) jobs.push({ job: query.id, protocol: 'history', request: JSON.stringify(query) });
+    const noTmux = { ...codexQuery, id: 995, tmux: '' };
+    for (const query of [missing, otherPinned, emptySid, stale, noTmux]) jobs.push({ job: query.id, protocol: 'history', request: JSON.stringify(query) });
     const appended = spawnSync('python3', ['tools/chat-bench/reader-service.py', 'src/chat_history_reader.py'], {
       input: jobs.map(job => JSON.stringify(job) + '\n').join(''), cwd: repo, env, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 10000,
     });
@@ -54,11 +55,13 @@ test('IGSH-993 offline pinned requests read benchmark histories and appended mes
     assert.doesNotMatch(responses[liveCount].wire, /LIVE-/);
     const otherWire = responses[liveCount + 1].wire;
     assert.match(otherWire, new RegExp(`^@mp\\t998\\thistory\\tok\\t${codex[1].sid}\\t`));
-    assert.doesNotMatch(otherWire, new RegExp(codex[0].sid));
+    assert.equal(otherWire.split('\n')[0].split('\t')[10], codex[0].sid);
+    assert.doesNotMatch(otherWire, new RegExp(`${codex[0].sid}-`));
     assert.equal(responses[liveCount + 2].job, 997);
     assert.match(responses[liveCount + 2].error, /invalid identity/);
     const staleWire = responses[liveCount + 3].wire;
     assert.match(staleWire, new RegExp(`^@mp\\t996\\thistory\\tok\\t${codex[0].sid}\\t`));
     assert.doesNotMatch(staleWire, new RegExp(codex[1].sid));
+    assert.equal(responses[liveCount + 4].wire.split('\n')[0].split('\t')[10], '-');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

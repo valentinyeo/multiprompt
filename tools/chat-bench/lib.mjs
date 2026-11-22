@@ -4,6 +4,16 @@ import crypto from 'node:crypto';
 
 export const defaults = JSON.parse(fs.readFileSync(new URL('./config.json', import.meta.url)));
 export const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+export const mainWindowNamePatterns = ['Multi Bot', 'multiprompt v', 'Multibot DEV'];
+
+export async function searchMainWindows(execute) {
+  const ids = new Set();
+  for (const pattern of mainWindowNamePatterns) {
+    const stdout = (await execute('xdotool', ['search', '--name', pattern]).catch(() => ({ stdout: '' }))).stdout.trim();
+    for (const id of stdout.split(/\s+/).filter(Boolean)) ids.add(id);
+  }
+  return [...ids];
+}
 export const atomic = (file, data) => { fs.writeFileSync(`${file}.tmp`, data); fs.renameSync(`${file}.tmp`, file); };
 export const winPath = file => `Z:${path.resolve(file).replaceAll('/', '\\')}`;
 export const percentile = (values, p) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
@@ -220,7 +230,7 @@ export function evaluate(run, config) {
       if (!Number.isFinite(shot.foreignBrowsersOnScreen)) failures.push(`${shot.phase} tab ${shot.index}: browser panes on screen not counted`);
       if (!shot.geometryInside || !shot.headerInk || !shot.composerInk) failures.push(`${shot.phase} tab ${shot.index}: header/composer outside chat pane or missing screenshot ink`);
       if (shot.phase === 'warm' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && (!Number.isFinite(shot.contentPaintMs) || shot.contentPaintMs >= rules.cachedPaintP95Ms || !shot.earlyContent)) failures.push(`warm tab ${shot.index}: cached rows delayed behind remote fetch`);
-      if (shot.phase === 'cold' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && !shot.earlyContent && !shot.loadingInk) failures.push(`cold tab ${shot.index}: blank loading state`);
+      if (shot.phase === 'cold' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && !(Number.isFinite(shot.contentPaintMs) && shot.contentPaintMs < config.switchSeconds * 1000)) failures.push(`cold tab ${shot.index}: transcript did not paint inside the switch window`);
     }
   }
   if (!run.restarted) failures.push('missing restart');
