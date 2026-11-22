@@ -882,6 +882,10 @@ pub fn held(shell_id: u32) bool {
 }
 
 pub fn historyCaughtUp(shell_id: u32) void {
+    historyCaughtUpWithSeen(shell_id, &.{});
+}
+
+pub fn historyCaughtUpWithSeen(shell_id: u32, seen: []const chat_markdown.Block) void {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
@@ -893,6 +897,15 @@ pub fn historyCaughtUp(shell_id: u32) void {
         } else if (live.state == .running and live.items.items.len > 0) {
             const last = live.items.items[live.items.items.len - 1];
             live.reply_in_history = last.kind == .text and last.done;
+        }
+        for (live.items.items) |*item| {
+            if (item.kind != .text or !item.done or item.text.items.len == 0) continue;
+            if (!chat_markdown.drawnOnce(item.key, seen)) {
+                live.reply_in_history = true;
+                live.held = false;
+                live.touch();
+                break;
+            }
         }
     }
 }
@@ -1633,6 +1646,23 @@ test "IGSH-1266 history that lands before the turn ends does not leave a second 
     var text: [64]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
     try std.testing.expectEqual(@as(usize, 0), tailFor(95, &text, 0, &blocks, &.{}).blocks);
+}
+
+test "SOFT-3047 history catch-up after the transcript lands clears a live reply copy" {
+    const sid = "11111111-2222-3333-4444-304700000001";
+    _ = begin(3047, 0, sid);
+    defer release(3047);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.done\",\"turn\":\"t-1\",\"item\":\"msg_reply:text:0\",\"payload\":{\"text\":\"Got it: the text cursor in a chat should always blink.\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(3047, sid, page));
+    var text: [128]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const landed = [_]chat_markdown.Block{.{ .start = 0, .len = 57, .role = .prose, .row_key = chat_markdown.rowKey("msg_reply") }};
+    try std.testing.expectEqual(@as(usize, 1), tailFor(3047, &text, 0, &blocks, &.{}).blocks);
+    historyCaughtUpWithSeen(3047, &landed);
+    try std.testing.expectEqual(@as(usize, 0), tailFor(3047, &text, 0, &blocks, &landed).blocks);
 }
 
 test "IGSH-1415 a reply the transcript already carries is drawn once while the turn runs" {
