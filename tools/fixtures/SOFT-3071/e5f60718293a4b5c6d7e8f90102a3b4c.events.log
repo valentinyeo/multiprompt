@@ -1,0 +1,4 @@
+{"at":1795150800,"event":"start","detail":{"tmux":"live-crash"}}
+{"at":1795150860,"event":"agent_started","detail":{"pid":1206}}
+{"at":1795154400,"event":"crash","detail":{"error":"NameError"}}
+{"at":1795154406.0,"event":"stop","detail":null}
