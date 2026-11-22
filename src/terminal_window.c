@@ -16,6 +16,8 @@ typedef struct {
     int anchor, end, selecting, selected;
     WCHAR surrogate;
     uint32_t background;
+    int caret_created;
+    int caret_w, caret_h;
 } TerminalWindow;
 
 typedef struct { TerminalWindow *window; int attached; } Creation;
@@ -45,11 +47,36 @@ static void caret(TerminalWindow *t) {
     if (GetFocus() != t->hwnd) return;
     int row, col;
     int visible = mp_terminal_cursor(t->model, &row, &col) && !t->scroll;
-    DestroyCaret();
-    if (visible && CreateCaret(t->hwnd, NULL, t->width, t->height)) {
-        SetCaretPos(col * t->width, row * t->height);
-        ShowCaret(t->hwnd);
+    if (!visible) {
+        if (t->caret_created) {
+            DestroyCaret();
+            t->caret_created = 0;
+        }
+        return;
     }
+    int x = col * t->width;
+    int y = row * t->height;
+    if (!t->caret_created || t->caret_w != t->width || t->caret_h != t->height) {
+        DestroyCaret();
+        t->caret_created = 0;
+        if (CreateCaret(t->hwnd, NULL, t->width, t->height)) {
+            t->caret_created = 1;
+            t->caret_w = t->width;
+            t->caret_h = t->height;
+            SetCaretPos(x, y);
+            ShowCaret(t->hwnd);
+        }
+        return;
+    }
+    SetCaretPos(x, y);
+    ShowCaret(t->hwnd);
+}
+
+void mp_terminal_window_repair_caret(HWND hwnd) {
+    TerminalWindow *t = get(hwnd);
+    if (!t || GetFocus() != t->hwnd) return;
+    if (!t->caret_created) caret(t);
+    else ShowCaret(t->hwnd);
 }
 
 static void resize(TerminalWindow *t, int force) {
@@ -297,7 +324,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
         case WM_SIZE: resize(t, 0); return 0;
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
         case WM_SETFOCUS: caret(t); return 0;
-        case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); return 0;
+        case WM_KILLFOCUS: t->surrogate = 0; DestroyCaret(); t->caret_created = 0; return 0;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int mod = modifiers();
             if ((mod & (VTERM_MOD_CTRL | VTERM_MOD_SHIFT)) == (VTERM_MOD_CTRL | VTERM_MOD_SHIFT) && (wp == 'C' || wp == 'V')) {

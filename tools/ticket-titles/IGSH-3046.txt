@@ -1,0 +1,1 @@
+Session carets blink and show again when you return to the app

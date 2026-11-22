@@ -530,6 +530,8 @@ pub extern "user32" fn IsZoomed(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn IsIconic(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn IsChild(HANDLE, HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetFocus() callconv(WINAPI) HANDLE;
+pub extern "user32" fn ShowCaret(HANDLE) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetCaretBlinkTime() callconv(WINAPI) UINT;
 pub extern "user32" fn GetSystemMenu(HANDLE, BOOL) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetWindowRect(HANDLE, *RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn MonitorFromWindow(HANDLE, DWORD) callconv(WINAPI) HANDLE;
