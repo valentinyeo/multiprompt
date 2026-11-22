@@ -67,12 +67,13 @@ public sealed class ChatStillObserver {
             pixelCurrent = new byte[pixelImage.Width * pixelImage.Height * 4];
         }
         if (!Same(pixelRect, clip)) {
-            if (streaming < 0 && viewTop != pinViewTop) {
+            if (streaming >= 0 || (streaming < 0 && viewTop != pinViewTop)) {
                 pixelRect = clip;
                 if (pixelImage != null) { pixelGraphics.Dispose(); pixelImage.Dispose(); }
                 pixelImage = new Bitmap(clip[2] - clip[0], clip[3] - clip[1], PixelFormat.Format32bppRgb);
                 pixelGraphics = Graphics.FromImage(pixelImage);
                 pixelCurrent = new byte[pixelImage.Width * pixelImage.Height * 4];
+                if (streaming < 0 && viewTop != pinViewTop) pinViewTop = viewTop;
             } else throw new InvalidOperationException("Newest message on-screen pixel crop moved");
         }
         pixelGraphics.CopyFromScreen(clip[0], clip[1], 0, 0, pixelImage.Size, CopyPixelOperation.SourceCopy);
