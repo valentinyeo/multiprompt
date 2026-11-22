@@ -2793,8 +2793,8 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
-                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
-                      "Chats: `mp-sessions --help` start and manage.\n"
+                      "Helper chats: `mp-helper --help`.\n"
+                      "Chats: `mp-sessions list --workspace mine`, `mp-sessions send`, `mp-sessions --help`.\n"
                       "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
@@ -8611,7 +8611,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 143
+RUNTIME_GENERATION = 145
 
 if __name__ == '__main__':
     import base64 as _base64

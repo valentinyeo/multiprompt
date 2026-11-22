@@ -51,7 +51,9 @@ else:
 
 LISTING = dict(ok=True, hosts=["remote-1"], workspaces=[
     dict(id=0, name="Home", active=True, groups=[], tabs=[dict(id=40, title="Anchor", host="remote-1", tmux="live-anchor")]),
+    dict(id=1, name="Away", active=False, groups=[], tabs=[]),
 ])
+READER = ROOT / "src" / "chat_history_reader.py"
 
 
 class MpSessionsTest(unittest.TestCase):
@@ -98,6 +100,16 @@ class MpSessionsTest(unittest.TestCase):
             return []
         return [value for name, value in (json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()) if name == kind]
 
+    def mark_running(self, started):
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        path = self.host / (key + ".config.json")
+        self.assertTrue(path.is_file(), str(path))
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["enabled"] = True
+        (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude",
+                                                                       pid=os.getpid())), encoding="utf-8")
+
     def test_SOFT_3055_start_creates_once_and_is_idempotent(self):
         first = self.parsed(self.run_sessions("start", "--name", "Daily chat"))
         again = self.parsed(self.run_sessions("start", "--name", "daily chat"))
@@ -135,6 +147,45 @@ class MpSessionsTest(unittest.TestCase):
 
     def test_SOFT_3055_unknown_name_reports_clearly(self):
         missing = self.run_sessions("restart", "No such chat")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("no chat named", missing.stderr)
+
+    def test_SOFT_3055_list_workspace_mine_filters_to_caller_workspace(self):
+        caller = self.parsed(self.run_sessions("start", "--name", "Caller", "--workspace", "Home"))
+        self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.parsed(self.run_sessions("start", "--name", "Other", "--workspace", "Away"))
+        listed = self.parsed(self.run_sessions("list", "--workspace", "mine", "--json",
+                                               MULTIPROMPT_TAB=caller["tmux"]))
+        names = {row.get("name") for row in listed}
+        self.assertEqual(names, {"Caller", "Peer"})
+        for row in listed:
+            self.assertEqual(row.get("workspace"), "Home")
+
+    def test_SOFT_3055_send_by_name_targets_the_named_chat(self):
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(peer)
+        done = self.run_sessions("send", "Peer", "hello there", MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertEqual(sent["sid"], peer["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
+
+    def test_SOFT_3055_send_workspace_mine_skips_the_caller(self):
+        caller = self.parsed(self.run_sessions("start", "--name", "Caller", "--workspace", "Home"))
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(caller)
+        self.mark_running(peer)
+        done = self.run_sessions("send", "--workspace", "mine", "team note", MULTIPROMPT_TAB=caller["tmux"],
+                                 MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        payload = json.loads(done.stdout)
+        self.assertIsInstance(payload, list)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["sid"], peer["sid"])
+        self.assertNotEqual(payload[0]["sid"], caller["sid"])
+
+    def test_SOFT_3055_send_unknown_name_errors_clearly(self):
+        missing = self.run_sessions("send", "No such chat", "hello")
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
 

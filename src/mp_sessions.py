@@ -169,10 +169,15 @@ def pick_target(send, listing, target):
 def find_existing(send, listing, slot, display, folder):
     token = display.casefold()
     for row in session_catalog(send, listing):
-        if row.get("spawn_name") == token or send.squash(row.get("name") or "") == send.squash(display):
-            if row.get("folder") and os.path.realpath(row["folder"]) != folder:
-                raise ValueError("a chat named " + repr(display) + " already exists with another folder")
-            return row
+        if row.get("spawn_name") == token:
+            matched = True
+        elif row.get("sid") and send.squash(row.get("name") or "") == send.squash(display):
+            matched = True
+        else:
+            continue
+        if row.get("folder") and os.path.realpath(row["folder"]) != folder:
+            raise ValueError("a chat named " + repr(display) + " already exists with another folder")
+        return row
     return None
 
 
@@ -200,14 +205,136 @@ def start_host(send, provider, sid, folder, tmux):
     return started
 
 
+def row_state(row):
+    if row.get("busy"):
+        return "busy"
+    if row.get("running"):
+        return "running"
+    return "stopped"
+
+
+def caller_mark(send, listing, rows):
+    tmux = send.own_tmux()
+    if not tmux:
+        return None, None
+    workspace = send.find_tab(listing, tmux)[0]
+    if not workspace:
+        for row in rows:
+            if row["tmux"] == tmux:
+                workspace = row.get("workspace")
+                break
+    return tmux, workspace
+
+
+def filter_workspace(rows, workspace):
+    wanted = workspace.strip()
+    if not wanted:
+        return rows
+    return [row for row in rows if (row.get("workspace") or "") == wanted]
+
+
+def catalog_table(rows):
+    headers = ("NAME", "WORKSPACE", "GROUP", "STATE", "TMUX", "SID")
+    body = []
+    for row in rows:
+        mark = "*" if row.get("self") else " "
+        body.append((mark + (row.get("name") or row["tmux"]), row.get("workspace") or "", row.get("group") or "",
+                     row_state(row), row["tmux"], row.get("sid") or ""))
+    data = [headers] + body
+    widths = [max(len(row[i]) for row in data) for i in range(len(headers))]
+    return "\n".join("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))) for row in data)
+
+
+def session_message(send, target, text, sender=None):
+    provider = target.get("provider")
+    sid = target.get("sid")
+    tmux = target["tmux"]
+    if not provider or not sid:
+        raise ValueError((target.get("name") or tmux) + " has no session id yet; use mp-sessions start")
+    if not target.get("running"):
+        raise ValueError((target.get("name") or tmux) + " is not running; use mp-sessions restart")
+    reader = send.reader_module()
+    label = sender
+    if label is None:
+        try:
+            label = send.sender_label([], None)
+        except ValueError:
+            label = None
+    body = text if label is None else ("From " + label + ": " + text)
+    send.check_rate(reader, provider, sid, label)
+    message = send.submit(reader, provider, sid, tmux, body)
+    send.dispatch(reader, provider, sid, tmux)
+    final = send.handoff(reader, provider, sid, tmux, message.get("id"), 15.0)
+    state = (final or {}).get("state")
+    return dict(name=target.get("name"), tmux=tmux, sid=sid, id=message.get("id"), state=state)
+
+
 def cmd_list(args):
     send = load_send()
-    chats = send.live_chats()
+    listing = send.zsb("workspace-list")
+    rows = session_catalog(send, listing)
+    caller, mine = caller_mark(send, listing, rows)
+    for row in rows:
+        row["self"] = caller is not None and row["tmux"] == caller
+    workspace = args.workspace
+    if workspace == "mine":
+        if not mine:
+            raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
+        workspace = mine
+    rows = filter_workspace(rows, workspace) if workspace else rows
     if args.json:
-        print(json.dumps(chats, separators=(",", ":")))
+        print(json.dumps(rows, separators=(",", ":")))
     else:
-        print(send.table(chats))
+        print(catalog_table(rows))
     return 0
+
+
+def parse_send(argv):
+    workspace = None
+    rest = list(argv)
+    if "--workspace" in rest:
+        index = rest.index("--workspace")
+        if index + 1 >= len(rest):
+            raise ValueError("send --workspace needs a workspace name or mine")
+        workspace = rest[index + 1]
+        del rest[index:index + 2]
+    if workspace == "mine":
+        if not rest:
+            raise ValueError("send needs message text")
+        return argparse.Namespace(workspace="mine", name=None, text=" ".join(rest))
+    if len(rest) < 2:
+        raise ValueError("send needs NAME and message text, or send --workspace mine TEXT")
+    return argparse.Namespace(workspace=None, name=rest[0], text=" ".join(rest[1:]))
+
+
+def cmd_send(args):
+    text = args.text
+    if text is None or not text.strip() or "\x00" in text:
+        raise ValueError("empty message")
+    send = load_send()
+    listing = send.zsb("workspace-list")
+    results = []
+    if args.workspace == "mine":
+        rows = session_catalog(send, listing)
+        caller, mine = caller_mark(send, listing, rows)
+        if not caller or not mine:
+            raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
+        targets = [row for row in filter_workspace(rows, mine) if row["tmux"] != caller and row.get("running")]
+        if not targets:
+            raise ValueError("no other running chats in workspace " + repr(mine))
+        for target in targets:
+            results.append(session_message(send, target, text))
+    else:
+        target = pick_target(send, listing, args.name)
+        if send.own_tmux() == target["tmux"]:
+            raise ValueError("that is this chat; pick another chat")
+        results.append(session_message(send, target, text))
+    if args.workspace == "mine":
+        print(json.dumps(results, separators=(",", ":")))
+    else:
+        print(json.dumps(results[0], separators=(",", ":")))
+    failed = [row for row in results if row.get("state") in ("failed", "cancelled")]
+    return 3 if failed else 0
 
 
 def cmd_start(args):
@@ -363,6 +490,11 @@ def parse(argv):
     commands = parser.add_subparsers(dest="command")
     listing = commands.add_parser("list", help="list live chats (default)")
     listing.add_argument("--json", action="store_true")
+    listing.add_argument("--workspace", default=None)
+    sending = commands.add_parser("send", help="send one message to a chat by app name")
+    sending.add_argument("--workspace", default=None)
+    sending.add_argument("name", nargs="?")
+    sending.add_argument("text", nargs=argparse.REMAINDER)
     begin = commands.add_parser("start", help="start or reuse a top-level chat")
     begin.add_argument("--name", required=True)
     begin.add_argument("--folder")
@@ -384,7 +516,7 @@ def parse(argv):
     ending.add_argument("--force", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False)
-    if argv[0] not in {"list", "start", "restart", "rename", "move", "close", "-h", "--help"}:
+    if argv[0] not in {"list", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -406,9 +538,17 @@ def main(argv=None):
         print("mp-sessions: " + str(error), file=sys.stderr)
         return 2
     command = args.command or "list"
-    handlers = dict(list=cmd_list, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move, close=cmd_close)
+    send = load_send()
+    handlers = dict(list=cmd_list, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
+                    close=cmd_close, send=cmd_send)
     try:
+        if command == "send":
+            tail = argv[1:] if argv and argv[0] == "send" else argv
+            return handlers[command](parse_send(tail))
         return handlers[command](args)
+    except send.RateLimited as error:
+        print("mp-sessions: " + str(error), file=sys.stderr)
+        return 5
     except (OSError, ValueError, KeyError, TypeError) as error:
         print("mp-sessions: " + str(error), file=sys.stderr)
         return 2
