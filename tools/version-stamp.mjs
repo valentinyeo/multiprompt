@@ -68,6 +68,25 @@ export function productChange(line) {
   return plainChange(line) && !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:checks?|tests?|CI|proofs?|pipelines?|workflows?)\b/i.test(line));
 }
 
+const engineeringTitle = /^(?:\[INFRA\]\s*|Multiprompt verify:\s*|Multiprompt verification playbook:\s*|Release gate:\s*|CI:\s*)/i;
+
+function userFacingTitle(title) {
+  if (!title.trim()) return false;
+  if (/checks and fixes, no visible change/i.test(title)) return false;
+  if (engineeringTitle.test(title)) return false;
+  return !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:tests?|proofs?|pipelines?|workflows?)\b/i.test(title));
+}
+
+export function userFacingReleaseLine(line) {
+  if (typeof line !== 'string') return false;
+  const text = line.trim();
+  const match = /^([A-Z][A-Z0-9]*-[1-9]\d*) (.*)$/s.exec(text);
+  if (!match || text.length > 512 || /[\x00-\x1f\x7f]/.test(text)) return false;
+  const [, id, title] = match;
+  if (id.startsWith('HYCI-')) return false;
+  return userFacingTitle(title);
+}
+
 export function fragmentLines(file, text) {
   fragmentTicketId(file);
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
