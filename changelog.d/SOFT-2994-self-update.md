@@ -1,1 +1,0 @@
-Multiprompt now shows a header message when looking for an update fails or stalls instead of staying quiet.
