@@ -717,6 +717,11 @@
     }
   },
   "fetches": {
+    "command_palette.zig:finishSwitchAi": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Loads the switched chat under its new provider after the user changes AI."
+    },
     "chat_find_ui.zig:jump": {
       "owner": "chat",
       "trigger": "user",
