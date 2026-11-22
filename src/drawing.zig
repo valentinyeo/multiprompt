@@ -232,10 +232,6 @@ pub fn resetFontCache() void {
         _ = DeleteObject(app_state.g_chat_code_font);
         app_state.g_chat_code_font = null;
     }
-    if (app_state.g_chat_emoji_font != null) {
-        _ = DeleteObject(app_state.g_chat_emoji_font);
-        app_state.g_chat_emoji_font = null;
-    }
     if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null and app_state.g_chat_layout_width > 0) {
         chatRelayout(app_state.g_chat_layout_width);
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);

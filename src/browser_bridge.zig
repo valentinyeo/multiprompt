@@ -465,12 +465,6 @@ fn buildDiagResponseJson(query_raw: []const u8, out: []u8) usize {
     if (!appendAsciiBuf(out, &pos, "{\"ok\":true")) return 0;
     var first = false;
     if (!diagJsonStringField(out, &pos, &first, "version", APP_VERSION)) return 0;
-    if (!IS_DEV) {
-        const ur = @import("update_release.zig");
-        if (!diagJsonBoolField(out, &pos, &first, "update_checking", ur.checking())) return 0;
-        const detail = ur.checkDetail();
-        if (detail.len > 0 and !diagJsonStringField(out, &pos, &first, "update_check_detail", detail)) return 0;
-    }
     if (!diagJsonBoolField(out, &pos, &first, "dev_build", IS_DEV)) return 0;
     if (!diagJsonStringField(out, &pos, &first, "instance_id", getInstanceName())) return 0;
     if (app_state.g_window_display_name_u8_len > 0 and !diagJsonStringField(out, &pos, &first, "window_name", app_state.g_window_display_name_u8[0..app_state.g_window_display_name_u8_len])) return 0;

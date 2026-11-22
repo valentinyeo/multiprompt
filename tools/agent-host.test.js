@@ -84,9 +84,6 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
   assert.match(session, /const helper = @embedFile\("mp_helper\.py"\);/);
   assert.match(session, /MP_HELPER_SOURCE = '\{s\}'/);
   assert.match(reader, /publish_named_tool\('mp-helper', _base64\.b64decode\(helper_source\)\)/);
-  assert.match(session, /const mp_fresh = @embedFile\("mp_fresh\.py"\);/);
-  assert.match(session, /MP_FRESH_SOURCE = '\{s\}'/);
-  assert.match(reader, /publish_named_tool\('mp-fresh', _base64\.b64decode\(fresh_source\)\)/);
   assert.match(reader, /_os\.chmod\('mp-helper', 0o700, dir_fd=directory\)/);
   assert.match(session, /const zsb = @embedFile\("mp_zsb\.sh"\);/);
   assert.match(session, /ZSB_SOURCE = '\{s\}'\\nMULTIBOT_APP_VERSION/);

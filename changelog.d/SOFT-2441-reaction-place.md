@@ -1,1 +1,0 @@
-Reactions on long replies sit under the message again and show at full size.
