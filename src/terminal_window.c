@@ -70,6 +70,10 @@ static void caret(TerminalWindow *t) {
             t->caret_x = x;
             t->caret_y = y;
             ShowCaret(t->hwnd);
+            if (GetCaretBlinkTime() != 0xFFFFFFFF) {
+                HideCaret(t->hwnd);
+                ShowCaret(t->hwnd);
+            }
         }
         return;
     }
@@ -84,7 +88,10 @@ void mp_terminal_window_repair_caret(HWND hwnd) {
     TerminalWindow *t = get(hwnd);
     if (!t || GetFocus() != t->hwnd) return;
     if (!t->caret_created) caret(t);
-    else ShowCaret(t->hwnd);
+    else if (GetCaretBlinkTime() != 0xFFFFFFFF) {
+        HideCaret(t->hwnd);
+        ShowCaret(t->hwnd);
+    } else ShowCaret(t->hwnd);
 }
 
 static void resize(TerminalWindow *t, int force) {

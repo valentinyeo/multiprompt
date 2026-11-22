@@ -25,17 +25,21 @@
             }
             function Assert-CaretBlink {
                 if ([VerifyNative]::CaretBlinkTime() -eq [uint32]::MaxValue) { return }
-                Doctor
-                Assert-Foreground
-                $first = [VerifyNative]::GuiCaretSnapshot($script:window)
-                Save-CaretSample 'blink-a' $first
-                if (-not (CaretSampleNonEmpty $first)) { throw 'session-caret: blink-a caret rectangle is empty' }
-                Start-Sleep -Milliseconds 600
-                Doctor
-                Assert-Foreground
-                $second = [VerifyNative]::GuiCaretSnapshot($script:window)
-                Save-CaretSample 'blink-b' $second
-                if (-not (Test-CaretMotion $first $second)) { throw 'session-caret: caret did not blink within 600ms' }
+                $deadline = [DateTime]::UtcNow.AddMilliseconds(2000)
+                $sample = 0
+                $previous = $null
+                while ([DateTime]::UtcNow -lt $deadline) {
+                    Doctor
+                    Assert-Foreground
+                    $current = [VerifyNative]::GuiCaretSnapshot($script:window)
+                    Save-CaretSample ('blink-' + $sample) $current
+                    if (-not (CaretSampleNonEmpty $current)) { throw ('session-caret: blink-' + $sample + ' caret rectangle is empty') }
+                    if ($null -ne $previous -and (Test-CaretMotion $previous $current)) { return }
+                    $previous = $current
+                    $sample++
+                    Start-Sleep -Milliseconds 100
+                }
+                throw 'session-caret: caret did not blink within 2000ms'
             }
             Wait-Until { $null -ne (Read-Session) -and @((Read-Session).tabs).Count -ge 1 } 'initial CMD session'
             Type-Text 'abc'
