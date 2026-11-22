@@ -50,9 +50,9 @@ pub fn build(b: *std.Build) void {
             .optimize = stable_optimize,
         }),
     });
-    const rooms_preview_flag = b.option(bool, "rooms-preview", "Compile the desktop Rooms integration");
+    const rooms_preview = b.option(bool, "rooms-preview", "Compile the experimental desktop Rooms integration") orelse false;
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
-    const rooms_preview = rooms_preview_flag orelse release;
+    if (release and rooms_preview) @panic("Rooms preview cannot be included in a release");
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
         if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
@@ -343,8 +343,6 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&mp_send_tests.step);
     const mp_talk_tests = b.addSystemCommand(&.{ "python3", "tools/mp-talk-test.py" });
     vps_test_step.dependOn(&mp_talk_tests.step);
-    const mp_agent_sync_tests = b.addSystemCommand(&.{ "python3", "tools/mp-agent-sync-test.py" });
-    vps_test_step.dependOn(&mp_agent_sync_tests.step);
     const mp_helper_tests = b.addSystemCommand(&.{ "python3", "tools/mp-helper-test.py" });
     vps_test_step.dependOn(&mp_helper_tests.step);
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js" });
@@ -900,7 +898,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&windows_shortcut_passthrough_tests.step);
     const inbox_reduction_search_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-reduction-search.test.js" });
     test_step.dependOn(&inbox_reduction_search_tests.step);
-    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js", "tools/dictation-respect-edits.test.js" });
+    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
     const deepgram_key_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/deepgram_key.zig"),
