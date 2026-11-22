@@ -102,3 +102,68 @@ test "composer input returns before a slow helper would block the GUI thread" {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const uiBusy = /ui_thread\.zig\)\.busy\(\)|@import\("ui_thread\.zig"\)\.busy\(\)/;
+
+test('SOFT-3067 favicon fetch waits on a worker thread', () => {
+  const vps = read('src/vps.zig');
+  const start = fnBody(vps, 'pub fn startFaviconFetch');
+  const worker = fnBody(vps, 'fn faviconFetchThread');
+  assert.doesNotMatch(start, longWait, 'startFaviconFetch must not wait for the SSH child on the caller thread');
+  assert.match(start, /Thread\.spawn/, 'startFaviconFetch must spawn a worker');
+  assert.match(worker, longWait, 'worker owns the favicon child wait');
+});
+
+test('SOFT-3067 room transport runs remote work off the UI thread', () => {
+  const transport = read('src/room_transport.zig');
+  const start = fnBody(transport, 'pub fn start');
+  const run = fnBody(transport, 'fn run');
+  const shutdown = fnBody(read('src/rooms.zig'), 'pub fn shutdown');
+  assert.match(start, /Thread\.spawn/, 'room transport must start on a worker');
+  assert.doesNotMatch(start, longWait, 'start must not wait for the helper handshake');
+  assert.match(run, longWait, 'run owns the helper-ready wait');
+  assert.match(shutdown, uiBusy, 'room shutdown must not join a live worker on the GUI thread');
+});
+
+test('SOFT-3067 console tunnel and SSH setup avoid long waits on the GUI thread', () => {
+  const tunnel = fnBody(read('src/console.zig'), 'fn tunnelSocketId');
+  const resolve = fnBody(read('src/console.zig'), 'pub fn resolveSshPath');
+  assert.match(tunnel, uiBusy, 'tunnel socket id must use cached data on the GUI thread');
+  assert.doesNotMatch(tunnel, /WaitForSingleObject\(mutex,\s*5000\)/, 'tunnel socket id must not block the GUI for five seconds on the mutex');
+  assert.match(resolve, uiBusy, 'ssh path resolution must defer work off the GUI thread');
+  const maintain = fnBody(read('src/console.zig'), 'pub fn maintainTunnelKeepers');
+  assert.doesNotMatch(maintain, blockingRemote, 'tunnel keeper timer must not run blocking remote capture inline');
+});
+
+test('SOFT-3067 archive and account flows avoid long waits on the GUI thread', () => {
+  const kill = fnBody(read('src/archive.zig'), 'fn killRemoteTmuxSession');
+  const archiveTab = fnBody(read('src/archive.zig'), 'pub fn archiveTabAt');
+  const claim = fnBody(read('src/account_desktop.zig'), 'pub fn accountClaim');
+  assert.match(kill, uiBusy, 'remote session kill must queue instead of blocking the GUI thread');
+  assert.doesNotMatch(archiveTab, longWait, 'archive tab action must not wait for remote kill on the GUI thread');
+  assert.doesNotMatch(claim, /WaitForSingleObject\([^,]+,\s*(3000|5000|8000)\)/, 'account claim must not use multi-second mutex or hung-window waits');
+});
+
+test('SOFT-3067 browser helper resolves windows on a worker thread', () => {
+  const pane = read('src/browser_pane.zig');
+  const queue = fnBody(pane, 'pub fn startBrowserWindowResolve');
+  const resolve = fnBody(pane, 'fn resolveBrowserWindowIdFromCommand');
+  assert.doesNotMatch(queue, longWait, 'browser resolve queue must not block the GUI thread');
+  assert.match(queue, /Thread\.spawn/, 'browser resolve must spawn a worker');
+  assert.match(resolve, longWait, 'bridge helper wait stays on the worker');
+  const bind = fnBody(read('src/browser_bridge.zig'), 'pub fn handleZsbBindRequest');
+  assert.doesNotMatch(bind, /zsbRunBridgeOnce/, 'bind handling on the GUI thread must not run bridge helper processes inline');
+});
+
+test('SOFT-3067 updater poll avoids a five-second child wait on the GUI thread', () => {
+  const poll = fnBody(read('src/update_release.zig'), 'pub fn poll');
+  const recover = fnBody(read('src/update_release.zig'), 'fn recoverStuckChecker');
+  assert.match(poll, /WaitForSingleObject\(process,\s*0\)/, 'poll must only reap finished checker children');
+  assert.doesNotMatch(recover, /WaitForSingleObject\(process,\s*5000\)/, 'stuck checker recovery must not block the GUI for five seconds');
+});
+
+test('SOFT-3067 negative control: inline tunnel mutex wait on the GUI thread fails the oracle', () => {
+  const tunnel = fnBody(read('src/console.zig'), 'fn tunnelSocketId');
+  const regressed = tunnel.replace('if (on_ui) 0 else 5000', '5000');
+  assert.match(regressed, /WaitForSingleObject\(mutex,\s*5000\)/, 'control must catch long mutex waits');
+});

@@ -2461,7 +2461,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
         }
         var window_pid: DWORD = 0;
         const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
-        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 8000, null) != 0;
+        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG, 250, null) != 0;
         const action = secondLaunchAction(alive, is_app, has_window, responsive);
         var log_buf: [128]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log_buf, "second-launch: {s} pid={d} reason={s}", .{ @tagName(action), pid, if (!alive) "not_alive" else if (!is_app) "not_app" else if (!has_window) "no_window" else if (!responsive) "hung" else "responsive" }) catch "second-launch");
@@ -2481,12 +2481,12 @@ pub fn accountClaim(hwnd: HANDLE) bool {
                 const process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
                 if (process != null) {
                     defer _ = CloseHandle(process);
-                    if (TerminateProcess(process, 1) != 0 and WaitForSingleObject(process, 5000) == 0) {
-                        result = WaitForSingleObject(mutex, 5000);
-                    }
+                    _ = TerminateProcess(process, 1);
+                    _ = WaitForSingleObject(process, 0);
+                    result = WaitForSingleObject(mutex, 0);
                 }
             },
-            .refuse => result = WaitForSingleObject(mutex, 3000),
+            .refuse => result = WaitForSingleObject(mutex, 0),
         }
     }
     if (result != 0 and result != 0x80) {

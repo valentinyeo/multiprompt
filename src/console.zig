@@ -1169,7 +1169,14 @@ fn probeSsh(candidate: []const u8) bool {
     return ok;
 }
 
-pub fn resolveSshPath(force: bool) bool {
+var g_ssh_resolve_thread = std.atomic.Value(bool).init(false);
+
+fn resolveSshPathWorker(force: bool) void {
+    defer g_ssh_resolve_thread.store(false, .release);
+    _ = resolveSshPathInner(force);
+}
+
+fn resolveSshPathInner(force: bool) bool {
     while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
     defer app_state.g_ssh_mutex.unlock();
     if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
@@ -1225,6 +1232,22 @@ pub fn resolveSshPath(force: bool) bool {
         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SSH_UNAVAILABLE, 0, 0);
     }
     return false;
+}
+
+pub fn resolveSshPath(force: bool) bool {
+    if (@import("ui_thread.zig").busy()) {
+        if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
+        if (!g_ssh_resolve_thread.swap(true, .acq_rel)) {
+            @import("idle_budget.zig").bump(.thread_spawn);
+            const thread = std.Thread.spawn(.{}, resolveSshPathWorker, .{force}) catch {
+                g_ssh_resolve_thread.store(false, .release);
+                return false;
+            };
+            thread.detach();
+        }
+        return false;
+    }
+    return resolveSshPathInner(force);
 }
 
 fn loadSshConfig() void {
@@ -1373,10 +1396,23 @@ fn validTunnelId(raw: []const u8) ?[16]u8 {
 }
 
 fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
+    const on_ui = @import("ui_thread.zig").busy();
+    if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
+        const n = @min(app_state.g_tunnel_notify_id_len, out.len);
+        @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
+        return out[0..n];
+    }
     const mutex = CreateMutexW(null, 0, L("Local\\ZigShell-notify-laptop-id")) orelse return null;
     defer _ = CloseHandle(mutex);
-    const wait = WaitForSingleObject(mutex, 5000);
-    if (wait != 0 and wait != 0x80) return null;
+    const wait = WaitForSingleObject(mutex, if (on_ui) 0 else 5000);
+    if (wait != 0 and wait != 0x80) {
+        if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
+            const n = @min(app_state.g_tunnel_notify_id_len, out.len);
+            @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
+            return out[0..n];
+        }
+        return null;
+    }
     defer _ = ReleaseMutex(mutex);
     var dir_buf: [512]u8 = undefined;
     const dir = getSessionDir(&dir_buf) orelse return null;
@@ -1406,7 +1442,12 @@ fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
     }
     var name: [48]u8 = undefined;
     const n = GetEnvironmentVariableA("COMPUTERNAME", &name, name.len);
-    return tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
+    const sock = tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
+    if (sock.len > 0 and sock.len <= app_state.g_tunnel_notify_id.len) {
+        @memcpy(app_state.g_tunnel_notify_id[0..sock.len], sock);
+        app_state.g_tunnel_notify_id_len = sock.len;
+    }
+    return sock;
 }
 
 fn probeTunnelRelay(host: u8) void {
