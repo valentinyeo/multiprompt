@@ -435,6 +435,79 @@ pub const History = struct {
         self.updateCursor(next.*);
     }
 
+    fn rowRoleText(a: std.mem.Allocator, line: []const u8) ?struct { role: []const u8, text: []const u8 } {
+        const m = std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true }) catch return null;
+        const text = std.mem.trim(u8, m.text, " \t\r\n");
+        if (text.len == 0) return null;
+        return .{ .role = m.role, .text = text };
+    }
+
+    fn rewriteUserRole(a: std.mem.Allocator, line: []const u8) ![]u8 {
+        const from = "\"role\":\"user\"";
+        const to = "\"role\":\"assistant\"";
+        const at = std.mem.indexOf(u8, line, from) orelse return a.dupe(u8, line);
+        const out = try a.alloc(u8, line.len - from.len + to.len);
+        @memcpy(out[0..at], line[0..at]);
+        @memcpy(out[at..][0..to.len], to);
+        @memcpy(out[at + to.len ..], line[at + from.len ..]);
+        return out;
+    }
+
+    fn keepReplySide(self: *History, a: std.mem.Allocator, previous: History) !void {
+        if (std.mem.indexOf(u8, self.rows.items, "\"role\":\"user\"") == null) return;
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        var replies: std.ArrayList([]const u8) = .empty;
+        var scan = std.mem.splitScalar(u8, previous.rows.items, '\n');
+        while (scan.next()) |line| {
+            if (line.len == 0) continue;
+            const parsed = rowRoleText(scratch, line) orelse continue;
+            if (std.mem.eql(u8, parsed.role, "assistant") and parsed.text.len >= 16) try replies.append(scratch, parsed.text);
+        }
+        if (replies.items.len == 0) return;
+        var assistant_here: std.ArrayList([]const u8) = .empty;
+        scan = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (scan.next()) |line| {
+            if (line.len == 0) continue;
+            const parsed = rowRoleText(scratch, line) orelse continue;
+            if (!std.mem.eql(u8, parsed.role, "assistant")) continue;
+            for (replies.items) |reply| if (std.mem.eql(u8, parsed.text, reply)) try assistant_here.append(scratch, parsed.text);
+        }
+        var next: std.ArrayList(u8) = .empty;
+        errdefer next.deinit(a);
+        scan = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (scan.next()) |line| {
+            if (line.len == 0) continue;
+            if (rowRoleText(scratch, line)) |known| {
+                if (std.mem.eql(u8, known.role, "user") and !std.mem.startsWith(u8, known.text, "/") and known.text.len >= 16) {
+                    var echoed = false;
+                    for (replies.items) |reply| if (std.mem.eql(u8, known.text, reply)) {
+                        echoed = true;
+                    };
+                    if (echoed) {
+                        var already = false;
+                        for (assistant_here.items) |have| if (std.mem.eql(u8, have, known.text)) {
+                            already = true;
+                        };
+                        if (!already) {
+                            const rewritten = try rewriteUserRole(a, line);
+                            defer a.free(rewritten);
+                            try next.appendSlice(a, rewritten);
+                            try next.append(a, '\n');
+                            try assistant_here.append(scratch, known.text);
+                        }
+                        continue;
+                    }
+                }
+            }
+            try next.appendSlice(a, line);
+            try next.append(a, '\n');
+        }
+        self.rows.deinit(a);
+        self.rows = next;
+    }
+
     fn retainRows(self: *History, a: std.mem.Allocator, previous: History) !void {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
@@ -467,6 +540,7 @@ pub const History = struct {
             }
         }
         if (!shared and !std.mem.eql(u8, &self.sid, &previous.sid)) {
+            try self.keepReplySide(a, previous);
             self.read_sid = self.sid;
             return;
         }
@@ -500,6 +574,7 @@ pub const History = struct {
         }
         self.rows.deinit(a);
         self.rows = rows;
+        try self.keepReplySide(a, previous);
     }
 
     const SourcePosition = struct {
@@ -2142,6 +2217,21 @@ test "IGSH-950 a different live conversation replaces unrelated retained history
     try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("current conversation"), h.text.items);
     try std.testing.expectEqualStrings("new", std.mem.sliceTo(&h.read_sid, 0));
+}
+
+test "SOFT-2420 a transcript reset does not draw an assistant reply as the user" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(2420, 0, false, "postbox", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    const paused = "Paused. Nothing was in flight.";
+    try h.apply(a, "@mp\t1\thistory\tok\told-sid\t0\t100\t9\t0\tclaude\tpostbox\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"paused\",\"text\":\"" ++ paused ++ "\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tnew-sid\t0\t100\t10\t0\tclaude\tpostbox\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"echo\",\"text\":\"" ++ paused ++ "\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqual(md.Role.prose, h.blocks.items[0].role);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Paused. Nothing was in flight."), h.text.items);
 }
 
 test "IGSH-934 backfill after a source rewrite deduplicates already retained messages" {
