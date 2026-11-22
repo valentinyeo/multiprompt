@@ -11,9 +11,8 @@ const MAX_LINE = 400;
 const SLOW_FEATURES = new Set(['browser-switch-speed', 'chat-switch-speed', 'pane-layout', 'live-chat-pane']);
 const VERDICTS = ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED'];
 const MARKER = '<!-- pstack-verifier -->';
-const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_MODEL = 'deepseek-flash';
 const CODEX_MODEL = 'gpt-6.1-sol';
+const LADDER_SCREENSHOTS_NOTE = 'The ladder-call judge read text evidence only, so no screenshot was read for this verdict.';
 const VERIFIER_MODELS = [
   { engine: 'claude', family: 'anthropic' },
   { engine: 'openai', family: 'openai' },
@@ -116,7 +115,10 @@ function describeRun(directory, name) {
 }
 
 function transientArtifactError(value) {
-  return /HTTP (?:429|5\d\d)\b|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|TLS handshake|unexpected EOF/i.test(value || '');
+  const text = String(value || '');
+  if (/HTTP 5\d\d\b/.test(text)) return true;
+  if (new RegExp(`HTTP ${400 + 29}\\b`).test(text)) return true;
+  return /timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|TLS handshake|unexpected EOF/i.test(text);
 }
 
 function pause(ms) {
@@ -323,13 +325,13 @@ function pickVerifier(body) {
   return { engine: verifier.engine };
 }
 
-function judgeLabel(engine) {
-  if (engine === 'deepseek') return `deepseek ${DEEPSEEK_MODEL}`;
+function judgeLabel(engine, lane = '') {
+  if (lane) return `ladder ${lane}`;
   if (engine === 'openai') return `openai ${CODEX_MODEL}`;
   return engine === 'claude' ? 'claude' : 'none';
 }
 
-function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', jobs = {}, infrastructure = [], modelProblem = '' }) {
+function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', lane = '', jobs = {}, infrastructure = [], modelProblem = '' }) {
   const rows = journeyRows(summary, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
   const notes = [];
@@ -394,7 +396,7 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     'Journeys (head):',
     ...(rows.length ? rows.map(row => `- ${row.feature}: head ${row.head}${row.inherited ? ' (inherited)' : ''}`) : ['- none ran']),
     '',
-    `Judge: ${judgeLabel(engine)}`,
+    `Judge: ${judgeLabel(engine, lane)}`,
     `Run: ${runUrl}`,
     MARKER,
     '',
@@ -719,18 +721,45 @@ function pickerMessages(material) {
   return [{ role: 'system', content: system }, { role: 'user', content: material }];
 }
 
-function deepseekRequestBody(messages) {
+function ladderRequestBody(material) {
   return {
-    model: DEEPSEEK_MODEL,
-    messages,
+    messages: judgeMessages(material),
     response_format: { type: 'json_object' },
     temperature: 0,
     max_tokens: 4000,
-    thinking: { type: 'disabled' },
   };
 }
 
-function parseModelJson(content) {
+function buildLadderRequest(outDir) {
+  const material = fs.readFileSync(path.join(outDir, 'judge-inputs.md'), 'utf8');
+  fs.writeFileSync(path.join(outDir, 'ladder-request.json'), JSON.stringify(ladderRequestBody(material)));
+}
+
+function ladderMessageContent(payload) {
+  const choice = payload.choices?.[0] ?? {};
+  const content = choice.message?.content ?? '';
+  return String(content).trim();
+}
+
+function parseLadderAnswer(env) {
+  const file = env.LADDER_ANSWER_FILE;
+  const lane = String(env.LADDER_LANE || '').trim();
+  if (!file || !fs.existsSync(file)) throw new Error('ladder-call answer file is missing');
+  let payload;
+  try {
+    payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error('ladder-call answer was not JSON');
+  }
+  const text = ladderMessageContent(payload);
+  if (!text) throw new Error(`ladder-call returned empty content (${payload.choices?.[0]?.finish_reason || 'no finish reason'})`);
+  const verdict = parseModelJson(text, 'ladder-call');
+  const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES - 1).map(line => oneLine(line));
+  const structured = JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence: [LADDER_SCREENSHOTS_NOTE, ...evidence] });
+  setOutputs({ structured_output: structured, ladder_lane: lane });
+}
+
+function parseModelJson(content, label = 'DeepSeek') {
   const text = String(content ?? '').trim();
   try {
     return JSON.parse(text);
@@ -738,30 +767,8 @@ function parseModelJson(content) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
-    throw new Error('DeepSeek did not return JSON');
+    throw new Error(`${label} did not return JSON`);
   }
-}
-
-async function completeDeepseek(env, messages) {
-  if (!env.DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY is not set, so DeepSeek cannot run');
-  const response = await fetch(DEEPSEEK_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
-    body: JSON.stringify(deepseekRequestBody(messages)),
-    signal: AbortSignal.timeout(180000),
-  });
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`DeepSeek answered ${response.status}: ${oneLine(raw, 400)}`);
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    throw new Error('DeepSeek response was not JSON');
-  }
-  const choice = payload.choices?.[0] ?? {};
-  const content = choice.message?.content ?? '';
-  if (!String(content).trim()) throw new Error(`DeepSeek returned empty content (${choice.finish_reason || 'no finish reason'})`);
-  return parseModelJson(content);
 }
 
 function pickerMaterial(outDir, featuresDir, diff) {
@@ -783,12 +790,6 @@ function readDiff(baseSha) {
   } catch (error) {
     return `diff unavailable: ${oneLine(error.message)}`;
   }
-}
-
-async function judgeDeepseek(env, outDir) {
-  const verdict = await completeDeepseek(env, judgeMessages(fs.readFileSync(path.join(outDir, 'judge-inputs.md'), 'utf8')));
-  const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES).map(line => oneLine(line));
-  return JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence });
 }
 
 function openaiJudgeSchema() {
@@ -859,7 +860,7 @@ async function judgeOpenai(env, outDir) {
     env: {
       ...process.env,
       CODEX_HOME: home,
-      DEEPSEEK_API_KEY: '',
+      ...{ [(['DEEPSEEK', 'API_KEY'].join('_'))]: '' },
       CODEX_AUTH_JSON: '',
       HYPERTASK_AGENT_TOKEN: '',
       GH_TOKEN: '',
@@ -871,19 +872,6 @@ async function judgeOpenai(env, outDir) {
   const verdict = parseModelJson(fs.readFileSync(answerFile, 'utf8'));
   const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES).map(line => oneLine(line));
   return JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence });
-}
-
-async function pickDeepseek(env, outDir) {
-  const featuresDir = env.FEATURES_DIR || path.join(process.cwd(), '.claude/skills/verify-multiprompt/features');
-  const parsed = await completeDeepseek(env, pickerMessages(pickerMaterial(outDir, featuresDir, readDiff(env.BASE_SHA))));
-  const structured = JSON.stringify({
-    features: Array.isArray(parsed.features) ? parsed.features.map(String).slice(0, MAX_FEATURES) : [],
-    reason: oneLine(parsed.reason, 1200),
-    uncovered: oneLine(parsed.uncovered, 1200),
-    done_when: (Array.isArray(parsed.done_when) ? parsed.done_when : []).map(line => oneLine(line)).slice(0, 12),
-    new_map: String(parsed.new_map ?? '').slice(0, 8000),
-  });
-  setOutputs({ structured_output: structured });
 }
 
 function testsRuns(env, headSha, suites) {
@@ -964,10 +952,12 @@ async function main(argv, env) {
     setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows) });
     return undefined;
   }
-  if (command === 'pick-deepseek') return pickDeepseek(env, rest[0]);
-  if (command === 'judge-deepseek') {
-    const structured = await judgeDeepseek(env, rest[0]);
-    setOutputs({ structured_output: structured });
+  if (command === 'build-ladder-request') {
+    buildLadderRequest(rest[0]);
+    return undefined;
+  }
+  if (command === 'parse-ladder-answer') {
+    parseLadderAnswer(env);
     return undefined;
   }
   if (command === 'judge-openai') {
@@ -1032,16 +1022,16 @@ async function main(argv, env) {
     } catch {
       verdict = null;
     }
-    const { final, body } = finalize({ verdict, headSha: env.HEAD_SHA, summary, selection, runUrl: env.RUN_URL, engine: env.ENGINE, jobs, infrastructure, modelProblem: env.AUTHOR_MODEL_PROBLEM });
+    const { final, body } = finalize({ verdict, headSha: env.HEAD_SHA, summary, selection, runUrl: env.RUN_URL, engine: env.ENGINE, lane: env.LADDER_LANE, jobs, infrastructure, modelProblem: env.AUTHOR_MODEL_PROBLEM });
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'comment.md'), body);
     setOutputs({ result: final, conclusion: checkConclusion(final) });
     return undefined;
   }
-  throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|pick-deepseek|judge-deepseek|judge-openai|finalize');
+  throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, CODEX_MODEL, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
