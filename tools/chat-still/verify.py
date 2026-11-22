@@ -80,7 +80,7 @@ def check(root, replay_code=False):
     history = (root / "src/chat_history.zig").read_text()
     bodies = {name: function(session, name) for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll")}
     covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll")}}
-    recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
+    recorded = json.loads((root / "tools/chat-still/coverage.json").read_text())
     for name, body in covered.items():
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
         if digest != recorded["functions"][name]["sha256"]:
@@ -164,6 +164,9 @@ def baseline_report(baseline, files):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(subprocess.check_output(
                 ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10))
+        (root / "tools" / "chat-still").mkdir(parents=True, exist_ok=True)
+        (root / "tools/chat-still/coverage.json").write_bytes(subprocess.check_output(
+            ["git", "-C", str(ROOT), "show", baseline + ":tools/chat-still/coverage.json"], stderr=subprocess.PIPE, timeout=10))
         with contextlib.redirect_stdout(io.StringIO()):
             return check(root)
 
@@ -181,6 +184,8 @@ def self_test(root, replay_code=False):
             source = source.replace(original, broken)
         (scratch / "src/chat_session.zig").write_text(source)
         (scratch / "src/chat_history.zig").write_text((root / "src/chat_history.zig").read_text())
+        (scratch / "tools/chat-still").mkdir(parents=True, exist_ok=True)
+        (scratch / "tools/chat-still/coverage.json").write_bytes((root / "tools/chat-still/coverage.json").read_bytes())
         result = check(scratch, replay_code)
         assert len(result["failures"]) == 10, "Each anchor obligation must reject the real-source scratch break"
         print("MUTATION PASS: both production held_y guards were broken in scratch; every obligation rejected them")
