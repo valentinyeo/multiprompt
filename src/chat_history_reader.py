@@ -5092,6 +5092,8 @@ def host_handle_request(provider, sid, tmux, session, request):
                     parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
+        session["exit_cause"] = "stop_requested"
+        host_log(provider, sid, "stop_requested")
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
@@ -6273,6 +6275,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
                             host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
+                        session["exit_cause"] = "agent_closed"
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
@@ -6348,6 +6351,9 @@ def host_main(provider, sid):
     except (OSError, ValueError) as error:
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
         return 4
+    except Exception as error:
+        host_log(provider, sid, "crash", dict(error=type(error).__name__))
+        raise
     finally:
         host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
@@ -6368,7 +6374,7 @@ def host_main(provider, sid):
         stopped["stopped"] = time.time()
         host_write(paths["state"], stopped)
         host_release(lock)
-        host_log(provider, sid, "stop")
+        host_log(provider, sid, "stop", dict(cause=session.get("exit_cause") if "session" in locals() else None))
 
 
 def host_nightly_day(now=None):
@@ -6456,6 +6462,7 @@ def host_rotate(provider, sid, session, agent):
     host_flush(provider, sid, host_chat_name(provider, sid), session)
     host_agent_stop(agent)
     session["agent"] = None
+    session["exit_cause"] = "host_update"
     host_log(provider, sid, "rotate", dict(runtime=runtime, generation=host_generation()))
     try:
         os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
@@ -8580,7 +8587,9 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
-    sys.exit(host_main(sys.argv[2], sys.argv[3]))
+    code = host_main(sys.argv[2], sys.argv[3])
+    host_log(sys.argv[2], sys.argv[3], "exit", dict(code=code))
+    sys.exit(code)
 elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
     print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
@@ -8603,7 +8612,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 143
+RUNTIME_GENERATION = 144
 
 if __name__ == '__main__':
     import base64 as _base64
