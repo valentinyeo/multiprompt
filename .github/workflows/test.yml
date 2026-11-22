@@ -89,6 +89,8 @@ jobs:
         run: python3 -W error::DeprecationWarning tools/computer-discovery.test.py -v
       - name: Check every hosted chat read shape returns its replies
         run: python3 tools/verify-hosted-chat-reads.py
+      - name: Report every chat exit with its cause
+        run: python3 tools/chat-exit-report.test.py -v
 
   test:
     name: test-windows (${{ matrix.group }})
