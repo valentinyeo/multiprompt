@@ -1,1 +1,0 @@
-Two chats starting at once can fail on the host folder

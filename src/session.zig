@@ -14,7 +14,11 @@ const InvalidateRect = @import("win32.zig").InvalidateRect;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const OpenProcess = @import("win32.zig").OpenProcess;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const PROCESS_TERMINATE = @import("win32.zig").PROCESS_TERMINATE;
+const GetExitCodeProcess = @import("win32.zig").GetExitCodeProcess;
+const STILL_ACTIVE = @import("win32.zig").STILL_ACTIVE;
 const SESSION_JSON_CAPACITY = @import("app_state.zig").SESSION_JSON_CAPACITY;
 const getInstanceName = @import("startup.zig").getInstanceName;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
@@ -72,7 +76,7 @@ const voiceSpeedSessionValue = @import("voice.zig").voiceSpeedSessionValue;
 const capacityJsonValue = @import("capacity.zig").capacityJsonValue;
 const appendJsonEscapedWide = @import("snippets.zig").appendJsonEscapedWide;
 const spawnShellWithSession = @import("console.zig").spawnShellWithSession;
-const killSavedOrphanIfStale = @import("console.zig").killSavedOrphanIfStale;
+const killProcessTree = @import("console.zig").killProcessTree;
 const switchToShell = @import("console.zig").switchToShell;
 const ensureOtherWorkspaceSlot = @import("workspaces.zig").ensureOtherWorkspaceSlot;
 const compactWorkspaceSlots = @import("workspaces.zig").compactWorkspaceSlots;
@@ -1617,7 +1621,10 @@ fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
             const count = json_reader.sessionTabs(parsed.value, tabs, MAX_LWS);
             for (tabs[0..count]) |tab| {
                 if (tab.pid == 0 or tab.keep_alive) continue;
-                killSavedOrphanIfStale(tab.pid, tab.kind);
+                const orphan = OpenProcess(PROCESS_TERMINATE, 0, tab.pid) orelse continue;
+                defer _ = CloseHandle(orphan);
+                var exit_code: DWORD = 0;
+                if (GetExitCodeProcess(orphan, &exit_code) != 0 and exit_code == STILL_ACTIVE) killProcessTree(tab.pid);
             }
         }
     }
@@ -1863,8 +1870,15 @@ pub fn restoreSession() u32 {
 
     for (0..if (prepared) 0 else tab_count) |t| {
         if (tabs[t].pid != 0 and !tabs[t].keep_alive) {
-            debugLog("restoreSession: killing orphan process tree");
-            killSavedOrphanIfStale(tabs[t].pid, tabs[t].kind);
+            const orphan = OpenProcess(PROCESS_TERMINATE, 0, tabs[t].pid);
+            if (orphan != null) {
+                var exit_code: DWORD = 0;
+                if (GetExitCodeProcess(orphan, &exit_code) != 0 and exit_code == STILL_ACTIVE) {
+                    debugLog("restoreSession: killing orphan process tree");
+                    killProcessTree(tabs[t].pid);
+                }
+                _ = CloseHandle(orphan);
+            }
         }
     }
 
