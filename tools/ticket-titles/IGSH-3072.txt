@@ -1,0 +1,1 @@
+Idle stop kills a chat's running work
