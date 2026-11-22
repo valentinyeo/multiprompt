@@ -349,6 +349,7 @@ pub const History = struct {
         defer arena.deinit();
         const scratch = arena.allocator();
         var sources = std.HashMap(SourcePosition, void, SourcePosition.Context, 80).init(scratch);
+        var assistant_ids = std.HashMap([]const u8, []const u8, std.hash_map.StringContext, 80).init(scratch);
         var max_offset: ?u64 = null;
         var trailing_start: usize = 0;
         var scanned_sources = false;
@@ -368,6 +369,11 @@ pub const History = struct {
                     if (old.len == 0) continue;
                     const old_key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
                     if (old_key.end > old_key.offset) try sources.put(.{ .segment = old_key.segment, .offset = old_key.offset, .end = old_key.end }, {});
+                    if (std.mem.indexOf(u8, old, "\"role\":\"assistant\"") != null) {
+                        const old_message = try std.json.parseFromSliceLeaky(Message, scratch, old, .{ .ignore_unknown_fields = true });
+                        const old_id = old_message.read_id orelse old_message.id;
+                        if (old_id.len > 0) try assistant_ids.put(old_id, old_message.text);
+                    }
                     if (old_key.end > old_key.offset) {
                         if (max_offset) |last| {
                             if (old_key.offset < last) trailing_start = row_index;
@@ -381,6 +387,19 @@ pub const History = struct {
                 scanned_sources = true;
             }
             overlap = overlap or (key.end > key.offset and sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }));
+            if (std.mem.indexOf(u8, line, "\"role\":\"assistant\"") != null) {
+                const incoming_row = try std.json.parseFromSliceLeaky(Message, scratch, line, .{ .ignore_unknown_fields = true });
+                const incoming_id = incoming_row.read_id orelse incoming_row.id;
+                if (incoming_id.len > 0) {
+                    if (assistant_ids.get(incoming_id)) |known_text| {
+                        if (std.mem.eql(u8, known_text, incoming_row.text) and key.end > key.offset and
+                            !sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }))
+                        {
+                            overlap = true;
+                        }
+                    }
+                }
+            }
             if (key.end <= key.offset) {
                 all_positioned = false;
             } else if (max_offset) |last| {
@@ -2225,6 +2244,26 @@ test "IGSH-934 a reset with a wider window inserts unseen older messages before 
         "{\"role\":\"user\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n" ++
         "{\"role\":\"assistant\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 2, key);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthird"), h.text.items);
+}
+
+test "SOFT-3047 duplicate assistant rows at new file offsets coalesce" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(3047, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    const reply = "Got it: the text cursor in a chat should always blink.";
+    const line = "{\"role\":\"assistant\",\"id\":\"msg_reply\",\"text\":\"" ++ reply ++ "\",\"offset\":100,\"end\":200}\n";
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++ line ++ "@@MP_END@@\n", 1, key);
+    var next = h.cursor();
+    defer next.deinit(a);
+    try next.rows.appendSlice(a, "{\"role\":\"assistant\",\"id\":\"msg_reply\",\"text\":\"" ++ reply ++ "\",\"offset\":220,\"end\":320}\n");
+    try next.render(a);
+    next.offset = 320;
+    next.inode = 9;
+    @memcpy(next.sid[0..3], "sid");
+    try h.appendParsed(a, &next);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral(reply), h.text.items);
 }
 
 test "IGSH-934 a partial tail retains earlier streamed fragments of the same message" {

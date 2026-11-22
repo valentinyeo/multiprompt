@@ -1482,7 +1482,6 @@ pub fn chatFileOnReady() void {
             const preview_content_changed = !entry.unchanged and !entry.prepended and
                 (entry.incremental or !std.mem.eql(u16, entry.history.text.items, history.text.items));
             const belongs_to_active = chat_history.sameSession(key, entry.key);
-            if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUp(entry.key.shell_id);
             if (entry.staged) {
                 entry.before = 0;
                 entry.result = null;
@@ -1522,6 +1521,7 @@ pub fn chatFileOnReady() void {
                 entry.history = history;
             }
             if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
+            if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUpWithSeen(entry.key.shell_id, entry.history.blocks.items);
             if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) read_ready = foregroundIsOurs();
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
