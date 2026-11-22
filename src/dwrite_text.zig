@@ -238,6 +238,13 @@ fn ellipsize(hdc: w.HANDLE, face: *FontFace, width: i32, segment: *Segment) ?usi
     return kept;
 }
 
+pub fn measureWidth(hdc: w.HANDLE, text: []const u16) i32 {
+    if (text.len == 0) return 0;
+    var size: w.SIZE = undefined;
+    if (w.GetTextExtentPoint32W(hdc, text.ptr, @intCast(text.len), &size) == 0) return 0;
+    return size.cx;
+}
+
 pub fn emHeight(hdc: w.HANDLE) ?i32 {
     var metric: TextMetric = undefined;
     if (GetTextMetricsW(hdc, &metric) == 0) return null;
