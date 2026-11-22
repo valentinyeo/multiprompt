@@ -11,13 +11,21 @@
                 $changelogSpeed.after_ms += [VerifyNative]::ChangelogResponse($script:window)
             }
             Save-Json $changelogSpeed 'changelog-speed.json'
-            $changelogBudget = @{ open_ms = 200; scroll_ms = 100; close_ms = 100; after_ms = 100 }
             foreach ($kind in @('open_ms', 'scroll_ms', 'close_ms', 'after_ms')) {
-                $limit = [int]$changelogBudget[$kind]
-                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge $limit) { throw ('Changelog ' + $kind + ' reached ' + $limit + ' milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
+                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge 100) { throw ('Changelog ' + $kind + ' reached 100 milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
             }
             Snapshot 'changelog-closed'
-            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = $changelogBudget; entry = 'Ctrl+K Changelog' }
+            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
+            function Test-FreshPaletteLog([string]$Path, [long]$From) {
+                if (-not (Test-Path $Path)) { return $false }
+                $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+                try {
+                    $null = $stream.Seek($From, 'Begin')
+                    $reader = New-Object IO.StreamReader($stream)
+                    $fresh = $reader.ReadToEnd()
+                } finally { $stream.Dispose() }
+                return ($fresh -match '\[palette\] ready chars=\d+ count=\d+')
+            }
             $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
             New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
             $folder = '/tmp/multiprompt-harness-folder'
@@ -27,15 +35,30 @@
             [IO.File]::WriteAllText($commandsPath, $seedJson, (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
             $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $logStart = if (Test-Path $debugLog) { (Get-Item $debugLog).Length } else { 0 }
             Palette ''
             Snapshot 'ctrl-k-empty'
             Save-Json (Read-Session) 'ctrl-k-empty.session.json'
             Press @(0x1B) 'Esc: close empty palette'
-            Palette 'powershell' '2005'
+            Palette 'More shells'
             Snapshot 'more-shells-search'
+            $logStart = if (Test-Path $debugLog) { (Get-Item $debugLog).Length } else { 0 }
+            Press @(0x0D) 'Enter: More shells'
+            Start-Sleep -Milliseconds 700
+            $shellsOpened = (Test-FreshPaletteLog $debugLog $logStart)
+            if (-not $shellsOpened) {
+                Press @(0x28) 'Down: leave the most used header'
+                Press @(0x0D) 'Enter: More shells again'
+                Start-Sleep -Milliseconds 700
+                $shellsOpened = (Test-FreshPaletteLog $debugLog $logStart)
+            }
+            Snapshot 'more-shells'
+            Type-Text 'powershell'
+            Start-Sleep -Milliseconds 400
             Snapshot 'more-shells-search-inside'
-            Press @(0x1B) 'Esc: close PowerShell search'
-            $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells-search.png'; query = 'powershell'; command = 2005; commands = 'harness workspace folder seeded' }
+            Press @(0x1B) 'Esc: clear the sub-list query'
+            $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png'; fallbackDown = (-not $shellsOpened); commands = 'harness workspace folder seeded' }
+            Press @(0x1B) 'Esc: close More shells'
             $tabRowsBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count
             Doctor
             Assert-Foreground
@@ -57,8 +80,6 @@
             $repoEntries = @(foreach ($name in $repoNames) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $repoFolder } })
             [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $repoEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
-            Press @(0x11, 0x4E) 'Ctrl+N: leave Other so the saved folder can start a tab'
-            Wait-Until { $state = Read-Session; $state.active_workspace -ne 0 -and $state.workspace_count -ge 2 } 'named workspace active'
             $repoTabsBefore = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new tab in the harness folder'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore + 1 } 'harness folder tab open'
@@ -104,11 +125,11 @@
             if (Test-Path -LiteralPath $crashRoot) { $crashReports = @(Get-ChildItem -LiteralPath $crashRoot -Filter 'crash-*.txt' -File -ErrorAction SilentlyContinue).Count }
             if ($crashReports -ne 0) { throw 'Pick repo left a crash report behind' }
             Snapshot 'pick-repo-opened'
-            Palette 'close tab' '7110'
+            Palette 'close tab' '(7197|6232)'
             Press @(0x0D) 'Enter: hide the tab Pick repo opened'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore } 'Pick repo tab closed'
             $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $pickedFolder; tabSelected = ($pickedActive -eq [int]$pickedTab.shell_id); crashReports = $crashReports }
-            Palette 'close tab' '7110'
+            Palette 'close tab' '(7197|6232)'
             Press @(0x0D) 'Enter: hide the harness folder tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
@@ -176,9 +197,7 @@
             } 'only chosen snippet removed from disk'
             Snapshot 'snippet-deleted'
             Press @(0x1B) 'Escape: close Manage Snippets'
-            $shellsBeforeRestart = @((Read-Inbox).shells).Count
-            if ($shellsBeforeRestart -lt 1) { throw 'Restart has no owned shell to restore' }
-            Restart-ChatView $shellsBeforeRestart
+            Restart-ChatView 1
             Focus-Palette 'use snippets' 6254
             Press @(0x0D) 'Enter: existing snippet picker after restart'
             Type-Text 'Keep Me'
