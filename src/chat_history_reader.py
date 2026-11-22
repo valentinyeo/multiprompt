@@ -2777,6 +2777,8 @@ HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
+HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
+HOST_FRESH_RETRY_WAIT = 120
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -4210,17 +4212,35 @@ def host_layout_publish_conversation(provider, sid, conversation_sid):
 
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
-    retry = isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed")
-    if retry:
-        fresh["phase"] = "resume_failed"
-    else:
-        session["state"].pop("fresh_start", None)
+    phase = fresh.get("phase") if isinstance(fresh, dict) else None
+    if phase == "resume" and not fresh.get("resume_retried"):
+        fresh.update(phase="resume_failed", started=time.time(), resume_retried=True)
+        session.pop("fresh_resumed", None)
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "fresh_resume_retry", dict(reason=reason))
+        return
+    session["state"].pop("fresh_start", None)
+    session.pop("fresh_resumed", None)
     host_state_write(provider, sid, session["state"])
     host_event(provider, sid, tmux, session, "text.done",
-               dict(text="Fresh start failed. " + reason + " Your previous work is saved." +
-                         (" Choose Fresh start to retry reading the handover." if retry else "")),
+               dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
                "fresh-failed-" + uuid.uuid4().hex)
     host_log(provider, sid, "fresh_start_failed", dict(reason=reason))
+
+
+def host_fresh_retry(provider, sid, tmux, session):
+    fresh = session["state"].get("fresh_start")
+    if not isinstance(fresh, dict) or fresh.get("phase") != "resume_failed":
+        return False
+    if host_fresh_busy(session):
+        if time.time() - fresh.get("started", time.time()) <= HOST_FRESH_RETRY_WAIT:
+            return False
+        host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
+        return False
+    fresh.update(phase="resume", started=time.time())
+    session.pop("fresh_resumed", None)
+    host_state_write(provider, sid, session["state"])
+    return True
 
 
 def host_fresh_send(provider, sid, tmux, session, text):
@@ -6186,7 +6206,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
             fresh = session["state"].get("fresh_start")
-            if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset", "resume") and time.time() - fresh.get("started", time.time()) > 180:
+            fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
+            if fresh_limit is not None and time.time() - fresh.get("started", time.time()) > fresh_limit:
                 HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
                 host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
                 fresh = None
@@ -6213,6 +6234,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
+            host_fresh_retry(provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
             if (provider == "claude" and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
@@ -8588,7 +8610,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 140
+RUNTIME_GENERATION = 141
 
 if __name__ == '__main__':
     import base64 as _base64
