@@ -3,6 +3,7 @@ $marker = 'SOFT3048SCROLL-42'
 
 function Read-VisibleShellText {
     for ($attempt = 0; $attempt -lt 8; $attempt++) {
+        if ($attempt -gt 0) { Start-Sleep -Milliseconds 700 }
         [VerifyNative]::DragSelectClient($shell, 1, 1, [int]($client.Right - 2), [int]($client.Bottom - 2))
         Start-Sleep -Milliseconds 120
         [System.Windows.Forms.Clipboard]::Clear()
@@ -64,6 +65,7 @@ Snapshot 'server-shell-after-wheel'
 $scrolled = Read-VisibleShellText
 $afterIndex = Get-FirstScrollIndex $scrolled
 if ($afterIndex -lt 0 -or $afterIndex -ge $beforeIndex) { throw ('Wheel up did not scroll back through server shell output: ' + $beforeIndex + ' to ' + $afterIndex) }
+Snapshot 'after'
 $check.passed = $true
 $check.clipboard = $marker
 $check.interrupt = $true

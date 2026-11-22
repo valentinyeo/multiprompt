@@ -58,4 +58,5 @@ test('SOFT-3048 the journey proves copy, interrupt and wheel scrollback on the n
   assert.match(journey, /interrupt\.json/);
   assert.match(journey, /WheelClientPoint/);
   assert.match(journey, /afterIndex -ge \$beforeIndex/);
+  assert.match(journey, /Snapshot 'after'/, 'the harness requires an after snapshot before it reports passed');
 });
