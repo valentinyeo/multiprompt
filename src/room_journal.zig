@@ -1,13 +1,14 @@
 const std = @import("std");
 const w = @import("win32.zig");
 const file_io = @import("file_io.zig");
+const room_post = @import("room_post.zig");
 
 const allocator = std.heap.page_allocator;
 const max_file = 2 * 1024 * 1024;
 const max_request = 131071;
 const max_evidence = 262144;
 
-pub const Kind = enum { create, edit };
+pub const Kind = enum { create, edit, post };
 pub const State = enum { prepared, uncertain, accepted, rejected };
 pub const Scope = struct { account_digest: [64]u8, store_uuid: [36]u8 };
 pub const Binding = struct { alias: []const u8, id: []const u8 };
@@ -117,12 +118,68 @@ fn validMember(member: std.json.Value, store: []const u8) bool {
     return identity.len == provider.len + 1 + sid.len and std.mem.startsWith(u8, identity, provider) and identity[provider.len] == ':' and std.mem.eql(u8, identity[provider.len + 1 ..], sid);
 }
 
+fn validAlias(alias: []const u8) bool {
+    if (alias.len == 0 or alias.len > 32) return false;
+    for (alias) |ch| if (!(ch >= 'a' and ch <= 'z') and !(ch >= 'A' and ch <= 'Z') and !(ch >= '0' and ch <= '9') and ch != '_' and ch != '-') return false;
+    return true;
+}
+
+fn validPostRequest(r: Record, obj: std.json.Value) bool {
+    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    const op = text(obj, "op") orelse return false;
+    const command = text(obj, "command_id") orelse return false;
+    const host = text(obj, "host_uuid") orelse return false;
+    const room = text(obj, "room_id") orelse return false;
+    const body = text(obj, "text") orelse return false;
+    if (!std.mem.eql(u8, op, "post_human") or !std.mem.eql(u8, command, r.command_id) or !std.mem.eql(u8, host, r.store_uuid) or !std.mem.eql(u8, room, r.room_id) or (number(obj, "expected_revision") orelse 0) != r.revision) return false;
+    if (!validText(body, room_post.max_text) or room_post.blank(body)) return false;
+    const recipients = field(obj, "recipients") orelse return false;
+    if (recipients != .array or recipients.array.items.len > 64) return false;
+    for (recipients.array.items, 0..) |item, i| {
+        if (item != .string or !validAlias(item.string)) return false;
+        for (recipients.array.items[0..i]) |old| if (std.mem.eql(u8, old.string, item.string)) return false;
+    }
+    return true;
+}
+
+fn validPostReceipt(r: Record, event: std.json.Value, deliveries: []const std.json.Value) bool {
+    if (event.object.count() != 7 or deliveries.len > 64) return false;
+    const id = text(event, "id") orelse return false;
+    const room = text(event, "room_id") orelse return false;
+    const kind = text(event, "type") orelse return false;
+    const body = text(event, "text") orelse return false;
+    const seq = number(event, "seq") orelse return false;
+    const recipients = field(event, "recipients") orelse return false;
+    if (!uuidValid(id) or !std.mem.eql(u8, room, r.room_id) or !std.mem.eql(u8, kind, "human") or seq == 0 or (number(event, "revision") orelse 0) != r.revision) return false;
+    if (recipients != .array or recipients.array.items.len != deliveries.len) return false;
+    var request = std.json.parseFromSlice(std.json.Value, allocator, r.request, .{ .allocate = .alloc_always }) catch return false;
+    defer request.deinit();
+    if (!std.mem.eql(u8, body, text(request.value, "text") orelse return false)) return false;
+    const wanted = field(request.value, "recipients") orelse return false;
+    if (wanted != .array or (wanted.array.items.len != 0 and wanted.array.items.len != deliveries.len)) return false;
+    for (recipients.array.items, deliveries, 0..) |member, delivery, i| {
+        if (member != .string or !uuidValid(member.string)) return false;
+        for (recipients.array.items[0..i]) |old| if (std.mem.eql(u8, old.string, member.string)) return false;
+        if (delivery != .object or delivery.object.count() != 7) return false;
+        const delivery_id = text(delivery, "id") orelse return false;
+        const delivery_room = text(delivery, "room_id") orelse return false;
+        const delivery_event = text(delivery, "event_id") orelse return false;
+        const delivery_member = text(delivery, "member_id") orelse return false;
+        const status = text(delivery, "status") orelse return false;
+        if (!uuidValid(delivery_id) or !std.mem.eql(u8, delivery_room, r.room_id) or !std.mem.eql(u8, delivery_event, id) or !std.mem.eql(u8, delivery_member, member.string) or !std.mem.eql(u8, status, "pending")) return false;
+        if ((number(delivery, "event_seq") orelse 0) != seq or (number(delivery, "delivery_seq") orelse 0) == 0) return false;
+    }
+    return true;
+}
+
 fn validateRequest(r: Record) bool {
     if (!uuidValid(r.command_id) or r.request.len == 0 or r.request.len > max_request or std.mem.indexOfScalar(u8, r.request, '\n') != null or !std.unicode.utf8ValidateSlice(r.request)) return false;
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, r.request, .{ .allocate = .alloc_always }) catch return false;
     defer parsed.deinit();
     const obj = parsed.value;
-    if (obj != .object or obj.object.count() != (if (r.kind == .create) @as(usize, 5) else 7)) return false;
+    if (obj != .object) return false;
+    if (r.kind == .post) return validPostRequest(r, obj);
+    if (obj.object.count() != (if (r.kind == .create) @as(usize, 5) else 7)) return false;
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
     const host = text(obj, "host_uuid") orelse return false;
@@ -162,12 +219,14 @@ fn validateEvidence(r: Record) bool {
     if (r.state == .rejected) {
         if (obj.object.count() != 1) return false;
         const code = text(obj, "error") orelse return false;
-        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op" }) |known| if (std.mem.eql(u8, code, known)) return true;
+        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op", "invalid_recipients", "invalid_mentions" }) |known| if (std.mem.eql(u8, code, known)) return true;
         return false;
     }
     const event = field(obj, "event") orelse return false;
     const deliveries = field(obj, "deliveries") orelse return false;
-    if (obj.object.count() != 2 or event != .object or event.object.count() != 7 or deliveries != .array or deliveries.array.items.len != 0) return false;
+    if (obj.object.count() != 2 or event != .object or deliveries != .array) return false;
+    if (r.kind == .post) return validPostReceipt(r, event, deliveries.array.items);
+    if (event.object.count() != 7 or deliveries.array.items.len != 0) return false;
     const event_id = text(event, "id") orelse return false;
     const room = text(event, "room_id") orelse return false;
     const kind = text(event, "type") orelse return false;
@@ -315,4 +374,67 @@ pub fn updateLocked(guard: *const Lock, command_id: []const u8, state: State, ev
     record.state = state;
     record.evidence = evidence;
     try persist(scope, record);
+}
+
+const test_store = "10000000-0000-4000-8000-000000000001";
+const test_command = "20000000-0000-4000-8000-000000000002";
+const test_room = "30000000-0000-4000-8000-000000000003";
+const test_event = "40000000-0000-4000-8000-000000000004";
+const test_member = "50000000-0000-4000-8000-000000000005";
+const test_delivery = "60000000-0000-4000-8000-000000000006";
+const test_request = "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"@alpha hi\",\"recipients\":[\"alpha\"]}";
+const test_receipt = "{\"event\":{\"id\":\"" ++ test_event ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"seq\":7,\"type\":\"human\",\"text\":\"@alpha hi\",\"revision\":3,\"recipients\":[\"" ++ test_member ++ "\"]},\"deliveries\":[{\"id\":\"" ++ test_delivery ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"event_id\":\"" ++ test_event ++ "\",\"event_seq\":7,\"member_id\":\"" ++ test_member ++ "\",\"status\":\"pending\",\"delivery_seq\":1}]}";
+
+fn testScope() Scope {
+    var scope = Scope{ .account_digest = @splat('a'), .store_uuid = undefined };
+    @memcpy(&scope.store_uuid, test_store);
+    return scope;
+}
+
+fn testRecord(scope: *const Scope, request: []const u8, state: State, evidence: []const u8) Record {
+    return .{ .account_digest = &scope.account_digest, .store_uuid = &scope.store_uuid, .kind = .post, .command_id = test_command, .room_id = test_room, .revision = 3, .request = request, .bindings = &.{}, .state = state, .evidence = evidence };
+}
+
+fn roundTrips(scope: Scope, record: Record) !bool {
+    const digest = try checksum(record);
+    const bytes = try std.json.Stringify.valueAlloc(allocator, Envelope{ .record = record, .checksum = &digest }, .{});
+    defer allocator.free(bytes);
+    var parsed = try std.json.parseFromSlice(Envelope, allocator, bytes, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    if (!std.mem.eql(u8, parsed.value.record.request, record.request) or parsed.value.record.kind != .post) return false;
+    return validate(scope, parsed.value);
+}
+
+test "post journal record keeps the exact request through the envelope" {
+    const scope = testScope();
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .prepared, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .uncertain, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .accepted, test_receipt)));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"invalid_mentions\"}")));
+}
+
+test "post journal request refuses a body that does not match the record" {
+    const scope = testScope();
+    const plain = "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}";
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, plain, .prepared, "")));
+    const bad = [_][]const u8{
+        "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_room ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}",
+        "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":4,\"text\":\"hello\",\"recipients\":[]}",
+        "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"  \",\"recipients\":[]}",
+        "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[\"a b\"]}",
+        "{\"op\":\"post_human\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[\"alpha\",\"alpha\"]}",
+        "{\"op\":\"edit\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}",
+        "{\"op\":\"post_human\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}",
+    };
+    for (bad) |request| try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, request, .prepared, ""))));
+}
+
+test "post journal evidence must match the request" {
+    const scope = testScope();
+    const short = "{\"event\":{\"id\":\"" ++ test_event ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"seq\":7,\"type\":\"human\",\"text\":\"@alpha hi\",\"revision\":3,\"recipients\":[\"" ++ test_member ++ "\"]},\"deliveries\":[]}";
+    const other_text = "{\"event\":{\"id\":\"" ++ test_event ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"seq\":7,\"type\":\"human\",\"text\":\"other\",\"revision\":3,\"recipients\":[\"" ++ test_member ++ "\"]},\"deliveries\":[{\"id\":\"" ++ test_delivery ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"event_id\":\"" ++ test_event ++ "\",\"event_seq\":7,\"member_id\":\"" ++ test_member ++ "\",\"status\":\"pending\",\"delivery_seq\":1}]}";
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .accepted, short))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .accepted, other_text))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .accepted, "{\"error\":\"nope\"}"))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .uncertain, test_receipt))));
 }
