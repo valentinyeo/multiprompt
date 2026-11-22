@@ -269,21 +269,47 @@ def session_message(send, target, text, sender=None):
     return dict(name=target.get("name"), tmux=tmux, sid=sid, id=message.get("id"), state=state)
 
 
+def live_catalog_rows(send):
+    rows = []
+    for chat in send.live_chats():
+        rows.append(dict(
+            name=chat.get("name"),
+            tmux=chat["tmux"],
+            sid=chat["sid"],
+            provider=chat.get("provider"),
+            workspace="",
+            group="",
+            busy=chat.get("state") == "busy",
+            running=True,
+        ))
+    return rows
+
+
 def cmd_list(args):
     send = load_send()
     listing = send.zsb("workspace-list")
-    rows = session_catalog(send, listing)
+    workspace = getattr(args, "workspace", None)
+    if workspace:
+        rows = session_catalog(send, listing)
+        caller, mine = caller_mark(send, listing, rows)
+        for row in rows:
+            row["self"] = caller is not None and row["tmux"] == caller
+        if workspace == "mine":
+            if not mine:
+                raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
+            workspace = mine
+        rows = filter_workspace(rows, workspace)
+        if args.json:
+            print(json.dumps(rows, separators=(",", ":")))
+        else:
+            print(catalog_table(rows))
+        return 0
+    rows = live_catalog_rows(send)
     caller, mine = caller_mark(send, listing, rows)
     for row in rows:
         row["self"] = caller is not None and row["tmux"] == caller
-    workspace = args.workspace
-    if workspace == "mine":
-        if not mine:
-            raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
-        workspace = mine
-    rows = filter_workspace(rows, workspace) if workspace else rows
     if args.json:
-        print(json.dumps(rows, separators=(",", ":")))
+        print(json.dumps(send.live_chats(), separators=(",", ":")))
     else:
         print(catalog_table(rows))
     return 0
@@ -515,7 +541,7 @@ def parse(argv):
     ending.add_argument("name")
     ending.add_argument("--force", action="store_true")
     if not argv:
-        return argparse.Namespace(command="list", json=False)
+        return argparse.Namespace(command="list", json=False, workspace=None)
     if argv[0] not in {"list", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
@@ -526,7 +552,7 @@ def parse(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
-        return cmd_list(argparse.Namespace(command="list", json=False))
+        return cmd_list(argparse.Namespace(command="list", json=False, workspace=None))
     if argv == ["--help"] or argv == ["-h"]:
         parse(["--help"])
         return 0
