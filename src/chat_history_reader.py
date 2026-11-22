@@ -2778,6 +2778,7 @@ HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_DELIVERY_TIMEOUT = 15
+HOST_FRESH_TIMEOUT = 300
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
 HOST_LINE_LIMIT = 4 * 1024 * 1024
@@ -4208,17 +4209,42 @@ def host_layout_publish_conversation(provider, sid, conversation_sid):
     return False
 
 
+def host_fresh_resume_clear(session, provider, sid):
+    session.pop("fresh_resumed", None)
+    host_state_write(provider, sid, session["state"])
+
+
+def host_fresh_recover_stuck(provider, sid, session):
+    fresh = session["state"].get("fresh_start")
+    if not isinstance(fresh, dict) or fresh.get("phase") != "resume_failed":
+        return
+    if fresh.get("resume_retried"):
+        session["state"].pop("fresh_start", None)
+        host_fresh_resume_clear(session, provider, sid)
+        return
+    fresh.update(phase="resume", started=time.time())
+    host_fresh_resume_clear(session, provider, sid)
+
+
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
-    retry = isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed")
-    if retry:
-        fresh["phase"] = "resume_failed"
-    else:
+    if isinstance(fresh, dict) and fresh.get("phase") in ("resume", "resume_failed"):
+        if not fresh.get("resume_retried"):
+            fresh.update(phase="resume", resume_retried=True, started=time.time())
+            host_fresh_resume_clear(session, provider, sid)
+            host_log(provider, sid, "fresh_start_resume_retry", dict(reason=reason))
+            return
         session["state"].pop("fresh_start", None)
+        host_fresh_resume_clear(session, provider, sid)
+        host_event(provider, sid, tmux, session, "text.done",
+                   dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
+                   "fresh-failed-" + uuid.uuid4().hex)
+        host_log(provider, sid, "fresh_start_failed", dict(reason=reason))
+        return
+    session["state"].pop("fresh_start", None)
     host_state_write(provider, sid, session["state"])
     host_event(provider, sid, tmux, session, "text.done",
-               dict(text="Fresh start failed. " + reason + " Your previous work is saved." +
-                         (" Choose Fresh start to retry reading the handover." if retry else "")),
+               dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
                "fresh-failed-" + uuid.uuid4().hex)
     host_log(provider, sid, "fresh_start_failed", dict(reason=reason))
 
@@ -4243,14 +4269,13 @@ def host_fresh_send(provider, sid, tmux, session, text):
 def host_fresh_start(provider, sid, tmux, session, handover_file=None):
     fresh = session["state"].get("fresh_start")
     if isinstance(fresh, dict) and fresh.get("phase") == "resume_failed":
-        if host_fresh_busy(session):
-            session["state"]["fresh_start_queued"] = dict(retry=True)
+        if fresh.get("resume_retried"):
+            session["state"].pop("fresh_start", None)
             host_state_write(provider, sid, session["state"])
-            return dict(status="started", reason="fresh_start_queued")
-        fresh.update(phase="resume", started=time.time())
-        session.pop("fresh_resumed", None)
-        host_state_write(provider, sid, session["state"])
-        return dict(status="started")
+        else:
+            fresh.update(phase="resume", started=time.time())
+            host_fresh_resume_clear(session, provider, sid)
+            return dict(status="started")
     if fresh or isinstance(session["state"].get("fresh_start_queued"), dict):
         return dict(status="already", reason="fresh_start_pending")
     if host_fresh_busy(session):
@@ -4298,10 +4323,9 @@ def host_fresh_drain_queued(provider, sid, tmux, session):
     host_state_write(provider, sid, session["state"])
     if queued.get("retry"):
         fresh = session["state"].get("fresh_start")
-        if isinstance(fresh, dict) and fresh.get("phase") == "resume_failed":
+        if isinstance(fresh, dict) and fresh.get("phase") == "resume_failed" and not fresh.get("resume_retried"):
             fresh.update(phase="resume", started=time.time())
-            session.pop("fresh_resumed", None)
-            host_state_write(provider, sid, session["state"])
+            host_fresh_resume_clear(session, provider, sid)
             return True
     handover = queued.get("handover_file")
     host_fresh_start(provider, sid, tmux, session, handover)
@@ -4353,6 +4377,7 @@ def host_fresh_prepare(provider, sid, state):
 
 
 def host_fresh_resume(provider, sid, tmux, session):
+    host_fresh_recover_stuck(provider, sid, session)
     fresh = session["state"].get("fresh_start")
     if not isinstance(fresh, dict) or fresh.get("phase") != "resume" or session.get("fresh_resumed"):
         return
@@ -6186,7 +6211,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
             fresh = session["state"].get("fresh_start")
-            if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset", "resume") and time.time() - fresh.get("started", time.time()) > 180:
+            if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset", "resume") and time.time() - fresh.get("started", time.time()) > HOST_FRESH_TIMEOUT:
                 HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
                 host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
                 fresh = None
@@ -8588,7 +8613,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 140
+RUNTIME_GENERATION = 141
 
 if __name__ == '__main__':
     import base64 as _base64
