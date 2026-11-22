@@ -59,13 +59,14 @@ test('existing release workflow signs the versioned history alongside the update
   const release = workflow.slice(workflow.indexOf('\n  release:\n'));
   const signedNotesInOrder = text => {
     const notes = text.indexOf('cp release-notes.json dist/release-notes.json');
-    const manifest = text.indexOf('sha256sum -- *.exe *.zip release-notes.json > SHA256SUMS.txt');
+    const runtime = text.indexOf('node tools/runtime-release-asset.mjs');
+    const manifest = text.indexOf('sha256sum -- *.exe *.zip release-notes.json multiprompt-runtime.py > SHA256SUMS.txt');
     const signature = text.indexOf('node tools/sign-release.mjs');
     const publication = text.indexOf('gh release create "$TAG" dist/*');
-    return notes >= 0 && notes < manifest && manifest < signature && signature < publication;
+    return notes >= 0 && notes < runtime && runtime < manifest && manifest < signature && signature < publication;
   };
   assert.ok(signedNotesInOrder(release));
-  const unsigned = release.replace('sha256sum -- *.exe *.zip release-notes.json > SHA256SUMS.txt', 'sha256sum -- *.exe *.zip > SHA256SUMS.txt');
+  const unsigned = release.replace('sha256sum -- *.exe *.zip release-notes.json multiprompt-runtime.py > SHA256SUMS.txt', 'sha256sum -- *.exe *.zip > SHA256SUMS.txt');
   assert.equal(signedNotesInOrder(unsigned), false);
   assert.match(workflow, /gh release create "\$TAG" dist\/\*/);
 });
