@@ -30,6 +30,7 @@ const Host = struct {
     input: w.HANDLE = null,
     output: w.HANDLE = null,
     running: bool = false,
+    starting: bool = false,
     stopping: bool = false,
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
@@ -119,7 +120,80 @@ fn transmit(host: *Host) void {
     }
 }
 
-fn start(host: *Host, index: u8) bool {
+const Boot = struct {
+    host: *Host,
+    input: w.HANDLE,
+    output: w.HANDLE,
+    process: w.HANDLE,
+};
+
+fn closeBoot(b: Boot) void {
+    _ = w.TerminateProcess(b.process, 0);
+    _ = w.CloseHandle(b.process);
+    _ = w.CloseHandle(b.input);
+    _ = w.CloseHandle(b.output);
+}
+
+fn abortBoot(b: Boot) void {
+    closeBoot(b);
+    lock(b.host);
+    b.host.starting = false;
+    b.host.retry_at = w.GetTickCount64() + 250;
+    b.host.mutex.unlock();
+}
+
+fn handshakeWorker(b: Boot) void {
+    const deadline = w.GetTickCount64() + 15_000;
+    var ready: [15]u8 = undefined;
+    var ready_len: usize = 0;
+    var ok = false;
+    while (ready_len < ready.len and w.GetTickCount64() < deadline) {
+        var available: u32 = 0;
+        if (w.PeekNamedPipe(b.output, null, 0, null, &available, null) == 0) break;
+        if (available == 0) {
+            if (w.WaitForSingleObject(b.process, 0) == 0) break;
+            w.Sleep(5);
+            continue;
+        }
+        var count: u32 = 0;
+        if (w.ReadFile(b.output, ready[ready_len..].ptr, @intCast(ready.len - ready_len), &count, null) == 0 or count == 0) break;
+        ready_len += count;
+    }
+    if (ready_len >= "{\"ready\":true}\n".len and std.mem.eql(u8, ready[0..ready_len], "{\"ready\":true}\n")) ok = true;
+    if (!ok or state.g_chat_history_channels_closing.load(.acquire)) {
+        abortBoot(b);
+        return;
+    }
+    lock(b.host);
+    if (b.host.stopping or !b.host.starting) {
+        const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process };
+        b.host.starting = false;
+        b.host.mutex.unlock();
+        closeBoot(abort);
+        return;
+    }
+    b.host.process = b.process;
+    b.host.input = b.input;
+    b.host.output = b.output;
+    b.host.running = true;
+    b.host.starting = false;
+    b.host.mutex.unlock();
+    idle_budget.bump(.thread_spawn);
+    const thread = std.Thread.spawn(.{}, receive, .{b.host}) catch {
+        lock(b.host);
+        if (b.host.process) |process| _ = w.TerminateProcess(process, 0);
+        b.host.running = false;
+        b.host.process = null;
+        b.host.input = null;
+        b.host.output = null;
+        b.host.retry_at = w.GetTickCount64() + 250;
+        b.host.mutex.unlock();
+        return;
+    };
+    thread.detach();
+}
+
+fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
     if (host.wake == null) return false;
     var cmd: [2048]u16 = undefined;
@@ -136,18 +210,9 @@ fn start(host: *Host, index: u8) bool {
     var input: w.HANDLE = null;
     var output: w.HANDLE = null;
     var process: w.HANDLE = null;
-    var accepted = false;
     defer {
         if (child_input != null) _ = w.CloseHandle(child_input);
         if (child_output != null) _ = w.CloseHandle(child_output);
-        if (!accepted) {
-            if (process != null) {
-                _ = w.TerminateProcess(process, 0);
-                _ = w.CloseHandle(process);
-            }
-            if (input != null) _ = w.CloseHandle(input);
-            if (output != null) _ = w.CloseHandle(output);
-        }
     }
     if (w.CreatePipe(&child_input, &input, &sa, 1 << 20) == 0 or
         w.CreatePipe(&output, &child_output, &sa, 1 << 20) == 0 or
@@ -167,51 +232,68 @@ fn start(host: *Host, index: u8) bool {
     if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, console.SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) return false;
     _ = w.CloseHandle(pi.hThread);
     process = pi.hProcess;
-    if (state.g_tunnel_job == null or w.AssignProcessToJobObject(state.g_tunnel_job, process) == 0) return false;
-    const reader = @import("chat_session.zig").chatReaderBundle(a) orelse return false;
+    if (state.g_tunnel_job == null or w.AssignProcessToJobObject(state.g_tunnel_job, process) == 0) {
+        _ = w.TerminateProcess(process, 0);
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
+        return false;
+    }
+    const reader = @import("chat_session.zig").chatReaderBundle(a) orelse {
+        _ = w.TerminateProcess(process, 0);
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
+        return false;
+    };
     defer a.free(reader);
     const terminal_source = @embedFile("terminal_channel.py");
-    const terminal64 = a.alloc(u8, std.base64.standard.Encoder.calcSize(terminal_source.len)) catch return false;
+    const terminal64 = a.alloc(u8, std.base64.standard.Encoder.calcSize(terminal_source.len)) catch {
+        _ = w.TerminateProcess(process, 0);
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
+        return false;
+    };
     defer a.free(terminal64);
     _ = std.base64.standard.Encoder.encode(terminal64, terminal_source);
-    const broker = std.fmt.allocPrint(a, "TERMINAL_SOURCE = '{s}'\n{s}", .{ terminal64, @embedFile("chat_transport.py") }) catch return false;
+    const broker = std.fmt.allocPrint(a, "TERMINAL_SOURCE = '{s}'\n{s}", .{ terminal64, @embedFile("chat_transport.py") }) catch {
+        _ = w.TerminateProcess(process, 0);
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
+        return false;
+    };
     defer a.free(broker);
     for ([_][]const u8{ broker, reader }) |source| {
-        const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(source.len)) catch return false;
+        const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(source.len)) catch {
+            _ = w.TerminateProcess(process, 0);
+            _ = w.CloseHandle(process);
+            _ = w.CloseHandle(input);
+            _ = w.CloseHandle(output);
+            return false;
+        };
         defer a.free(encoded);
         _ = std.base64.standard.Encoder.encode(encoded, source);
-        if (!writeAll(input, encoded) or !writeAll(input, "\n")) return false;
-    }
-    const deadline = w.GetTickCount64() + 15_000;
-    var ready: [15]u8 = undefined;
-    var ready_len: usize = 0;
-    while (ready_len < ready.len and w.GetTickCount64() < deadline) {
-        var available: u32 = 0;
-        if (w.PeekNamedPipe(output, null, 0, null, &available, null) == 0) return false;
-        if (available == 0) {
-            if (w.WaitForSingleObject(process, 0) == 0) return false;
-            w.Sleep(5);
-            continue;
+        if (!writeAll(input, encoded) or !writeAll(input, "\n")) {
+            _ = w.TerminateProcess(process, 0);
+            _ = w.CloseHandle(process);
+            _ = w.CloseHandle(input);
+            _ = w.CloseHandle(output);
+            return false;
         }
-        var count: u32 = 0;
-        if (w.ReadFile(output, ready[ready_len..].ptr, @intCast(ready.len - ready_len), &count, null) == 0 or count == 0) return false;
-        ready_len += count;
     }
-    if (!std.mem.eql(u8, ready[0..ready_len], "{\"ready\":true}\n")) return false;
-    host.process = process;
-    host.input = input;
-    host.output = output;
-    host.running = true;
-    idle_budget.bump(.thread_spawn);
-    const thread = std.Thread.spawn(.{}, receive, .{host}) catch {
-        host.running = false;
-        host.process = null;
-        host.input = null;
-        host.output = null;
+    host.starting = true;
+    const job = Boot{ .host = host, .input = input, .output = output, .process = process };
+    const thread = std.Thread.spawn(.{}, handshakeWorker, .{job}) catch {
+        host.starting = false;
+        _ = w.TerminateProcess(process, 0);
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
         return false;
     };
     thread.detach();
-    accepted = true;
     return true;
 }
 
@@ -222,11 +304,12 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     defer host.mutex.unlock();
     if (host.channels.items.len >= 128) return null;
     if (!host.running) {
-        if (host.stopping or w.GetTickCount64() < host.retry_at) return null;
-        if (!start(host, index)) {
+        if (host.stopping or host.starting or w.GetTickCount64() < host.retry_at) return null;
+        if (!bootHost(host, index)) {
             host.retry_at = w.GetTickCount64() + 250;
             return null;
         }
+        return null;
     }
     if (host.next_id == std.math.maxInt(u32)) return null;
     host.next_id += 1;
@@ -332,7 +415,8 @@ pub fn close(channel: *Channel) void {
 pub fn shutdown() void {
     for (&hosts) |*host| {
         lock(host);
-        if (host.running) _ = w.TerminateProcess(host.process, 0);
+        if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
+        host.starting = false;
         for (host.channels.items) |channel| {
             channel.ended = true;
             notify(channel);
@@ -346,7 +430,8 @@ pub fn respawn(index: u8) void {
     const host = &hosts[index];
     lock(host);
     defer host.mutex.unlock();
-    if (host.running) _ = w.TerminateProcess(host.process, 0);
+    if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
+    host.starting = false;
 }
 
 fn rejectTerminal(channel: *Channel) bool {
@@ -397,6 +482,7 @@ fn receive(host: *Host) void {
     defer {
         lock(host);
         host.running = false;
+        host.starting = false;
         host.stopping = true;
         _ = w.SetEvent(host.wake);
         _ = w.TerminateProcess(host.process, 0);
