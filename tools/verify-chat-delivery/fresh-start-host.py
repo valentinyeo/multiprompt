@@ -86,7 +86,7 @@ def install(namespace, root, record):
                     event = row.get("event", {})
                     payload = event.get("payload") or {}
                     if event.get("kind") == "text.done" and HANDOVER in (payload.get("text") or ""):
-                        record("fresh-start-host.jsonl", stage="handover_visible", sid=s, text=payload.get("text"))
+                        record("fresh-start-host.jsonl", stage="handover_visible", sid=sub["sid"], text=payload.get("text"))
 
     namespace["host_deliver"] = deliver
     namespace["host_dispatch_switch"] = dispatch_switch
