@@ -14,32 +14,13 @@
                 if (-not (CaretSampleNonEmpty $sample)) { throw "session-caret: $Label caret rectangle is empty" }
                 return $sample.CaretRect
             }
-            function Test-CaretMotion([VerifyNative+CaretSnapshot]$First, [VerifyNative+CaretSnapshot]$Second) {
-                if ($First.Caret -ne $Second.Caret) { return $true }
-                $firstEmpty = -not (CaretSampleNonEmpty $First)
-                $secondEmpty = -not (CaretSampleNonEmpty $Second)
-                if ($firstEmpty -ne $secondEmpty) { return $true }
-                if ($firstEmpty) { return $false }
-                if ($First.CaretRect.Left -ne $Second.CaretRect.Left -or $First.CaretRect.Top -ne $Second.CaretRect.Top -or $First.CaretRect.Right -ne $Second.CaretRect.Right -or $First.CaretRect.Bottom -ne $Second.CaretRect.Bottom) { return $true }
-                return $false
-            }
             function Assert-CaretBlink {
                 if ([VerifyNative]::CaretBlinkTime() -eq [uint32]::MaxValue) { return }
-                $deadline = [DateTime]::UtcNow.AddMilliseconds(2000)
-                $sample = 0
-                $previous = $null
-                while ([DateTime]::UtcNow -lt $deadline) {
-                    Doctor
-                    Assert-Foreground
-                    $current = [VerifyNative]::GuiCaretSnapshot($script:window)
-                    Save-CaretSample ('blink-' + $sample) $current
-                    if (-not (CaretSampleNonEmpty $current)) { throw ('session-caret: blink-' + $sample + ' caret rectangle is empty') }
-                    if ($null -ne $previous -and (Test-CaretMotion $previous $current)) { return }
-                    $previous = $current
-                    $sample++
-                    Start-Sleep -Milliseconds 100
-                }
-                throw 'session-caret: caret did not blink within 2000ms'
+                Doctor
+                Assert-Foreground
+                $motion = [VerifyNative]::CaretPixelMotionMs($script:window, 2000, 50)
+                Save-Json @{ motionMs = $motion } 'caret-blink-motion.json'
+                if ($motion -lt 0) { throw 'session-caret: caret did not blink within 2000ms' }
             }
             Wait-Until { $null -ne (Read-Session) -and @((Read-Session).tabs).Count -ge 1 } 'initial CMD session'
             Type-Text 'abc'

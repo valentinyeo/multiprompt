@@ -955,6 +955,41 @@ public static class VerifyNative {
     }
     public static Rect CaretRect(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)).CaretRect; }
     public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)); }
+    static int[] SampleRectPixels(int left, int top, int width, int height) {
+        if (width <= 0 || height <= 0) throw new InvalidOperationException("Caret sample rectangle is empty");
+        Bitmap bitmap = new Bitmap(width, height);
+        using (Graphics graphics = Graphics.FromImage(bitmap)) {
+            graphics.CopyFromScreen(left, top, 0, 0, bitmap.Size);
+        }
+        int[] colors = new int[width * height];
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) colors[y * width + x] = bitmap.GetPixel(x, y).ToArgb();
+        bitmap.Dispose();
+        return colors;
+    }
+    static int PixelDiff(int[] first, int[] second) {
+        if (first.Length != second.Length) return int.MaxValue;
+        int diff = 0;
+        for (int i = 0; i < first.Length; i++) if (first[i] != second[i]) diff++;
+        return diff;
+    }
+    public static int CaretPixelMotionMs(IntPtr hwnd, int budgetMs, int stepMs) {
+        CaretSnapshot snap = GuiCaretSnapshot(hwnd);
+        if (snap.Caret == IntPtr.Zero || snap.CaretRect.Right <= snap.CaretRect.Left || snap.CaretRect.Bottom <= snap.CaretRect.Top)
+            throw new InvalidOperationException("Caret is not visible for pixel sampling");
+        Point origin = new Point { X = snap.CaretRect.Left, Y = snap.CaretRect.Top };
+        if (!ClientToScreen(snap.Caret, ref origin)) throw new InvalidOperationException("Cannot map caret to screen coordinates");
+        int width = snap.CaretRect.Right - snap.CaretRect.Left;
+        int height = snap.CaretRect.Bottom - snap.CaretRect.Top;
+        int[] baseline = SampleRectPixels(origin.X, origin.Y, width, height);
+        int elapsed = 0;
+        while (elapsed < budgetMs) {
+            Thread.Sleep(stepMs);
+            elapsed += stepMs;
+            int[] current = SampleRectPixels(origin.X, origin.Y, width, height);
+            if (PixelDiff(baseline, current) > 0) return elapsed;
+        }
+        return -1;
+    }
     static uint WindowThread(IntPtr hwnd) {
         uint pid;
         uint thread = GetWindowThreadProcessId(hwnd, out pid);
