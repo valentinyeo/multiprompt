@@ -17,5 +17,7 @@ test('Windows cancellation worker uses the production reader with its fixture bo
   assert.match(adapter[1], /if not self\.get_map\(\):\s+time\.sleep\([\s\S]*?return super\(\)\.select\(timeout\)/);
   assert.match(adapter[1], /namespace\["message_worker"\]\(tmux, provider, sid\)/);
   assert.doesNotMatch(adapter[1], /message_store_request|message_apply_connector|UPDATE shared_messages|message_dispatch/);
-  assert.match(source, /MODE == "message-worker" else ssh\(\)/);
+  assert.match(source, /run_message_worker\(\) if MODE == "message-worker"/);
+  assert.match(source, /bootstrap_fresh_start_host\(\) if MODE == "bootstrap-fresh-start"/);
+  assert.match(source, /else ssh\(\)/);
 });
