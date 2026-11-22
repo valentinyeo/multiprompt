@@ -152,6 +152,7 @@ const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const fetchAcPersistent = @import("vps.zig").fetchAcPersistent;
 const sshOneShotCaptureInput = @import("vps.zig").sshOneShotCaptureInput;
 const TMUX_HOST_DE = @import("app_state.zig").TMUX_HOST_DE;
+const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
@@ -1327,19 +1328,19 @@ fn chatAcFetchThread(req: ChatAcRequest) void {
     const session = std.mem.sliceTo(&req.session, 0);
     const cwd = std.mem.sliceTo(&req.cwd, 0);
     const owner_account = req.host == TMUX_HOST_DE and (std.mem.eql(u8, cwd, "/home/inne") or std.mem.startsWith(u8, cwd, "/home/inne/"));
+    const ac_host = if (owner_account) TMUX_HOST_INNE else req.host;
     const agent = if (req.agent == .codex) "codex" else "claude";
     const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
     const started = GetTickCount64();
     var bytes: [128 * 1024]u8 = undefined;
-    var n = if (owner_account) @as(usize, 0) else fetchAcPersistent(req.host, request, &bytes) orelse 0;
+    var n = fetchAcPersistent(ac_host, request, &bytes) orelse 0;
     if (n == 0) {
         var encoded: [1024]u8 = undefined;
         const b64 = std.base64.standard.Encoder.encode(&encoded, request);
         var command: [2048]u8 = undefined;
         var pos: usize = 0;
         if (appendSshExe(&command, &pos)) {
-            const helper = if (owner_account) "sudo -n -H -u inne -- python3 /home/inne/.local/share/zigshell/mp_complete.py" else "python3 ~/.local/share/zigshell/mp_complete.py";
-            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s} --once {s}", .{ tmuxSshTarget(req.host), helper, b64 }) catch "";
+            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} python3 ~/.local/share/zigshell/mp_complete.py --once {s}", .{ tmuxSshTarget(ac_host), b64 }) catch "";
             if (tail.len > 0) {
                 const result = sshOneShotCaptureInput(command[0 .. pos + tail.len], &bytes, null, 20_000);
                 n = result.len;
