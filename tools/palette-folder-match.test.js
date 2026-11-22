@@ -17,10 +17,11 @@ function body(signature) {
 }
 
 test('IGSH-1908: an open session matches Ctrl+K by its folder name', () => {
+  const rows = body('fn appendPaletteShellRows() void {');
+  assert.match(rows, /sessionFolderMatchesQuery\(&app_state\.shells\[i\], q\)/, 'open session rows test the folder name');
   const update = body('pub fn updateSearchResults() void {');
-  const loop = update.indexOf('const remote_host: ?u8');
-  const openRows = update.slice(loop, update.indexOf('appendTmuxCacheRows', loop));
-  assert.match(openRows, /sessionFolderMatchesQuery\(&app_state\.shells\[i\], q\)/, 'open session rows test the folder name');
+  const call = update.indexOf('appendPaletteShellRows()');
+  assert.ok(call >= 0 && update.indexOf('appendTmuxCacheRows', call) > call, 'session rows stay ahead of unattached tmux rows');
   assert.match(body('fn sessionFolderLeaf('), /claude_cwd_len > 0[\s\S]*cached_cwd/, 'folder comes from the chat folder, else the shell folder');
 });
 
