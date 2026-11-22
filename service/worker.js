@@ -25,7 +25,6 @@ function layoutResponse(request, value, status = 200) {
       delete visible.color;
     }
     if (!layoutFeature(request, 'bot_palette8') && visible.color === 7) delete visible.color;
-    if (!layoutFeature(request, 'csid')) delete visible.csid;
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'workspace_color')) value.layout.workspaces = value.layout.workspaces.map(({ color, ...workspace }) => workspace);
@@ -39,7 +38,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   if (value.layout && !layoutFeature(request, 'group_order')) delete value.layout.group_order;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups,csid' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
   return response;
 }
 export function validateLayout(x) {
@@ -70,8 +69,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group', 'starred_group', 'csid'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' || key === 'starred_group' ? t[key] !== '' && !text(t[key], 64) : key === 'csid' ? !/^[0-9a-fA-F-]{8,39}$/.test(t.csid) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group', 'starred_group'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' || key === 'starred_group' ? t[key] !== '' && !text(t[key], 64) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
