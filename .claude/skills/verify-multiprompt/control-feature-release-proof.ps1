@@ -12,7 +12,12 @@ function Save-ReleaseCheck([string]$Name, [hashtable]$Values) {
 
 function Find-ConsoleWindow {
     Wait-Until {
-        $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null)
+        $candidate = [IntPtr]::Zero
+        foreach ($pane in [VerifyNative]::OwnedPaneWindows($script:window)) {
+            $found = [VerifyNative]::FindWindowEx($pane, [IntPtr]::Zero, 'MPTerminal', $null)
+            if ($found -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($pane)) { $candidate = $found; break }
+        }
+        if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null) }
         if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal') }
         $candidate -ne [IntPtr]::Zero
     } 'hosted native terminal window' 60
@@ -27,7 +32,7 @@ function Focus-Console([string]$Step) {
         $client.Right -gt 0 -and $client.Bottom -gt 0
     } 'native terminal client area' 30
     [VerifyNative]::ClickClient($shell, [int]($client.Right / 2), [int]($client.Bottom - 40))
-    Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $shell } ('native terminal holds keyboard focus: ' + $Step) 30
+    Wait-Until { [VerifyNative]::GetFocusedWindow([VerifyNative]::GetAncestor($shell, 2)) -eq $shell -or [VerifyNative]::GetFocusedWindow($script:window) -eq $shell } ('native terminal holds keyboard focus: ' + $Step) 30
     return $shell
 }
 
@@ -128,6 +133,8 @@ Wait-Until {
     $null -ne $saved -and $saved.tabs[$saved.active_tab].tmux_session -ceq 'verify-agent-1'
 } 'first server shell tab selected'
 $shell = Focus-Console 'caret-before-switch'
+Save-Json @([VerifyNative]::OwnedPaneWindows($script:window) | ForEach-Object { [VerifyNative]::WindowIdentity($_) }) 'console-panes.json'
+Save-Json ([VerifyNative]::WindowIdentity($shell)) 'console-terminal.json'
 Snapshot 'caret-console-focused'
 $beforeCaret = Measure-CaretBlink 'console-before-switch'
 Press @(0x11, 0x32) 'Ctrl+2: switch to the other session'
