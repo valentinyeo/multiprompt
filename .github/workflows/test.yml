@@ -688,7 +688,7 @@ jobs:
         env:
           CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
         run: |
-          if ! grep -q 'client_id' .chat-row-base/src/chat_echo.zig; then
+          if ! grep -qE '^[[:space:]]+client_id[[:space:]]*:' .chat-row-base/src/chat_echo.zig; then
             echo 'Base no longer uses identity-only matching'
             exit 0
           fi
@@ -702,7 +702,7 @@ jobs:
           grep -q 'TestExpectedEqual' "$RUNNER_TEMP/chat-row-before.log"
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: timeout 180 node --test tools/chat-row-identity.test.js
+        run: timeout 180 node --test tools/chat-row-identity.test.js tools/chat-row-identity-guard.test.js
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs
