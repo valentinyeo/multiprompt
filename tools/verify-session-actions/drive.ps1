@@ -121,6 +121,10 @@ function Start-App {
     }
     [void](Wait-For 'both restored transports painted their consoles' {
         $consoleLog=Join-Path $env:MP_VERIFY_STATE 'console.jsonl'
+        foreach ($failure in @(Get-ChildItem $env:MP_VERIFY_STATE -Filter 'transport-failure-*.json' -ErrorAction SilentlyContinue)) {
+            $cause=Get-Content $failure.FullName -Raw | ConvertFrom-Json
+            if ($cause.ms -ge $launchAt) { throw ('Restored transport ' + $cause.session + ' stopped painting: ' + $cause.error) }
+        }
         if (!(Test-Path $consoleLog)) { return $false }
         $painted=@(Get-Content $consoleLog | ForEach-Object { try { $_ | ConvertFrom-Json } catch {} } | Where-Object { $_.ms -ge $launchAt } | Select-Object -ExpandProperty session -Unique)
         @($names | Where-Object { $_ -in $painted }).Count -eq 2

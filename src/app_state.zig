@@ -1288,6 +1288,7 @@ pub var g_chat_block_count: usize = 0;
 pub var g_chat_rich_fonts: [12]HANDLE = @splat(null);
 pub var g_chat_screen: [262144]u16 = undefined;
 pub var g_chat_browser_swap: chat_switch.Pending = .{};
+pub var g_chat_ready_deferred: chat_switch.Deferred = .{};
 pub var g_browser_onscreen: browser_onscreen.OnScreen = .{};
 pub var g_chat_switch_preparing = false;
 pub var g_chat_switch_started: u64 = 0;

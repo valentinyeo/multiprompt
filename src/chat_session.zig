@@ -1439,7 +1439,7 @@ var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
 
 pub fn chatFileOnReady() void {
-    if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (!app_state.g_chat_ready_deferred.arrive(app_state.g_chat_browser_swap.shell_id != 0)) return;
     const key = chatCacheIdentity();
     var active_changed = false;
     var preview_changed = false;
@@ -2029,6 +2029,12 @@ pub fn chatSwitchContentPainted() void {
     debugLog(line);
 }
 
+pub fn chatFileReadyDeferredFlush() void {
+    if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (!app_state.g_chat_ready_deferred.take()) return;
+    if (app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
+}
+
 pub fn chatSwitchBrowserTick() void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
@@ -2054,6 +2060,7 @@ pub fn chatSwitchBrowserTick() void {
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
     if (!app_state.g_chat_browser_swap.take(app_state.shells[app_state.active_shell].shell_id)) return;
+    chatFileReadyDeferredFlush();
     parkInactiveBrowserPanes();
     ecoqosReevaluateAll();
     if (app_state.shells[app_state.active_shell].browser_frozen) wakeBrowserPaneFromFreeze(app_state.active_shell);

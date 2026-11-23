@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 
 ROOT = Path(os.environ["MP_VERIFY_STATE"])
@@ -820,9 +821,51 @@ def console_rows(lines, width):
     return rows
 
 
+def console_geometry(info):
+    return (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
+
+
+def paint_fake_console(kernel, handle, session, claude, info, count):
+    shown = fake_screen(claude, False)
+    lines = console_rows(shown.splitlines(), info.size.X - 1)
+    top = max(0, info.window.Bottom - len(lines))
+    row = next(i for i, line in enumerate(lines) if line.startswith("❯"))
+    size = info.size.X * info.size.Y
+    if not kernel.FillConsoleOutputCharacterW(handle, " ", size, COORD(0, 0), ctypes.byref(count)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    kernel.FillConsoleOutputAttribute(handle, 7, size, COORD(0, 0), ctypes.byref(count))
+    kernel.SetConsoleCursorPosition(handle, COORD(0, top))
+    kernel.SetConsoleTextAttribute(handle, 7)
+    text = "\r\n".join(lines) + "\r\n"
+    if not kernel.WriteConsoleW(handle, text, len(text), ctypes.byref(count), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    grey = fake_suggestion_shown(claude)
+    if grey and not kernel.FillConsoleOutputAttribute(handle, 8, len(claude["suggestion"]), COORD(2, top + row), ctypes.byref(count)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    kernel.SetConsoleCursorPosition(handle, COORD(2, top + row))
+    raw = ctypes.create_unicode_buffer(info.size.X * len(lines))
+    if not kernel.ReadConsoleOutputCharacterW(handle, raw, len(raw), COORD(0, top), ctypes.byref(count)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(len(lines))]
+    attribute = wintypes.WORD()
+    if not kernel.ReadConsoleOutputAttribute(handle, ctypes.byref(attribute), 1, COORD(2, top + row), ctypes.byref(count)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return shown, rows, top + row, attribute.value, grey
+
+
 def attach_fake(session):
     if (ROOT / "console-detached").exists():
         return
+    try:
+        attach_fake_paint(session)
+    except BaseException as error:
+        (ROOT / f"transport-failure-{os.getpid()}.json").write_text(json.dumps(dict(
+            ms=time.time_ns() // 1000000, pid=os.getpid(), session=session,
+            error=f"{type(error).__name__}: {error}", trace=traceback.format_exc())), encoding="utf-8")
+        raise
+
+
+def attach_fake_paint(session):
     kernel = console_kernel()
     handle = kernel.GetStdHandle(-11)
     previous = None
@@ -835,37 +878,20 @@ def attach_fake(session):
         count = wintypes.DWORD()
         if not kernel.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
             raise ctypes.WinError(ctypes.get_last_error())
-        geometry = (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
+        geometry = console_geometry(info)
         if (claude, geometry) != previous:
-            shown = fake_screen(claude, False)
-            lines = console_rows(shown.splitlines(), info.size.X - 1)
-            top = max(0, info.window.Bottom - len(lines))
-            row = next(i for i, line in enumerate(lines) if line.startswith("❯"))
-            size = info.size.X * info.size.Y
-            if not kernel.FillConsoleOutputCharacterW(handle, " ", size, COORD(0, 0), ctypes.byref(count)):
+            shown, rows, prompt_row, attribute, grey = paint_fake_console(kernel, handle, session, claude, info, count)
+            after = INFO()
+            if not kernel.GetConsoleScreenBufferInfo(handle, ctypes.byref(after)):
                 raise ctypes.WinError(ctypes.get_last_error())
-            kernel.FillConsoleOutputAttribute(handle, 7, size, COORD(0, 0), ctypes.byref(count))
-            kernel.SetConsoleCursorPosition(handle, COORD(0, top))
-            kernel.SetConsoleTextAttribute(handle, 7)
-            text = "\r\n".join(lines) + "\r\n"
-            if not kernel.WriteConsoleW(handle, text, len(text), ctypes.byref(count), None):
-                raise ctypes.WinError(ctypes.get_last_error())
-            grey = fake_suggestion_shown(claude)
-            if grey and not kernel.FillConsoleOutputAttribute(handle, 8, len(claude["suggestion"]), COORD(2, top + row), ctypes.byref(count)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            kernel.SetConsoleCursorPosition(handle, COORD(2, top + row))
-            raw = ctypes.create_unicode_buffer(info.size.X * len(lines))
-            if not kernel.ReadConsoleOutputCharacterW(handle, raw, len(raw), COORD(0, top), ctypes.byref(count)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(len(lines))]
-            if rows != [line.rstrip() for line in lines]:
+            if console_geometry(after) != geometry:
+                previous = None
+                continue
+            if rows != [line.rstrip() for line in console_rows(shown.splitlines(), info.size.X - 1)]:
                 raise RuntimeError("Console screen readback mismatch")
-            attribute = wintypes.WORD()
-            if not kernel.ReadConsoleOutputAttribute(handle, ctypes.byref(attribute), 1, COORD(2, top + row), ctypes.byref(count)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            if grey and attribute.value != 8:
+            if grey and attribute != 8:
                 raise RuntimeError("Console suggestion is not grey")
-            record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=attribute.value, promptRow=top + row, greySuggestion=grey)
+            record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=attribute, promptRow=prompt_row, greySuggestion=grey)
             (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")
             previous = (claude, geometry)
         time.sleep(0.05)

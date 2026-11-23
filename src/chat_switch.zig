@@ -35,6 +35,46 @@ pub const Pending = struct {
     }
 };
 
+pub const Deferred = struct {
+    pending: bool = false,
+
+    pub fn arrive(self: *Deferred, swap_pending: bool) bool {
+        if (swap_pending) {
+            self.pending = true;
+            return false;
+        }
+        return true;
+    }
+
+    pub fn take(self: *Deferred) bool {
+        const ready = self.pending;
+        self.pending = false;
+        return ready;
+    }
+};
+
+test "a chat file ready that arrives during a pending switch paint is kept" {
+    var deferred = Deferred{};
+    try std.testing.expect(!deferred.arrive(true));
+    try std.testing.expect(deferred.pending);
+    try std.testing.expect(!deferred.arrive(true));
+    try std.testing.expect(deferred.pending);
+}
+
+test "the kept chat file ready fires once the switch settles" {
+    var deferred = Deferred{};
+    _ = deferred.arrive(true);
+    try std.testing.expect(deferred.take());
+    try std.testing.expect(!deferred.take());
+}
+
+test "a chat file ready with no switch in flight is handled at once" {
+    var deferred = Deferred{};
+    try std.testing.expect(deferred.arrive(false));
+    try std.testing.expect(!deferred.pending);
+    try std.testing.expect(!deferred.take());
+}
+
 test "rapid switches only consume the last painted target" {
     var pending = Pending{};
     pending.request(1, 1000);

@@ -1,0 +1,1 @@
+Restored chats sometimes stay blank at startup

@@ -2125,6 +2125,7 @@ pub fn closeChatView() void {
     app_state.g_chat_browser_swap.cancel();
     app_state.g_chat_switch_browser_sid = 0;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
+    @import("chat_session.zig").chatFileReadyDeferredFlush();
     app_state.g_chat_switch_loading = false;
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_screen_status_len = 0;

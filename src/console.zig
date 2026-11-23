@@ -2988,6 +2988,7 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_chat_browser_swap.cancel();
         app_state.g_chat_switch_browser_sid = 0;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
+        @import("chat_session.zig").chatFileReadyDeferredFlush();
     }
     app_state.g_browser_focus_mode = false;
     const prev = app_state.active_shell;
