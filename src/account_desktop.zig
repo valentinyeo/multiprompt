@@ -193,8 +193,10 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
         const ws: usize = if (app_state.g_single_window) shell.workspace else 0;
         if (ws >= workspaces.items.len) return error.InvalidLayout;
         const name = try std.unicode.utf16LeToUtf8Alloc(a, shell.name[0..shell.name_len]);
+        var state = try @import("tab_state_desktop.zig").capture(a, shell_index);
+        if (!include_local) state.chat_id = 0;
         try tabs.append(a, .{
-            .tab_state = try @import("tab_state_desktop.zig").capture(a, shell_index),
+            .tab_state = state,
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
@@ -220,7 +222,9 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             known_workspace = true;
         };
         if (!known_workspace) continue;
-        try tabs.append(a, .{ .tab_state = try state.dupe(a), .name = try a.dupe(u8, state.name), .manual = true, .group = if (state.group) |group| try a.dupe(u8, group) else "", .tmux_session = try a.dupe(u8, state.tmux), .tmux_host = entry.host, .workspace = try a.dupe(u8, state.workspace) });
+        var portable = try state.dupe(a);
+        portable.chat_id = 0;
+        try tabs.append(a, .{ .tab_state = portable, .name = try a.dupe(u8, state.name), .manual = true, .group = if (state.group) |group| try a.dupe(u8, group) else "", .tmux_session = try a.dupe(u8, state.tmux), .tmux_host = entry.host, .workspace = try a.dupe(u8, state.workspace) });
     };
     const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
     return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
@@ -1771,7 +1775,15 @@ pub fn applyServerLayout(json: []const u8) !void {
             try app_state.g_tmux_closed.close(std.heap.page_allocator, tab.tmux_host, tab.tmux_session);
             for (app_state.g_tmux_closed.entries.items) |*entry| {
                 if (!tmux_identity.same(entry.host, entry.name[0..entry.len], tab.tmux_host, tab.tmux_session)) continue;
-                if (entry.tab_state == null) entry.tab_state = try state.dupe(std.heap.page_allocator);
+                if (entry.tab_state == null) {
+                    var saved = try state.dupe(std.heap.page_allocator);
+                    for (app_state.shells[0..app_state.shell_count]) |shell| {
+                        if (!tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], tab.tmux_host, tab.tmux_session)) continue;
+                        saved.chat_id = shell.chat_id;
+                        break;
+                    }
+                    entry.tab_state = saved;
+                }
             }
         };
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);

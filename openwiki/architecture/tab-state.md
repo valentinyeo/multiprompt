@@ -21,7 +21,7 @@ The record also retains `shell`, `agent`, `cwd` and the local draft identity `ch
 
 ## Conflicts and compatibility
 
-The desktop serializes UI and CLI writes. An expected-state mismatch refuses without changes; callers reread and retry deliberately. Account sync carries portable tmux records; local and plain SSH tabs remain in the desktop session layout. Account sync may update a live record but cannot clear a close tombstone. Only an explicit open/restore can do that. Visibility always comes from the current desktop, never account sync or process health. If an acknowledgement is lost, report failure and reconcile with PC-state on retry; do not claim that a distributed timeout proves rollback.
+The desktop serializes UI and CLI writes. An expected-state mismatch refuses without changes; callers reread and retry deliberately. Account sync carries portable tmux records with `chat_id` cleared; draft files and their identities remain local. Local and plain SSH tabs remain in the desktop session layout. Account sync may update a live record but cannot clear a close tombstone. Only an explicit open/restore can do that. Visibility always comes from the current desktop, never account sync or process health. If an acknowledgement is lost, report failure and reconcile with PC-state on retry; do not claim that a distributed timeout proves rollback.
 
 Old clients may read the existing layout fields. New clients require the tab-state bridge and refuse to mutate through an older desktop. Android can keep reading portable layout fields; paired Android support must consume the optional tab-state record before offering these verbs.
 
