@@ -141,6 +141,45 @@ pub fn withoutRemovedWorkspaces(a: Allocator, target: Layout, removed: []const [
     return result;
 }
 
+pub fn prepareArchiveCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
+    var root = try std.json.parseFromSliceLeaky(std.json.Value, a, try prepareCache(a, cache, remote), .{ .allocate = .alloc_always });
+    var groups = root.object.get("groups") orelse std.json.Value{ .array = .init(a) };
+    if (groups != .array) return error.InvalidLayout;
+    var next_id: i64 = 1;
+    for (groups.array.items) |group| {
+        const id = @import("json_reader.zig").uint(group, "id");
+        if (id >= std.math.maxInt(u32)) return error.InvalidLayout;
+        next_id = @max(next_id, @as(i64, @intCast(id)) + 1);
+    }
+    for (root.object.getPtr("tabs").?.array.items) |*record| {
+        const session = @import("json_reader.zig").field(record.*, "tmux_session");
+        if (session != .string) continue;
+        const host = @import("json_reader.zig").uint(record.*, "tmux_host");
+        for (remote.tabs) |tab| {
+            if (host != tab.tmux_host or !std.ascii.eqlIgnoreCase(session.string, tab.tmux_session)) continue;
+            inline for (.{ .{ "group", "group_id" }, .{ "starred_group", "starred_group_id" } }) |fields| {
+                if (@field(tab, fields[0])) |name| {
+                    const id: i64 = if (name.len == 0) 0 else for (groups.array.items) |group| {
+                        const existing = @import("json_reader.zig").field(group, "name");
+                        if (existing == .string and eq(u8, existing.string, name)) break @intCast(@import("json_reader.zig").uint(group, "id"));
+                    } else blk: {
+                        var group: std.json.Value = .{ .object = .empty };
+                        try group.object.put(a, "id", .{ .integer = next_id });
+                        try group.object.put(a, "name", .{ .string = name });
+                        try groups.array.append(group);
+                        next_id += 1;
+                        break :blk next_id - 1;
+                    };
+                    try record.object.put(a, fields[1], .{ .integer = id });
+                }
+            }
+            break;
+        }
+    }
+    try root.object.put(a, "groups", groups);
+    return std.json.Stringify.valueAlloc(a, root, .{});
+}
+
 pub fn archivedWorkspaceFromCache(a: Allocator, cache: []const u8, name: []const u8) !Layout {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, cache, .{ .allocate = .alloc_always });
     defer parsed.deinit();
@@ -1642,4 +1681,22 @@ test "SOFT-2295 an offline archive captures saved remote sessions without upload
     const wire = try layout.encode(a, captured);
     try std.testing.expect(std.mem.indexOf(u8, wire, "pid") == null);
     try std.testing.expect(std.mem.indexOf(u8, wire, "Local") == null);
+}
+
+test "SOFT-2295 remote archive snapshots restore both group memberships and preserve local commands" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const remote = Layout{ .workspaces = &.{.{ .name = "Project", .color = 3 }}, .tabs = &.{.{ .name = "Runner", .tmux_session = "runner", .tmux_host = 1, .workspace = "Project", .group = "Work", .starred_group = "Pinned", .favorite = true }} };
+    const cache = "{\"workspaces\":[{\"name\":\"Project\"}],\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Local\",\"pid\":123,\"workspace\":0,\"group_id\":7}],\"groups\":[{\"id\":7,\"name\":\"Local group\"}]}";
+    const snapshot = try prepareArchiveCache(a, cache, remote);
+    const saved = try std.json.parseFromSlice(std.json.Value, a, snapshot, .{});
+    defer saved.deinit();
+    try std.testing.expectEqual(@as(usize, 2), saved.value.object.get("tabs").?.array.items.len);
+    try std.testing.expectEqual(@as(i64, 7), saved.value.object.get("tabs").?.array.items[1].object.get("group_id").?.integer);
+    const captured = try archivedWorkspaceFromCache(a, snapshot, "Project");
+    try std.testing.expectEqualStrings("Work", captured.tabs[0].group.?);
+    try std.testing.expectEqualStrings("Pinned", captured.tabs[0].starred_group.?);
+    try std.testing.expect(captured.tabs[0].favorite.?);
+    try std.testing.expectEqual(@as(?u8, 3), captured.workspaces[0].color);
 }

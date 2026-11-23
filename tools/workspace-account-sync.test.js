@@ -41,7 +41,7 @@ test('SOFT-2295 startup and running pulls materialize archive snapshots before s
   const reconcile = body(workspaces, 'applyAccountWorkspaceArchives');
   assert.match(reconcile, /exportSlotSessionFile\(slot\)/);
   assert.match(reconcile, /hibernateWorkspaceShell\(si\)/);
-  assert.match(reconcile, /prepareCache/);
+  assert.match(reconcile, /prepareArchiveCache/);
   assert.match(reconcile, /absorbWorkspaceIntoSlots/);
   assert.match(reconcile, /rememberRemovedWorkspace/);
   assert.doesNotMatch(reconcile, /endTmux|killRemote/);
@@ -52,5 +52,5 @@ test('SOFT-2295 hosted archive restore delete conflict and legacy-wire round tri
     cwd: path.join(__dirname, '..'), encoding: 'utf8', timeout: 120000
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 5 tests passed/);
+  assert.match(result.stderr, /All 6 tests passed/);
 });

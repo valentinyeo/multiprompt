@@ -1230,7 +1230,7 @@ pub fn applyAccountWorkspaceArchives(a: std.mem.Allocator, target: @import("sess
         const path = getSessionPathForWorkspace(&path_buf, entry.id[0..entry.id_len]) orelse return error.Storage;
         const old = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY);
         defer if (old) |bytes| std.heap.page_allocator.free(bytes);
-        const snapshot = try @import("account_layout.zig").prepareCache(a, old orelse "{\"tabs\":[]}", .{ .workspaces = &.{.{ .name = workspace.name, .color = workspace.color }}, .tabs = tabs.items });
+        const snapshot = try @import("account_layout.zig").prepareArchiveCache(a, old orelse "{\"tabs\":[]}", .{ .workspaces = &.{.{ .name = workspace.name, .color = workspace.color }}, .tabs = tabs.items });
         if (!writeFileAtomicW(path, snapshot)) return error.Storage;
         entry.archived = true;
         entry.restore = false;
