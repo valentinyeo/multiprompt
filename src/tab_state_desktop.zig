@@ -79,6 +79,28 @@ fn failure(out: []u8, reason: []const u8) usize {
     return response(out, .{ .ok = false, .@"error" = reason });
 }
 
+pub fn appendState(out: []u8, pos: *usize, idx: usize) bool {
+    var arena: std.heap.ArenaAllocator = .init(a);
+    defer arena.deinit();
+    const state = capture(arena.allocator(), idx) catch return false;
+    const bytes = std.json.Stringify.valueAlloc(arena.allocator(), state, .{}) catch return false;
+    return @import("archive.zig").appendAsciiBuf(out, pos, ",\"tab_state\":") and @import("archive.zig").appendAsciiBuf(out, pos, bytes);
+}
+
+pub fn appendClosed(out: []u8, pos: *usize) bool {
+    if (!@import("archive.zig").appendAsciiBuf(out, pos, ",\"closed_tabs\":[")) return false;
+    var first = true;
+    for (app.g_tmux_closed.entries.items) |entry| {
+        const state = entry.tab_state orelse continue;
+        if (!first and !@import("archive.zig").appendAsciiBuf(out, pos, ",")) return false;
+        first = false;
+        const bytes = std.json.Stringify.valueAlloc(a, state, .{}) catch return false;
+        defer a.free(bytes);
+        if (!@import("archive.zig").appendAsciiBuf(out, pos, bytes)) return false;
+    }
+    return @import("archive.zig").appendAsciiBuf(out, pos, "]");
+}
+
 pub fn pcState(out: []u8) usize {
     var arena: std.heap.ArenaAllocator = .init(a);
     defer arena.deinit();

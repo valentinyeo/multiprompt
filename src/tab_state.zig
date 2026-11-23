@@ -19,6 +19,15 @@ pub const State = struct {
     tmux: []const u8,
     name: []const u8,
 
+    pub fn jsonStringify(self: State, json: anytype) !void {
+        try json.beginObject();
+        inline for (std.meta.fields(State)) |field| {
+            try json.objectField(field.name);
+            try json.write(@field(self, field.name));
+        }
+        try json.endObject();
+    }
+
     pub fn dupe(self: State, a: std.mem.Allocator) !State {
         var result = self;
         inline for (std.meta.fields(State)) |field| {
@@ -50,7 +59,7 @@ pub fn equal(a: State, b: State) bool {
             if (!std.mem.eql(u8, x, y)) return false;
         } else if (field.type == ?[]const u8) {
             if ((x == null) != (y == null)) return false;
-            if (x) |text| if (!std.mem.eql(u8, text, y.?)) return false;
+            if (x) |value| if (!std.mem.eql(u8, value, y.?)) return false;
         } else if (x != y) return false;
     }
     return true;

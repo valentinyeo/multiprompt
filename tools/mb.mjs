@@ -8,12 +8,12 @@ import { pathToFileURL } from 'node:url';
 import { run as layoutRun } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
-const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
+const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo,tab_state';
 const USAGE = `usage: mb <command> [options]
 
 commands:
   list [--json]
-  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
+  open [name] [--kind shell|chat --tmux <name> --workspace <name>] [--sid ID] [--group <group>] [--title <text>] [--host N] [--json]
   close <name> [--host N] [--json]
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
@@ -23,7 +23,7 @@ commands:
   restore <name> [--host N] [--json]
   restart <name> [--host N]
   rename <name> <title> [--host N]
-  move <name> [--group <group>] [--workspace <name>] [--host N]
+  move <name> [--group <group>] [--workspace <name>] [--position N] [--host N] [--json]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
@@ -322,23 +322,6 @@ async function restartSession(ctx, flags) {
   ctx.out(`${word} ${clean(flags._[0])}`);
 }
 
-async function close(ctx, flags) {
-  const name = flags._[0];
-  if (!name || flags._.length !== 1) throw new Failure('give one session name');
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  const owners = readOwners(ctx);
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, name, host);
-    if (!tab) return null;
-    layout.tabs = layout.tabs.filter(item => item !== tab);
-    return layout;
-  });
-  const session = name;
-  const owned = Object.values(owners.sessions).find(item => item.owner === 'mb' && (item.session.toLowerCase() === clean(session).toLowerCase() || clean(item.name || '').toLowerCase() === clean(session).toLowerCase()) && (host === null || item.host === host));
-  if (owned) await releaseOwned(ctx, owners, owned);
-  ctx.out(`${result.changed ? 'closed' : 'already closed'} ${clean(name)}${result.changed ? ` (revision ${result.revision})` : ''}`);
-}
-
 async function releaseOwned(ctx, owners, owned) {
   const id = `${owned.host}:${owned.session.toLowerCase()}`;
   if (owned.provider && owned.sid) {
@@ -364,28 +347,10 @@ async function renameSession(ctx, flags) {
     if (!tab) throw new Failure('no such session');
     if (tab.name === title) return null;
     tab.name = title;
+    if (tab.tab_state) tab.tab_state.name = title;
     return layout;
   });
   ctx.out(result.changed ? `renamed ${flags._[0]} (revision ${result.revision})` : `already renamed ${flags._[0]}`);
-}
-
-async function moveSession(ctx, flags) {
-  if (flags._.length !== 1) throw new Failure('move needs one session');
-  if (flags.group === undefined && flags.workspace === undefined) throw new Failure('give --group or --workspace');
-  const group = flags.group === undefined ? null : groupName(flags.group);
-  const workspace = flags.workspace === undefined ? null : workspaceName(flags.workspace);
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  if (group !== null) requireFeature(await readLayout(ctx), 'groups');
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, flags._[0], host);
-    if (!tab) throw new Failure('no such session');
-    if (workspace && !layout.workspaces.some(item => item.name === workspace)) throw new Failure(`workspace ${workspace} not found or not visible to this key`);
-    let changed = false;
-    if (workspace && tab.workspace !== workspace) { tab.workspace = workspace; changed = true; }
-    if (group !== null && (tab.group || null) !== group) { tab.group = group; changed = true; }
-    return changed ? layout : null;
-  });
-  ctx.out(result.changed ? `moved ${flags._[0]} (revision ${result.revision})` : `already moved ${flags._[0]}`);
 }
 
 async function style(ctx, flags) {
@@ -905,7 +870,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, restart: restartSession, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, restart: restartSession, rename: renameSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

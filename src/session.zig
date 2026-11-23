@@ -253,6 +253,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (!@import("tab_state_desktop.zig").appendState(&json_buf, &pos, i)) return false;
+
         const wake_id: u32 = if (workspace_filter != null) @intCast(written_tabs) else app_state.shells[i].wake_id;
         if (wake_id != 0) {
             const pre_id = ",\"wake_id\":";

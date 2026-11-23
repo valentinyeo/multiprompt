@@ -2109,6 +2109,7 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
         if (@import("capacity.zig").remoteHostForShell(&shell) != null) {
             if (!zsbAppendSessionState(out, pos, &shell)) return false;
         } else if (!appendAsciiBuf(out, pos, ",\"state\":null")) return false;
+        if (!@import("tab_state_desktop.zig").appendState(out, pos, i)) return false;
         if (!appendAsciiBuf(out, pos, "}")) return false;
     }
     return appendAsciiBuf(out, pos, "]");
@@ -2147,7 +2148,9 @@ fn zsbWorkspaceList(out: []u8) usize {
         if (!zsbWorkspaceTabs(out, &pos, @intCast(wi), 0)) return 0;
         if (!appendAsciiBuf(out, &pos, "}")) return 0;
     }
-    if (!appendAsciiBuf(out, &pos, "]}\n")) return 0;
+    if (!appendAsciiBuf(out, &pos, "]")) return 0;
+    if (!@import("tab_state_desktop.zig").appendClosed(out, &pos)) return 0;
+    if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
     return pos;
 }
 

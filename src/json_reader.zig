@@ -227,6 +227,13 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         if (std.mem.eql(u8, mode, "everywhere")) tab.cv = !tab.cso;
         if (std.mem.eql(u8, mode, "nowhere")) tab.cv = false;
         tab.inbox_archived = boolTrue(obj, "iah");
+        const tab_state = field(obj, "tab_state");
+        if (tab_state == .object) {
+            tab.pinned_top = boolTrue(tab_state, "pinned");
+            tab.inbox_archived = boolTrue(tab_state, "waiting");
+            tab.cv = std.mem.eql(u8, string(field(tab_state, "kind")) orelse "shell", "chat");
+            tab.claude_sid_len = copyString(tab_state, "sid", &tab.claude_sid);
+        }
         tab.needs_attention = boolTrue(obj, "att");
         tab.bnat = !boolFalse(obj, "bnat");
         tab.shell_id = @intCast(@min(uint(obj, "shell_id"), std.math.maxInt(u32)));

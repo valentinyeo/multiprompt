@@ -187,13 +187,14 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
         if (name.len > 32) return error.InvalidLayout;
         try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
     }
-    for (app_state.shells[0..app_state.shell_count]) |shell| {
+    for (app_state.shells[0..app_state.shell_count], 0..) |shell, shell_index| {
         const remote = shell.tmux_session_len > 0;
         if (!include_local and !remote) continue;
         const ws: usize = if (app_state.g_single_window) shell.workspace else 0;
         if (ws >= workspaces.items.len) return error.InvalidLayout;
         const name = try std.unicode.utf16LeToUtf8Alloc(a, shell.name[0..shell.name_len]);
         try tabs.append(a, .{
+            .tab_state = try @import("tab_state_desktop.zig").capture(a, shell_index),
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
@@ -1857,6 +1858,15 @@ pub fn applyServerLayout(json: []const u8) !void {
         const shell = &app_state.shells[dest];
         if (account_layout.find(server.value.tabs, tab) != null) {
             shell.sync_owned = true;
+            if (tab.tab_state) |state| {
+                shell.pinned_top = state.pinned;
+                shell.inbox_archived = state.waiting;
+                shell.chat_view_on = state.kind == .chat;
+                if (state.sid) |sid| {
+                    @memcpy(shell.claude_sid[0..sid.len], sid);
+                    shell.claude_sid_len = @intCast(sid.len);
+                }
+            }
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);

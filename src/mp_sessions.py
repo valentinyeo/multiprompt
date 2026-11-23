@@ -34,15 +34,20 @@ def health_report_fn():
     return _health_report_fn
 
 
-def tab_command_fn():
-    existing = globals().get("tab_command")
+_tab_state_module = None
+
+
+def tab_state_fn(name):
+    global _tab_state_module
+    existing = globals().get(name)
     if callable(existing):
         return existing
-    source = Path(__file__).resolve().with_name("mp_tab_state.py")
-    spec = importlib.util.spec_from_file_location("mp_tab_state", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.tab_command
+    if _tab_state_module is None:
+        source = Path(__file__).resolve().with_name("mp_tab_state.py")
+        spec = importlib.util.spec_from_file_location("mp_tab_state", source)
+        _tab_state_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_tab_state_module)
+    return getattr(_tab_state_module, name)
 
 
 def load_send(session_api=True):
@@ -130,15 +135,14 @@ def session_catalog(send, listing):
             tmux = tab.get("tmux")
             if not isinstance(tmux, str):
                 continue
-            rows[tmux] = dict(
-                name=tab.get("title") or names.get(tmux) or tmux,
-                tmux=tmux,
-                host=tab.get("host"),
-                workspace=workspace,
-                group=group,
-                tab_id=tab.get("id"),
-                tab_open=True,
-            )
+            state = tab.get("tab_state") or {}
+            row = dict(name=tab.get("title") or names.get(tmux) or tmux, tmux=tmux,
+                       host=tab.get("host"), workspace=workspace, group=group,
+                       tab_id=tab.get("id"), tab_open=True)
+            row.update(state)
+            rows[(row.get("host"), tmux)] = row
+        for state in listing.get("closed_tabs") or []:
+            rows.setdefault((state["host"], state["tmux"]), dict(state, tab_open=False))
     for path in sorted(send.host_root().glob("*.config.json")):
         config = send.read_json(path)
         if not config or config.get("helper_parent"):
@@ -151,31 +155,22 @@ def session_catalog(send, listing):
         provider = config.get("provider") or state.get("provider") or "claude"
         sid = state.get("sid") or config.get("sid")
         alive = send.pid_alive(state.get("pid"))
-        row = rows.get(tmux, dict(tmux=tmux, tab_open=False))
-        row.update(
-            provider=provider,
-            sid=sid,
-            folder=config.get("cwd"),
-            spawn_name=config.get("spawn_name"),
-            host=row.get("host") or config.get("spawn_host_name"),
-            workspace=row.get("workspace") or config.get("spawn_workspace"),
-            group=row.get("group") if "group" in row else config.get("spawn_group"),
-            spawn_tab_kind=config.get("spawn_tab_kind"),
-        )
-        if not row.get("tab_open"):
-            after = config.get("spawn_after_tab")
-            if isinstance(after, int):
-                row["after_tab"] = after
+        candidates = [row for row in rows.values() if row["tmux"] == tmux]
+        matched = [row for row in candidates if row.get("sid") == sid]
+        row = matched[0] if len(matched) == 1 else candidates[0] if len(candidates) == 1 else dict(tmux=tmux, tab_open=False)
+        row.update(provider=provider, folder=config.get("cwd"), spawn_name=config.get("spawn_name"))
+        if not row.get("sid"):
+            row["sid"] = sid
         row["running"] = config.get("enabled") is True and alive
         row["busy"] = bool(state.get("inflight")) and alive
         if not row.get("name"):
             row["name"] = names.get(tmux) or config.get("spawn_display") or tmux
-        rows[tmux] = row
-    for tmux, row in rows.items():
+        rows[(row.get("host"), tmux)] = row
+    for row in rows.values():
         row.setdefault("tab_open", False)
         row.setdefault("running", False)
         row.setdefault("busy", False)
-        row["link"] = send.link_token(row.get("name"), tmux)
+        row["link"] = send.link_token(row.get("name"), row["tmux"])
     return sorted(rows.values(), key=lambda row: ((row.get("name") or row["tmux"]).casefold(), row["tmux"]))
 
 
@@ -223,117 +218,24 @@ def find_existing(send, listing, slot, display, folder):
     return None
 
 
-def placement_open(send, listing, tmux, display, workspace, host, target):
-    after_tab = target.get("after_tab")
-    group = target.get("group")
-    tab_kind = target.get("spawn_tab_kind")
-    if tab_kind not in send.TAB_KINDS and target.get("sid"):
-        tab_kind = "chat"
-    if isinstance(after_tab, int):
-        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=after_tab, tab_kind=tab_kind)
-    if group:
-        return send.open_visible_tab(listing, tmux, display, workspace, host, group=group, tab_kind=tab_kind)
-    anchor = workspace_anchor(listing, workspace)
-    if anchor is not None:
-        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=anchor, tab_kind=tab_kind)
-    return dict(ok=False, error="no_placement")
-
-
-def resolve_workspace(send, listing, workspace):
-    note = None
-    if workspace and not send.workspace_known(listing, workspace):
-        note = workspace + " is gone; opened in the front workspace"
-        workspace = None
-    if not workspace:
-        workspace = default_workspace(listing)
-    return workspace, note
-
-
-def expected_chat_tab_kind(send, target):
-    tab_kind = target.get("spawn_tab_kind")
-    if tab_kind not in send.TAB_KINDS and target.get("sid"):
-        tab_kind = "chat"
-    return tab_kind
-
-
-def reopen_placement_available(send, listing, target, workspace):
-    if isinstance(target.get("after_tab"), int):
-        return True
-    if target.get("group"):
-        return True
-    return workspace_anchor(listing, workspace) is not None
-
-
-def reopen_desktop_preflight(send, listing, target, display):
-    if listing.get("ok") is not True:
-        raise ValueError("desktop is offline; open the desktop app and retry")
-    workspace, _note = resolve_workspace(send, listing, target.get("workspace"))
-    host_name(listing, host_slot())
-    tab_kind = expected_chat_tab_kind(send, target)
-    if tab_kind != "chat":
-        raise ValueError("chat tab must reopen as chat, not shell")
-    present = send.find_tab(listing, target["tmux"])[2]
-    if present:
-        if send.listing_tab_kind(present) != "chat":
-            raise ValueError("desktop tab is a shell tab, not chat")
-        return workspace
-    if not reopen_placement_available(send, listing, target, workspace):
-        raise ValueError("no tab placement is available in workspace " + repr(workspace))
-    return workspace
-
-
-def verify_reopened_chat_tab(send, listing, tmux, workspace):
-    if listing.get("ok") is not True:
-        raise ValueError("desktop is offline after reopen")
-    found_ws, _group, tab = send.find_tab(listing, tmux)
-    if tab is None:
-        raise ValueError("chat tab did not appear on the desktop")
-    if send.listing_tab_kind(tab) != "chat":
-        raise ValueError("desktop reopened a shell tab, not chat")
-    if workspace and found_ws != workspace:
-        raise ValueError("chat tab opened in " + repr(found_ws) + ", not " + repr(workspace))
-
-
-def ensure_visible(send, listing, target, display):
-    workspace, note = resolve_workspace(send, listing, target.get("workspace"))
-    host = target.get("host") or host_name(listing, host_slot())
-    present = send.find_tab(listing, target["tmux"])[2]
-    if target.get("tab_open") or present:
-        result = dict(ok=True, tab=(present or {}).get("id") or target.get("tab_id"), existing=True)
-        if note:
-            result["placement_note"] = note
-        return result
-    opened = placement_open(send, listing, target["tmux"], display, workspace, host, target)
-    if note:
-        opened["placement_note"] = note
-    return opened
-
-
-def persist_close_placement(send, listing, target):
-    provider = target.get("provider")
-    sid = target.get("sid")
-    if not provider or not sid:
-        return
-    path = send.host_root() / (send.host_config_key(provider, sid) + ".config.json")
-    config = send.read_json(path)
-    if not config:
-        return
-    workspace, group, tab = send.find_tab(listing, target["tmux"])
-    workspace = workspace or target.get("workspace")
-    if group is None and "group" in target:
-        group = target.get("group")
-    tab = tab if tab is not None else (dict(id=target.get("tab_id")) if isinstance(target.get("tab_id"), int) else None)
-    send.apply_spawn_placement(config, listing, workspace, group, tab, target.get("host"))
-    send.write_json(path, config)
-
-
 def placement_listing(send):
     if not callable(getattr(send, "zsb", None)):
         return {}
     listing = send.zsb("workspace-list")
-    if listing.get("ok") is True:
-        send.sync_tab_placements(listing)
     return listing if isinstance(listing, dict) else {}
+
+
+def confirm_open(send, target):
+    args = argparse.Namespace(command="open", name=target["tmux"], host=None, json=True,
+                              kind="chat", tmux=target["tmux"], sid=target["sid"],
+                              title=target.get("name"), workspace=target.get("workspace"),
+                              group=target.get("group"), position=target.get("position", 0))
+    import contextlib
+    import io
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        tab_state_fn("tab_command")(send, args)
+    return json.loads(output.getvalue())["state"]
 
 
 def start_host(send, provider, sid, folder, tmux):
@@ -457,9 +359,6 @@ def live_table_rows(send):
 def cmd_list(args):
     workspace = getattr(args, "workspace", None)
     send = load_send(session_api=bool(workspace))
-    if not workspace and args.json:
-        print(json.dumps(send.live_chats(), separators=(",", ":")))
-        return 0
     listing = placement_listing(send) if callable(getattr(send, "zsb", None)) else {}
     if callable(getattr(send, "published_names", None)):
         rows = session_catalog(send, listing)
@@ -605,16 +504,16 @@ def cmd_start(args):
             raise ValueError("that name is already a helper chat; pick another name")
         if prior and (prior.get("cwd") != folder or prior.get("tmux") != tmux):
             raise ValueError("host configuration collision for " + repr(display))
-        config = dict(enabled=False, cwd=folder, tmux=tmux, sid=sid, provider=provider, spawn_workspace=workspace,
-                      spawn_name=display.casefold(), spawn_display=display, spawn_group=group, spawn_host=slot,
-                      spawn_host_name=host, spawn_tab_kind="chat")
-        send.write_json(path, config)
+        config = dict(enabled=False, cwd=folder, tmux=tmux, sid=sid, provider=provider,
+                      spawn_name=display.casefold(), spawn_display=display)
         existing = dict(name=display, tmux=tmux, provider=provider, sid=sid, folder=folder, workspace=workspace,
                         group=group, host=host, running=False, tab_open=False)
         status = "started" if not prior else "already"
+    shown = confirm_open(send, existing)
     if not existing.get("running", False):
+        if not send.read_json(send.host_root() / (send.host_config_key(provider, sid) + ".config.json")):
+            send.write_json(send.host_root() / (send.host_config_key(provider, sid) + ".config.json"), config)
         start_host(send, provider, sid, folder, tmux)
-    shown = ensure_visible(send, listing, {**existing, "tab_open": existing.get("tab_open", False)}, display)
     first = None
     if task is not None:
         reader = send.reader_module()
@@ -624,9 +523,7 @@ def cmd_start(args):
         final = send.handoff(reader, provider, sid, tmux, message.get("id"), 15.0)
         first = dict(id=message.get("id"), state=(final or {}).get("state"))
     result = dict(ok=True, status=status, name=display, tmux=tmux, sid=sid, provider=provider, folder=folder,
-                  workspace=workspace, group=group, host=host, visible=shown.get("ok") is True, tab=shown.get("tab"), task=first)
-    if shown.get("ok") is not True:
-        result["visible_error"] = shown.get("error")
+                  workspace=workspace, group=group, host=host, visible=shown["visible"], task=first)
     print(json.dumps(result, separators=(",", ":")))
     return 0 if first is None or first["state"] not in ("failed", "cancelled") else 3
 
@@ -644,32 +541,27 @@ def cmd_restart(args):
     display = target.get("name") or tmux
     if target.get("busy"):
         raise ValueError(display + " is busy; wait for its turn to finish")
-    workspace = reopen_desktop_preflight(send, listing, target, display)
-    if target.get("running") and target.get("tab_open") and restart_pending(send, provider, sid):
-        print(json.dumps(dict(ok=True, status="already", name=display, tmux=tmux, sid=sid), separators=(",", ":")))
-        return 0
-    host_started = False
-    try:
-        if target.get("running"):
-            status = resume_status(restart_host(send, provider, sid))
-        else:
-            start_host(send, provider, sid, folder, tmux)
-            host_started = True
-            status = "restarted"
-        shown = ensure_visible(send, listing, target, display)
-        if shown.get("ok") is not True:
-            raise ValueError(shown.get("error") or "tab reopen failed")
-        listing = placement_listing(send)
-        verify_reopened_chat_tab(send, listing, tmux, workspace)
-    except (OSError, ValueError, KeyError, TypeError):
-        if host_started:
-            send.reader_cli("stop", provider, sid)
-        raise
-    result = dict(ok=True, status=status, name=display, tmux=tmux, sid=sid,
-                  visible=True, tab=shown.get("tab"))
-    if shown.get("placement_note"):
-        result["placement_note"] = shown["placement_note"]
-    print(json.dumps(result, separators=(",", ":")))
+    view = tab_state_fn("pc_state")(send)
+    state = tab_state_fn("tab_target")(view, tmux)
+    if state is None:
+        raise ValueError("no retained desktop state; open this chat explicitly")
+    if state["kind"] != "chat":
+        raise ValueError("desktop tab is a shell tab, not chat")
+    if state["closed"]:
+        raise ValueError("chat is closed; use open or restore explicitly before restart")
+    if state["archived"] or state["waiting"]:
+        raise ValueError("chat is hidden; restore it explicitly before restart")
+    if target.get("running") and restart_pending(send, provider, sid):
+        status = "already"
+    elif target.get("running"):
+        status = resume_status(restart_host(send, provider, sid))
+    else:
+        start_host(send, provider, sid, folder, tmux)
+        status = "restarted"
+    after = tab_state_fn("tab_target")(tab_state_fn("pc_state")(send), tmux)
+    if after is None or not tab_state_fn("same_tab_state")(state, after):
+        raise ValueError("desktop state changed during restart")
+    print(json.dumps(dict(ok=True, status=status, name=display, tmux=tmux, sid=sid, state=after), separators=(",", ":")))
     return 0
 
 
@@ -687,65 +579,11 @@ def cmd_rename(args):
     return 0
 
 
-def cmd_move(args):
-    send = load_send()
-    listing = placement_listing(send)
-    target = pick_target(send, listing, args.name)
-    workspace = display_name(args.workspace)
-    if not target.get("tab_id"):
-        raise ValueError("chat tab is not open on the desktop; restart it first")
-    command = ["session-move", "--tab", str(target["tab_id"]), "--workspace", workspace]
-    if args.group is not None:
-        command += ["--group", display_name(args.group)]
-    else:
-        command += ["--ungrouped"]
-    moved = send.zsb(*command)
-    if moved.get("ok") is not True:
-        raise ValueError("move failed: " + str(moved.get("error") or moved.get("message")))
-    path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
-    config = send.read_json(path)
-    if config:
-        config["spawn_workspace"] = workspace
-        if args.group is not None:
-            config["spawn_group"] = display_name(args.group)
-        elif "spawn_group" in config:
-            del config["spawn_group"]
-        send.write_json(path, config)
-    group = display_name(args.group) if args.group is not None else None
-    print(json.dumps(dict(ok=True, name=target.get("name"), tmux=target["tmux"], workspace=workspace, group=group), separators=(",", ":")))
-    return 0
-
-
 def cmd_health(args):
     send = load_send()
     listing = send.zsb("workspace-list")
     rows = session_catalog(send, listing)
     return health_report_fn()(send, listing, rows, args.ping, args.json)
-
-
-def cmd_close(args):
-    send = load_send()
-    listing = placement_listing(send)
-    target = pick_target(send, listing, args.name)
-    if not target.get("sid"):
-        raise ValueError("chat has no session id")
-    if not target.get("tab_open") and not target.get("running"):
-        print(json.dumps(dict(ok=True, status="closed", name=target.get("name"), tmux=target["tmux"]), separators=(",", ":")))
-        return 0
-    if target.get("busy") and not args.force:
-        raise ValueError((target.get("name") or target["tmux"]) + " is busy; pass --force to close anyway")
-    reopen_desktop_preflight(send, listing, target, target.get("name") or target["tmux"])
-    persist_close_placement(send, listing, target)
-    tab_closed = None
-    if target.get("tab_id"):
-        closed = send.zsb("session-close", "--tab", str(target["tab_id"]))
-        tab_closed = closed.get("ok") is True
-        if closed.get("ok") is not True and closed.get("error") != "unknown_tab":
-            raise ValueError("tab close failed: " + str(closed.get("error") or closed.get("message")))
-    stopped = send.reader_cli("stop", target["provider"], target["sid"])
-    print(json.dumps(dict(ok=stopped.get("status") == "stopped", status="closed", name=target.get("name"),
-                          tmux=target["tmux"], tab_closed=tab_closed), separators=(",", ":")))
-    return 0 if stopped.get("status") == "stopped" else 3
 
 
 def parse(argv):
@@ -823,14 +661,13 @@ def main(argv=None):
         return 2
     command = args.command or "list"
     send = load_send(session_api=False)
-    handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
-                    close=cmd_close, send=cmd_send, health=cmd_health)
+    handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, send=cmd_send, health=cmd_health)
     try:
         if command == "send":
             tail = argv[1:] if argv and argv[0] == "send" else argv
             return handlers[command](parse_send(tail))
         if command in {"open", "close", "move", "pin", "unpin", "archive", "unarchive", "wait", "restore"}:
-            return tab_command_fn()(send, args)
+            return tab_state_fn("tab_command")(send, args)
         return handlers[command](args)
     except send.RateLimited as error:
         print("mp-sessions: " + str(error), file=sys.stderr)

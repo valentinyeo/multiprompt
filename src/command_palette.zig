@@ -409,20 +409,8 @@ pub fn openCommandsJsonInEditor() void {
     _ = ShellExecuteW(null, L("open"), L("notepad.exe"), wpath.ptr, null, SHOW_NORMAL);
 }
 
-fn customCmdHasQuote(s: []const u8) bool {
-    for (s) |c| {
-        if (c == '\'' or c == '"') return true;
-    }
-    return false;
-}
-
-fn altTProgramSafe(program: []const u8) bool {
-    if (program.len == 0 or program.len >= 127) return false;
-    for (program) |c| {
-        if (!std.ascii.isAlphanumeric(c) and c != ' ' and c != '-' and c != '_' and c != '.' and c != '/' and c != '=') return false;
-    }
-    return true;
-}
+const customCmdHasQuote = @import("palette_command_validation.zig").customCmdHasQuote;
+const altTProgramSafe = @import("palette_command_validation.zig").altTProgramSafe;
 
 test "Alt+T program accepts only shell-safe command characters" {
     try std.testing.expect(altTProgramSafe("claude --model opus-4.1"));

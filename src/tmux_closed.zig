@@ -78,8 +78,8 @@ pub const Closed = struct {
                     const entry = &self.entries.items[self.entries.items.len - 1];
                     const face = json_reader.uintDefault(item, "face", 20);
                     const color = json_reader.uintDefault(item, "color", @import("session_layout.zig").color_count);
-                    if (item.object.get("tab_state")) |value| {
-                        const parsed = std.json.parseFromValue(@import("tab_state.zig").State, a, value, .{ .allocate = .alloc_always }) catch continue;
+                    if (item.object.get("tab_state")) |state_value| {
+                        const parsed = std.json.parseFromValue(@import("tab_state.zig").State, a, state_value, .{ .allocate = .alloc_always }) catch continue;
                         defer parsed.deinit();
                         @import("tab_state.zig").validate(parsed.value) catch continue;
                         entry.tab_state = try parsed.value.dupe(a);
