@@ -8273,6 +8273,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
+                @import("focus.zig").frontOnActivation();
                 focusGuardNoteActivation();
                 updateCardPoll();
                 updateBrowserVisibility();
@@ -8291,6 +8292,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const active = @as(u16, @truncate(wp));
             if (active == 0) @import("diagnostics.zig").focusTrace(.activate_inactive, @ptrFromInt(@as(usize, @bitCast(lp))), 0);
             if (active != 0) {
+                @import("focus.zig").frontOnActivation();
                 focusGuardNoteActivation();
                 exitDeepIdleNow(hwnd);
                 _ = KillTimer(hwnd, TIMER_HOOK_UNINSTALL);
