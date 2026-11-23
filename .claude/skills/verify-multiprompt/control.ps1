@@ -116,6 +116,7 @@ $switchNativeRegistry = $null
 $switchExtensionRoot = $null
 $script:pinnedNotifyListeners = @()
 $script:keyProvider = $null
+$script:slowProxy = $null
 $script:uploadReceiver = $null
 $script:uploadReceiverDir = $null
 $script:window = [IntPtr]::Zero
@@ -409,6 +410,37 @@ try {
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
+    if ($Feature -eq 'slow-network') {
+        $slowState = Join-Path $scratch 'slow-network-state'
+        New-Item -ItemType Directory -Force -Path $slowState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $slowNames = @('verify-one', 'verify-two')
+        $slowPanes = [ordered]@{}
+        $slowSids = [ordered]@{}
+        for ($i = 0; $i -lt $slowNames.Count; $i++) {
+            $slowPanes[$slowNames[$i]] = 5300 + $i
+            $slowSids[$slowNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
+        }
+        $slowDocument = [ordered]@{ name = 'slow-network'; fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $slowNames; panes = $slowPanes; sids = $slowSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
+        [IO.File]::WriteAllText((Join-Path $slowState 'state.json'), (ConvertTo-Json -InputObject $slowDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+        $env:MP_VERIFY_REAL_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
+        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot 'slow-network.py')).Path
+        $env:MP_VERIFY_STATE = $slowState
+        $env:MP_VERIFY_SLOW_MS = '2000'
+        $env:MP_VERIFY_SLOW_PORT = '22391'
+        $env:MP_VERIFY_SLOW_READY = Join-Path $slowState 'ready.txt'
+        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
+        & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_REAL_BOUNDARY shell seed-many 3
+        if ($LASTEXITCODE -ne 0) { throw 'Slow-network transcript seeding failed' }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        $slowTabs = @($slowNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
+        $slowSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; tabs = $slowTabs } -Depth 6
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $slowSeedJson, (New-Object Text.UTF8Encoding($false)))
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $slowSeedJson
+        $script:slowProxy = Start-Process -FilePath $env:MP_VERIFY_PYTHON -ArgumentList @('-u', ('"' + $env:MP_VERIFY_BOUNDARY + '"'), 'proxy') -PassThru -WindowStyle Hidden
+        Wait-Until { Test-Path -LiteralPath $env:MP_VERIFY_SLOW_READY } 'slow-network delay proxy listening' 30
+        $result.seedBoundary = 'Two saved stand-in tmux tabs on one stand-in SSH host. The stand-in ssh the app spawns connects to a local TCP proxy that holds every chunk 2000 ms in each direction, about 4 s round trip, before reaching the repository boundary. Nothing else is seeded; the app, window, composer, session switches and typing are real.'
+    }
     }
     if ($Feature -eq 'inbox-order') {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
@@ -725,6 +757,9 @@ try {
         'chat-switch-speed' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')
         }
+        'slow-network' {
+            . (Join-Path $PSScriptRoot 'control-feature-slow-network.ps1')
+        }
     }
     if ($Feature -in @('title-bar', 'window-controls')) {
         if (-not $result.windowControls.closed -or -not $process.HasExited) { throw 'Window control journey did not prove normal close' }
@@ -773,6 +808,7 @@ try {
                 foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
                 $script:pinnedNotifyListeners = @()
                 if ($null -ne $script:keyProvider -and -not $script:keyProvider.HasExited) { $script:keyProvider.Kill(); $script:keyProvider.WaitForExit() }
+                if ($null -ne $script:slowProxy -and -not $script:slowProxy.HasExited) { $script:slowProxy.Kill(); $script:slowProxy.WaitForExit() }
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }
