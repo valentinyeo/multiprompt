@@ -1425,3 +1425,72 @@ test "IGSH-1890 Favorites groups sync between desktops and an empty first sync n
     try std.testing.expect(stripped.tabs[0].starred_group == null);
     try std.testing.expectEqualStrings("Hypertask", pc1.tabs[0].starred_group.?);
 }
+
+pub fn stampOf(parts: []const []const u8) u64 {
+    var hash = std.hash.Wyhash.init(0);
+    for (parts) |part| {
+        hash.update(std.mem.asBytes(&part.len));
+        hash.update(part);
+    }
+    return hash.final() | 1;
+}
+
+pub const PublishGate = struct {
+    quiet: u64 = 0,
+    reported: u64 = 0,
+
+    pub fn skip(self: *const PublishGate, stamp: u64) bool {
+        _ = self;
+        _ = stamp;
+        return false;
+    }
+
+    pub fn settle(self: *PublishGate, stamp: u64, publish: bool) void {
+        _ = self;
+        _ = stamp;
+        _ = publish;
+    }
+
+    pub fn forget(self: *PublishGate) void {
+        self.quiet = 0;
+    }
+
+    pub fn firstReport(self: *PublishGate, stamp: u64) bool {
+        _ = self;
+        _ = stamp;
+        return true;
+    }
+};
+
+test "MUBO-249 an unchanged layout that needs no publish is not rebuilt on every pass" {
+    const base = [_][]const u8{ "{\"tabs\":[1]}", "{\"tabs\":[1,2]}", "local" };
+    const same = stampOf(&base);
+    var gate = PublishGate{};
+    try std.testing.expect(!gate.skip(same));
+    gate.settle(same, false);
+    for (0..50) |_| try std.testing.expect(gate.skip(stampOf(&base)));
+    const moved = [_][]const u8{ "{\"tabs\":[1]}", "{\"tabs\":[1,2]}", "local2" };
+    try std.testing.expect(!gate.skip(stampOf(&moved)));
+    gate.forget();
+    try std.testing.expect(!gate.skip(same));
+}
+
+test "MUBO-249 a layout that still needs publishing is never skipped" {
+    const parts = [_][]const u8{ "a", "b" };
+    var gate = PublishGate{};
+    gate.settle(stampOf(&parts), true);
+    try std.testing.expect(!gate.skip(stampOf(&parts)));
+    gate.settle(stampOf(&parts), false);
+    try std.testing.expect(gate.skip(stampOf(&parts)));
+    gate.settle(stampOf(&parts), true);
+    try std.testing.expect(!gate.skip(stampOf(&parts)));
+}
+
+test "MUBO-249 the missing-locally notice is reported once per change, not once per pass" {
+    var gate = PublishGate{};
+    const first = stampOf(&.{ "kept-a", "kept-b" });
+    try std.testing.expect(gate.firstReport(first));
+    for (0..50) |_| try std.testing.expect(!gate.firstReport(first));
+    try std.testing.expect(gate.firstReport(stampOf(&.{"kept-a"})));
+    try std.testing.expect(!gate.firstReport(stampOf(&.{"kept-a"})));
+}
