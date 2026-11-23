@@ -121,7 +121,9 @@ for ($index = 0; $index -lt 10; $index++) {
 $result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
 $result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true -or $_.hadError -eq $true }).Count -gt 0
 
-Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session'
+$openChat = Measure-PumpWindow { Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session' } 3000
+$openChat.kind = 'chat-view'
+$result.slowNetwork.chatViewMaxPumpMs = [int]$openChat.maxPumpMs
 Wait-Until {
     $state = Read-Session
     $null -ne $state -and $state.tabs[$state.active_tab].cv -eq $true
