@@ -531,6 +531,12 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
 test('IGSH-1754 a chat switch clears the last batch time', () => {
   assert.match(fn('chatDeferTranscriptLoad'), /g_chat_batch_boundary = \.\{}/);
 });
+test('SOFT-2373 a live revision change repaints only the chat pane and republishes the sidebar only when the preview line differs', () => {
+  const ready = fn('chatFileOnReady');
+  assert.doesNotMatch(ready, /InvalidateRect\(app_state\.g_main_hwnd, null, 0\)/);
+  assert.match(ready, /chatViewLayout\(\)\.pane/);
+  assert.match(ready, /std\.meta\.eql\(g_chat_live_preview, preview\)/);
+});
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
   assert.equal(run.status, 0, run.stdout + run.stderr);
