@@ -13,29 +13,21 @@ function body(file, name) {
   assert.notEqual(start, -1, name);
   return source.slice(start, source.indexOf('\n}', start) + 2).replace(/^fn /, 'pub fn ');
 }
+const resolveImports = source => source
+  .replaceAll('@import("capacity.zig").remoteHostForShell', 'remoteHostForShell')
+  .replaceAll('@import("vps.zig").shellKnownRemotePath', 'shellKnownRemotePath');
 
-test('SOFT-3003 palette and shortcut share the server shell spawn path', () => {
-  const main = read('src/main.zig');
-  assert.match(main, /spawnShellFromMenuIndex\(wp\)/);
-  assert.match(main, /const kind_idx = target - SEARCH_NEW_OFFSET;[\s\S]*?spawnShellFromMenuIndex\(kind_idx\)/);
-  const palette = read('src/command_palette.zig');
-  assert.match(palette, /SEARCH_NEW_OFFSET \+ 3, .keywords = "open shell on vps 1/);
-  assert.match(palette, /SEARCH_NEW_OFFSET \+ 4, .keywords = "open shell on vps 2/);
-});
-
-test('SOFT-3003 server shells start in the chat cwd, including before the first poll', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-shell-cwd-'));
-  try {
-    copyZig(['tmux_identity.zig'], dir);
-    const functions = [
-      body('src/console.zig', 'tmuxHostForMenuIndex'),
-      body('src/console.zig', 'spawnShellFromMenuIndex'),
-      body('src/capacity.zig', 'remoteHostForShell'),
-      body('src/vps.zig', 'shellKnownRemotePath'),
-      body('src/vps.zig', 'tmuxCachePathForShell'),
-    ].join('\n').replaceAll('@import("capacity.zig").remoteHostForShell', 'remoteHostForShell')
-      .replaceAll('@import("vps.zig").shellKnownRemotePath', 'shellKnownRemotePath');
-    fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
+function harness() {
+  const functions = resolveImports([
+    body('src/console.zig', 'tmuxHostForMenuIndex'),
+    body('src/console.zig', 'chatFolderForShell'),
+    body('src/console.zig', 'spawnShellInFolder'),
+    body('src/console.zig', 'spawnShellFromMenuIndex'),
+    body('src/capacity.zig', 'remoteHostForShell'),
+    body('src/vps.zig', 'shellKnownRemotePath'),
+    body('src/vps.zig', 'tmuxCachePathForShell'),
+  ].join('\n'));
+  return `const std = @import("std");
 const app_state = @This();
 const ShellKind = enum { cmd, tmux, vps, vps2, pwsh, bash, gitbash };
 const NUM_BUTTONS = 8;
@@ -61,33 +53,41 @@ var g_tmux_cache = [_]Entry{.{}};
 fn GetTickCount64() u64 { return 42; }
 var opened_host: u8 = 255;
 var opened_kind: ShellKind = .cmd;
-var command: [2048]u8 = @splat(0);
-var command_len: usize = 0;
+var opened_session: [64]u8 = @splat(0);
+var opened_session_len: usize = 0;
+var spawned_command: [2048]u8 = @splat(0);
+var spawned_command_len: usize = 0;
 fn spawnShell(kind: ShellKind) bool { return spawnShellWithSession(kind, null, null, null); }
-fn spawnShellWithSession(kind: ShellKind, _: ?[]const u8, _: ?[]const u8, _: ?[]const u8) bool {
+fn spawnShellWithSession(kind: ShellKind, session: ?[]const u8, _: ?[]const u8, _: ?[]const u8) bool {
     opened_kind = kind;
     opened_host = if (kind == .vps) 0 else if (kind == .vps2) 1 else g_pending_tmux_host;
-    command_len = g_pending_tmux_cmd_len;
-    @memcpy(command[0..command_len], g_pending_tmux_cmd[0..command_len]);
+    opened_session_len = if (session) |name| name.len else 0;
+    if (session) |name| @memcpy(opened_session[0..name.len], name);
+    spawned_command_len = g_pending_tmux_cmd_len;
+    @memcpy(spawned_command[0..spawned_command_len], g_pending_tmux_cmd[0..spawned_command_len]);
     g_pending_tmux_cmd_len = 0;
     return true;
 }
 ${functions}
+fn expectFolder(cwd: []const u8) !void {
+    var expected_buf: [1024]u8 = undefined;
+    const expected = if (std.mem.startsWith(u8, cwd, "~/"))
+        try std.fmt.bufPrint(&expected_buf, "tmux new-session -s 'shell-2a' -c ~/'{s}'", .{cwd[2..]})
+    else
+        try std.fmt.bufPrint(&expected_buf, "tmux new-session -s 'shell-2a' -c '{s}'", .{cwd});
+    try std.testing.expectEqualStrings(expected, spawned_command[0..spawned_command_len]);
+}
 test "server shell uses chat cwd on both hosts without waiting for tmux polling" {
-    for ([_]u8{0, 1}) |host| {
+    for ([_]u8{ 0, 1 }) |host| {
         for ([_][]const u8{ "/work/chat", "/work/chat folder", "~/chat folder", "/work/literal~folder" }) |cwd| {
             shells[0] = .{ .tmux_host = host };
             @memcpy(shells[0].cached_cwd[0..cwd.len], cwd);
             shells[0].cached_cwd_len = @intCast(cwd.len);
             g_tmux_cache_count = 0;
-            command_len = 0;
+            spawned_command_len = 0;
             try std.testing.expect(spawnShellFromMenuIndex(3 + @as(usize, host)));
             try std.testing.expectEqual(host, opened_host);
-            var expected_buf: [1024]u8 = undefined;
-            const expected = if (std.mem.startsWith(u8, cwd, "~/"))
-                try std.fmt.bufPrint(&expected_buf, "tmux new-session -s 'shell-2a' -c ~/'{s}'", .{cwd[2..]})
-            else try std.fmt.bufPrint(&expected_buf, "tmux new-session -s 'shell-2a' -c '{s}'", .{cwd});
-            try std.testing.expectEqualStrings(expected, command[0..command_len]);
+            try expectFolder(cwd);
         }
     }
 }
@@ -105,7 +105,23 @@ test "provider cwd wins over the host tmux pane home folder" {
     @memcpy(g_tmux_cache[0].path[0..10], "/home/user");
     g_tmux_cache_count = 1;
     try std.testing.expect(spawnShellFromMenuIndex(3));
-    try std.testing.expectEqualStrings("tmux new-session -s 'shell-2a' -c '/work/reported chat'", command[0..command_len]);
+    try std.testing.expectEqualStrings("tmux new-session -s 'shell-2a' -c '/work/reported chat'", spawned_command[0..spawned_command_len]);
+}
+test "tmux pane path is the last folder source before a plain login" {
+    shells[0] = .{};
+    @memcpy(shells[0].tmux_session[0..9], "live-chat");
+    shells[0].tmux_session_len = 9;
+    g_tmux_cache[0] = .{ .name_len = 9, .path_len = 12 };
+    @memcpy(g_tmux_cache[0].name[0..9], "live-chat");
+    @memcpy(g_tmux_cache[0].path[0..12], "/work/cached");
+    g_tmux_cache_count = 1;
+    try std.testing.expect(spawnShellFromMenuIndex(3));
+    try std.testing.expectEqualStrings("tmux new-session -s 'shell-2a' -c '/work/cached'", spawned_command[0..spawned_command_len]);
+    g_tmux_cache_count = 0;
+    spawned_command_len = 0;
+    try std.testing.expect(spawnShellFromMenuIndex(3));
+    try std.testing.expectEqual(ShellKind.vps, opened_kind);
+    try std.testing.expectEqual(@as(usize, 0), spawned_command_len);
 }
 test "explicit other server and local shell do not inherit the chat folder" {
     shells[0] = .{};
@@ -114,27 +130,42 @@ test "explicit other server and local shell do not inherit the chat folder" {
     shells[0].cached_cwd_len = cwd.len;
     try std.testing.expect(spawnShellFromMenuIndex(4));
     try std.testing.expectEqual(@as(u8, 1), opened_host);
-    try std.testing.expectEqual(@as(usize, 0), command_len);
+    try std.testing.expectEqual(@as(usize, 0), spawned_command_len);
     try std.testing.expect(spawnShellFromMenuIndex(0));
     try std.testing.expectEqual(ShellKind.cmd, opened_kind);
     try std.testing.expect(!spawnShellFromMenuIndex(99));
 }
-`);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+`;
+}
+
+test('SOFT-3003 palette and shortcut share the server shell spawn path', () => {
+  const main = read('src/main.zig');
+  assert.match(main, /spawnShellFromMenuIndex\(wp\)/);
+  assert.match(main, /const kind_idx = target - SEARCH_NEW_OFFSET;[\s\S]*?spawnShellFromMenuIndex\(kind_idx\)/);
+  const palette = read('src/command_palette.zig');
+  assert.match(palette, /SEARCH_NEW_OFFSET \+ 3, .keywords = "open shell on vps 1/);
+  assert.match(palette, /SEARCH_NEW_OFFSET \+ 4, .keywords = "open shell on vps 2/);
+});
+
+test('SOFT-3003 server shells start in the chat cwd, including before the first poll', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-shell-cwd-'));
+  try {
+    copyZig(['tmux_identity.zig'], dir);
+    const file = path.join(dir, 'test.zig');
+    const positive = harness();
+    fs.writeFileSync(file, positive);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    const current = body('src/console.zig', 'spawnShellFromMenuIndex')
-      .replaceAll('@import("capacity.zig").remoteHostForShell', 'remoteHostForShell')
-      .replaceAll('@import("vps.zig").shellKnownRemotePath', 'shellKnownRemotePath');
-    const file = path.join(dir, 'test.zig');
-    const positive = fs.readFileSync(file, 'utf8');
-    const negative = positive.replace(current, body('tools/fixtures/SOFT-3003/console.zig', 'spawnShellFromMenuIndex'));
+    const current = resolveImports(body('src/console.zig', 'spawnShellFromMenuIndex'));
+    const negative = positive.replace(current, resolveImports(body('tools/fixtures/SOFT-3003/console.zig', 'spawnShellFromMenuIndex')));
     assert.notEqual(negative, positive);
     fs.writeFileSync(file, negative);
     const baseline = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(baseline.status, 0, 'The master snapshot must reproduce the missing chat directory');
-    assert.match(baseline.stderr, /server shell uses chat cwd[^\n]*FAIL/);
-    assert.match(baseline.stderr, /provider cwd wins[^\n]*FAIL/);
+    assert.match(baseline.stderr, /server shell uses chat cwd/);
+    assert.match(baseline.stderr, /provider cwd wins/);
+    assert.match(baseline.stderr, /FAIL/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
