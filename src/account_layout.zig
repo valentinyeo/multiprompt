@@ -1435,20 +1435,33 @@ pub fn stampOf(parts: []const []const u8) u64 {
     return hash.final() | 1;
 }
 
+pub fn publishStamp(a: Allocator, local: Layout, synced: Layout, base_bytes: []const u8, synced_bytes: []const u8, extra: []const u8) !u64 {
+    const tabs = try a.dupe(Tab, local.tabs);
+    for (tabs) |*tab| {
+        const known = find(synced.tabs, tab.*);
+        const input = tab.input orelse 0;
+        const synced_input = if (known) |i| synced.tabs[i].input orelse 0 else 0;
+        tab.input = if (input > synced_input and (synced_input == 0 or input - synced_input > 60 * 1000)) 1 else null;
+        const used = tab.used orelse 0;
+        const previous = if (known) |i| synced.tabs[i].used orelse 0 else 0;
+        tab.used = if (used > previous and used - previous > 10 * 60 * 1000) 1 else null;
+    }
+    var quantized = local;
+    quantized.tabs = tabs;
+    const encoded = try layout.encode(a, quantized);
+    return stampOf(&.{ encoded, base_bytes, synced_bytes, extra });
+}
+
 pub const PublishGate = struct {
     quiet: u64 = 0,
     reported: u64 = 0,
 
     pub fn skip(self: *const PublishGate, stamp: u64) bool {
-        _ = self;
-        _ = stamp;
-        return false;
+        return self.quiet != 0 and self.quiet == stamp;
     }
 
     pub fn settle(self: *PublishGate, stamp: u64, publish: bool) void {
-        _ = self;
-        _ = stamp;
-        _ = publish;
+        self.quiet = if (publish) 0 else stamp;
     }
 
     pub fn forget(self: *PublishGate) void {
@@ -1456,8 +1469,8 @@ pub const PublishGate = struct {
     }
 
     pub fn firstReport(self: *PublishGate, stamp: u64) bool {
-        _ = self;
-        _ = stamp;
+        if (self.reported == stamp) return false;
+        self.reported = stamp;
         return true;
     }
 };
@@ -1493,4 +1506,24 @@ test "MUBO-249 the missing-locally notice is reported once per change, not once 
     for (0..50) |_| try std.testing.expect(!gate.firstReport(first));
     try std.testing.expect(gate.firstReport(stampOf(&.{"kept-a"})));
     try std.testing.expect(!gate.firstReport(stampOf(&.{"kept-a"})));
+}
+
+test "MUBO-249 typing that moves input or use time within the sync slack leaves the publish stamp unchanged" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const synced_tab = Tab{ .name = "one", .tmux_host = 0, .tmux_session = "one", .workspace = "Other", .input = 1_000_000, .used = 1_000_000 };
+    const synced: Layout = .{ .workspaces = &test_ws, .tabs = &.{synced_tab} };
+    var near = synced_tab;
+    near.input = 1_000_000 + 30_000;
+    near.used = 1_000_000 + 30_000;
+    var far = synced_tab;
+    far.input = 1_000_000 + 120_000;
+    const before = try publishStamp(a, .{ .workspaces = &test_ws, .tabs = &.{synced_tab} }, synced, "base", "synced", "");
+    const typed = try publishStamp(a, .{ .workspaces = &test_ws, .tabs = &.{near} }, synced, "base", "synced", "");
+    const past = try publishStamp(a, .{ .workspaces = &test_ws, .tabs = &.{far} }, synced, "base", "synced", "");
+    const edited = try publishStamp(a, .{ .workspaces = &test_ws, .tabs = &.{synced_tab} }, synced, "base2", "synced", "");
+    try std.testing.expectEqual(before, typed);
+    try std.testing.expect(before != past);
+    try std.testing.expect(before != edited);
 }

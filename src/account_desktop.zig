@@ -238,6 +238,7 @@ var g_appearance: ?[]appearance_intent.Intent = null;
 var g_palette8_supported = false;
 var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
 var g_tracking = false;
+var g_publish_gate: account_layout.PublishGate = .{};
 var g_pending_loaded = false;
 var g_pending_bytes: ?[]u8 = null;
 var g_pending_write_mutex: app_state.SpinMutex = .{};
@@ -287,6 +288,7 @@ pub fn startAccountJob(job: AccountJob) void {
         accountJobFree(job);
         return;
     }
+    g_publish_gate.forget();
     var submitted = job;
     const layout_job = switch (job.kind) { .startup, .login, .pull, .push, .remove_host => true, else => false };
     if (layout_job) {
@@ -338,7 +340,11 @@ fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !sessio
     for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed) |c, *t|
         t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
     const kept = try account_layout.keepHeld(a, base, local, closed);
-    if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
+    if (kept.tabs.len != local.tabs.len) {
+        const names = try a.alloc([]const u8, kept.tabs.len);
+        for (kept.tabs, names) |tab, *name| name.* = tab.tmux_session;
+        if (g_publish_gate.firstReport(account_layout.stampOf(names))) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
+    }
     return kept;
 }
 pub fn publishSessionLayout() void {
@@ -348,10 +354,13 @@ pub fn publishSessionLayout() void {
     const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
     defer base.deinit();
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
-    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
+    const synced_bytes = app_state.g_account_base orelse return;
+    const synced = session_layout.parse(arena.allocator(), synced_bytes) catch return;
     defer synced.deinit();
-    accountLoadPending() catch return;
     const intents = g_appearance orelse return;
+    const stamp = publishGateStamp(arena.allocator(), local, synced.value, app_state.g_account_local_base orelse return, synced_bytes, intents) catch return;
+    if (g_publish_gate.skip(stamp)) return;
+    accountLoadPending() catch return;
     accountWritePending(.{ .base = base.value, .edited = local, .appearance = intents }) catch {
         syncLogThrottled("account-sync: pending layout write failed");
         return;
@@ -392,12 +401,24 @@ pub fn publishSessionLayout() void {
         }
     }
     if (!eligible and !account_layout.publishNeeded(plain_local, plain_base, plain_synced)) {
+        g_publish_gate.settle(stamp, false);
         app_state.g_account_dirty_at = 0;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
         return;
     }
+    g_publish_gate.settle(stamp, true);
     app_state.g_account_dirty_at = GetTickCount64();
     if (!app_state.g_account_retry.notified and !app_state.g_account_reauth) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE, 2000, null);
+}
+fn publishGateStamp(a: std.mem.Allocator, local: session_layout.Layout, synced: session_layout.Layout, base_bytes: []const u8, synced_bytes: []const u8, intents: []const appearance_intent.Intent) !u64 {
+    var extra: std.ArrayList(u8) = .empty;
+    const flags = [_]bool{ app_state.g_account_groups_supported, app_state.g_account_starred_groups_supported, app_state.g_account_group_order_supported, app_state.g_account_colors_supported, app_state.g_account_appearance_supported, g_palette8_supported, app_state.g_account_dirty_at != 0, app_state.g_account_reauth, app_state.g_account_retry.notified };
+    for (flags) |flag| try extra.append(a, @intFromBool(flag));
+    for (intents) |intent| {
+        try extra.appendSlice(a, &.{ intent.tmux_host, intent.touched, intent.face orelse 255, intent.color orelse 255, @intCast(intent.tmux_session.len) });
+        try extra.appendSlice(a, intent.tmux_session);
+    }
+    return account_layout.publishStamp(a, local, synced, base_bytes, synced_bytes, extra.items);
 }
 pub fn pullSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
@@ -2021,6 +2042,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         }
     }
     defer accountResetAppearanceTracking();
+    g_publish_gate.forget();
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
