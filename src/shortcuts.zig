@@ -264,6 +264,9 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
     .{ .a = "F2", .b = "Rename chat title, tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
+    .{ .a = "Alt+Shift+1", .b = "Workspace view: All sessions by recency", .header = false },
+    .{ .a = "Alt+Shift+2", .b = "Workspace view: Frequent sessions", .header = false },
+    .{ .a = "Alt+Shift+3", .b = "Workspace view: Favorites", .header = false },
     .{ .a = "Alt+1", .b = "Go to Starred workspace", .header = false },
     .{ .a = "Alt+1 ... 9", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
     .{ .a = "Ctrl+K -> Archive workspace", .b = "Hide a workspace without deleting its server sessions", .header = false },
@@ -774,6 +777,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
         const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
         const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
+        if (key_down and foregroundIsOurs() and @import("workspace_switcher.zig").isOpen()) {
+            switch (kb.vkCode) {
+                0x1B, 0x26, 0x28, 0x0D, 0x20 => {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_KEYDOWN, kb.vkCode, 0);
+                    return 1;
+                },
+                else => {},
+            }
+        }
         if (key_down and !((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and app_state.g_browser_focus_chord_held) and
             @import("browser_pane.zig").browserHotkeyPasses(kb.vkCode))
         {
@@ -1278,6 +1290,18 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
             const shift_down = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, if (shift_down) 21 else 20, 0);
+            return 1;
+        }
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0 and
+            kb.vkCode >= 0x31 and kb.vkCode <= 0x33 and foregroundIsOurs() and
+            !app_state.g_search_active and app_state.g_edit_hwnd == null)
+        {
+            app_state.g_sysmenu_pending = false;
+            keybd_event(0xFF, 0, 0, 0);
+            keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
+            const view = @import("workspace_view.zig").builtins[kb.vkCode - 0x31];
+            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, @intFromEnum(view), 0);
             return 1;
         }
         if (app_state.g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus()) {
