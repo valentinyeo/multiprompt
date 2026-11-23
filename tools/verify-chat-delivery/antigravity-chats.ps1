@@ -2,13 +2,13 @@ $hostDir = "$profile/home/.local/state/multiprompt/agent-host"
 $paletteLog = "$settings/debug.log"
 $earlierText = 'earlier claude question'
 $afterText = 'after the switch'
-function Palette-Choose([string]$Query, [string]$Screenshot) {
+function Palette-Choose([string]$Query, [int]$Target, [string]$Screenshot) {
     $offset = (Read-Shared $paletteLog).Length
     Press @(0x11, 0x4B) "Ctrl+K: $Query"
     [void](Wait-For 'palette opened' { (Read-Shared $paletteLog).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    $actions.Add(@{case=$plan.name; input='type palette query'; text=$Query})
+    $actions.Add(@{case=$plan.name; input='type palette query'; text=$Query; target=$Target})
     foreach ($letter in $Query.ToCharArray()) { Doctor; [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For "palette row for $Query" { (Read-Shared $paletteLog).Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=1 target=\d+') })
+    [void](Wait-For "palette row for $Query" { (Read-Shared $paletteLog).Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=\d+ target=' + $Target + '\b') } 15)
     Shot $Screenshot
     Press @(0x0D) "Enter: $Query"
 }
@@ -27,7 +27,7 @@ $claudeHistory = @(Get-ChildItem "$hostDir/*.history.jsonl" | Where-Object { (Re
 Copy-Item $claudeHistory "$caseDir/claude-history.jsonl"
 $tabsBefore = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
 Shot 'antigravity-chat-before'
-Palette-Choose 'chat view switch ai to antigravity' 'antigravity-switch-palette'
+Palette-Choose 'switch ai to antigravity keep chat name' 7053 'antigravity-switch-palette'
 [void](Wait-For 'antigravity host enabled by the switch' {
     $configs = @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue)
     (@($configs | Where-Object { (Read-Shared $_.FullName) -match '"provider":"antigravity"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -eq 1)
@@ -53,7 +53,7 @@ Send-Composer $afterText
 } 60)
 Shot 'antigravity-switched-chat'
 Shot 'after'
-Palette-Choose 'new antigravity sessions' 'antigravity-new-session-palette'
+Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'
 [void](Wait-For 'new Antigravity session tab in Chat View' {
     if (-not (Test-Path "$settings/session.json")) { return $false }
     $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
