@@ -16,7 +16,18 @@ Wait-Until {
     $saved = Read-Session
     $null -ne $saved -and $saved.tabs[$saved.active_tab].tmux_session -ceq 'live-slash' -and $saved.tabs[$saved.active_tab].cv
 } 'second-account chat selected with Chat View on'
-Wait-ChatFocus 'Edit' 'owner-slash-composer'
+function Focus-Composer([string]$Step) {
+    Wait-Until { [VerifyNative]::FirstVisibleChild($script:window, 'Edit') -ne [IntPtr]::Zero } 'visible chat composer' 30
+    $composerWindow = [VerifyNative]::FirstVisibleChild($script:window, 'Edit')
+    $client = New-Object VerifyNative+Rect
+    Wait-Until {
+        [void][VerifyNative]::GetClientRect($composerWindow, [ref]$client)
+        $client.Right -gt 10 -and $client.Bottom -gt 10
+    } 'chat composer client area' 30
+    [VerifyNative]::ClickClient($composerWindow, [int]($client.Right / 2), [int]($client.Bottom / 2))
+    Wait-ChatFocus 'Edit' $Step
+}
+Focus-Composer 'owner-slash-composer'
 $composer = [IntPtr][System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle
 if ([VerifyNative]::Class($composer) -cne 'Edit' -or [VerifyNative]::GetAncestor($composer, 2) -ne $script:window) { throw 'Slash composer is not owned by the verified app' }
 $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
