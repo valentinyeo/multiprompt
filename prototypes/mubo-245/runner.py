@@ -16,40 +16,76 @@ sys.path.insert(0, str(HERE))
 import skills
 
 
+def resolve_pkg_bin(pkg_dir, node):
+    pkg_json = pkg_dir / "package.json"
+    if not pkg_json.is_file():
+        return None
+    try:
+        meta = json.loads(pkg_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    bin_field = meta.get("bin")
+    rel = None
+    if isinstance(bin_field, str):
+        rel = bin_field
+    elif isinstance(bin_field, dict):
+        rel = bin_field.get("claude") or next(iter(bin_field.values()), None)
+    if not isinstance(rel, str) or not rel.strip():
+        return None
+    target = (pkg_dir / rel).resolve()
+    if not target.is_file():
+        return None
+    if target.suffix.lower() in (".js", ".mjs", ".cjs") and node:
+        return [node, str(target)]
+    return [str(target)]
+
+
 def find_claude_cmd():
     override = os.environ.get("MUBO245_CLAUDE_CLI_JS", "").strip()
     node = shutil.which("node")
-    if override and node and Path(override).is_file():
-        return [node, override]
-    npm_root = None
+    if override and Path(override).is_file():
+        if override.lower().endswith((".js", ".mjs", ".cjs")) and node:
+            return [node, override]
+        return [override]
+    local_root = os.environ.get("MUBO245_CLAUDE_PREFIX", "").strip()
+    pkg_dirs = []
+    if local_root:
+        root_path = Path(local_root)
+        pkg_dirs.append(root_path / "node_modules" / "@anthropic-ai" / "claude-code")
+        for exe_name in ("claude.exe", "claude"):
+            direct = root_path / "node_modules" / ".bin" / exe_name
+            if direct.is_file():
+                return [str(direct)]
+        for native_hit in (root_path / "node_modules").rglob("claude.exe"):
+            if native_hit.is_file():
+                return [str(native_hit)]
     npm = shutil.which("npm")
     if npm:
         try:
             proc = subprocess.run([npm, "root", "-g"], capture_output=True, text=True, timeout=15)
             if proc.returncode == 0 and proc.stdout.strip():
-                npm_root = Path(proc.stdout.strip())
+                pkg_dirs.append(Path(proc.stdout.strip()) / "@anthropic-ai" / "claude-code")
         except (OSError, subprocess.SubprocessError):
-            npm_root = None
-    candidates = []
-    if npm_root:
-        candidates.append(npm_root / "@anthropic-ai" / "claude-code" / "cli.js")
-    local_root = os.environ.get("MUBO245_CLAUDE_PREFIX", "").strip()
+            pass
+    for pkg_dir in pkg_dirs:
+        resolved = resolve_pkg_bin(pkg_dir, node)
+        if resolved:
+            return resolved
+        for name in ("cli.js", "cli.mjs", "claude.exe"):
+            cand = pkg_dir / name
+            if cand.is_file():
+                return [node, str(cand)] if cand.suffix.lower() in (".js", ".mjs") and node else [str(cand)]
     if local_root:
-        candidates.append(Path(local_root) / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
+        cmd_shim = Path(local_root) / "node_modules" / ".bin" / "claude.cmd"
+        if cmd_shim.is_file():
+            return [str(cmd_shim)]
     claude_bin = shutil.which("claude")
     if claude_bin:
-        bin_dir = Path(claude_bin).resolve().parent
-        candidates.extend([
-            bin_dir / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js",
-            bin_dir.parent / "lib" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js",
-        ])
-    if node:
-        for candidate in candidates:
-            if candidate.is_file():
-                return [node, str(candidate)]
-    if claude_bin:
         return [claude_bin]
-    raise RuntimeError("Claude Code CLI not found on PATH or npm global root")
+    listing = []
+    if local_root and Path(local_root).exists():
+        listing = [str(p) for p in list(Path(local_root).rglob("*"))[:40]]
+    raise RuntimeError(f"Claude Code CLI not found. prefix={local_root!r} files={listing}")
 
 
 def probe_claude_cli(base_cmd, out_dir):
