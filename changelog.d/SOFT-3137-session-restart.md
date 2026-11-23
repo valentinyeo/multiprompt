@@ -1,1 +1,1 @@
-A hosted verification journey checks that a chat closed and restarted from the server comes back as a chat tab, not a shell tab.
+A chat you close and restart on the server stays in Chat View instead of reopening as a terminal tab.

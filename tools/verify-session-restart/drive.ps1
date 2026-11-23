@@ -145,8 +145,7 @@ function Restart-DesktopApp {
 try {
     $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'driver-repo-path').Trim()
     & "$PSScriptRoot/../verify-server-chat/start.ps1" -Profile $profile -Evidence $Evidence
-    $linuxRepo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $repo) -Evidence $Evidence -Name 'prepare-repo-path').Trim()
-    [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$linuxRepo/tools/verify-session-restart/prepare-server.sh", $linuxRepo) -Evidence $Evidence -Name 'prepare-mp-talk')
+    [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-session-restart/prepare-server.sh", $repo) -Evidence $Evidence -Name 'prepare-mp-talk')
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $env:APPDATA = "$profile/roaming"
     $env:LOCALAPPDATA = "$profile/local"
