@@ -29,8 +29,8 @@ test("blue-dot attention survives save, restart, and reconnect", () => {
   const failedRestore = functionBody("preserveFailedRemoteSavedTab", "parseSessionTabs");
   assert.match(failedRestore, /shell\.needs_attention = tab\.needs_attention/);
 
-  const restore = functionBody("spawnSavedTab", "restoreSession");
-  assert.match(restore, /shells\[idx\]\.needs_attention = tabs\[t\]\.needs_attention/);
+  const restore = functionBody("applySavedTabFields", "restoreCachedSavedTab");
+  assert.match(restore, /shells\[idx\]\.needs_attention = tab\.needs_attention/);
   assert.match(functionBody("restoreSession", "enumWindowsCallback"), /spawnSavedTab\(&tabs\[t\], \.continue_latest\)/);
 
   const respawn = functionBody("respawnShellInPlace", "faviconHostForShell");
