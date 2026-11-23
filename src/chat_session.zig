@@ -2056,17 +2056,17 @@ pub fn chatSwitchBrowserTick() void {
     if (app_state.g_chat_browser_swap.shell_id == 0 or app_state.g_chat_browser_swap.shell_id != shell_id) return;
     if (app_state.g_chat_switch_preparing or !chatViewOwnsInput() or app_state.g_edit_hwnd != null or app_state.g_popup_menu_active) {
         const blocked_at = GetTickCount64();
-        var held: [192]u8 = undefined;
-        const line = std.fmt.bufPrint(&held, "[switch] paint held shell={d} preparing={} owns={} edit={} menu={} held_ms={d}", .{
-            shell_id,
-            app_state.g_chat_switch_preparing,
-            chatViewOwnsInput(),
-            app_state.g_edit_hwnd != null,
-            app_state.g_popup_menu_active,
-            blocked_at -| app_state.g_chat_browser_swap.requested_at,
-        }) catch "[switch] paint held";
-        debugLog(line);
         if (app_state.g_chat_browser_swap.held(blocked_at)) {
+            var held: [192]u8 = undefined;
+            const line = std.fmt.bufPrint(&held, "[switch] paint held shell={d} preparing={} owns={} edit={} menu={} ms={d}", .{
+                shell_id,
+                app_state.g_chat_switch_preparing,
+                chatViewOwnsInput(),
+                app_state.g_edit_hwnd != null,
+                app_state.g_popup_menu_active,
+                blocked_at -| app_state.g_chat_browser_swap.requested_at,
+            }) catch "[switch] paint held";
+            debugLog(line);
             app_state.g_chat_browser_swap.cancel();
             chatFileReadyDeferredFlush();
             return;

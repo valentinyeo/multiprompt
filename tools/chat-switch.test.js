@@ -15,9 +15,12 @@ function paintFirst(text) {
   const chat = switching.slice(chatStart, switching.indexOf('} else if (', chatStart + 1));
   assert.match(chat, /chatDeferTranscriptLoad\(\);[\s\S]*layoutChatControls\(\);/);
   assert.doesNotMatch(chat, /positionActiveBrowser|parkInactiveBrowserPanes|updateBrowserVisibility|refreshChatTranscript/);
-  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript', 'chatFileOnReadyOrDefer']) {
+  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript']) {
     assert.match(body(fn, text), /if \(g_chat_browser_swap\.shell_id != 0\) return;/);
   }
+  const deferReady = body('chatFileOnReadyOrDefer', text);
+  assert.match(deferReady, /g_chat_browser_swap\.shell_id != 0/);
+  assert.match(deferReady, /return;[\s\S]*chatFileOnReady\(\);/);
   const paint = body('chatTranscriptWndProc', text);
   assert.match(paint, /EndPaint\(hwnd, &ps\);\s*if \(painted\) chatSwitchDidPaint\(\);/);
   assert.match(paint, /painted = BitBlt\([^]*\) != 0;/);
@@ -276,11 +279,11 @@ test "a switch paint held by an overlay past the hold deadline is abandoned so c
     test_now = 9000;
     g_chat_browser_swap.request(7, 9000);
     chatSwitchBrowserTick();
-    try std.testing.expectEqual(@as(u32), 7, g_chat_browser_swap.shell_id);
+    try std.testing.expect(g_chat_browser_swap.shell_id == 7);
     test_now = 12000;
     chatSwitchBrowserTick();
-    try std.testing.expectEqual(@as(u32), 0, g_chat_browser_swap.shell_id);
-    try std.testing.expectEqual(@as(usize), 0, reveals);
+    try std.testing.expect(g_chat_browser_swap.shell_id == 0);
+    try std.testing.expect(reveals == 0);
     g_all_sessions_active = false;
 }
 `;
