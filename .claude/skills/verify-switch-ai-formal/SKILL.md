@@ -33,7 +33,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `9e4d749e01aea7405ed2bde50182ce4507e1fafd`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code. SOFT-3098 changed only archive row identity in `host_history_append`, `host_event`, `host_assistant_event` and the two event-log rebuild readers that `host_switch_rows` and the handover use, so the carried rows and every switch decision are unchanged.
 
 | Source | Covered behavior |
 | --- | --- |
