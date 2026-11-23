@@ -1,0 +1,180 @@
+name: MUBO-245 Pin Skill Prototype
+
+on:
+  push:
+    branches:
+      - mubo-245-pin-skill-proto
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Claude Code model for the 22-turn prototype runs
+        type: string
+        default: haiku
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mubo-245-pin-skill-proto-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proto:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        option: [a, b, c]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install Claude Code CLI
+        env:
+          PREFIX: ${{ runner.temp }}/claude-cli
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:PREFIX" --no-audit --no-fund @anthropic-ai/claude-code
+          if ($LASTEXITCODE -ne 0) { throw 'claude-code install failed' }
+      - name: Run 22-turn prototype scenario
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MUBO245_CLAUDE_PREFIX: ${{ runner.temp }}/claude-cli
+          PROTO_OPTION: ${{ matrix.option }}
+          PROTO_MODEL: ${{ inputs.model || 'haiku' }}
+        shell: pwsh
+        run: |
+          python prototypes/mubo-245/runner.py --option "$env:PROTO_OPTION" --model "$env:PROTO_MODEL" --out "evidence/option-$env:PROTO_OPTION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mubo-245-option-${{ matrix.option }}
+          path: evidence/option-${{ matrix.option }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+  ladder_judge:
+    needs: proto
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: mubo-245-option-*
+          path: collected
+      - name: Normalize downloaded directories
+        run: |
+          mkdir -p normalized
+          for opt in a b c; do
+            if [ -f "collected/mubo-245-option-${opt}/results.json" ]; then
+              mkdir -p "normalized/option-${opt}"
+              cp -r "collected/mubo-245-option-${opt}/." "normalized/option-${opt}/"
+            fi
+          done
+      - name: Build Token Ladder judge request
+        run: python3 prototypes/mubo-245/build_judge_request.py --input-dir normalized --out judge-out/ladder-request.json
+      - name: Score pospeak transcripts via ladder-call
+        id: ladder
+        continue-on-error: true
+        uses: valentinyeo/token-ladder/.github/actions/ladder-call@main
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          request-file: judge-out/ladder-request.json
+          purpose: mubo-245-proto-judge
+      - name: Save judge output
+        if: always()
+        env:
+          ANSWER_FILE: ${{ steps.ladder.outputs.answer-file }}
+          LADDER_LANE: ${{ steps.ladder.outputs.lane }}
+        run: |
+          mkdir -p judge-evidence
+          if [ -n "$ANSWER_FILE" ] && [ -f "$ANSWER_FILE" ]; then
+            cp "$ANSWER_FILE" judge-evidence/ladder-answer.json
+          fi
+          printf '%s\n' "${LADDER_LANE:-unavailable}" > judge-evidence/ladder-lane.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mubo-245-judge
+          path: judge-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  screenshots:
+    needs: [proto, ladder_judge]
+    if: always() && !cancelled()
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: mubo-245-*
+          path: collected
+      - name: Render HTML report and capture Windows screenshots
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force normalized | Out-Null
+          foreach ($opt in @('a', 'b', 'c')) {
+            $src = "collected/mubo-245-option-$opt"
+            if (Test-Path "$src/results.json") {
+              New-Item -ItemType Directory -Force "normalized/option-$opt" | Out-Null
+              Copy-Item -Recurse -Force "$src/*" "normalized/option-$opt/"
+            }
+          }
+          $judgeAnswer = 'collected/mubo-245-judge/ladder-answer.json'
+          $laneFile = 'collected/mubo-245-judge/ladder-lane.txt'
+          $lane = if (Test-Path $laneFile) { (Get-Content -Raw $laneFile).Trim() } else { '' }
+          $renderArgs = @('prototypes/mubo-245/render_report.py', '--input-dir', 'normalized', '--out-dir', 'evidence/report', '--ladder-lane', $lane)
+          if (Test-Path $judgeAnswer) {
+            $renderArgs += @('--judge-answer', $judgeAnswer)
+          }
+          python @renderArgs
+          if ($LASTEXITCODE -ne 0) { throw 'render_report failed' }
+          $edgeCandidates = @(
+            'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
+          )
+          $edge = $edgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $edge) { throw 'Microsoft Edge not found on Windows runner' }
+          $htmlPath = (Resolve-Path 'evidence/report/viewer_rendered.html').Path
+          $htmlUri = ([System.Uri]$htmlPath).AbsoluteUri
+          foreach ($view in @('a', 'b', 'c', 'compare')) {
+            $shotName = if ($view -eq 'compare') { 'comparison.png' } else { "option-$view.png" }
+            $shotPath = Join-Path (Resolve-Path 'evidence/report').Path $shotName
+            & $edge --headless=new --disable-gpu --hide-scrollbars --window-size=1440,940 --virtual-time-budget=3000 "--screenshot=$shotPath" "${htmlUri}?view=$view"
+            if (-not (Test-Path $shotPath)) { throw "Screenshot missing: $shotPath" }
+          }
+          Get-Content 'evidence/report/summary.md'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mubo-245-proto-evidence
+          path: evidence/report/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MUBO-245 Prototype: Pin a Skill to a Chat (A / B / C)</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #161a24;
+    --panel2: #1d2230;
+    --border: #2a3142;
+    --text: #e6ebf5;
+    --muted: #8f9bb3;
+    --accent: #5b9bff;
+    --green: #2ecc71;
+    --red: #ff5c6c;
+    --amber: #f5b041;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #12151e;
+    border-bottom: 1px solid var(--border);
+  }
+  .title { font-weight: 700; font-size: 15px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-left: 10px; }
+  .switcher { display: flex; gap: 6px; }
+  .switcher button {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .switcher button.active {
+    background: var(--accent);
+    color: #08101e;
+    border-color: var(--accent);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 12px;
+    padding: 12px 16px;
+    height: calc(100vh - 54px);
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .card h2 {
+    margin: 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .mb-shell {
+    display: grid;
+    grid-template-columns: 148px 1fr;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #0c0e14;
+    overflow: hidden;
+    flex: 1;
+  }
+  .sidebar {
+    background: #121620;
+    border-right: 1px solid var(--border);
+    padding: 8px;
+    position: relative;
+  }
+  .tab {
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    margin-bottom: 4px;
+    color: var(--muted);
+  }
+  .tab.active {
+    background: #222a3d;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .tab-menu {
+    margin-top: 8px;
+    background: #1a2030;
+    border: 1px solid #3c4863;
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  }
+  .menu-hdr {
+    font-size: 10px;
+    color: var(--muted);
+    padding: 3px 6px;
+    text-transform: uppercase;
+  }
+  .menu-row {
+    padding: 5px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .menu-row.pin-row {
+    background: rgba(91, 155, 255, 0.16);
+    color: #cde0ff;
+    font-weight: 600;
+  }
+  .chat-pane {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+  .msg {
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user {
+    background: #1e283d;
+    align-self: flex-end;
+    max-width: 92%;
+  }
+  .msg.bot {
+    background: #151924;
+    border: 1px solid #252c3d;
+    align-self: flex-start;
+    max-width: 96%;
+  }
+  .ui-note {
+    font-size: 11px;
+    color: #9ed9b5;
+    background: rgba(46, 204, 113, 0.1);
+    border: 1px solid rgba(46, 204, 113, 0.3);
+    border-radius: 5px;
+    padding: 6px 8px;
+  }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .metric {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .metric .k { font-size: 11px; color: var(--muted); }
+  .metric .v { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  .metric .s { font-size: 10px; color: var(--muted); }
+  .heatmap-wrap {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .skill-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .skill-row:last-child { margin-bottom: 0; }
+  .skill-name { width: 105px; font-weight: 600; font-size: 12px; }
+  .cells { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+  .cell {
+    width: 28px;
+    height: 24px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .cell.pass { background: rgba(46, 204, 113, 0.22); border: 1px solid var(--green); color: #8ff0b7; }
+  .cell.fail { background: rgba(255, 92, 108, 0.22); border: 1px solid var(--red); color: #ff9ea8; }
+  .divider {
+    width: 2px;
+    height: 24px;
+    background: var(--amber);
+    margin: 0 3px;
+  }
+  .legend {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .excerpts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+  }
+  .excerpt {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    overflow: hidden;
+  }
+  .excerpt h3 {
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    color: #b7c6e6;
+  }
+  .turn-line {
+    font-size: 11px;
+    padding: 4px 0;
+    border-top: 1px solid #272f42;
+  }
+  .turn-line:first-of-type { border-top: 0; }
+  .badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .badge.ok { background: rgba(46, 204, 113, 0.2); color: #8ff0b7; }
+  .badge.bad { background: rgba(255, 92, 108, 0.2); color: #ff9ea8; }
+  .badge.info { background: rgba(91, 155, 255, 0.2); color: #b9d5ff; }
+  .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: #c7d4ee; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 7px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #1c2231; color: #b7c6e6; }
+  .compare-wrap {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div>
+    <span class="title">MUBO-245 Prototype: Pin a Skill to a Chat</span>
+    <span class="subtitle" id="run-meta">Real Claude Code on GitHub Windows runner (22 turns + restart + unpin)</span>
+  </div>
+  <div class="switcher">
+    <button id="btn-a" onclick="selectView('a')">A: UserPromptSubmit Hook</button>
+    <button id="btn-b" onclick="selectView('b')">B: Send-Path Marker</button>
+    <button id="btn-c" onclick="selectView('c')">C: --append-system-prompt</button>
+    <button id="btn-compare" onclick="selectView('compare')">Compare A / B / C</button>
+  </div>
+</div>
+<div id="app"></div>
+<script>
+const BUNDLE = __MUBO245_BUNDLE__;
+
+const META = {
+  a: {
+    title: "Option A: Per-chat UserPromptSubmit Hook",
+    mechanism: "Claude Code UserPromptSubmit hook reads pins.json keyed by MULTIBOT_SID/session_id and emits additionalContext every turn.",
+    unpin: "Delete entry from pins.json. Takes effect on next turn, zero process restart.",
+    codex: "Fragile on Codex: requires manual hook approval and codex app-server does not guarantee Claude-style additionalContext injection; unavailable on Pi/Hax.",
+    wire: "User message stays clean in chat transcript; instruction injected via hook additionalContext."
+  },
+  b: {
+    title: "Option B: Multi Bot Send-Path Marker Prepend",
+    mechanism: "Multi Bot send path (adapter['write']) prepends compact [Pinned skill: ...] marker to outgoing user text; Chat View strips/hides marker.",
+    unpin: "Clear pinned_skill in chat state. Takes effect on next turn, zero process restart.",
+    codex: "Works identically on Claude, Codex, Pi, Hax, and Cursor (single shared send hook in chat_history_reader.py).",
+    wire: "Raw native transcript contains the prepended marker; reader must strip known prefix on history load."
+  },
+  c: {
+    title: "Option C: --append-system-prompt / output-style on Resume",
+    mechanism: "Multi Bot appends pinned skill rules to --append-system-prompt (and developerInstructions for Codex) on launch/resume.",
+    unpin: "Must close and --resume the hosted agent process with updated system prompt (otherwise stays stuck).",
+    codex: "Maps cleanly to Codex thread/start + thread/resume developerInstructions, Pi --append-system-prompt, Cursor --append-system-prompt (not Hax). output-style is Claude-only.",
+    wire: "User turns and native transcript stay 100% clean; static system prompt stays prompt-cached across turns."
+  }
+};
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderCells(turns) {
+  let html = '<div class="cells">';
+  for (const t of turns || []) {
+    if (t.turn === 11) html += '<div class="divider" title="Chat restart (--resume)"></div>';
+    if (t.turn === 21) html += '<div class="divider" style="background:#5b9bff" title="Unpinned"></div>';
+    const cls = t.passed ? "pass" : "fail";
+    html += `<div class="cell ${cls}" title="Turn ${t.turn} (${t.phase})">${t.turn}</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function pickTurns(turns, ids) {
+  const map = new Map((turns || []).map(t => [t.turn, t]));
+  return ids.map(id => map.get(id)).filter(Boolean);
+}
+
+function renderOption(opt) {
+  const data = (BUNDLE.options || {})[opt] || {};
+  const meta = META[opt];
+  const canary = (data.skills || {})["pinned-canary"] || { summary: {}, turns: [] };
+  const pospeak = (data.skills || {})["pospeak"] || { summary: {}, turns: [] };
+  const cs = canary.summary || {};
+  const ps = pospeak.summary || {};
+  const pinnedPass = (cs.pinned_pass || 0) + (ps.pinned_pass || 0);
+  const pinnedTotal = (cs.pinned_total || 0) + (ps.pinned_total || 0);
+  const unpinPass = (cs.unpin_pass || 0) + (ps.unpin_pass || 0);
+  const unpinTotal = (cs.unpin_total || 0) + (ps.unpin_total || 0);
+  const avgMs = Math.round(((cs.avg_turn_ms || 0) + (ps.avg_turn_ms || 0)) / 2);
+  const avgIn = Math.round(((cs.avg_input_tokens || 0) + (ps.avg_input_tokens || 0)) / 2);
+  const avgCacheR = Math.round(((cs.avg_cache_read_tokens || 0) + (ps.avg_cache_read_tokens || 0)) / 2);
+  const totalCost = ((cs.total_cost_usd || 0) + (ps.total_cost_usd || 0)).toFixed(4);
+  const samplePos = pickTurns(pospeak.turns, [1, 11, 20, 21]);
+  const sampleCan = pickTurns(canary.turns, [1, 10, 11, 20, 21]);
+  const previewTurn = samplePos[0] || { ui_prompt: "Explain verifyEmailToken JWT exp bug...", reply: "**Login links expired early.** ..." };
+  const previewTurn2 = samplePos[1] || { ui_prompt: "Redis cache eviction...", reply: "**Inbox slowed down, now fixed.** ..." };
+
+  return `
+  <div class="grid">
+    <div class="card">
+      <h2>UI Surface (Pin in Tab Menu Only)</h2>
+      <div class="mb-shell">
+        <div class="sidebar">
+          <div class="tab active">product-triage</div>
+          <div class="tab">deploy-ops</div>
+          <div class="tab">release-check</div>
+          <div class="tab-menu">
+            <div class="menu-hdr">Tab Menu</div>
+            <div class="menu-row"><span>Rename session</span></div>
+            <div class="menu-row pin-row"><span>Pinned: pospeak</span><span>Unpin</span></div>
+            <div class="menu-row"><span>Fresh start</span></div>
+            <div class="menu-row"><span>Archive session</span></div>
+          </div>
+        </div>
+        <div class="chat-pane">
+          <div class="msg user">${esc((previewTurn.ui_prompt || "").slice(0, 115))}</div>
+          <div class="msg bot">${esc((previewTurn.reply || "").slice(0, 230))}</div>
+          <div class="msg user">${esc((previewTurn2.ui_prompt || "").slice(0, 115))}</div>
+          <div class="msg bot">${esc((previewTurn2.reply || "").slice(0, 230))}</div>
+        </div>
+      </div>
+      <div class="ui-note">Pin state lives ONLY in the right-click / Ctrl+K tab menu. Zero badges, pills, or status text around messages.</div>
+      <div class="mono"><b>Mechanism:</b> ${esc(meta.mechanism)}</div>
+      <div class="mono"><b>Unpin:</b> ${esc(meta.unpin)}</div>
+      <div class="mono"><b>Codex / other providers:</b> ${esc(meta.codex)}</div>
+      <div class="mono"><b>Transcript hygiene:</b> ${esc(meta.wire)}</div>
+    </div>
+    <div class="card">
+      <h2>${esc(meta.title)} — Live Windows Claude Code Proof (Model: ${esc(data.model || "haiku")})</h2>
+      <div class="metrics">
+        <div class="metric"><div class="k">Pinned Pass (T1-20)</div><div class="v" style="color:${pinnedPass === pinnedTotal && pinnedTotal > 0 ? 'var(--green)' : 'var(--amber)'}">${pinnedPass}/${pinnedTotal}</div><div class="s">Canary ${cs.pinned_pass||0}/${cs.pinned_total||0} · Pospeak ${ps.pinned_pass||0}/${ps.pinned_total||0}</div></div>
+        <div class="metric"><div class="k">Unpin Clean (T21-22)</div><div class="v">${unpinPass}/${unpinTotal}</div><div class="s">${opt === 'c' ? `Restart ${ps.unpin_restart_ms || cs.unpin_restart_ms || 0}ms` : 'Zero restart'}</div></div>
+        <div class="metric"><div class="k">Avg Turn Latency</div><div class="v">${avgMs} ms</div><div class="s">${opt === 'a' ? `Hook avg ${cs.avg_hook_ms || 0}ms` : `Restart ${cs.restart_ms || 0}ms`}</div></div>
+        <div class="metric"><div class="k">Tokens / Turn (avg)</div><div class="v">${avgIn} in</div><div class="s">${avgCacheR} cache read · $${totalCost}</div></div>
+        <div class="metric"><div class="k">Transcript Markers</div><div class="v">${(cs.transcript_marker_hits || 0) + (ps.transcript_marker_hits || 0)}</div><div class="s">${opt === 'b' ? 'Needs strip on read' : 'Native transcript clean'}</div></div>
+      </div>
+      <div class="heatmap-wrap">
+        <div class="skill-row"><div class="skill-name">pinned-canary</div>${renderCells(canary.turns)}</div>
+        <div class="skill-row"><div class="skill-name">pospeak</div>${renderCells(pospeak.turns)}</div>
+        <div class="legend">
+          <span><b style="color:var(--green)">Green</b> = Pass</span>
+          <span><b style="color:var(--red)">Red</b> = Fail</span>
+          <span><b style="color:var(--amber)">Amber bar (10|11)</b> = Chat restart (--resume)</span>
+          <span><b style="color:var(--accent)">Blue bar (20|21)</b> = Unpinned</span>
+        </div>
+      </div>
+      <div class="excerpts">
+        <div class="excerpt">
+          <h3>pinned-canary excerpts (incl. T10 adversarial, T11 resume, T21 unpin)</h3>
+          ${sampleCan.map(t => `<div class="turn-line"><span class="badge ${t.passed ? 'ok' : 'bad'}">T${t.turn} ${t.passed ? 'PASS' : 'FAIL'}</span><span class="badge info">${esc(t.phase)}</span> ${esc((t.reply || "").replace(/\s+/g, " ").slice(0, 145))}</div>`).join("")}
+        </div>
+        <div class="excerpt">
+          <h3>pospeak excerpts (real product-owner skill)</h3>
+          ${samplePos.map(t => `<div class="turn-line"><span class="badge ${t.passed ? 'ok' : 'bad'}">T${t.turn} ${t.passed ? 'PASS' : 'FAIL'}</span><span class="badge info">${esc(t.phase)}</span> ${esc((t.reply || "").replace(/\s+/g, " ").slice(0, 170))}</div>`).join("")}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderCompare() {
+  const rows = ["a", "b", "c"].map(opt => {
+    const d = (BUNDLE.options || {})[opt] || {};
+    const cs = ((d.skills || {})["pinned-canary"] || {}).summary || {};
+    const ps = ((d.skills || {})["pospeak"] || {}).summary || {};
+    const avgMs = Math.round(((cs.avg_turn_ms || 0) + (ps.avg_turn_ms || 0)) / 2);
+    const totalCost = ((cs.total_cost_usd || 0) + (ps.total_cost_usd || 0)).toFixed(4);
+    const jScore = ((((BUNDLE.ladder_judge || {}).scores || {})[opt]) || {}).pospeak_quality_10;
+    return `<tr>
+      <td><b>${esc(META[opt].title)}</b></td>
+      <td>${cs.pinned_pass||0}/${cs.pinned_total||0} (post-restart ${cs.post_restart_pass||0}/${cs.post_restart_total||0})</td>
+      <td>${ps.pinned_pass||0}/${ps.pinned_total||0} (post-restart ${ps.post_restart_pass||0}/${ps.post_restart_total||0})${jScore != null ? `<br>Ladder judge: ${jScore}/10` : ""}</td>
+      <td>${(cs.unpin_pass||0)+(ps.unpin_pass||0)}/${(cs.unpin_total||0)+(ps.unpin_total||0)}<br>${opt === 'c' ? 'Requires process restart' : 'Instant (no restart)'}</td>
+      <td>${avgMs} ms/turn · $${totalCost}</td>
+      <td>${esc(META[opt].codex)}</td>
+    </tr>`;
+  }).join("");
+  const judgeLine = (BUNDLE.ladder_judge || {}).one_line_verdict || "No ladder-call verdict attached.";
+  return `
+  <div class="compare-wrap">
+    <div class="card">
+      <h2>Side-by-Side Comparison (Real Claude Code on Windows, 22 Turns x 2 Skills per Option)</h2>
+      <table>
+        <thead>
+          <tr><th>Option</th><th>pinned-canary (T1-20)</th><th>pospeak (T1-20)</th><th>Unpin (T21-22)</th><th>Latency &amp; Cost</th><th>Codex &amp; Multi-provider</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="ui-note"><b>Token Ladder independent judge (${esc(BUNDLE.ladder_lane || "ladder-call")}):</b> ${esc(judgeLine)}</div>
+    </div>
+    <div class="card">
+      <h2>Turn-by-Turn Pass/Fail Heatmaps (T1-10 Pre-restart | T11-20 Post-restart | T21-22 Unpinned)</h2>
+      ${["a", "b", "c"].map(opt => {
+        const d = (BUNDLE.options || {})[opt] || {};
+        const ct = ((d.skills || {})["pinned-canary"] || {}).turns || [];
+        const pt = ((d.skills || {})["pospeak"] || {}).turns || [];
+        return `<div style="margin-bottom:8px">
+          <div style="font-weight:700;margin-bottom:4px;color:#b7c6e6">${esc(META[opt].title)}</div>
+          <div class="skill-row"><div class="skill-name">pinned-canary</div>${renderCells(ct)}</div>
+          <div class="skill-row"><div class="skill-name">pospeak</div>${renderCells(pt)}</div>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
+function selectView(view) {
+  for (const id of ["a", "b", "c", "compare"]) {
+    document.getElementById("btn-" + id).classList.toggle("active", id === view);
+  }
+  document.getElementById("app").innerHTML = view === "compare" ? renderCompare() : renderOption(view);
+}
+
+window.addEventListener("keydown", e => {
+  if (e.key === "1") selectView("a");
+  if (e.key === "2") selectView("b");
+  if (e.key === "3") selectView("c");
+  if (e.key === "4") selectView("compare");
+});
+
+const params = new URLSearchParams(location.search);
+const initial = params.get("view");
+selectView(["a", "b", "c", "compare"].includes(initial) ? initial : "compare");
+</script>
+</body>
+</html>
