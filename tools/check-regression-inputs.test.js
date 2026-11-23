@@ -90,10 +90,10 @@ test('CLI checks committed additions via merge-base, not unchanged legacy or bas
   write('tools/old.js', old + 'const unrelated = 1;\n');
   write('src/ignored.zig', old);
   commit();
-  assert.deepEqual(checkRegressionInputs(baseTip, dir).errors, []);
+  assert.deepEqual(checkRegressionInputs(baseTip, dir, null).errors, []);
   write('tools/nested/new.test.js', old);
   commit();
-  const result = checkRegressionInputs(base, dir);
+  const result = checkRegressionInputs(base, dir, null);
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /^tools\/nested\/new.test.js:1 loads cb15de6:src\/main.zig/);
   const cli = spawnSync(process.execPath, [join(__dirname, 'check-regression-inputs.mjs'), base, '--root', dir], { encoding: 'utf8' });

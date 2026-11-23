@@ -40,12 +40,23 @@ function copyFiles(files, fromRoot, toRoot) {
   }
 }
 
+function ensureCommit(root, ref) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], { cwd: root, stdio: 'pipe' });
+    return ref;
+  } catch {
+    execFileSync('git', ['fetch', '--depth', '1', 'origin', ref], { cwd: root, stdio: 'pipe' });
+    return execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], { cwd: root, encoding: 'utf8' }).trim();
+  }
+}
+
 export function runRegressionRepro({ root = '.', base, pr, headRoot = root }) {
   if (!fixture.isBugPullRequest(pr, root)) return null;
   const ticket = fixture.primaryTicket(pr);
   if (!ticket) return null;
   const manifest = fixture.readReproManifest(headRoot, ticket);
   if (!manifest) return null;
+  const baseSha = ensureCommit(root, base);
   const carry = manifest.files.length
     ? manifest.files
     : [
@@ -55,7 +66,7 @@ export function runRegressionRepro({ root = '.', base, pr, headRoot = root }) {
   const headOut = runCommand(manifest.command, headRoot);
   const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), 'regression-base-'));
   try {
-    execFileSync('git', ['worktree', 'add', '--detach', tempBase, base], { cwd: root });
+    execFileSync('git', ['worktree', 'add', '--detach', tempBase, baseSha], { cwd: root });
     copyFiles(carry, headRoot, tempBase);
     const baseOut = runCommand(manifest.command, tempBase, { REGRESSION_REPRO_BASE: '1' });
     return {

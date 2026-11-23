@@ -117,8 +117,9 @@ function readPullRequest(root) {
   };
 }
 
-export function checkRegressionInputs(base, root = '.', pr = readPullRequest(root)) {
+export function checkRegressionInputs(base, root = '.', pr) {
   if (!base || base.startsWith('-')) throw new Error('Usage: node tools/check-regression-inputs.mjs <base-ref> [--root DIR]');
+  const pull = pr === undefined ? readPullRequest(root) : pr;
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const range = `${base}...HEAD`;
   const files = git(['diff', '--no-ext-diff', '--name-only', '-z', '--diff-filter=ACMR', range, '--']).split('\0').filter(isInputFile);
@@ -128,8 +129,8 @@ export function checkRegressionInputs(base, root = '.', pr = readPullRequest(roo
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     errors.push(...findHistoryInputs(file, source, addedLines(diff)));
   }
-  if (pr) errors.push(...checkBugFixtureErrors({ base, root, pr }));
-  return { errors, files: files.length, bugPullRequest: pr ? isBugPullRequest(pr, root) : false };
+  if (pull) errors.push(...checkBugFixtureErrors({ base, root, pr: pull }));
+  return { errors, files: files.length, bugPullRequest: pull ? isBugPullRequest(pull, root) : false };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
