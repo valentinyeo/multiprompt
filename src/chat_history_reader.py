@@ -2798,7 +2798,7 @@ HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
-                      "Saved locally and queued for the host account to file on the board when no agent token is set here.")
+                      "Saved locally; without an agent token, the host account files it on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
