@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +46,13 @@ elif sys.argv[1] == "session-open":
     state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
     Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
     print(json.dumps(dict(ok=True, created=True, tab=55)))
+elif sys.argv[1] == "session-rename":
+    tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
+    for tab in state.get("tabs", []):
+        if tab["id"] == tab_id:
+            tab["title"] = sys.argv[sys.argv.index("--name") + 1]
+    Path(state_file).write_text(json.dumps(state), encoding="utf-8")
+    print(json.dumps(dict(ok=True)))
 else:
     print(json.dumps(dict(ok=True)))
 '''
@@ -82,7 +90,7 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
-        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB"):
+        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID"):
             base.pop(name, None)
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
@@ -109,6 +117,113 @@ class MpSessionsTest(unittest.TestCase):
         (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
         (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude",
                                                                        pid=os.getpid())), encoding="utf-8")
+
+    def identity_chat(self, provider="claude", sid="caller-session", tmux="live-caller", name="My Chat"):
+        self.host.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((provider + ":" + sid).encode()).hexdigest()[:32]
+        (self.host / (key + ".config.json")).write_text(json.dumps(dict(
+            provider=provider, sid=sid, tmux=tmux, spawn_display="Old launch name")), encoding="utf-8")
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(
+            provider=provider, sid=sid, pid=os.getpid())), encoding="utf-8")
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        tabs = state.setdefault("tabs", [])
+        if not any(tab["tmux"] == tmux for tab in tabs):
+            tabs.append(dict(id=len(tabs) + 50, title=name, tmux=tmux, host="remote-1"))
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    def test_SOFT_2451_whoami_json_identifies_only_the_caller_for_every_host_provider(self):
+        for provider in ("claude", "codex", "pi", "hax", "cursor"):
+            self.identity_chat(provider, provider + "-session", "live-" + provider)
+        for provider in ("claude", "codex", "pi", "hax", "cursor"):
+            for hosted in (False, True):
+                with self.subTest(provider=provider, hosted=hosted):
+                    extra = dict(MULTIBOT_PROVIDER=provider, MULTIBOT_SID=provider + "-session") if hosted else {}
+                    identity = self.parsed(self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-" + provider, **extra))
+                    self.assertEqual(identity, dict(name="My Chat", sid=provider + "-session", provider=provider,
+                                                    tmux="live-" + provider, link="@My Chat{live-" + provider + "}"))
+        self.assertEqual(self.events("host"), [])
+        self.assertTrue(all(call == ["workspace-list"] for call in self.events("zsb")))
+
+    def test_SOFT_2451_whoami_text_prints_name_session_and_linked_agent(self):
+        self.identity_chat("codex")
+        done = self.run_sessions("whoami", MULTIPROMPT_TAB="live-caller")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for text in ("My Chat", "caller-session", "codex", "@My Chat{live-caller}"):
+            self.assertIn(text, done.stdout)
+
+    def test_SOFT_2451_whoami_reads_a_rename_immediately_without_using_cached_names(self):
+        self.identity_chat()
+        cached = self.home / ".local/state/multiprompt/chat-names.json"
+        cached.write_text(json.dumps({"live-caller": dict(name="Stale published name", at=1)}), encoding="utf-8")
+        first = self.parsed(self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller"))
+        self.assertEqual(first["name"], "My Chat")
+        before = time.monotonic()
+        self.parsed(self.run_sessions("rename", "My Chat", "Renamed Chat"))
+        renamed = self.parsed(self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller"))
+        self.assertEqual(renamed["name"], "Renamed Chat")
+        self.assertEqual(renamed["sid"], first["sid"])
+        self.assertEqual(renamed["link"], "@Renamed Chat{live-caller}")
+        self.assertLess(time.monotonic() - before, 60)
+
+    def test_SOFT_2451_whoami_resolves_the_calling_tmux_pane(self):
+        self.identity_chat()
+        tmux = self.bin / "tmux"
+        tmux.write_text("#!" + sys.executable + "\nimport sys\nif sys.argv[1:] == "
+                        "['display-message', '-p', '-t', '%7', '#{session_name}']:\n print('live-caller')\n"
+                        "else:\n sys.exit(1)\n", encoding="utf-8")
+        tmux.chmod(0o755)
+        identity = self.parsed(self.run_sessions("whoami", "--json", TMUX_PANE="%7"))
+        self.assertEqual(identity["name"], "My Chat")
+        self.assertEqual(identity["sid"], "caller-session")
+
+    def test_SOFT_2451_whoami_refuses_to_guess_a_peer_without_a_caller(self):
+        self.identity_chat()
+        for extra in ({}, dict(MULTIPROMPT_TAB="live-missing")):
+            with self.subTest(extra=extra):
+                done = self.run_sessions("whoami", "--json", **extra)
+                self.assertEqual(done.returncode, 2)
+                self.assertEqual(done.stdout, "")
+                self.assertIn("this chat", done.stderr)
+
+    def test_SOFT_2451_whoami_requires_a_live_desktop_name(self):
+        self.identity_chat()
+        for listing in (dict(ok=False, error="offline"), LISTING):
+            with self.subTest(listing=listing):
+                self.state_file.write_text("{}", encoding="utf-8")
+                done = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller",
+                                         MP_SESSIONS_TEST_LIST=json.dumps(listing))
+                self.assertEqual(done.returncode, 2)
+                self.assertEqual(done.stdout, "")
+
+    def test_SOFT_2451_whoami_refuses_duplicate_terminal_names_across_hosts(self):
+        self.identity_chat()
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["tabs"].append(dict(id=99, title="Another host's chat", tmux="live-caller", host="remote-2"))
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        done = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller")
+        self.assertEqual(done.returncode, 2)
+        self.assertEqual(done.stdout, "")
+
+    def test_SOFT_2451_whoami_does_not_borrow_a_peers_session_id(self):
+        self.identity_chat()
+        self.identity_chat("codex", "peer-session", "live-peer")
+        for path in self.host.glob("*.json"):
+            if json.loads(path.read_text(encoding="utf-8")).get("sid") == "caller-session":
+                path.unlink()
+        done = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller")
+        self.assertEqual(done.returncode, 2)
+        self.assertEqual(done.stdout, "")
+
+    def test_SOFT_2451_whoami_disambiguates_host_bindings_only_with_the_callers_identity(self):
+        self.identity_chat()
+        self.identity_chat("codex", "previous-session")
+        ambiguous = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller")
+        self.assertEqual(ambiguous.returncode, 2)
+        self.assertEqual(ambiguous.stdout, "")
+        own = self.parsed(self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller",
+                                            MULTIBOT_PROVIDER="claude", MULTIBOT_SID="caller-session"))
+        self.assertEqual(own["sid"], "caller-session")
+        self.assertEqual(own["provider"], "claude")
 
     def test_SOFT_3055_start_creates_once_and_is_idempotent(self):
         first = self.parsed(self.run_sessions("start", "--name", "Daily chat"))

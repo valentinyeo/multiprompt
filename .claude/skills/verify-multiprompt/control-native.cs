@@ -716,6 +716,15 @@ public static class VerifyNative {
             }
         } finally { MouseAt(end.X, end.Y, 4); }
     }
+    public static void ClickOwnedChildClient(IntPtr child, IntPtr owner, int x, int y) {
+        if (Class(child) != "MultiPromptWorkspaceSwitcher" || GetAncestor(child, 2) != owner) throw new InvalidOperationException("Workspace card is not in the owned window");
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(child, ref point) || WindowFromPoint(point) != child) throw new InvalidOperationException("Workspace card row is not in the owned window");
+        if (GetAncestor(GetForegroundWindow(), 2) != owner) throw new InvalidOperationException("Owned window must be foreground before a workspace card click");
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 2);
+        MouseAt(point.X, point.Y, 4);
+    }
     public static void RightClickTranscript(IntPtr hwnd, uint pid, IntPtr owner, Point point) {
         uint actualPid;
         GetWindowThreadProcessId(hwnd, out actualPid);
