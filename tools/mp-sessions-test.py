@@ -126,7 +126,9 @@ class MpSessionsTest(unittest.TestCase):
         (self.host / (key + ".state.json")).write_text(json.dumps(dict(
             provider=provider, sid=sid, pid=os.getpid())), encoding="utf-8")
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        state.setdefault("tabs", []).append(dict(id=len(state["tabs"]) + 50, title=name, tmux=tmux, host="remote-1"))
+        tabs = state.setdefault("tabs", [])
+        if not any(tab["tmux"] == tmux for tab in tabs):
+            tabs.append(dict(id=len(tabs) + 50, title=name, tmux=tmux, host="remote-1"))
         self.state_file.write_text(json.dumps(state), encoding="utf-8")
 
     def test_SOFT_2451_whoami_json_identifies_only_the_caller_for_every_host_provider(self):
@@ -192,6 +194,15 @@ class MpSessionsTest(unittest.TestCase):
                                          MP_SESSIONS_TEST_LIST=json.dumps(listing))
                 self.assertEqual(done.returncode, 2)
                 self.assertEqual(done.stdout, "")
+
+    def test_SOFT_2451_whoami_refuses_duplicate_terminal_names_across_hosts(self):
+        self.identity_chat()
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["tabs"].append(dict(id=99, title="Another host's chat", tmux="live-caller", host="remote-2"))
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        done = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller")
+        self.assertEqual(done.returncode, 2)
+        self.assertEqual(done.stdout, "")
 
     def test_SOFT_2451_whoami_does_not_borrow_a_peers_session_id(self):
         self.identity_chat()

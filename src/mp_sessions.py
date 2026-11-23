@@ -325,9 +325,10 @@ def cmd_whoami(args):
     listing = send.zsb("workspace-list")
     if listing.get("ok") is not True:
         raise ValueError("cannot read this chat's current name; open the desktop app and retry")
-    tab = send.find_tab(listing, tmux)[2]
-    if not tab or not tab.get("title"):
-        raise ValueError("this chat has no named tab on the desktop")
+    tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux]
+    if len(tabs) != 1 or not tabs[0].get("title"):
+        raise ValueError("this chat has no unique named tab on the desktop")
+    tab = tabs[0]
     provider = os.environ.get("MULTIBOT_PROVIDER")
     sid = os.environ.get("MULTIBOT_SID")
     root = send.host_root()
