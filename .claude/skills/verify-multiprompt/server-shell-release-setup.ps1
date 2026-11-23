@@ -2,11 +2,19 @@
 $serverProofStarted = $true
 & "$PSScriptRoot/../../../tools/verify-server-chat/start.ps1" -Profile $scratch -Evidence $Evidence
 $serverProofSettings = Join-Path $scratch 'roaming/ZigShell'
+$serverProofReceiptKnownHosts = Join-Path $serverProofSettings 'ssh-key/receipt-known_hosts'
+$scan = [IO.File]::ReadAllText((Join-Path $Evidence 'ssh-keyscan.stdout.log')).Trim()
+$scanLines = @($scan -split "`n" | Where-Object { $_.Trim() })
+if ($scanLines.Count -eq 0) { throw 'ssh-keyscan left no loopback host key to pin for receipt reads' }
+New-Item -ItemType Directory -Force (Split-Path $serverProofReceiptKnownHosts) | Out-Null
+[IO.File]::WriteAllText($serverProofReceiptKnownHosts, ($scanLines -join "`n") + "`n")
+$knownForReceipt = $serverProofReceiptKnownHosts.Replace('\', '/')
+Save-Json @{ path = $knownForReceipt; lines = $scanLines.Count } 'shell-receipt-known-hosts.json'
 $serverProofRepo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'shell-repo-path').Trim()
 $serverProofSsh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
 function Read-ProofServer([string]$Command, [string]$Name, [int]$DeadlineSeconds = 45) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Command))
-    $arguments = @('-F', "$serverProofSettings/ssh-key/config", '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', 'remote-1', "echo $encoded | base64 -d | timeout 30s bash")
+    $arguments = @('-F', "$serverProofSettings/ssh-key/config", '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '-o', "UserKnownHostsFile=$knownForReceipt", 'remote-1', "echo $encoded | base64 -d | timeout 30s bash")
     $commandLine = ($arguments | ForEach-Object {
         if ($_ -ne '' -and $_ -notmatch '[\s"]') { $_ }
         else { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }

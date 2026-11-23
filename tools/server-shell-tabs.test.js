@@ -25,6 +25,13 @@ test('SOFT-3128 remote shell reads use a bounded local process wait', () => {
   assert.match(setup, /function Proof-SyncKnownHosts/);
 });
 
+test('SOFT-3128 receipt reads trust the ssh-keyscan loopback key through an isolated known_hosts file', () => {
+  assert.match(setup, /ssh-keyscan\.stdout\.log/);
+  assert.match(setup, /receipt-known_hosts/);
+  const reader = setup.match(/function Read-ProofServer[\s\S]*?\n\}/)[0];
+  assert.match(reader, /UserKnownHostsFile=\$knownForReceipt/);
+});
+
 test('SOFT-3128 paste, interrupt and restore wait on visible shell evidence', () => {
   assert.match(setup, /proofLastHostsSync/);
   assert.match(journey, /Proof-SyncKnownHosts/);
