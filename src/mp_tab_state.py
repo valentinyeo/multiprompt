@@ -18,7 +18,7 @@ def pc_state(send):
 
 
 def same_tab_state(left, right):
-    return all(left.get(field) == right.get(field) for field in TAB_FIELDS)
+    return all(left.get(field) == right.get(field) for field in (*TAB_FIELDS, "shell", "agent"))
 
 
 def tab_target(view, name, host=None):

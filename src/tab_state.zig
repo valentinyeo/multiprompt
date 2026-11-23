@@ -155,4 +155,11 @@ test "SOFT-3141 stale state and identity changes are refused before apply" {
     try std.testing.expectError(error.Conflict, transition(original, .{ .verb = .pin, .expected = null, .state = desired }));
     desired.host = "remote-2";
     try std.testing.expectError(error.InvalidChange, transition(original, .{ .verb = .pin, .expected = original, .state = desired }));
+    desired = original;
+    desired.pinned = true;
+    desired.agent = 5;
+    try std.testing.expectError(error.InvalidChange, transition(original, .{ .verb = .pin, .expected = original, .state = desired }));
+    desired.agent = original.agent;
+    desired.shell = .pwsh;
+    try std.testing.expectError(error.InvalidChange, transition(original, .{ .verb = .pin, .expected = original, .state = desired }));
 }

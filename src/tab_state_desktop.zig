@@ -316,7 +316,21 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
         var live = idx;
         if (live == null) {
             const kind = std.meta.stringToEnum(app.ShellKind, @tagName(next.shell)).?;
-            const spawned = console.spawnBackgroundRemoteShell(dest.host orelse 0, dest.workspace, kind, if (plain_shell) null else next.tmux, next.cwd);
+            const old_chat_view = app.g_pending_chat_view;
+            const old_spawn_len = app.g_pending_spawn_cmd_len;
+            const old_tmux_len = app.g_pending_tmux_cmd_len;
+            const old_resurrect_len = app.g_pending_resurrect_len;
+            defer {
+                app.g_pending_chat_view = old_chat_view;
+                app.g_pending_spawn_cmd_len = old_spawn_len;
+                app.g_pending_tmux_cmd_len = old_tmux_len;
+                app.g_pending_resurrect_len = old_resurrect_len;
+            }
+            app.g_pending_chat_view = next.kind == .chat;
+            app.g_pending_spawn_cmd_len = 0;
+            app.g_pending_tmux_cmd_len = 0;
+            app.g_pending_resurrect_len = 0;
+            const spawned = console.spawnBackgroundRemoteShell(dest.host orelse 0, dest.workspace, kind, if (plain_shell) null else next.tmux, if (local_kind) next.cwd else null);
             if (!spawned) return failure(out, "spawn_failed");
             if (plain_shell) {
                 const created = &app.shells[app.shell_count - 1];

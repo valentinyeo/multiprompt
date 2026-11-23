@@ -34,7 +34,9 @@ class Desktop:
         if self.mode in ("refused", "conflict"):
             return dict(ok=False, error=self.mode)
         if self.mode != "ignored":
-            self.view["tabs"] = [request["state"]]
+            self.view["tabs"] = [copy.deepcopy(request["state"])]
+            if self.mode == "wrong_runtime":
+                self.view["tabs"][0].update(shell="cmd", agent=1)
             self.writes.append(request)
         return dict(ok=True, state=request["state"])
 
@@ -138,6 +140,22 @@ class TabVerbs(unittest.TestCase):
         self.assertEqual(restored["tmux"], opened["tmux"])
         self.assertFalse(restored["closed"])
         self.assertEqual(restored["kind"], "shell")
+
+    def test_readback_must_keep_the_shell_and_provider(self):
+        desktop = Desktop("wrong_runtime")
+        desktop.view["tabs"][0].update(shell="tmux", agent=5, cwd="/work/hax")
+        with self.assertRaisesRegex(ValueError, "PC-state did not confirm"):
+            self.invoke(desktop, "pin")
+
+    def test_every_verb_preserves_runtime_identity(self):
+        for shell, agent, kind in (("pwsh", 0, "shell"), ("tmux", 5, "chat")):
+            for verb in VERBS:
+                with self.subTest(shell=shell, verb=verb):
+                    desktop = Desktop()
+                    desktop.view["tabs"][0].update(shell=shell, agent=agent, kind=kind, cwd="/work/project")
+                    self.prepare(desktop, verb)
+                    result = self.invoke_with(desktop, verb, {"workspace": "Home"} if verb == "move" else {})
+                    self.assertEqual((result["shell"], result["agent"], result["cwd"]), (shell, agent, "/work/project"))
 
     def test_open_refuses_a_different_requested_placement(self):
         desktop = Desktop()
