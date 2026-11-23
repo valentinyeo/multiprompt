@@ -20,6 +20,17 @@ The first version of this journey switched tabs and typed, and both v0.28.1849 (
 
 Both steps measure the pump exactly like the switch and typing steps, so the pre-fix red run keeps its numbers.
 
+Measured on 2026-11-23, one dispatch per release, same branch head 8c40796d1:
+
+| Step | v0.28.1849 (before) | v0.28.1890 (after) |
+| --- | --- | --- |
+| Archive the selected remote chat (Ctrl+K) | 5001 ms, not responding | 1 ms |
+| First open after the transport helper was killed | 1 ms | 1 ms |
+| Ten Ctrl+Tab switches, worst | 6 ms | 5 ms |
+| Eight composer keystrokes, worst | 7 ms | 8 ms |
+
+The archive step reproduces SOFT-3067 and the after build clears it. The helper-down first open did not stall on v0.28.1849: the helper it kills is booted again off the window thread even in the pre-fix build, so the ready handshake never lands on the window thread from this action. Runs [45142127724](https://github.com/valentinyeo/multiprompt/actions/runs/45142127724) and [45142183920](https://github.com/valentinyeo/multiprompt/actions/runs/45142183920).
+
 ## How to get to it (user POV)
 
 Two remote tmux tabs are open. Press Ctrl+Tab to switch and keep typing in the Chat View composer (Alt+C) while the link to the server answers in seconds. Then use Ctrl+K to archive a chat, and open a chat whose transport is still starting. The sidebar, tabs and composer must keep responding immediately.
