@@ -356,7 +356,7 @@ pub fn build(b: *std.Build) void {
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js", "tools/session-link.test.js", "tools/session-link-click.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
-    const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js", "tools/chat-host-socket-root.test.js" });
+    const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js", "tools/chat-host-socket-root.test.js", "tools/chat-host-resume-fresh.test.js" });
     vps_test_step.dependOn(&startup_retry_tests.step);
     const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js", "tools/session-actions.test.js" });
     test_step.dependOn(&end_session_tests.step);

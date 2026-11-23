@@ -1,0 +1,1 @@
+When a server chat cannot resume after a restart, it starts fresh on its own and tells you if the message did not go through.

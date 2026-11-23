@@ -2778,6 +2778,9 @@ HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
 HOST_FRESH_RETRY_WAIT = 120
+HOST_RESUME_TRANSCRIPT_LIMIT = 64 * 1024 * 1024
+HOST_RESUME_READY_TIMEOUT = 180
+HOST_RESUME_TAIL_BYTES = 2 * 1024 * 1024
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -3685,6 +3688,154 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_resume_transcript_size(provider, sid):
+    state = host_session_state(provider, sid)
+    native = state.get("native_session") or sid
+    try:
+        path = conversation_path(provider, native, host_cwd(provider, sid))
+    except (OSError, ValueError):
+        return 0
+    if path is None:
+        return 0
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def host_resume_transcript_oversize(provider, sid):
+    return host_resume_transcript_size(provider, sid) > HOST_RESUME_TRANSCRIPT_LIMIT
+
+
+def host_resume_planned(provider, sid):
+    if provider != "claude":
+        return False
+    state = host_session_state(provider, sid)
+    fresh = state.get("fresh_start")
+    if isinstance(fresh, dict) and fresh.get("phase") in ("handover", "reset"):
+        return False
+    native = state.get("native_session") or sid
+    return host_transcript_exists(provider, native)
+
+
+def host_transcript_tail_rows(provider, sid, native, limit_bytes=HOST_RESUME_TAIL_BYTES):
+    try:
+        path = conversation_path(provider, native, host_cwd(provider, sid))
+    except (OSError, ValueError):
+        return []
+    if path is None:
+        return []
+    rows = []
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    start = max(0, size - limit_bytes)
+    try:
+        with path.open("rb") as transcript:
+            if start:
+                transcript.seek(start)
+                transcript.readline()
+            offset = transcript.tell()
+            for line in transcript:
+                try:
+                    rows.extend(conversation_rows(json.loads(line), provider, offset))
+                except (ValueError, UnicodeError):
+                    pass
+                offset += len(line)
+    except OSError:
+        return []
+    return rows
+
+
+def host_resume_handover_text(provider, sid, tmux):
+    state = host_session_state(provider, sid)
+    native = state.get("native_session") or sid
+    rows = host_transcript_tail_rows(provider, sid, native)
+    if not rows:
+        try:
+            rows = host_switch_rows(provider, sid, tmux)
+        except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+            rows = []
+    lines = []
+    for row in rows:
+        text = row.get("text")
+        role = row.get("role")
+        if role in ("user", "assistant") and isinstance(text, str) and text.strip() and not text.startswith("---\n"):
+            text = text.strip()
+            if len(text) > HOST_SWITCH_MESSAGE_LIMIT:
+                text = text[:HOST_SWITCH_MESSAGE_LIMIT] + " [shortened]"
+            lines.append(("You" if role == "assistant" else "User") + ": " + text)
+    kept, size = [], 0
+    for line in reversed(lines):
+        size += len(line.encode("utf-8")) + 2
+        if size > HOST_SWITCH_HANDOVER_LIMIT:
+            break
+        kept.append(line)
+    kept.reverse()
+    head = ("The host could not resume this chat's full transcript. "
+            "Recent conversation, oldest first:\n\n")
+    return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
+
+
+def host_resume_fail_sends(provider, sid, tmux, session, reason=None):
+    tokens = []
+    inflight = session.get("inflight")
+    if isinstance(inflight, dict) and not inflight.get("accepted"):
+        token = inflight.get("id")
+        if isinstance(token, str):
+            tokens.append(token)
+    for entry in session.get("sends") or []:
+        if isinstance(entry, dict) and not entry.get("accepted"):
+            token = entry.get("id")
+            if isinstance(token, str) and token not in tokens:
+                tokens.append(token)
+    for token in tokens:
+        host_unsent(provider, sid, tmux, session, token, reason)
+    session["sends"] = [entry for entry in session.get("sends") or [] if entry.get("accepted")]
+    session["inflight"] = None
+    session["turn"] = None
+    session["state"]["inflight"] = None
+    session["state"]["sends"] = [entry["id"] for entry in session["sends"]]
+    host_state_write(provider, sid, session["state"])
+
+
+def host_resume_autofresh(provider, sid, tmux, session, reason):
+    state = session["state"]
+    if state.get("resume_fresh_tried"):
+        host_resume_fail_sends(provider, sid, tmux, session, reason)
+        return False
+    if not host_fresh_save_handover(provider, sid, session, tmux, host_resume_handover_text(provider, sid, tmux)):
+        host_resume_fail_sends(provider, sid, tmux, session, reason)
+        return False
+    try:
+        host_fresh_prepare(provider, sid, state)
+    except (OSError, ValueError):
+        state.pop("fresh_start", None)
+        host_resume_fail_sends(provider, sid, tmux, session, reason)
+        return False
+    state["resume_fresh_tried"] = True
+    session.pop("resume_since", None)
+    session.pop("fresh_resumed", None)
+    host_state_write(provider, sid, state)
+    host_log(provider, sid, "resume_autofresh", dict(reason=reason))
+    return True
+
+
+def host_resume_rotate_agent(provider, sid, session):
+    try:
+        agent = host_agent_start(provider, sid, session["state"].get("mode"))
+    except (OSError, RuntimeError):
+        agent = None
+    if agent is None:
+        return None
+    host_session_reset(session, agent)
+    session.pop("fresh_resumed", None)
+    session["state"]["agent_pid"] = agent.pid
+    host_state_write(provider, sid, session["state"])
+    return agent
+
+
 def host_agent_env(provider, sid):
     config = host_config(provider, sid) or {}
     env = dict(os.environ)
@@ -3721,7 +3872,7 @@ def host_claude_argv(provider, sid, base, mode=None):
                 "--include-partial-messages", "--permission-prompt-tool", "stdio"]
     command += ["--append-system-prompt", HOST_APPEND_PROMPT]
     state = host_session_state(provider, sid)
-    native = state.get("native_session") or state.get("context_session") or sid
+    native = state.get("context_session") or state.get("native_session") or sid
     return command + (["--resume", native] if host_transcript_exists(provider, native) else ["--session-id", native])
 
 
@@ -6389,6 +6540,8 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
+    if host_resume_planned(provider, sid) and not isinstance(session["state"].get("fresh_start"), dict):
+        session["resume_since"] = time.time()
     host_nightly_mark(provider, sid, session)
     if provider in ("claude", "codex"):
         session["settings"] = host_settings(provider, sid)
@@ -6460,6 +6613,29 @@ def host_loop(provider, sid, tmux, session, server, agent):
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
                     return
+            resume_since = session.get("resume_since")
+            if (not session["ready"] and resume_since is not None
+                    and time.time() - resume_since > HOST_RESUME_READY_TIMEOUT
+                    and host_resume_planned(provider, sid)):
+                HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
+                host_agent_stop(agent)
+                session["agent"] = None
+                if host_resume_autofresh(provider, sid, tmux, session, "resume_timeout"):
+                    agent = host_resume_rotate_agent(provider, sid, session)
+                    if agent is None:
+                        host_startup_failure(provider, sid, tmux, session["state"], "agent_unavailable",
+                                             session.get("retry_generation", 0))
+                        return
+                    session["agent"] = agent
+                    selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                    HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
+                    continue
+                owner = conversation_owner(host_cwd(provider, sid), include_home=True)
+                reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
+                host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
+                session["exit_cause"] = "resume_timeout"
+                host_log(provider, sid, "agent_closed", dict(reason="resume_timeout"))
+                return
             for key, _ in selector.select(host_flush_timeout(session)):
                 if key.data == "agent":
                     try:
@@ -6467,10 +6643,29 @@ def host_loop(provider, sid, tmux, session, server, agent):
                     except (OSError, ValueError):
                         chunk = b""
                     if not host_agent_read(provider, sid, tmux, session, chunk):
-                        owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
-                            reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
-                            host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
+                            state = session["state"]
+                            if state.get("resume_fresh_tried"):
+                                host_resume_fail_sends(provider, sid, tmux, session, "agent_unavailable")
+                                owner = conversation_owner(host_cwd(provider, sid), include_home=True)
+                                reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
+                                host_startup_failure(provider, sid, tmux, state, reason, session.get("retry_generation", 0))
+                            elif host_resume_planned(provider, sid) and host_resume_autofresh(provider, sid, tmux, session, "agent_closed"):
+                                selector.unregister(agent.stdout)
+                                host_agent_stop(agent)
+                                agent = host_resume_rotate_agent(provider, sid, session)
+                                if agent is None:
+                                    host_startup_failure(provider, sid, tmux, session["state"], "agent_unavailable",
+                                                         session.get("retry_generation", 0))
+                                    return
+                                session["agent"] = agent
+                                selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                                HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
+                                continue
+                            else:
+                                owner = conversation_owner(host_cwd(provider, sid), include_home=True)
+                                reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
+                                host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
                         session["exit_cause"] = "agent_closed"
                         host_log(provider, sid, "agent_closed")
                         return
@@ -6523,6 +6718,13 @@ def host_main(provider, sid):
         mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
         if mode in HOST_SAVED_PERMISSION_MODES:
             host_save_permission_mode(provider, sid, mode)
+        if (provider == "claude" and not state.get("fresh_start")
+                and host_resume_planned(provider, sid) and host_resume_transcript_oversize(provider, sid)):
+            bootstrap = dict(state=state)
+            if not host_resume_autofresh(provider, sid, tmux, bootstrap, "transcript_oversize"):
+                host_startup_failure(provider, sid, tmux, state, "agent_unavailable", retry_generation)
+                return 4
+            state = host_session_state(provider, sid)
         try:
             agent = host_agent_start(provider, sid, mode)
             reason = "agent_not_found" if agent is None else None
