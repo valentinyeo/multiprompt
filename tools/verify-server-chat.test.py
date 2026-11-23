@@ -22,20 +22,22 @@ class ProviderTest(unittest.TestCase):
 
     def test_skill_quote_wraps_command_markup_in_transcripts(self):
         with tempfile.TemporaryDirectory() as home:
-            spec = json.loads((ROOT / 'tools/verify-server-chat/skill-quote.json').read_text())
+            spec = json.loads((ROOT / 'tools/verify-server-chat/skill-quote.json').read_text(encoding='utf-8'))
             text = '\n'.join(spec['compose'])
             program = ROOT / 'tools/verify-server-chat/provider.py'
             script = 'import os,pathlib,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); runpy.run_path(sys.argv[0],run_name="__main__")'
             request = dict(type='user', uuid='skill-quote', message=dict(content=[dict(type='text', text=text)]))
-            subprocess.run([sys.executable, '-c', script, str(program), home, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=json.dumps(request) + '\n', text=True, capture_output=True, check=True, cwd=home)
-            saved = json.loads(next(path for path in (Path(home) / '.claude/projects').glob('*/*.jsonl')).read_text().splitlines()[0])
+            payload = (json.dumps(request, ensure_ascii=False) + '\n').encode('utf-8')
+            env = dict(os.environ, PYTHONIOENCODING='utf-8', HOME=home, USERPROFILE=home)
+            subprocess.run([sys.executable, '-c', script, str(program), home, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=payload, env=env, capture_output=True, check=True, cwd=home)
+            saved = json.loads(next(path for path in (Path(home) / '.claude/projects').glob('*/*.jsonl')).read_text(encoding='utf-8').splitlines()[0])
             content = saved['message']['content']
             if isinstance(content, list):
                 content = content[0]['text']
             self.assertIn('<command-name>/pstack:correct</command-name>', content)
             self.assertIn(spec['marker'], content)
             self.assertIn('already delivered to it', content)
-            fixture = json.loads((ROOT / 'tools/fixtures/SOFT-3097/skill-quote-echo.jsonl').read_text().splitlines()[0])
+            fixture = json.loads((ROOT / 'tools/fixtures/SOFT-3097/skill-quote-echo.jsonl').read_text(encoding='utf-8').splitlines()[0])
             expected = fixture['message']['content']
             start = expected.index('<command-args>') + len('<command-args>')
             end = expected.index('</command-args>')
@@ -49,8 +51,11 @@ class ProviderTest(unittest.TestCase):
                 program = ROOT / 'tools/verify-server-chat/provider.py'
                 script = 'import os,pathlib,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); cwd=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); pathlib.Path.cwd=classmethod(lambda cls: pathlib.PureWindowsPath(cwd) if "\\\\" in cwd else pathlib.PurePosixPath(cwd)); runpy.run_path(sys.argv[0],run_name="__main__")'
                 requests = [dict(type='user', uuid=f'user-{index}', message=dict(content=[dict(type='text', text=text)])) for index, text in enumerate(('windows send proof', '/clear', 'windows after clear'))]
-                result = subprocess.run([sys.executable, '-c', script, str(program), home, cwd, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=''.join(json.dumps(row) + '\n' for row in requests), text=True, capture_output=True, check=True, cwd=home)
-                events = [json.loads(line) for line in result.stdout.splitlines()]
+                payload = ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in requests).encode('utf-8')
+                env = dict(os.environ, PYTHONIOENCODING='utf-8', HOME=home, USERPROFILE=home)
+                result = subprocess.run([sys.executable, '-c', script, str(program), home, cwd, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=payload, env=env, capture_output=True, check=True, cwd=home)
+                stdout = result.stdout.decode('utf-8') if isinstance(result.stdout, bytes) else result.stdout
+                events = [json.loads(line) for line in stdout.splitlines()]
                 self.assertEqual(events[0]['subtype'], 'init')
                 self.assertEqual([row['message']['content'][0]['text'] for row in events if row['type'] == 'assistant'], ['Server received: ' + request['message']['content'][0]['text'] for request in requests])
                 receipts = [json.loads(line) for line in (Path(home) / 'provider-input.jsonl').read_text().splitlines()]
