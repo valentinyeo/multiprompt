@@ -61,6 +61,8 @@ SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It 
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
 
+SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
+
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |

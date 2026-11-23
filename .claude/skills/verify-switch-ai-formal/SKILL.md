@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `e11386929a20a51d87f0d91c429a097324c5571b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `cbd601c4c8743f6b90c4325face79f03b08da35b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |
