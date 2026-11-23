@@ -56,7 +56,7 @@ const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session
 var kill_outcome: Outcome = .retry;
 var admitted = true;
 var notices: usize = 0;
-var saved: usize = 0;
+var fixture_save_calls: usize = 0;
 var queued: usize = 0;
 fn rememberArchivedTab(_: usize) ?struct { ai_agent: u8 } { return .{ .ai_agent = 2 }; }
 fn rejectPinnedSessionClose(_: usize) bool { return false; }
@@ -72,7 +72,7 @@ fn closeShellRemember(_: u32, remember: bool) void {
 }
 fn fetchTmuxSessions() void {}
 fn publishInboxState() void {}
-fn saveSession() void { saved += 1; }
+fn saveSession() void { fixture_save_calls += 1; }
 fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: i32) i32 { return 1; }
 ${end}
 var sync_closed = false;
@@ -86,7 +86,7 @@ fn reset() void {
     app_state.shell_count = 1;
     app_state.shells[0] = .{ .tmux_session_len = 11 };
     @memcpy(app_state.shells[0].tmux_session[0..11], "session-one");
-    notices = 0; saved = 0; queued = 0;
+    notices = 0; fixture_save_calls = 0; queued = 0;
 }
 test "offline end prevents stale sync resurrection but not another host" {
     defer {
@@ -98,7 +98,7 @@ test "offline end prevents stale sync resurrection but not another host" {
     try std.testing.expectEqual(@as(usize, 0), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 1), queued);
     try std.testing.expectEqual(@as(usize, 0), notices);
-    try std.testing.expectEqual(@as(usize, 1), saved);
+    try std.testing.expectEqual(@as(usize, 1), fixture_save_calls);
     try std.testing.expect(app_state.g_tmux_closed.contains(0, "session-one"));
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -112,7 +112,7 @@ test "full queue and unsafe target preserve tab, successful end needs no retry" 
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 1), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 1), notices);
-    try std.testing.expectEqual(@as(usize, 0), saved);
+    try std.testing.expectEqual(@as(usize, 0), fixture_save_calls);
     reset(); kill_outcome = .unsafe;
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 1), app_state.shell_count);
