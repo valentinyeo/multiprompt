@@ -50,10 +50,10 @@ jobs:
       - name: Check durable regression inputs
         if: (success() || failure()) && github.event_name == 'pull_request'
         run: node tools/check-regression-inputs.mjs origin/${{ github.base_ref }}
-      - name: Test the runtime generation guard
+      - name: Test the runtime fingerprint guard
         if: success() || failure()
         run: node --test tools/check-runtime-generation.test.js
-      - name: Check the reader runtime generation
+      - name: Check the reader runtime fingerprint
         if: success() || failure()
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
