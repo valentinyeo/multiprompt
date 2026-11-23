@@ -651,6 +651,7 @@ foreach ($plan in $plans) {
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isAntigravity -or $isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
+        if ($isAntigravity) { $savedSession.tabs[0].ccwd = '/verify/work' }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
