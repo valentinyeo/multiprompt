@@ -2105,6 +2105,7 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
         } else if (!appendAsciiBuf(out, pos, "null")) return false;
         if (!diagJsonStringField(out, pos, &first, "kind", if (shell.chat_view_on) "chat" else "shell")) return false;
         if (!diagJsonBoolField(out, pos, &first, "active", i == app_state.active_shell)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "cv", shell.chat_view_on)) return false;
         if (@import("capacity.zig").remoteHostForShell(&shell) != null) {
             if (!zsbAppendSessionState(out, pos, &shell)) return false;
         } else if (!appendAsciiBuf(out, pos, ",\"state\":null")) return false;
@@ -3106,6 +3107,7 @@ test "workspace-list includes inactive workspaces grouped and ungrouped tabs wit
     try std.testing.expectEqualStrings("Agent 🧪", tab.object.get("title").?.string);
     try std.testing.expectEqualStrings("remote-1", tab.object.get("host").?.string);
     try std.testing.expectEqualStrings("runner-7", tab.object.get("tmux").?.string);
+    try std.testing.expect(tab.object.get("cv").?.bool);
     try std.testing.expect(!tab.object.get("active").?.bool);
     try std.testing.expect(local.object.get("state").? == .null);
     try std.testing.expectEqualStrings("connecting", tab.object.get("state").?.string);

@@ -1,0 +1,1 @@
+Server tools can check whether each chat host, desktop tab and history are healthy.
