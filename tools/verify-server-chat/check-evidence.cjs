@@ -8,7 +8,7 @@ const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\u
 const json = name => JSON.parse(text(name));
 const result = json('result.json');
 assert.equal(result.status, 'passed');
-assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
+assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true], ['skill-quote', true]]);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
@@ -47,4 +47,5 @@ const video = JSON.parse(probe.stdout);
 assert.ok(video.streams.some(stream => stream.codec_type === 'video' && Number(stream.nb_frames) > 0));
 assert.ok(Number(video.format.duration) > 1);
 assert.equal(json('doctor.json').sha256.toLowerCase(), json('build.json').sha256.toLowerCase());
+require('./skill-quote-proof.mjs').verifySkillQuoteEvidence(root);
 console.log('Real SSH server chat receipts, copied replies, key ACL, cleanup and video passed');

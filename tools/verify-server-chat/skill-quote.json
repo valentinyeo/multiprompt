@@ -1,0 +1,24 @@
+{
+  "busyPrime": "soft-3097 busy queue prime",
+  "marker": "quoted line five",
+  "command": "/pstack:correct",
+  "compose": [
+    "/pstack:correct",
+    "> quoted line one",
+    ">",
+    "> quoted line two",
+    ">",
+    "> quoted line three",
+    ">",
+    "> quoted line four",
+    ">",
+    "> quoted line five",
+    ">",
+    "> … own question @Builder ?"
+  ],
+  "requiredTranscriptTags": [
+    "<command-message>pstack:correct</command-message>",
+    "<command-name>/pstack:correct</command-name>",
+    "<command-args>"
+  ]
+}

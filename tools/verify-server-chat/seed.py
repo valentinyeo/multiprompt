@@ -7,6 +7,10 @@ import sys
 import time
 
 root = Path(sys.argv[1])
+home = Path.home()
+skill = home / '.claude/skills/pstack/correct/SKILL.md'
+skill.parent.mkdir(parents=True, exist_ok=True)
+skill.write_text('---\nname: pstack:correct\ndescription: Server-chat journey stub\n---\nFixture')
 sid = 'a1b2c3d4-2567-4000-8000-000000002567'
 sources = {name: base64.b64encode((root / f'src/chat_connectors/{name}.py').read_bytes()).decode() for name in ('claude', 'codex')}
 reader = runpy.run_path(str(root / 'src/chat_history_reader.py'), init_globals=dict(CONNECTOR_SOURCES=sources))
