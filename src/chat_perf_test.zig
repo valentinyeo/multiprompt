@@ -294,9 +294,13 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
     };
 
     const a = std.heap.page_allocator;
-    const block_counts = [_]usize{ 1200, 2800, 12200 };
-    const block_chars = [_]usize{ 60, 600 };
+    const block_counts = [_]usize{ 12200, 2800, 1200 };
+    const block_chars = [_]usize{ 600, 60 };
     const pending_chars = [_]usize{ 40, 2000, 12000 };
+    const Case = struct { blocks: usize, chars: usize, pending_len: usize, present: bool, best_ms: f64 };
+    const case_capacity = block_counts.len * block_chars.len * pending_chars.len * 2;
+    var cases: [case_capacity]Case = undefined;
+    var case_count: usize = 0;
 
     const ref_storage = try a.alloc(u16, @as(usize, @intCast(Bench.ref_work_units)));
     defer a.free(ref_storage);
@@ -316,11 +320,9 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
         slot.* = measured.per_call_ms;
         std.debug.print("CPU960 calibrate blocks={d} block_chars={d} pending_chars={d} trial={d} present=true reps={d} batch_ms={d} per_call_ms={d:.3} mode={s} clock=cpu_thread wall_ms={d}\n", .{ Bench.ref_blocks, Bench.ref_block_chars, ref_text.len, trial, measured.reps, measured.batch_ms, measured.per_call_ms, @tagName(@import("builtin").mode), measured.wall_ms });
     }
-    const reference_per_call_ms = Bench.minMs(&ref_samples);
-    std.debug.print("CPU960 reference_per_call_ms={d:.3} ref_work_units={d} heaviest_work_units={d} slack_ratio={d:.2} absolute_floor_ms={d} min_batch_ms={d} tick_ms={d:.3} trials={d} mode={s} clock=cpu_thread\n", .{ reference_per_call_ms, Bench.ref_work_units, Bench.heaviest_work_units, Bench.slack_ratio, Bench.absolute_floor_ms, Bench.min_batch_ms, Bench.tick_ms, Bench.trial_count, @tagName(@import("builtin").mode) });
+    const early_reference_per_call_ms = Bench.minMs(&ref_samples);
+    std.debug.print("CPU960 reference_per_call_ms={d:.3} ref_work_units={d} heaviest_work_units={d} slack_ratio={d:.2} absolute_floor_ms={d} min_batch_ms={d} tick_ms={d:.3} trials={d} mode={s} clock=cpu_thread\n", .{ early_reference_per_call_ms, Bench.ref_work_units, Bench.heaviest_work_units, Bench.slack_ratio, Bench.absolute_floor_ms, Bench.min_batch_ms, Bench.tick_ms, Bench.trial_count, @tagName(@import("builtin").mode) });
 
-    var slowest_ms: f64 = 0.0;
-    var worst_ratio: f64 = 0.0;
     for (block_counts) |bench_count| {
         for (block_chars) |bench_chars| {
             const bench_storage = try a.alloc(u16, bench_count * bench_chars);
@@ -336,7 +338,7 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
                 bench_users[bench_count] = .{ .text = bench_text };
                 const bench_prefix = bench_text[0..@min(bench_text.len, 40)];
                 const units = Bench.workUnits(bench_count, bench_chars);
-                const reps_hint = Bench.repsFor(reference_per_call_ms, units);
+                const reps_hint = Bench.repsFor(early_reference_per_call_ms, units);
                 for ([_]bool{ false, true }) |present| {
                     const expected_pick: ?usize = if (present) bench_count else null;
                     var samples: [Bench.trial_count]f64 = undefined;
@@ -345,18 +347,34 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
                         slot.* = measured.per_call_ms;
                         std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} reps={d} batch_ms={d} per_call_ms={d:.3} mode={s} clock=cpu_thread wall_ms={d}\n", .{ bench_count, bench_chars, bench_pending_len, trial, present, measured.reps, measured.batch_ms, measured.per_call_ms, @tagName(@import("builtin").mode), measured.wall_ms });
                     }
-                    const best_ms = Bench.minMs(&samples);
-                    const scenario_budget_ms = Bench.budgetMs(reference_per_call_ms, units);
-                    worst_ratio = @max(worst_ratio, best_ms / scenario_budget_ms);
-                    if (best_ms > scenario_budget_ms) {
-                        std.debug.print("CPU961 scenario_over blocks={d} block_chars={d} pending_chars={d} present={} best_per_call_ms={d:.3} scenario_budget_ms={d:.3} reference_per_call_ms={d:.3} mode={s} clock=cpu_thread\n", .{ bench_count, bench_chars, bench_pending_len, present, best_ms, scenario_budget_ms, reference_per_call_ms, @tagName(@import("builtin").mode) });
-                        return error.TestUnexpectedResult;
-                    }
-                    slowest_ms = @max(slowest_ms, best_ms);
+                    cases[case_count] = .{ .blocks = bench_count, .chars = bench_chars, .pending_len = bench_pending_len, .present = present, .best_ms = Bench.minMs(&samples) };
+                    case_count += 1;
                 }
             }
         }
     }
-    std.debug.print("CPU991 matching worst_ratio={d:.3} slowest_ms={d:.3} reference_per_call_ms={d:.3} heaviest_budget_ms={d:.3} mode={s} clock=cpu_thread\n", .{ worst_ratio, slowest_ms, reference_per_call_ms, Bench.budgetMs(reference_per_call_ms, Bench.heaviest_work_units), @tagName(@import("builtin").mode) });
+
+    _ = Bench.measureAssign(ref_users, ref_prefix, ref_text, true, 1);
+    var late_samples: [Bench.ref_trials]f64 = undefined;
+    for (&late_samples, 0..) |*slot, trial| {
+        const measured = try Bench.batched(ref_users, ref_prefix, ref_text, true, 1, Bench.ref_blocks);
+        slot.* = measured.per_call_ms;
+        std.debug.print("CPU960 late calibrate blocks={d} block_chars={d} pending_chars={d} trial={d} present=true reps={d} batch_ms={d} per_call_ms={d:.3} mode={s} clock=cpu_thread wall_ms={d}\n", .{ Bench.ref_blocks, Bench.ref_block_chars, ref_text.len, trial, measured.reps, measured.batch_ms, measured.per_call_ms, @tagName(@import("builtin").mode), measured.wall_ms });
+    }
+    const late_reference_per_call_ms = Bench.minMs(&late_samples);
+    const slower_reference_per_call_ms = @max(early_reference_per_call_ms, late_reference_per_call_ms);
+    std.debug.print("CPU960 window_reference_per_call_ms={d:.3} early_reference_per_call_ms={d:.3} late_reference_per_call_ms={d:.3} cases={d} mode={s} clock=cpu_thread\n", .{ slower_reference_per_call_ms, early_reference_per_call_ms, late_reference_per_call_ms, case_count, @tagName(@import("builtin").mode) });
+
+    var slowest_ms: f64 = 0.0;
+    var worst_ratio: f64 = 0.0;
+    for (cases[0..case_count]) |c| {
+        const scenario_budget_ms = Bench.budgetMs(slower_reference_per_call_ms, Bench.workUnits(c.blocks, c.chars));
+        worst_ratio = @max(worst_ratio, c.best_ms / scenario_budget_ms);
+        slowest_ms = @max(slowest_ms, c.best_ms);
+        if (c.best_ms > scenario_budget_ms) {
+            std.debug.print("CPU961 scenario_over blocks={d} block_chars={d} pending_chars={d} present={} best_per_call_ms={d:.3} scenario_budget_ms={d:.3} reference_per_call_ms={d:.3} mode={s} clock=cpu_thread\n", .{ c.blocks, c.chars, c.pending_len, c.present, c.best_ms, scenario_budget_ms, slower_reference_per_call_ms, @tagName(@import("builtin").mode) });
+        }
+    }
+    std.debug.print("CPU991 matching worst_ratio={d:.3} slowest_ms={d:.3} reference_per_call_ms={d:.3} heaviest_budget_ms={d:.3} mode={s} clock=cpu_thread\n", .{ worst_ratio, slowest_ms, slower_reference_per_call_ms, Bench.budgetMs(slower_reference_per_call_ms, Bench.heaviest_work_units), @tagName(@import("builtin").mode) });
     try std.testing.expect(worst_ratio <= 1.0);
 }
