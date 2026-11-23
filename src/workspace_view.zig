@@ -3,6 +3,30 @@ const frequent = @import("frequent.zig");
 
 pub const starred: u8 = 0xFE;
 
+pub const Builtin = enum(u8) {
+    all = 0xFB,
+    frequent = 0xFC,
+    favorites = 0xFD,
+
+    pub fn split(self: Builtin) u32 {
+        return switch (self) {
+            .all => frequent.all_split,
+            .frequent => frequent.frequent_split,
+            .favorites => frequent.favorites_split,
+        };
+    }
+
+    pub fn name(self: Builtin) []const u8 {
+        return switch (self) {
+            .all => "All",
+            .frequent => "Frequent",
+            .favorites => "Favorites",
+        };
+    }
+};
+
+pub const builtins = [_]Builtin{ .all, .frequent, .favorites };
+
 pub fn fromDigit(digit: u32) ?u8 {
     return switch (digit) {
         1 => starred,

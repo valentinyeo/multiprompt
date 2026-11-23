@@ -14,7 +14,7 @@ function fn(name) {
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
 
-test('SOFT-2584 an inne-account tab loads its own catalog on both transports', () => {
+test('SOFT-3053 inne slash commands use the inne completer, not sudo on the DE host', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'command-owner-'));
   try {
     copyZig(['chat_complete.zig'], dir, path.join(root, 'src'));
@@ -85,7 +85,7 @@ fn tryRequest(request: []const u8) void { std.debug.assert(std.mem.indexOf(u8, r
 fn sshOneShotCapture(command: []const u8, _: []u8) usize { @memcpy(command_bytes[0..command.len], command); command_len = command.len; return 0; }
 fn sshOneShotCaptureInput(command: []const u8, buf: []u8, _: anytype, _: u32) struct { len: usize, success: bool, exit_code: u32 } {
     _ = sshOneShotCapture(command, buf);
-    if (std.mem.indexOf(u8, command, "remote-1 sudo -n -H -u inne -- python3 /home/inne/.local/share/zigshell/mp_complete.py --once ") != null) {
+    if (std.mem.indexOf(u8, command, "remote-3 python3 ~/.local/share/zigshell/mp_complete.py --once ") != null) {
         owner_calls += 1;
         const answer = "@mp\\t7\\tslash\\tok\\t/home/inne/projects/sample\\t1\\nS\\towner-only\\t\\tOwner skill\\n@@MP_END@@\\n";
         @memcpy(buf[0..answer.len], answer);
@@ -124,8 +124,9 @@ test "owner catalog routing" {
     slot.pending = 7;
     const req = ChatAcRequest{ .slot = index, .id = 7, .host = slot.host, .agent = slot.agent, .mode = slot.mode, .session = slot.session, .cwd = slot.cwd };
     chatAcFetchThread(req);
-    try std.testing.expectEqual(@as(usize, 1), owner_calls);
-    try std.testing.expectEqual(@as(usize, 0), persistent_calls);
+    try std.testing.expectEqual(@as(usize, 0), owner_calls);
+    try std.testing.expectEqual(@as(usize, 1), persistent_calls);
+    try std.testing.expectEqual(@as(u8, 2), received_host);
     var entries: [512]chat_complete.Entry = undefined;
     const parsed = chat_complete.parseResponse(slot.bytes[1][0..slot.pending_len], &entries).?;
     try std.testing.expectEqual(@as(usize, 1), parsed.n);
@@ -139,26 +140,8 @@ test "owner catalog routing" {
     try std.testing.expect(std.mem.indexOf(u8, command_bytes[0..command_len], "remote-3 python3") != null);
     chatAcFetchThread(req);
     try std.testing.expectEqual(@as(usize, 2), owner_calls);
-    try std.testing.expect(std.mem.indexOf(u8, command_bytes[0..command_len], "remote-3") == null);
-    slot.pending = 0;
-    app_state.shells[0].tmux_host = 1;
-    try std.testing.expectEqual(@as(u8, 1), app_state.g_chat_ac_slots[chatAcCatalog(.slash).?].host);
-    var own_req = req;
-    own_req.host = 1;
-    chatAcFetchThread(own_req);
-    try std.testing.expectEqual(@as(u8, 1), received_host);
-    own_req.host = 0;
-    own_req.cwd = @splat(0);
-    const other = "/home/inne-other/projects/sample";
-    @memcpy(own_req.cwd[0..other.len], other);
-    chatAcFetchThread(own_req);
-    try std.testing.expectEqual(@as(u8, 0), received_host);
-    own_req.host = 2;
-    own_req.cwd = @splat(0);
-    const configured = "~/projects/sample";
-    @memcpy(own_req.cwd[0..configured.len], configured);
-    chatAcFetchThread(own_req);
-    try std.testing.expectEqual(@as(u8, 2), received_host);
+    try std.testing.expect(std.mem.indexOf(u8, command_bytes[0..command_len], "remote-3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command_bytes[0..command_len], "sudo") == null);
 }
 `;
     fs.writeFileSync(path.join(dir, 'owner.zig'), program);

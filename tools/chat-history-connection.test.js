@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -50,6 +51,7 @@ const chat_transcript = struct {
         host: u8 = 0, shell_id: u32 = 1, codex: bool = false, pi: bool = false,
         sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), cwd: [192]u8 = @splat(0),
     pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; }
+    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
     };
 };
 const chat_history = struct {
@@ -87,7 +89,7 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     ch.shared = @ptrFromInt(1 + @as(usize, host));
     return true;
 }
-fn chatHistoryFetchOnce(_: u8, _: []const u8, _: usize, out: *std.ArrayList(u8)) bool {
+fn chatHistoryFetchOnce(_: @import("session_identity.zig").Session, _: []const u8, _: usize, out: *std.ArrayList(u8)) bool {
     fallbacks += 1;
     std.debug.assert(out.items.len == 0);
     out.appendSlice(std.heap.page_allocator, "fallback") catch unreachable;
@@ -134,10 +136,27 @@ fn reset() void {
 }
 fn fetch(host: u8, out: *std.ArrayList(u8)) bool {
     out.clearRetainingCapacity();
-    return chatHistoryFetch(.{ .host = host }, 7, .{}, 0, out);
+    return chatHistoryFetch(.{ .host = host, .tmux = "term-one".* ++ @as([56]u8, @splat(0)) }, 7, .{}, 0, out);
 }
 `;
 const checks = String.raw`
+test "SOFT-2525 mismatched routing never starts or writes a server channel" {
+    reset();
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(std.heap.page_allocator);
+    var written = false;
+    const identity = @import("session_identity.zig").Session.remote(1, "term-one", "chat-one", 1).?;
+    for ([_][]const u8{
+        "{\"id\":7,\"op\":\"send\",\"host\":0,\"sid\":\"chat-one\"}",
+        "{\"id\":7,\"op\":\"send\",\"sid\":\"chat-two\"}",
+        "{\"id\":7,\"op\":\"send\",\"tmux\":\"term-two\"}",
+    }) |query| {
+        try std.testing.expect(!chatHistoryPersistent(identity, query, 4096, &out, &written));
+    }
+    try std.testing.expect(!written);
+    try std.testing.expectEqual(@as(usize, 0), starts);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+}
 test "connection reuse is per host and chunked JSON replies preserve escaped transcript" {
     reset();
     var out: std.ArrayList(u8) = .empty;
@@ -195,7 +214,7 @@ test "unreachable host and short writes fall back; oversized chat reply keeps th
     try std.testing.expect(fetch(0, &out));
     try std.testing.expectEqual(@as(usize, 1), terminations);
     reset();
-    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7}", 1, &out, null));
+    try std.testing.expect(!chatHistoryPersistent(@import("session_identity.zig").Session.remote(0, "term-one", "", 1).?, "{\"id\":7}", 1, &out, null));
     try std.testing.expectEqual(@as(usize, 0), terminations);
     try std.testing.expect(g_chat_history_channels[0].shared != null);
 }
@@ -204,13 +223,13 @@ test "send write reservation distinguishes prewrite failure from lost acknowledg
     defer out.deinit(std.heap.page_allocator);
     var request_written = false;
     reset(); fail_start = true;
-    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(!chatHistoryPersistent(@import("session_identity.zig").Session.remote(0, "term-one", "", 1).?, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
     try std.testing.expect(!request_written);
     reset(); partial_write = true;
-    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(!chatHistoryPersistent(@import("session_identity.zig").Session.remote(0, "term-one", "", 1).?, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
     try std.testing.expect(!request_written);
     reset(); mode = .hang;
-    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(!chatHistoryPersistent(@import("session_identity.zig").Session.remote(0, "term-one", "", 1).?, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
     try std.testing.expect(request_written);
     try std.testing.expectEqual(@as(u64, 15_000), now);
 }
@@ -231,22 +250,23 @@ test "shutdown during a fetch blocks new spawns and fallback and defers handle c
 `;
 
 test('IGSH-1903 failed history requests respawn the shared transport', () => {
-  assert.match(body('chatHistoryPersistent'), /transport\.respawn\(host\)/);
+  assert.match(body('chatHistoryRequest'), /transport\.respawn\(host\)/);
   assert.match(require('fs').readFileSync('src/chat_transport.zig', 'utf8'), /pub fn respawn\(index: u8\)/);
 });
 
 test('persistent history production transport: reuse, framing, timeout, fallback, backoff and shutdown', () => {
-  assert.match(body('chatHistoryPersistent'), /transport\.read/);
+  assert.match(body('chatHistoryRequest'), /transport\.read/);
   const start = source.indexOf('const ChatHistoryChannel = struct {');
   const end = source.indexOf('\nfn chatHistoryChannelClose(', start);
   assert.ok(start >= 0 && end > start);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-connection-'));
   try {
+    copyZig(['session_identity.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryQuery', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel'));
+    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryRequest', 'chatHistoryQuery', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stderr, /All 5 tests passed/);
+    assert.match(result.stderr, /All 7 tests passed/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
