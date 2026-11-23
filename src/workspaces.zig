@@ -4880,7 +4880,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         }
         const slot = slot_map[src_ws];
 
-        const tmux_name: ?[]const u8 = if ((tabs[t].kind == .vps or tabs[t].kind == .vps2 or tabs[t].kind == .tmux) and tabs[t].tmux_session_len > 0)
+        const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
             tabs[t].tmux_session[0..tabs[t].tmux_session_len]
         else
             null;
