@@ -75,6 +75,8 @@ jobs:
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
       - name: Test repair PR journey selection
         run: node --test tools/pr-verifier-repro.test.js
+      - name: Test emergency lane merge order and release path
+        run: node --test tools/check-emergency-lane.test.mjs tools/emergency-release-path.test.mjs
       - name: Test stable desktop journey command names
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands

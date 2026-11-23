@@ -29,7 +29,7 @@ test('production publishes the build, startup proof and signature gates without 
   assert.match(job('launch'), /name: release-launch-proof\n          path: release-proof\/\n          if-no-files-found: error/);
   assert.match(job('gitleaks'), /release_scan: true/);
   assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation']);
-  assert.doesNotMatch(job('release'), /^    if:/m);
+  assert.match(job('release'), /needs\.resource-observation\.result == 'skipped'/);
   assert.match(job('release'), /run: node tools\/sign-release\.mjs/);
   assert.deepEqual(needsOf('queue-newer'), ['prepare', 'release']);
 });

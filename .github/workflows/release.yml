@@ -35,6 +35,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       sha: ${{ steps.version.outputs.sha }}
+      emergency: ${{ steps.emergency.outputs.active }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -86,6 +87,14 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Detect emergency merge
+        id: emergency
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: echo "active=$(node tools/emergency-merge-head.mjs)" >> "$GITHUB_OUTPUT"
 
       - name: Resolve authoritative release notes
         env:
@@ -209,6 +218,7 @@ jobs:
 
   resource-observation:
     needs: [prepare, build]
+    if: needs.prepare.outputs.emergency != 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
@@ -342,6 +352,7 @@ jobs:
 
   release:
     needs: [prepare, build, launch, gitleaks, resource-observation]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.build.result == 'success' && needs.launch.result == 'success' && needs.gitleaks.result == 'success' && (needs.resource-observation.result == 'success' || (needs.prepare.outputs.emergency == 'true' && needs.resource-observation.result == 'skipped')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest

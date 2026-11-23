@@ -9,6 +9,13 @@ The launch job allows five minutes.
 A screenshot and process details record proof.
 Signed assets publish after these gates pass.
 
+Measured release timeouts: prepare about five minutes, build
+fifteen, launch five, release three, updater poll five.
+Routine publication worst-case is about sixty-eight minutes
+when resource observation uses its thirty-minute cap.
+Emergency merges skip resource observation and stay near
+twenty-eight minutes to the in-app updater.
+
 ## Permanent update origin
 
 Installed releases through v0.28.1660 require exact asset URLs under

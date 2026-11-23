@@ -52,6 +52,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Every reader and bundled helper edit changes its runtime fingerprint automatically. | `tools/check-runtime-generation.mjs` runs `tools/runtime-fingerprint.test.py` (test workflow) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| Emergency lane: when Valentin cannot reach or see his chats, or cannot work, the fix jumps the merge order, other merges pause, it waits only on the journeys its files own, and it releases right after merge. | `tools/check-emergency-lane.mjs`, `tools/check-emergency-lane.test.mjs`, `emergency-lane.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
 | Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |

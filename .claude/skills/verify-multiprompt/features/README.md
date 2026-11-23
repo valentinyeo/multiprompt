@@ -13,6 +13,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Formal Switch AI](chat-switch-ai-formal.md).
 - [Automatic AI switch](chat-auto-switch.md).
 - [CI repair receipt](ci-repair-receipt.md).
+- [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
 

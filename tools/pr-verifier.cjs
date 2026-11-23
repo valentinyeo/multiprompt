@@ -30,9 +30,17 @@ function oneLine(value, limit = MAX_LINE) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
+function isEmergency(pr) {
+  return (pr.labels || []).some(label => String(typeof label === 'string' ? label : label.name).trim().toLowerCase() === 'emergency');
+}
+
 function isRepair(pr) {
   return /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
     (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
+}
+
+function ownedJourneysOnly(pr) {
+  return isRepair(pr) || isEmergency(pr);
 }
 
 function ciRepro(selection, summary) {
@@ -53,7 +61,7 @@ function validateSelection(raw, available, pr = {}) {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
-  const bugFix = isRepair(pr);
+  const bugFix = ownedJourneysOnly(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
   const features = [];
   const dropped = [];
@@ -534,7 +542,7 @@ function resolve(env) {
   const dispatched = env.EVENT_NAME === 'workflow_dispatch';
   const eligible = pr.state === 'OPEN' && !pr.isCrossRepository && (dispatched || !pr.isDraft);
   if (eligible) gh(['api', `repos/${repo}/statuses/${pr.headRefOid}`, '-X', 'POST', '-f', 'context=pstack-verifier', '-f', 'state=pending', '-f', 'description=Verification is checking current PR metadata and evidence']);
-  const baseSha = isRepair(pr)
+  const baseSha = ownedJourneysOnly(pr)
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
@@ -992,7 +1000,7 @@ async function main(argv, env) {
     }
     if (env.PR_NUMBER) {
       try {
-        Object.assign(selection, { bugFix: isRepair(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
+        Object.assign(selection, { bugFix: ownedJourneysOnly(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
       } catch {
         infrastructure.push('Could not confirm bug-fix metadata; verification is BLOCKED.');
       }
@@ -1031,7 +1039,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, isRepair, isEmergency, ownedJourneysOnly };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
