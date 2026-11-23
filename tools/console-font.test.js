@@ -129,9 +129,9 @@ test('spawn and worker respawn apply the console theme before revealing the wind
 });
 
 test('Chat View uses the bundled mono face for code and Plex for prose', () => {
-  const render = read('src/chat_render.zig');
-  assert.match(render, /L\(@import\("fonts\.zig"\)\.MONO_FACE\)/);
-  assert.match(render, /@import\("fonts\.zig"\)\.chat\(/);
+  const fonts = read('src/chat_fonts.zig');
+  assert.match(fonts, /L\(@import\("fonts\.zig"\)\.MONO_FACE\)/);
+  assert.match(fonts, /@import\("fonts\.zig"\)\.chat\(/);
   assert.match(read('src/chat_composer.zig'), /@import\("fonts\.zig"\)\.chat\(/);
   assert.match(read('src/fonts.zig'), /options.body_weight == 500\) L\(UI_MEDIUM_FACE\)/);
 });

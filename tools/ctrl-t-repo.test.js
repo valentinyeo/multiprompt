@@ -232,7 +232,7 @@ test('offline selection reports the user failure while background fetching stays
   const palette = readFileSync('src/command_palette.zig', 'utf8');
   const vps = readFileSync('src/vps.zig', 'utf8');
   const choose = palette.match(/pub fn pickRepoChoose\([^]*?\n\}/);
-  const failure = main.match(/fn showPickRepoFailure\([^]*?\n\}/);
+  const failure = readFileSync('src/window_actions.zig', 'utf8').match(/fn showPickRepoFailure\([^]*?\n\}/);
   const fetch = vps.match(/fn repoFetchThread\([^]*?\n\}/);
   assert.ok(choose && failure && fetch);
   assert.match(choose[0], /if \(!@import\("vps\.zig"\)\.repoRowAvailable\(&rows\[idx\]\)\) \{[^]*?g_pick_repo_offline = true;\s*return false;/);

@@ -31,7 +31,7 @@ function debugLogFunctions(source) {
 }
 
 test('IGSH-1973 chat rendering never logs from a paint pass unless the log is gated', () => {
-  const render = read('src/chat_render.zig');
+  const render = read('src/chat_render.zig') + '\n' + read('src/chat_fonts.zig');
   assert.doesNotMatch(render, /CHAT_LIST/);
   for (const name of Object.keys(debugLogFunctions(render))) {
     assert.ok(name in repaintLoggers || eventLoggers.has(name), `${name} logs from chat_render.zig: gate it in diagnostics.zig or list it as event driven`);

@@ -230,7 +230,8 @@
   ["chat_session.zig", "fn chatHistoryChannelClose"],
   ["app_state.zig", "var g_chat_switch_loading"],
   ["chat_session.zig", "fn chatRefreshAfterFontChange"],
-  ["chat_render.zig", "fn chatCodeFontPx"],
+  ["chat_fonts.zig", "fn chatCodeFontPx"],
+  ["chat_render.zig", "fn chatTextWidth"],
   ["app_state.zig", "const ChatHit"],
   ["chat_render.zig", "fn chatSelRange"],
   ["app_state.zig", "const CHAT_BUBBLE_PAD"],
@@ -397,6 +398,7 @@
   ["shell_poll.zig", "fn agentLabel"],
   ["app_state.zig", "const HIDDEN_IDLE_WATCHDOG_POLLS"],
   ["shell_poll.zig", "fn shouldAdvanceHiddenIdleWatchdog"],
+  ["window_actions.zig", "fn showPickRepoFailure"],
   ["main.zig", "fn wndProc"],
   ["account_desktop.zig", "test \"account lock prevents restore and every shell spawn entry point\""]
 ]

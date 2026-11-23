@@ -30,10 +30,10 @@ test('all Chat View prose font requests use shipped shared defaults, never direc
     }
   }
   assert.match(read('src/chat_composer.zig'), /\.chat\(-uiScaled\(app_state\.g_chat_font_pt\), false, false, false, \.\{\}\)/);
-  const render = read('src/chat_render.zig');
-  assert.match(render, /false, false, true, \.\{\}\)/);
-  assert.match(render, /style\.bold or level > 0, style\.italic, false, \.\{\}\)/);
-  assert.match(render, /g_chat_font_pt - 3\)\), false, false, false, \.\{\}\)/);
+  const fonts = read('src/chat_fonts.zig');
+  assert.match(fonts, /false, false, true, \.\{\}\)/);
+  assert.match(fonts, /style\.bold or level > 0, style\.italic, false, \.\{\}\)/);
+  assert.match(fonts, /g_chat_font_pt - 3\)\), false, false, false, \.\{\}\)/);
 });
 
 test('body request guard catches direct 500 and conditional 500 but allows unchanged mono', () => {

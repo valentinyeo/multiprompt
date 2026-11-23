@@ -281,10 +281,11 @@ test('address hotkey registers only for the owned visible custom bar', () => {
   const end = pane.indexOf('\npub fn calcBrowserLayout(', start);
   const handlerStart = main.indexOf('        WM_HOTKEY => {');
   const handlerEnd = main.indexOf('        0x0011 => {', handlerStart);
-  const helperStart = main.indexOf('fn browserFocusHotkey()');
-  const helperEnd = main.indexOf('\n}', helperStart) + '\n}'.length;
+  const actions = fs.readFileSync(path.join(root, 'src/window_actions.zig'), 'utf8');
+  const helperStart = actions.indexOf('fn browserFocusHotkey()');
+  const helperEnd = actions.indexOf('\n}', helperStart) + '\n}'.length;
   assert.ok(start >= 0 && end > start && handlerStart >= 0 && handlerEnd > handlerStart && helperStart >= 0 && helperEnd > helperStart);
-  const focusHelper = main.slice(helperStart, helperEnd)
+  const focusHelper = actions.slice(helperStart, helperEnd)
     .replaceAll('@import("chat_find_ui.zig").close(false)', 'closeFind()')
     .replaceAll('@import("focus.zig").focusActiveShellFromBrowserInput()', 'focusActiveShell()');
   const lifecycle = pane.slice(start, end)

@@ -14,8 +14,9 @@ test('SOFT-2441 reaction paint uses body-sized color emoji and the message tail'
   assert.match(resolve, /indexOf\(u16, normalized\(body, buffer\), needle\)/);
   assert.match(resolve, /found = target\.last/);
   const render = read('src/chat_render.zig');
-  assert.match(render, /fn ensureChatEmojiFont\(\) HANDLE/);
-  assert.match(render, /emoji\(-uiScaled\(app_state\.g_chat_font_pt\)\)/);
+  const fonts = read('src/chat_fonts.zig');
+  assert.match(fonts, /fn ensureChatEmojiFont\(\) HANDLE/);
+  assert.match(fonts, /emoji\(-uiScaled\(app_state\.g_chat_font_pt\)\)/);
   const paint = render.slice(render.indexOf('fn chatPaintReactions'), render.indexOf('fn chatMessageBounds'));
   assert.doesNotMatch(paint, /g_chat_rich_fonts\[11\]/);
   assert.match(paint, /ensureChatEmojiFont\(\)/);
