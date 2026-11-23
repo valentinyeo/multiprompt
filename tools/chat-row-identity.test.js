@@ -73,6 +73,23 @@ function runZigTest(name) {
   }
 }
 
+test('hosted row proof distinguishes identity fields from reconnect parameter names', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/test.yml'), 'utf8');
+  const command = workflow.match(/if ! (grep [^\n]+chat_echo\.zig); then/)[1];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-row-proof-'));
+  try {
+    const sourceDir = path.join(dir, '.chat-row-base/src');
+    fs.mkdirSync(sourceDir, { recursive: true });
+    const file = path.join(sourceDir, 'chat_echo.zig');
+    fs.writeFileSync(file, 'pub fn requeueOnReconnect(has_client_id: bool) bool { return has_client_id; }\n');
+    assert.equal(spawnSync('bash', ['-c', command], { cwd: dir }).status, 1);
+    fs.appendFileSync(file, 'pub const Pending = struct {\n    client_id: u64 = 0,\n};\n');
+    assert.equal(spawnSync('bash', ['-c', command], { cwd: dir }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('SOFT-3097 hosted pending retires above its reply without a transcript client id', () => {
   runZigTest('SOFT-3097 hosted pending retires above its reply without a transcript client id');
 });
