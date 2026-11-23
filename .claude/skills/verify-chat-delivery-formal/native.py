@@ -53,11 +53,16 @@ const ChatOutboxEntry = struct {
     source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send) + load(send)
     source += '''test "formal source decisions" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("synthetic delivery probe");
-    const block = [_]chat_echo.UserBlock{.{ .text = text, .stamp_ms = 200, .message_id = 1 }};
+    var block: [1]chat_echo.UserBlock = undefined;
+    block[0] = .{ .text = text, .stamp_ms = 200, .message_id = 1 };
     var pending = [_]chat_echo.Pending{
         .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } },
         .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } },
     };
+    if (@hasField(chat_echo.Pending, "client_id")) {
+        for (&pending) |*p| p.client_id = 1;
+        block[0].client_id = 1;
+    }
     var picked: [2]?usize = undefined;
     chat_echo.assign(&pending, &block, false, &.{}, &picked);
     try std.testing.expectEqual(@as(?usize, 0), picked[0]);

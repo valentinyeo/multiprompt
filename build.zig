@@ -328,6 +328,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js", "tools/account-bot-photos.test.js", "tools/account-picture-proof.test.js" }).step);
+    const workspace_dropdown_tests = b.addSystemCommand(&.{ "node", "--test", "tools/workspace-dropdown-open.test.js", "tools/workspace-dropdown-hover.test.js" });
+    test_step.dependOn(&workspace_dropdown_tests.step);
     const live_resume_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-switch-resume.test.js" });
     const composer_paint_bound_tests = b.addSystemCommand(&.{ "node", "--test", "tools/composer-paint-bound.test.js" });
     test_step.dependOn(&composer_paint_bound_tests.step);
@@ -347,9 +349,11 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&mp_talk_tests.step);
     const mp_helper_tests = b.addSystemCommand(&.{ "python3", "tools/mp-helper-test.py" });
     vps_test_step.dependOn(&mp_helper_tests.step);
+    const mp_sessions_tests = b.addSystemCommand(&.{ "python3", "tools/mp-sessions-test.py" });
+    vps_test_step.dependOn(&mp_sessions_tests.step);
     const mp_shell_tests = b.addSystemCommand(&.{ "python3", "tools/mp-shell-test.py" });
     vps_test_step.dependOn(&mp_shell_tests.step);
-    const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js" });
+    const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js", "tools/session-link.test.js", "tools/session-link-click.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
     const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js", "tools/chat-host-socket-root.test.js" });
@@ -418,7 +422,7 @@ pub fn build(b: *std.Build) void {
     const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
     test_step.dependOn(&chat_perf_clock_tests.step);
     vps_test_step.dependOn(&chat_perf_clock_tests.step);
-    const chat_perf_echo_scaling_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-echo-scaling.test.js" });
+    const chat_perf_echo_scaling_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-echo-scaling.test.js", "tools/chat-perf-tick-budget.test.js" });
     test_step.dependOn(&chat_perf_echo_scaling_tests.step);
     vps_test_step.dependOn(&chat_perf_echo_scaling_tests.step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
@@ -426,6 +430,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_last_batch_time_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-last-batch-time.test.js" });
     test_step.dependOn(&chat_last_batch_time_tests.step);
+    const chat_live_redraw_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-redraw.test.js" });
+    test_step.dependOn(&chat_live_redraw_tests.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
     test_step.dependOn(&chat_backfill_fairness_tests.step);
     vps_test_step.dependOn(&chat_backfill_fairness_tests.step);
@@ -843,6 +849,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
     const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
     test_step.dependOn(&native_session_tests.step);
+    const server_shell_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/server-shell-input.test.js" });
+    test_step.dependOn(&server_shell_input_tests.step);
     vps_test_step.dependOn(&native_session_tests.step);
     const harness_alt_tap_tests = b.addSystemCommand(&.{ "node", "--test", "tools/harness-alt-tap.test.js" });
     test_step.dependOn(&harness_alt_tap_tests.step);
@@ -856,6 +864,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&paste_focus_tests.step);
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
     test_step.dependOn(&shell_focus_tests.step);
+    const alt_tab_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/alt-tab-front.test.js" });
+    test_step.dependOn(&alt_tab_front_tests.step);
     const console_font_lifecycle_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font-lifecycle.test.js" });
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);

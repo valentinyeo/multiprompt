@@ -556,6 +556,15 @@ const SEARCH_RECOVER_REPO_OFFSET = @import("app_state.zig").SEARCH_RECOVER_REPO_
 const SEARCH_OPENALL_HOST_BACK_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_BACK_OFFSET;
 const SEARCH_OPENALL_HOST_DE_OFFSET = @import("app_state.zig").SEARCH_OPENALL_HOST_DE_OFFSET;
 const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
+const SEARCH_MOVE_WORKSPACE_SERVER_OFFSET = @import("app_state.zig").SEARCH_MOVE_WORKSPACE_SERVER_OFFSET;
+const SEARCH_NEW_TAB_ON_SERVER_OFFSET = @import("app_state.zig").SEARCH_NEW_TAB_ON_SERVER_OFFSET;
+const SEARCH_WORKSPACE_SERVER_BACK_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_BACK_OFFSET;
+const SEARCH_WORKSPACE_SERVER_ROW_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_ROW_OFFSET;
+const WORKSPACE_SERVER_SLOT_COUNT = @import("app_state.zig").WORKSPACE_SERVER_SLOT_COUNT;
+const SEARCH_TABCTX_NEW_TAB_ON_SERVER = @import("app_state.zig").SEARCH_TABCTX_NEW_TAB_ON_SERVER;
+const openWorkspaceServerPicker = @import("command_palette.zig").openWorkspaceServerPicker;
+const closeWorkspaceServerPicker = @import("command_palette.zig").closeWorkspaceServerPicker;
+const workspaceServerChoose = @import("command_palette.zig").workspaceServerChoose;
 const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
@@ -2369,6 +2378,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 clampSidebarScroll();
                 _ = InvalidateRect(hwnd, null, 0);
                 return 0;
+            }
+            if (msg == WM_MOUSEWHEEL and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].native_terminal) {
+                const target = app_state.shells[app_state.active_shell].hwnd;
+                if (target != null and pt.x >= SIDEBAR_W()) {
+                    _ = SendMessageW(target, msg, wp, lp);
+                    return 0;
+                }
             }
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
@@ -4445,6 +4461,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
             closePickRepo();
+            closeWorkspaceServerPicker();
             app_state.g_tabctx_sid = 0;
             app_state.g_search_remind_input_mode = false;
             app_state.g_search_rename_input_mode = false;
@@ -4779,6 +4796,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_pick_repo_mode) {
                 closePickRepo();
+                app_state.g_search_len = 0;
+                app_state.g_search_sel = 0;
+                app_state.g_search_scroll = 0;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
+            } else if (app_state.g_search_workspace_server_mode != 0) {
+                closeWorkspaceServerPicker();
                 app_state.g_search_len = 0;
                 app_state.g_search_sel = 0;
                 app_state.g_search_scroll = 0;
@@ -5279,6 +5303,40 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_sel = 0;
                     app_state.g_search_scroll = 0;
                     updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_MOVE_WORKSPACE_SERVER_OFFSET or target == SEARCH_NEW_TAB_ON_SERVER_OFFSET or target == SEARCH_TABCTX_NEW_TAB_ON_SERVER) {
+                    openWorkspaceServerPicker(target == SEARCH_MOVE_WORKSPACE_SERVER_OFFSET);
+                    app_state.g_search_workspace_mode = false;
+                    app_state.g_search_theme_mode = false;
+                    app_state.g_search_openall_host_mode = false;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 1;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_WORKSPACE_SERVER_BACK_OFFSET) {
+                    closeWorkspaceServerPicker();
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target >= SEARCH_WORKSPACE_SERVER_ROW_OFFSET and target < SEARCH_WORKSPACE_SERVER_ROW_OFFSET + WORKSPACE_SERVER_SLOT_COUNT) {
+                    const moving = app_state.g_search_workspace_server_mode == 1;
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    const picked = workspaceServerChoose(target);
+                    applyPendingGroup();
+                    showActiveShellAfterOverlay();
+                    if (moving and picked) showHeaderNoticeAscii("Workspace server updated; new tabs use that server", 3000, false);
+                    if (!moving and !picked) showPickRepoFailure(false);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -8273,6 +8331,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
+                @import("focus.zig").frontOnActivation();
                 focusGuardNoteActivation();
                 updateCardPoll();
                 updateBrowserVisibility();
@@ -8291,6 +8350,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const active = @as(u16, @truncate(wp));
             if (active == 0) @import("diagnostics.zig").focusTrace(.activate_inactive, @ptrFromInt(@as(usize, @bitCast(lp))), 0);
             if (active != 0) {
+                @import("focus.zig").frontOnActivation();
                 focusGuardNoteActivation();
                 exitDeepIdleNow(hwnd);
                 _ = KillTimer(hwnd, TIMER_HOOK_UNINSTALL);

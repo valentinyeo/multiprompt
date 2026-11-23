@@ -350,6 +350,12 @@ const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET
 const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
+const SEARCH_MOVE_WORKSPACE_SERVER_OFFSET = @import("app_state.zig").SEARCH_MOVE_WORKSPACE_SERVER_OFFSET;
+const SEARCH_NEW_TAB_ON_SERVER_OFFSET = @import("app_state.zig").SEARCH_NEW_TAB_ON_SERVER_OFFSET;
+const SEARCH_WORKSPACE_SERVER_BACK_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_BACK_OFFSET;
+const SEARCH_WORKSPACE_SERVER_ROW_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_ROW_OFFSET;
+const WORKSPACE_SERVER_SLOT_COUNT = @import("app_state.zig").WORKSPACE_SERVER_SLOT_COUNT;
+const SEARCH_TABCTX_NEW_TAB_ON_SERVER = @import("app_state.zig").SEARCH_TABCTX_NEW_TAB_ON_SERVER;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const RepoRow = @import("vps.zig").RepoRow;
 const REPO_SCAN_ROWS = @import("app_state.zig").REPO_SCAN_ROWS;
@@ -468,7 +474,12 @@ fn loadCustomCommands() void {
     }
 }
 
+const CUSTOM_CMDS_UNIT_TEST_PIN_LO: u32 = 0xfffffffe;
+const CUSTOM_CMDS_UNIT_TEST_PIN_HI: u32 = 0xfffffffe;
+
 pub fn loadCustomCommandsIfChanged() void {
+    if (app_state.g_custom_cmds_mtime_lo == CUSTOM_CMDS_UNIT_TEST_PIN_LO and
+        app_state.g_custom_cmds_mtime_hi == CUSTOM_CMDS_UNIT_TEST_PIN_HI) return;
     var path_buf: [512]u8 = undefined;
     const path = getCommandsJsonPath(&path_buf) orelse return;
     var wbuf: [520]u16 = undefined;
@@ -545,10 +556,14 @@ const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "open shell on vps 2 host2 server 2 ssh new host2 vps shell" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
+    .{ .target = SEARCH_MOVE_WORKSPACE_SERVER_OFFSET, .keywords = "move workspace to server host vps ssh account server" },
+    .{ .target = SEARCH_NEW_TAB_ON_SERVER_OFFSET, .keywords = "new tab on server host vps ssh account server" },
 };
 
 pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
+pub const MOVE_WORKSPACE_SERVER_LABEL = "Move workspace to server";
+pub const NEW_TAB_ON_SERVER_LABEL = "New tab on server";
 
 fn newSessionRowOrder(target: usize) u16 {
     const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
@@ -699,6 +714,7 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (target == SEARCH_TABCTX_NEW_TAB_ON_SERVER) return NEW_TAB_ON_SERVER_LABEL;
     if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
     if (target == SEARCH_TABCTX_BROWSER) {
         if (findShellById(app_state.g_tabctx_sid)) |idx| {
@@ -948,6 +964,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
         SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
+        SEARCH_MOVE_WORKSPACE_SERVER_OFFSET => "move workspace to server host vps ssh account server",
+        SEARCH_NEW_TAB_ON_SERVER_OFFSET => "new tab on server host vps ssh account server",
+        SEARCH_WORKSPACE_SERVER_BACK_OFFSET => "back",
         SEARCH_OPEN_SESSION_MENU_OFFSET => "open session attach tmux list pick",
         SEARCH_REOPEN_SERVER_SHELL_OFFSET => "reopen server shell detached tmux attach orphaned",
         SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
@@ -1262,7 +1281,7 @@ fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, n
         if (key_delete != prev_delete) return key_delete;
         const key_open = key < app_state.shell_count;
         const prev_open = prev < app_state.shell_count;
-        if (key_open != prev_open and (paletteRowIsArchived(key) or paletteRowIsArchived(prev))) return key_open;
+        if (key_open != prev_open) return key_open;
         const key_workspace = paletteWorkspaceRank(key);
         const prev_workspace = paletteWorkspaceRank(prev);
         if (key_workspace != prev_workspace) return key_workspace > prev_workspace;
@@ -1418,6 +1437,47 @@ test "SOFT-2355 typing del ranks Delete session before Delete workspace" {
     try std.testing.expectEqual(SEARCH_WORKSPACE_DELETE_MENU_OFFSET, app_state.g_search_results[1]);
 }
 
+test "SOFT-3065 session Token Ladder ranks above Token Ladder commands for query token" {
+    const old_shell_name = app_state.shells[0].name;
+    const old_shell_name_len = app_state.shells[0].name_len;
+    const old_shell_count = app_state.shell_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    defer {
+        app_state.shells[0].name = old_shell_name;
+        app_state.shells[0].name_len = old_shell_name_len;
+        app_state.shell_count = old_shell_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    app_state.shell_count = 1;
+    const session_name = "Token Ladder";
+    for (session_name, 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = session_name.len;
+    for ("token", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 5;
+    app_state.g_palette_usage_count = 2;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_LADDER_AUTO_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) };
+    app_state.g_palette_usage[1] = .{ .key = SEARCH_LADDER_DASH_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) - 1 };
+    app_state.g_search_results[0] = SEARCH_LADDER_AUTO_OFFSET;
+    app_state.g_search_results[1] = SEARCH_LADDER_DASH_OFFSET;
+    app_state.g_search_results[2] = 0;
+    app_state.g_search_result_count = 3;
+    sortSearchResultsByRank();
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_search_results[0]);
+    try std.testing.expect(paletteResultOutranks(0, SEARCH_LADDER_AUTO_OFFSET, 0, 0, std.math.maxInt(u64)));
+    try std.testing.expect(paletteResultOutranks(0, SEARCH_LADDER_DASH_OFFSET, 0, 0, std.math.maxInt(u64)));
+    try std.testing.expect(!paletteResultOutranks(SEARCH_LADDER_AUTO_OFFSET, 0, 0, 0, std.math.maxInt(u64)));
+}
+
 fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
     var found: ?usize = null;
     for (results, 0..) |result, i| {
@@ -1479,7 +1539,9 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
         target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
         target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
-        (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
+        target == SEARCH_MOVE_WORKSPACE_SERVER_OFFSET or target == SEARCH_NEW_TAB_ON_SERVER_OFFSET or target == SEARCH_WORKSPACE_SERVER_BACK_OFFSET or
+        (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) or
+        (target >= SEARCH_WORKSPACE_SERVER_ROW_OFFSET and target < SEARCH_WORKSPACE_SERVER_ROW_OFFSET + WORKSPACE_SERVER_SLOT_COUNT)) return 0;
     if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
     if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) return 0;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
@@ -1981,6 +2043,7 @@ pub fn workspaceHostForNewTab(ws: u8) u8 {
 }
 
 pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8, plain_claude: bool) void {
+    clearPickRepoAnchor();
     app_state.g_search_snippet_mode = false;
     app_state.g_search_shells_mode = false;
     app_state.g_search_open_session_mode = false;
@@ -1995,6 +2058,186 @@ pub fn closePickRepo() void {
     app_state.g_search_pick_repo_mode = false;
     app_state.g_search_pick_repo_folder_mode = false;
     app_state.g_search_pick_repo_plain_claude = false;
+    clearPickRepoAnchor();
+}
+
+const PICK_REPO_NO_QUERY: usize = std.math.maxInt(usize);
+var g_pick_repo_last_query_len: usize = PICK_REPO_NO_QUERY;
+var g_pick_repo_anchor_valid: bool = false;
+var g_pick_repo_anchor_host: u8 = 0;
+var g_pick_repo_anchor_path_len: u16 = 0;
+var g_pick_repo_anchor_path: [255]u8 = [_]u8{0} ** 255;
+
+fn repoRowSameIdentity(row: *const RepoRow, host: u8, path: []const u8) bool {
+    return row.host == host and row.path_len == path.len and std.mem.eql(u8, row.path[0..row.path_len], path);
+}
+
+fn clearPickRepoAnchor() void {
+    g_pick_repo_anchor_valid = false;
+    g_pick_repo_anchor_host = 0;
+    g_pick_repo_anchor_path_len = 0;
+    g_pick_repo_last_query_len = PICK_REPO_NO_QUERY;
+}
+
+fn capturePickRepoAnchorFromSelection() void {
+    g_pick_repo_anchor_valid = false;
+    if (!app_state.g_search_pick_repo_mode or app_state.g_search_sel >= app_state.g_search_result_count) return;
+    const target = app_state.g_search_results[app_state.g_search_sel];
+    if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) return;
+    const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
+    if (idx >= g_presented_repo_count) return;
+    const row = &g_presented_repo_rows[idx];
+    g_pick_repo_anchor_host = row.host;
+    g_pick_repo_anchor_path_len = row.path_len;
+    @memcpy(g_pick_repo_anchor_path[0..row.path_len], row.path[0..row.path_len]);
+    g_pick_repo_anchor_valid = true;
+}
+
+fn beginPickRepoRefresh() bool {
+    if (!app_state.g_search_pick_repo_mode) return false;
+    const query_changed = app_state.g_search_len != g_pick_repo_last_query_len;
+    g_pick_repo_last_query_len = app_state.g_search_len;
+    if (!query_changed) capturePickRepoAnchorFromSelection();
+    return query_changed;
+}
+
+fn pickRepoResultIndexForRow(row_idx: u32) ?u32 {
+    const target = SEARCH_PICK_REPO_ROW_OFFSET + row_idx;
+    for (0..app_state.g_search_result_count) |sel| {
+        if (app_state.g_search_results[sel] == target) return @intCast(sel);
+    }
+    return null;
+}
+
+fn applyPickRepoAnchorToSelection() void {
+    if (!g_pick_repo_anchor_valid) return;
+    const path = g_pick_repo_anchor_path[0..g_pick_repo_anchor_path_len];
+    for (g_presented_repo_rows[0..g_presented_repo_count], 0..) |row, i| {
+        if (!repoRowSameIdentity(&row, g_pick_repo_anchor_host, path)) continue;
+        if (pickRepoResultIndexForRow(@intCast(i))) |sel| {
+            app_state.g_search_sel = sel;
+            return;
+        }
+    }
+    g_pick_repo_anchor_valid = false;
+    if (app_state.g_search_sel >= app_state.g_search_result_count and app_state.g_search_result_count > 0)
+        app_state.g_search_sel = app_state.g_search_result_count - 1;
+}
+
+fn finishPickRepoSelectionAfterRebuild(query_changed: bool) void {
+    if (!query_changed) {
+        applyPickRepoAnchorToSelection();
+        return;
+    }
+    if (app_state.g_search_len > 0 and app_state.g_search_result_count > 1) {
+        app_state.g_search_sel = 1;
+        app_state.g_search_scroll = 0;
+    }
+    capturePickRepoAnchorFromSelection();
+}
+
+pub const PICK_REPO_SCROLL_GUTTER: i32 = 16;
+pub const PICK_REPO_HOST_MIN_W: i32 = 64;
+pub const PICK_REPO_HOST_MAX_W: i32 = 160;
+pub const PICK_REPO_COLUMN_GAP: i32 = 12;
+
+pub const PickRepoColumns = struct {
+    name_left: i32,
+    name_right: i32,
+    path_left: i32,
+    path_right: i32,
+    host_left: i32,
+    host_right: i32,
+};
+
+fn pickRepoPathSeparator(c: u8) bool {
+    return c == '/' or c == '\\';
+}
+
+pub fn pickRepoFolderName(path: []const u8) []const u8 {
+    var end = path.len;
+    while (end > 0 and pickRepoPathSeparator(path[end - 1])) end -= 1;
+    var start = end;
+    while (start > 0 and !pickRepoPathSeparator(path[start - 1])) start -= 1;
+    return path[start..end];
+}
+
+pub fn pickRepoColumns(text_left: i32, overlay_right: i32, name_w: i32, host_w: i32) PickRepoColumns {
+    const host_right = overlay_right - PICK_REPO_SCROLL_GUTTER;
+    const host_left = host_right - std.math.clamp(host_w, PICK_REPO_HOST_MIN_W, PICK_REPO_HOST_MAX_W);
+    const path_right = host_left - PICK_REPO_COLUMN_GAP;
+    const name_right = @min(text_left + @max(name_w, 0), path_right);
+    const path_left = if (name_right + PICK_REPO_COLUMN_GAP <= path_right) name_right + PICK_REPO_COLUMN_GAP else path_right;
+    return .{
+        .name_left = text_left,
+        .name_right = name_right,
+        .path_left = path_left,
+        .path_right = path_right,
+        .host_left = host_left,
+        .host_right = host_right,
+    };
+}
+
+pub fn workspaceSpawnFolder(ws: u8, out_host: *u8, out_path: *[256]u8, out_len: *u32, out_program: *[128]u8, out_program_len: *u32) bool {
+    if (workspaceConfiguredTerminalFolder(ws, out_host, out_path, out_len, out_program, out_program_len)) return true;
+    out_program_len.* = 0;
+    return workspacePrimaryRepo(out_host, out_path, out_len);
+}
+
+fn workspaceServerSlotVisible(slot: u8) bool {
+    if (slot >= WORKSPACE_SERVER_SLOT_COUNT) return false;
+    return @import("account_desktop.zig").accountServerPaletteName(slot).len > 0;
+}
+
+pub fn openWorkspaceServerPicker(move_workspace: bool) void {
+    app_state.g_search_snippet_mode = false;
+    app_state.g_search_shells_mode = false;
+    app_state.g_search_open_session_mode = false;
+    closePickRepo();
+    app_state.g_search_workspace_server_mode = if (move_workspace) 1 else 2;
+}
+
+pub fn closeWorkspaceServerPicker() void {
+    app_state.g_search_workspace_server_mode = 0;
+}
+
+pub fn workspaceMissingFolderNotice(server: []const u8, path: []const u8, origin: ?[]const u8, out: []u8) ?[]const u8 {
+    if (origin) |url| return std.fmt.bufPrint(out, "Folder missing on {s}: {s}. Clone: git clone {s} {s}", .{ server, path, url, path }) catch null;
+    return std.fmt.bufPrint(out, "Folder missing on {s}: {s}", .{ server, path }) catch null;
+}
+
+fn showMissingWorkspaceFolder(chosen_host: u8, origin_host: u8, path: []const u8) void {
+    const server = @import("account_desktop.zig").accountServerPaletteName(chosen_host);
+    var msg_buf: [640]u8 = undefined;
+    var origin_buf: [256]u8 = undefined;
+    const origin = if (origin_host != chosen_host) @import("vps.zig").remoteGitOriginUrl(origin_host, path, &origin_buf) else null;
+    const notice = workspaceMissingFolderNotice(server, path, origin, &msg_buf) orelse "Folder missing on that server";
+    @import("console.zig").showHeaderNoticeAscii(notice, 8000, true);
+}
+
+pub fn workspaceServerChoose(target: usize) bool {
+    const move_workspace = app_state.g_search_workspace_server_mode == 1;
+    closeWorkspaceServerPicker();
+    if (target < SEARCH_WORKSPACE_SERVER_ROW_OFFSET or target >= SEARCH_WORKSPACE_SERVER_ROW_OFFSET + WORKSPACE_SERVER_SLOT_COUNT) return false;
+    const host: u8 = @intCast(target - SEARCH_WORKSPACE_SERVER_ROW_OFFSET);
+    if (!workspaceServerSlotVisible(host)) return false;
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    var current_host: u8 = 0;
+    const ws = activeWorkspaceSlot();
+    if (!workspaceSpawnFolder(ws, &current_host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
+        @import("diagnostics.zig").debugLog("[server] workspace has no folder");
+        return false;
+    }
+    const cwd = cwd_buf[0..cwd_len];
+    if (!@import("vps.zig").remoteWorkspaceFolderExists(host, cwd)) {
+        showMissingWorkspaceFolder(host, current_host, cwd);
+        return false;
+    }
+    if (move_workspace) return saveWorkspaceFolder(host, cwd);
+    return spawnWorkspaceSessionAt(host, cwd, program_buf[0..program_len], true, false);
 }
 
 fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
@@ -2060,7 +2303,7 @@ pub fn insertCommandEntry(text: []const u8, entry: []const u8, out: []u8) ?[]con
     return out[0..pos];
 }
 
-fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
+pub fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
     ensureCommandsJsonStarter();
     var path_buf: [512]u8 = undefined;
     const file = getCommandsJsonPath(&path_buf) orelse return false;
@@ -3251,16 +3494,21 @@ fn appendWorkspaceMovePills() void {
     }
 }
 
+fn sortFilteredResultsAfterBack() void {
+    if (app_state.g_search_len == 0 or app_state.g_search_result_count <= 1) return;
+    var i: u32 = 2;
+    while (i < app_state.g_search_result_count) : (i += 1) {
+        const target = app_state.g_search_results[i];
+        var j = i;
+        while (j > 1 and paletteQueryRank(target) > paletteQueryRank(app_state.g_search_results[j - 1])) : (j -= 1)
+            app_state.g_search_results[j] = app_state.g_search_results[j - 1];
+        app_state.g_search_results[j] = target;
+    }
+}
+
 fn preferFirstFilteredResultAfterBack() void {
+    sortFilteredResultsAfterBack();
     if (app_state.g_search_len > 0 and app_state.g_search_result_count > 1) {
-        var i: u32 = 2;
-        while (i < app_state.g_search_result_count) : (i += 1) {
-            const target = app_state.g_search_results[i];
-            var j = i;
-            while (j > 1 and paletteQueryRank(target) > paletteQueryRank(app_state.g_search_results[j - 1])) : (j -= 1)
-                app_state.g_search_results[j] = app_state.g_search_results[j - 1];
-            app_state.g_search_results[j] = target;
-        }
         app_state.g_search_sel = 1;
         app_state.g_search_scroll = 0;
     }
@@ -3458,6 +3706,7 @@ test "SOFT-2444 Ctrl+K session rows keep active sessions and drop archived ones"
 pub fn updateSearchResults() void {
     app_state.g_search_revision +%= 1;
     if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
+    const pick_repo_query_changed = beginPickRepoRefresh();
     @import("room_frontend.zig").resetPaletteRooms();
     defer {
         if (app_state.g_search_active) {
@@ -3497,6 +3746,28 @@ pub fn updateSearchResults() void {
         while (i < filtered) : (i += 1) {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_ROW_OFFSET + i;
+            app_state.g_search_result_count += 1;
+        }
+        sortFilteredResultsAfterBack();
+        finishPickRepoSelectionAfterRebuild(pick_repo_query_changed);
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_workspace_server_mode != 0) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_SERVER_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        for (0..WORKSPACE_SERVER_SLOT_COUNT) |slot| {
+            const host: u8 = @intCast(slot);
+            if (!workspaceServerSlotVisible(host)) continue;
+            const label = @import("account_desktop.zig").accountServerPaletteName(host);
+            if (app_state.g_search_len > 0 and
+                !asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive("server host vps ssh", app_state.g_search_buf[0..app_state.g_search_len]))
+                continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_SERVER_ROW_OFFSET + slot;
             app_state.g_search_result_count += 1;
         }
         preferFirstFilteredResultAfterBack();
@@ -4017,6 +4288,18 @@ pub fn updateSearchResults() void {
             keywordsMatchAll("set workspace folder declare workspace folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SET_FOLDER_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("move workspace to server host vps ssh account server", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MOVE_WORKSPACE_SERVER_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new tab on server host vps ssh account server", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_TAB_ON_SERVER_OFFSET;
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_len > 0) {
@@ -5658,6 +5941,12 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESTART_AI;
         app_state.g_search_result_count += 1;
     }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ NEW_TAB_ON_SERVER_LABEL, "server", "host", "vps", "ssh" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_NEW_TAB_ON_SERVER;
+        app_state.g_search_result_count += 1;
+    }
     if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
             if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move to Workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -5739,6 +6028,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
 
 pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
     .{ .target = SEARCH_TABCTX_PIN_TOP, .label = "Pin" },
+    .{ .target = SEARCH_TABCTX_NEW_TAB_ON_SERVER, .label = NEW_TAB_ON_SERVER_LABEL },
     .{ .target = SEARCH_TABCTX_WSMOVE, .label = "Move to workspace" },
     .{ .target = app_state.SEARCH_TABCTX_UNREAD, .label = "Mark as unread" },
     .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
@@ -6209,6 +6499,102 @@ test "IGSH-1266 pick repo typing filters paths case insensitively" {
     try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
 }
 
+fn pickRepoSelectedPath() []const u8 {
+    const target = app_state.g_search_results[app_state.g_search_sel];
+    const row = &g_presented_repo_rows[target - SEARCH_PICK_REPO_ROW_OFFSET];
+    return row.path[0..row.path_len];
+}
+
+fn pickRepoSelectPath(path: []const u8) !void {
+    for (0..app_state.g_search_result_count) |sel| {
+        const target = app_state.g_search_results[sel];
+        if (target < SEARCH_PICK_REPO_ROW_OFFSET) continue;
+        const row = &g_presented_repo_rows[target - SEARCH_PICK_REPO_ROW_OFFSET];
+        if (std.mem.eql(u8, row.path[0..row.path_len], path)) {
+            app_state.g_search_sel = @intCast(sel);
+            return;
+        }
+    }
+    return error.TestUnexpectedResult;
+}
+
+test "SOFT-2883 pick repo keeps the highlighted folder when the list refreshes" {
+    const vps = @import("vps.zig");
+    const old_len = app_state.g_search_len;
+    const old_sel = app_state.g_search_sel;
+    const old_scroll = app_state.g_search_scroll;
+    const old_shell_count = app_state.shell_count;
+    defer {
+        vps.replaceRepoRowsForTest(0, &.{});
+        closePickRepo();
+        app_state.g_search_len = old_len;
+        app_state.g_search_sel = old_sel;
+        app_state.g_search_scroll = old_scroll;
+        app_state.shell_count = old_shell_count;
+    }
+    const multiprompt = "/home/valentin/projects/multiprompt";
+    const android = "/home/valentin/projects/multiprompt-android";
+    const ios = "/home/valentin/projects/multiprompt-ios";
+    app_state.shell_count = 0;
+    vps.replaceRepoRowsForTest(0, &.{ android, multiprompt });
+    pickRepoOpen(true, false, 0, false);
+    @memcpy(app_state.g_search_buf[0..5], L("multi")[0..5]);
+    app_state.g_search_len = 5;
+    app_state.g_search_sel = 0;
+    updateSearchResults();
+    try pickRepoSelectPath(multiprompt);
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ ios, android, multiprompt });
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ multiprompt, android });
+    updateSearchResults();
+    try std.testing.expectEqualStrings(multiprompt, pickRepoSelectedPath());
+    vps.replaceRepoRowsForTest(0, &.{ android, ios });
+    updateSearchResults();
+    try std.testing.expect(app_state.g_search_sel < app_state.g_search_result_count);
+}
+
+test "SOFT-3075 pick repo folder name comes from the end of the path" {
+    try std.testing.expectEqualStrings("multiprompt-android", pickRepoFolderName("/home/valentin/projects/multiprompt-android"));
+    try std.testing.expectEqualStrings("multiprompt", pickRepoFolderName("/home/valentin/projects/multiprompt/"));
+    try std.testing.expectEqualStrings("repo", pickRepoFolderName("C:\\work\\repo"));
+    try std.testing.expectEqualStrings("multi.clock", pickRepoFolderName("/srv/multi.clock"));
+    try std.testing.expectEqualStrings("", pickRepoFolderName("/"));
+    try std.testing.expectEqualStrings("", pickRepoFolderName(""));
+}
+
+test "SOFT-3075 pick repo columns keep the folder name and the host clear of the scrollbar" {
+    const overlay_right: i32 = 560;
+    const text_left: i32 = 14;
+    const wide = pickRepoColumns(text_left, overlay_right, 132, 78);
+    try std.testing.expectEqual(text_left, wide.name_left);
+    try std.testing.expectEqual(@as(i32, 146), wide.name_right);
+    try std.testing.expectEqual(@as(i32, 158), wide.path_left);
+    try std.testing.expect(wide.path_right > wide.path_left);
+    try std.testing.expectEqual(overlay_right - PICK_REPO_SCROLL_GUTTER, wide.host_right);
+    try std.testing.expectEqual(wide.host_right - 78, wide.host_left);
+    try std.testing.expectEqual(wide.host_left - PICK_REPO_COLUMN_GAP, wide.path_right);
+    try std.testing.expect(wide.host_right <= overlay_right - 12);
+
+    const long_name = pickRepoColumns(text_left, overlay_right, 500, 78);
+    try std.testing.expectEqual(long_name.path_right, long_name.name_right);
+    try std.testing.expectEqual(long_name.path_right, long_name.path_left);
+
+    const short_name = pickRepoColumns(text_left, overlay_right, 20, 9);
+    try std.testing.expectEqual(@as(i32, 34), short_name.name_right);
+    try std.testing.expectEqual(short_name.host_right - PICK_REPO_HOST_MIN_W, short_name.host_left);
+
+    const long_host = pickRepoColumns(text_left, overlay_right, 20, 400);
+    try std.testing.expectEqual(long_host.host_right - PICK_REPO_HOST_MAX_W, long_host.host_left);
+
+    const narrow_overlay = pickRepoColumns(0, 240, 300, 120);
+    try std.testing.expect(narrow_overlay.name_right <= narrow_overlay.path_right);
+    try std.testing.expect(narrow_overlay.path_left >= narrow_overlay.name_right);
+    try std.testing.expect(narrow_overlay.host_right <= 240 - PICK_REPO_SCROLL_GUTTER);
+}
+
 fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
     app_state.g_custom_cmds_count = 0;
     var entry = CustomCmd{};
@@ -6287,4 +6673,70 @@ test "IGSH-1527 a named workspace keeps its saved folder" {
     var program_len: u32 = 0;
     try std.testing.expect(workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
     try std.testing.expectEqualStrings("/home/x/projects/repo-new", path[0..len]);
+}
+
+test "SOFT-3051 folder_host overrides primary repo host" {
+    const saved_count = app_state.shell_count;
+    const saved_cmds = app_state.g_custom_cmds_count;
+    const saved_mtime_lo = app_state.g_custom_cmds_mtime_lo;
+    const saved_mtime_hi = app_state.g_custom_cmds_mtime_hi;
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.g_custom_cmds_count = saved_cmds;
+        app_state.g_custom_cmds_mtime_lo = saved_mtime_lo;
+        app_state.g_custom_cmds_mtime_hi = saved_mtime_hi;
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+    }
+    const cwd = "/home/x/projects/travel";
+    app_state.shell_count = 1;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].workspace = 0;
+    app_state.shells[0].tmux_host = 0;
+    app_state.shells[0].tmux_session_len = 4;
+    @memcpy(app_state.shells[0].tmux_session[0..4], "live");
+    @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
+    app_state.shells[0].claude_cwd_len = cwd.len;
+    seedWorkspaceName(0, "travel");
+    app_state.g_custom_cmds_count = 0;
+    var entry = CustomCmd{};
+    entry.is_default = true;
+    entry.kind = .vps;
+    entry.folder_host = 2;
+    @memcpy(entry.workspace[0..6], "travel");
+    entry.workspace_len = 6;
+    @memcpy(entry.cwd[0..cwd.len], cwd);
+    entry.cwd_len = cwd.len;
+    app_state.g_custom_cmds[0] = entry;
+    app_state.g_custom_cmds_count = 1;
+    app_state.g_custom_cmds_mtime_lo = CUSTOM_CMDS_UNIT_TEST_PIN_LO;
+    app_state.g_custom_cmds_mtime_hi = CUSTOM_CMDS_UNIT_TEST_PIN_HI;
+    var host: u8 = 0;
+    var path: [256]u8 = undefined;
+    var len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    try std.testing.expect(workspaceSpawnFolder(0, &host, &path, &len, &program, &program_len));
+    try std.testing.expectEqual(@as(u8, 2), host);
+    var primary_host: u8 = 0;
+    var primary_path: [256]u8 = undefined;
+    var primary_len: u32 = 0;
+    try std.testing.expect(workspacePrimaryRepo(&primary_host, &primary_path, &primary_len));
+    try std.testing.expectEqual(@as(u8, 0), primary_host);
+}
+
+test "SOFT-3051 saved folder entry persists folder_host" {
+    var entry_buf: [512]u8 = undefined;
+    const entry = buildFolderEntry(&entry_buf, 2, "travel", "/home/x/projects/travel") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"label\":\"Folder\",\"kind\":\"vps\",\"folder_host\":\"2\",\"cwd\":\"/home/x/projects/travel\",\"workspace\":\"travel\",\"default\":true}", entry);
+}
+
+test "SOFT-3051 missing folder notice names server path and clone" {
+    var msg_buf: [640]u8 = undefined;
+    const notice = workspaceMissingFolderNotice("Contabo", "/home/x/travel", "https://github.com/org/travel.git", &msg_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, notice, "Contabo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notice, "/home/x/travel") != null);
+    try std.testing.expect(std.mem.indexOf(u8, notice, "git clone https://github.com/org/travel.git") != null);
 }
