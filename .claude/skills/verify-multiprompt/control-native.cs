@@ -241,6 +241,27 @@ public static class VerifyNative {
         }, IntPtr.Zero);
         return found;
     }
+    public static List<IntPtr> VisibleChildrenByClass(IntPtr parent, string className) {
+        var found = new List<IntPtr>();
+        EnumChildWindows(parent, delegate(IntPtr hwnd, IntPtr data) {
+            if (Class(hwnd) == className && IsWindowVisible(hwnd)) found.Add(hwnd);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+    public static List<Dictionary<string, object>> ChildWindows(IntPtr parent) {
+        var children = new List<Dictionary<string, object>>();
+        EnumChildWindows(parent, delegate(IntPtr hwnd, IntPtr data) {
+            Rect rectangle;
+            var identity = WindowIdentity(hwnd);
+            identity["parent"] = GetParent(hwnd).ToInt64();
+            identity["rect"] = GetWindowRect(hwnd, out rectangle) ? new int[] { rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom } : null;
+            children.Add(identity);
+            return true;
+        }, IntPtr.Zero);
+        return children;
+    }
+
     public static List<Dictionary<string, object>> DesktopWindows() {
         var windows = new List<Dictionary<string, object>>();
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {

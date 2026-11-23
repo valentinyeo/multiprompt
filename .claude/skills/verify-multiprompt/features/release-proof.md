@@ -22,9 +22,9 @@ SOFT-3053, the second account's own slash commands, is not part of this journey:
 gh workflow run verify.yml --ref <branch> -f feature=release-proof -f tag=v0.28.<n>
 ```
 
-The journey seeds three isolated stand-in tmux tabs once before launch and points the app's SSH path at the verification boundary, which renders each tab as a plain server shell. It focuses the first tab's native terminal, samples the caret pixels at 10 fps for five seconds, switches sessions with Ctrl+2 and back with Ctrl+1, and samples again. Both samples must keep toggling, and a magnified frame strip is written next to the frames.
+The journey seeds three isolated stand-in tmux tabs once before launch with the shared server connection on, so the release opens each saved session in its own hosted native terminal the way `server-shell-input` does, and points the app's SSH path at the verification boundary. It focuses the first tab's native terminal, samples the caret pixels at 10 fps for five seconds, switches sessions with Ctrl+2 and back with Ctrl+1, and samples again. Both samples must keep toggling, and a magnified frame strip is written next to the frames. The console lookup picks the largest visible `MPTerminal` child of the main window, which is the active tab's console, and writes `console-window.json` plus `console-visibles.json` so a wrong pick is visible in the evidence.
 
-Before restarting it shows the first tab's console, quits through WM_CLOSE, and relaunches the same verified executable in the same isolated profile. Both shell tabs must come back with their saved tmux session names, two fresh transports must name both sessions, and Ctrl+C in each restored console must reach its transport.
+Before restarting it shows the first tab's console, quits through WM_CLOSE, and relaunches the same verified executable in the same isolated profile. Both shell tabs must come back with their saved tmux session names, two fresh transports must name both sessions, and Ctrl+C in each restored console must reach its transport. A failed console lookup writes `console-windows.json`, every child window class and rectangle of the main window.
 
 Require `result.json` status `passed`, `server-shell-after-restart.png`, both `caret-strip-*.png` strips, the transport and input receipts, and a zero-process cleanup.
 

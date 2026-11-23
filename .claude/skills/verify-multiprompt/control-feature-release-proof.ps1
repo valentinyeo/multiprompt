@@ -1,4 +1,4 @@
-$result.seedBoundary = 'Two isolated saved tmux tabs seeded once before launch. Only SSH, tmux and agent transport are stand-ins. No account credentials, real server or paid agent are used.'
+$result.seedBoundary = 'Two isolated saved tmux sessions seeded once behind the shared server connection, so the release opens each one in its own hosted native terminal. Only SSH, tmux and agent transport are stand-ins. No account credentials, real server or paid agent are used.'
 $result.releaseProof = @{
     soft3039 = 'Real saved server tabs, normal quit, real relaunch and real native terminal input'
     soft3046 = 'Real MPTerminal caret pixels in the focused console, before and after a session switch'
@@ -11,22 +11,19 @@ function Save-ReleaseCheck([string]$Name, [hashtable]$Values) {
 }
 
 function Find-ConsoleWindow {
-    Wait-Until {
-        $candidate = [IntPtr]::Zero
-        foreach ($pane in [VerifyNative]::OwnedPaneWindows($script:window)) {
-            $found = [VerifyNative]::FindWindowEx($pane, [IntPtr]::Zero, 'MPTerminal', $null)
-            if ($found -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($pane)) { $candidate = $found; break }
-        }
-        if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null) }
-        if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal') }
-        if ($candidate -eq [IntPtr]::Zero) {
-            foreach ($entry in [VerifyNative]::DesktopWindows()) {
-                if ([int]$entry.pid -eq $process.Id -and $entry.class -ceq 'MPTerminal' -and $entry.visible) { $candidate = [IntPtr][long]$entry.handle; break }
-            }
-        }
-        $candidate -ne [IntPtr]::Zero
-    } 'hosted native terminal window' 60
-    return $candidate
+    try {
+        Wait-Until {
+            $visible = [VerifyNative]::VisibleChildrenByClass($script:window, 'MPTerminal')
+            if ($visible.Count -ne 1) { return $false }
+            $script:consoleHandle = $visible[0]
+            return $true
+        } 'single visible hosted native terminal window' 60
+    } catch {
+        Save-Json ([VerifyNative]::ChildWindows($script:window)) 'console-windows.json'
+        throw
+    }
+    Save-Json ([VerifyNative]::WindowIdentity($script:consoleHandle)) 'console-window.json'
+    return $script:consoleHandle
 }
 
 function Focus-Console([string]$Step) {
@@ -140,6 +137,7 @@ Wait-Until {
 $shell = Focus-Console 'caret-before-switch'
 Save-Json @([VerifyNative]::OwnedPaneWindows($script:window) | ForEach-Object { [VerifyNative]::WindowIdentity($_) }) 'console-panes.json'
 Save-Json ([VerifyNative]::WindowIdentity($shell)) 'console-terminal.json'
+Save-Json @([VerifyNative]::VisibleChildrenByClass($script:window, 'MPTerminal') | ForEach-Object { [VerifyNative]::WindowIdentity($_) }) 'console-visibles.json'
 Snapshot 'caret-console-focused'
 $beforeCaret = Measure-CaretBlink 'console-before-switch'
 Press @(0x11, 0x32) 'Ctrl+2: switch to the other session'
