@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Source/model mapping was reviewed at `07adbf66e` after merging session-link, workspace-server, palette-rank and slow-internet changes from master for the stopped-chat host restart. `chatRelayout`, `chatEchoNotSent`, `IGSH_1266_SharedMessageHostTest`, `ChatOutboxEntry` and the delivery model are unchanged. Slash-pill painting, agent-input rewriting, the send command's destination checks and the host start, owner and dispatch path are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
+Source/model mapping was reviewed at `407d45213` after merging session-link, workspace-server, palette-rank and slow-internet changes from master for the stopped-chat host restart. `chatRelayout`, `chatEchoNotSent`, `IGSH_1266_SharedMessageHostTest`, `ChatOutboxEntry` and the delivery model are unchanged. Slash-pill painting, agent-input rewriting, the send command's destination checks and the host start, owner and dispatch path are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |
