@@ -7,6 +7,8 @@ const diff = @import("chat_diff.zig");
 
 const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
+pub var settlement_parses: std.atomic.Value(usize) = .init(0);
+pub var source_rows_scanned: std.atomic.Value(usize) = .init(0);
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
@@ -243,6 +245,7 @@ pub const History = struct {
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             if (std.mem.indexOf(u8, line, "\"settlement\"") == null) continue;
+            _ = settlement_parses.fetchAdd(1, .monotonic);
             const parsed = try std.json.parseFromSlice(Message, a, line, .{});
             defer parsed.deinit();
             const m = parsed.value;
@@ -366,6 +369,7 @@ pub const History = struct {
                 var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
                 while (previous.next()) |old| {
                     if (old.len == 0) continue;
+                    _ = source_rows_scanned.fetchAdd(1, .monotonic);
                     const old_key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
                     if (old_key.end > old_key.offset) try sources.put(.{ .segment = old_key.segment, .offset = old_key.offset, .end = old_key.end }, {});
                     if (old_key.end > old_key.offset) {
@@ -2289,4 +2293,68 @@ test "IGSH-1674 appending positioned rows does not decode settled message bodies
     const last = h.blocks.items[128];
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), h.text.items[last.start..][0..last.len]);
     try std.testing.expectEqual(@as(u64, 12800), last.source_offset);
+}
+
+test "MUBO-249 delivery evidence parses each settlement row once, not once per call" {
+    const a = std.testing.allocator;
+    var h = History{};
+    defer h.deinit(a);
+    for (0..1600) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"text\":\"message {d}\",\"timestamp\":\"2026-10-13T11:06:22.591Z\"}}\n", .{i});
+        defer a.free(row);
+        try h.rows.appendSlice(a, row);
+        if (i % 8 == 0) {
+            const fact = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-13T11:06:23.591Z\",\"settlement\":{{\"operation\":\"enqueue\",\"content\":\"queued {d}\"}}}}\n", .{i});
+            defer a.free(fact);
+            try h.rows.appendSlice(a, fact);
+        }
+    }
+    const pending = echo.Pending{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("queued 8"), .anchor = .{ .after_ms = echo.stampMs("2026-10-13T11:00:00Z") } };
+    const base = settlement_parses.load(.monotonic);
+    const first = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(first.enqueued);
+    const cold = settlement_parses.load(.monotonic) - base;
+    try std.testing.expectEqual(@as(usize, 200), cold);
+    _ = try h.deliveryEvidence(a, pending);
+    _ = try h.deliveryEvidence(a, pending);
+    try std.testing.expectEqual(cold, settlement_parses.load(.monotonic) - base);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-13T11:07:00.000Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"queued 8\"}}\n");
+    const after = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(!after.enqueued);
+    try std.testing.expect(after.removed_ms > 0);
+    try std.testing.expectEqual(cold + 1, settlement_parses.load(.monotonic) - base);
+}
+
+test "MUBO-249 appending positioned rows scans only the new rows, not the whole history" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    const total: usize = 1600 * 100;
+    const head = try std.fmt.allocPrint(a, "@mp\t1\thistory\tok\tsid\t0\t{d}\t9\t0\tclaude\tterm-1\n", .{total});
+    defer a.free(head);
+    try wire.appendSlice(a, head);
+    for (0..1600) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"message {d}\"}}\n", .{ i * 100, (i + 1) * 100, i });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, wire.items, 1, key);
+    var scanned_by_append: [2]usize = undefined;
+    for (&scanned_by_append, 0..) |*scanned, step| {
+        const start = total + step * 100;
+        var next = try h.suffix(a);
+        defer next.deinit(a);
+        const bytes = try std.fmt.allocPrint(a, "@mp\t{d}\thistory\tok\tsid\t{d}\t{d}\t9\t0\tclaude\tterm-1\n{{\"role\":\"user\",\"text\":\"new prompt {d}\",\"offset\":{d},\"end\":{d}}}\n@@MP_END@@\n", .{ step + 2, start, start + 100, step, start, start + 100 });
+        defer a.free(bytes);
+        try next.apply(a, bytes, step + 2, key);
+        const before = source_rows_scanned.load(.monotonic);
+        try h.appendParsed(a, &next);
+        scanned.* = source_rows_scanned.load(.monotonic) - before;
+    }
+    try std.testing.expectEqual(@as(usize, 1602), h.blocks.items.len);
+    try std.testing.expect(scanned_by_append[1] < 16);
 }
