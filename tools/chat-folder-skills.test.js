@@ -10,7 +10,7 @@ test('SOFT-3102 slash typos find folder skills and exact prefixes rank first', (
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'folder-skills-'));
   try {
     copyZig(['chat_complete.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
+    const program = `const std = @import("std");
 const complete = @import("chat_complete.zig");
 test "folder skills tolerate one edit including transposition" {
     const names = [_][]const u8{ "verify-multiprompt", "verify-chat-still", "verify-server", "plugin:verify-app" };
@@ -43,9 +43,26 @@ test "exact prefixes beat typo matches even with recent picks" {
     var insertion: [64]u8 = undefined;
     try std.testing.expectEqualStrings("/verify-multiprompt ", complete.insertionFor(.claude, .slash, entries[order[1]], &insertion));
 }
-`);
-    const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
-    assert.equal(run.status, 0, `${run.error || run.signal || ''}\n${run.stdout}${run.stderr}`);
+`;
+    fs.writeFileSync(path.join(dir, 'test.zig'), program);
+    const module = path.join(dir, 'chat_complete.zig');
+    const source = fs.readFileSync(module, 'utf8');
+    const legacy = fs.readFileSync(path.join(__dirname, 'fixtures/SOFT-3102/score.zig'), 'utf8');
+    const start = source.indexOf('pub fn score(');
+    const end = source.indexOf('\nfn recent(', start);
+    assert.ok(start >= 0 && end > start);
+    for (const broken of [true, false]) {
+      fs.writeFileSync(module, broken ? source.slice(0, start) + legacy + source.slice(end) : source);
+      const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
+      assert.ifError(run.error);
+      if (broken) {
+        assert.equal(run.status, 1, `${run.signal || ''}\n${run.stdout}${run.stderr}`);
+        assert.match(run.stderr, /folder skills tolerate one edit including transposition[^]*FAIL \(TestUnexpectedResult\)/);
+        assert.match(run.stderr, /expected 3, found 1/);
+      } else {
+        assert.equal(run.status, 0, `${run.signal || ''}\n${run.stdout}${run.stderr}`);
+      }
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

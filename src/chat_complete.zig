@@ -91,6 +91,20 @@ fn prefixAtWord(hay: []const u8, needle: []const u8, boundaries: []const u8) boo
     return false;
 }
 
+fn typoPrefix(name: []const u8, query: []const u8) bool {
+    var i: usize = 0;
+    while (i < @min(name.len, query.len) and std.ascii.toLower(name[i]) == std.ascii.toLower(query[i])) : (i += 1) {}
+    if (i == query.len) return true;
+    if (i == name.len) return query.len == i + 1;
+    return std.ascii.startsWithIgnoreCase(name[i + 1 ..], query[i..]) or
+        std.ascii.startsWithIgnoreCase(name[i..], query[i + 1 ..]) or
+        std.ascii.startsWithIgnoreCase(name[i + 1 ..], query[i + 1 ..]) or
+        (i + 1 < name.len and i + 1 < query.len and
+            std.ascii.toLower(name[i]) == std.ascii.toLower(query[i + 1]) and
+            std.ascii.toLower(name[i + 1]) == std.ascii.toLower(query[i]) and
+            std.ascii.startsWithIgnoreCase(name[i + 2 ..], query[i + 2 ..]));
+}
+
 pub fn score(name: []const u8, desc: []const u8, query: []const u8) ?u16 {
     if (query.len == 0) return 6;
     if (std.ascii.eqlIgnoreCase(name, query)) return 0;
@@ -102,7 +116,13 @@ pub fn score(name: []const u8, desc: []const u8, query: []const u8) ?u16 {
     for (name) |c| {
         if (q < query.len and std.ascii.toLower(c) == std.ascii.toLower(query[q])) q += 1;
     }
-    return if (q == query.len) 5 else null;
+    if (q == query.len) return 5;
+    if (query.len >= 4) {
+        for (name, 0..) |_, i| {
+            if ((i == 0 or std.mem.indexOfScalar(u8, ":-_/", name[i - 1]) != null) and typoPrefix(name[i..], query)) return 6;
+        }
+    }
+    return null;
 }
 
 fn recent(name: []const u8, mru: []const []const u8) usize {

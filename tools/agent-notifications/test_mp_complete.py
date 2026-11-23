@@ -1,5 +1,6 @@
 import base64
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -81,7 +82,13 @@ class Completion(unittest.TestCase):
             with patch.object(complete.subprocess, "run") as run, \
                     patch.object(complete, "warm_async"), patch.object(complete, "CACHE", home / "empty-cache.json"):
                 run.return_value.stdout = str(home) + "\n"
-                response = complete.request(f"17\tslash\tclaude\tchat-session\t{cwd}\tverify-mul\n")
+                request = f"17\tslash\tclaude\tchat-session\t{cwd}\tverify-mul\n"
+                legacy = dict(complete.__dict__)
+                fixture = Path(__file__).parents[1] / "fixtures/SOFT-3102/resolve_cwd.py"
+                exec(fixture.read_text(encoding="utf-8"), legacy)
+                with patch.object(complete, "resolve_cwd", legacy["resolve_cwd"]):
+                    self.assertNotIn("J\tverify-multiprompt\t", complete.request(request))
+                response = complete.request(request)
             self.assertIn(f"\t{cwd}\t", response)
             for row in ("S\tuser-skill\t", "J\tverify-multiprompt\t", "J\tcheck:folder\t", "P\ttest:plugin-skill\t"):
                 self.assertIn(row, response)
@@ -106,6 +113,11 @@ class Completion(unittest.TestCase):
             command.parent.mkdir(parents=True)
             command.write_text("Run the check", encoding="utf-8")
             self.assertIn("check:nested", [r[1] for r in complete.project_and_plugins(cwd, {})])
+            command.write_text("An edited command", encoding="utf-8")
+            self.assertIn(("J", "check:nested", "", "An edited command"), complete.project_and_plugins(cwd, {}))
+            second = command.with_name("another.md")
+            second.write_text("Another command", encoding="utf-8")
+            self.assertIn("check:another", [r[1] for r in complete.project_and_plugins(cwd, {})])
             added = cwd / ".claude/skills/verify-new/SKILL.md"
             added.parent.mkdir()
             added.write_text("New skill", encoding="utf-8")
@@ -116,6 +128,43 @@ class Completion(unittest.TestCase):
             names = [r[1] for r in complete.project_and_plugins(cwd, {})]
             self.assertNotIn("verify-app", names)
             self.assertNotIn("check:nested", names)
+
+    def test_persistent_server_keeps_folder_catalogs_separate_and_fresh(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)), \
+                patch.object(complete, "CACHE", Path(tmp) / "empty-cache.json"), patch.object(complete, "warm_async"):
+            home = Path(tmp)
+            first = home / "first"
+            second = home / "second"
+            for cwd, name in ((first, "verify-first"), (second, "verify-second")):
+                skill = cwd / f".claude/skills/{name}/SKILL.md"
+                skill.parent.mkdir(parents=True)
+                skill.write_text("Verify this folder", encoding="utf-8")
+
+            def requests():
+                yield f"1\tslash\tclaude\t-\t{first}\t\n"
+                skill = first / ".claude/skills/verify-new/SKILL.md"
+                skill.parent.mkdir()
+                skill.write_text("Added while serving", encoding="utf-8")
+                yield f"2\tslash\tclaude\t-\t{first}\t\n"
+                yield f"3\tslash\tclaude\t-\t{second}\t\n"
+
+            output = io.StringIO()
+            with patch.object(complete.sys, "argv", ["mp_complete.py", "--serve"]), \
+                    patch.object(complete.sys, "stdin", requests()), patch.object(complete.sys, "stdout", output):
+                complete.main()
+            frames = output.getvalue().split(complete.END)
+            self.assertIn("J\tverify-first\t", frames[0])
+            self.assertNotIn("J\tverify-new\t", frames[0])
+            self.assertIn("J\tverify-new\t", frames[1])
+            self.assertIn("J\tverify-second\t", frames[2])
+            self.assertNotIn("J\tverify-first\t", frames[2])
+            self.assertNotIn("J\tverify-new\t", frames[2])
+            once = io.StringIO()
+            encoded = base64.b64encode(f"4\tslash\tclaude\t-\t{second}\t\n".encode()).decode()
+            with patch.object(complete.sys, "argv", ["mp_complete.py", "--once", encoded]), \
+                    patch.object(complete.sys, "stdout", once):
+                complete.main()
+            self.assertEqual(frames[2].lstrip("\n").replace("@mp\t3\t", "@mp\t4\t") + complete.END + "\n", once.getvalue())
 
     def test_missing_claude_cwd_uses_tmux_then_home(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other, \

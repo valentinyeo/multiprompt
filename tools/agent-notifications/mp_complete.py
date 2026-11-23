@@ -87,21 +87,45 @@ def off(overrides, name):
     return value is False or isinstance(value, str) and value.lower() in ("off", "disabled", "false")
 
 
+_SCANS = OrderedDict()
+
+
+def scan_stamp(path):
+    try:
+        info = path.stat()
+        return info.st_mtime_ns, info.st_size
+    except OSError:
+        return None
+
+
 def scan(root, prefix, kind, overrides, commands=False):
-    if not root.is_dir():
-        return []
-    paths = root.rglob("*.md") if commands else root.glob("*/SKILL.md")
-    result = []
-    for path in sorted(paths):
-        fields, body = frontmatter(path)
-        if not commands and fields.get("user-invocable", "").lower() == "false":
-            continue
-        name = prefix + (path.relative_to(root).with_suffix("").as_posix().replace("/", ":") if commands else fields.get("name") or path.parent.name)
-        if off(overrides, name) or off(overrides, name.split(":")[-1]):
-            continue
-        description = fields.get("description") or next((s.strip("# ") for s in body.splitlines() if s.strip()), "")
-        result.append((kind, name, clean(fields.get("argument-hint")), clean(description)))
-    return result
+    key = (root, prefix, kind, commands)
+    cached = _SCANS.get(key)
+    if cached is None or any(scan_stamp(path) != stamp for path, stamp in cached[0]):
+        if not root.is_dir():
+            watched, paths = [root], []
+        elif commands:
+            entries = list(root.rglob("*"))
+            paths = sorted(path for path in entries if path.suffix == ".md" and path.is_file())
+            watched = [root] + [path for path in entries if path.is_dir()] + paths
+        else:
+            folders = [path for path in root.iterdir() if path.is_dir()]
+            watched = [root] + folders + [path / "SKILL.md" for path in folders]
+            paths = sorted(path / "SKILL.md" for path in folders if (path / "SKILL.md").is_file())
+        stamps = [(path, scan_stamp(path)) for path in watched]
+        rows = []
+        for path in paths:
+            fields, body = frontmatter(path)
+            if not commands and fields.get("user-invocable", "").lower() == "false":
+                continue
+            name = prefix + (path.relative_to(root).with_suffix("").as_posix().replace("/", ":") if commands else fields.get("name") or path.parent.name)
+            description = fields.get("description") or next((s.strip("# ") for s in body.splitlines() if s.strip()), "")
+            rows.append((kind, name, clean(fields.get("argument-hint")), clean(description)))
+        cached = _SCANS[key] = (stamps, rows)
+    _SCANS.move_to_end(key)
+    while len(_SCANS) > 128:
+        _SCANS.popitem(last=False)
+    return [row for row in cached[1] if not off(overrides, row[1]) and not off(overrides, row[1].split(":")[-1])]
 
 
 OWNER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,31}\Z")
@@ -393,6 +417,8 @@ def usable_dir(path):
 
 
 def resolve_cwd(session, supplied):
+    if supplied != "-" and usable_dir(supplied):
+        return Path(supplied)
     if session != "-":
         try:
             resolved = subprocess.run(["tmux", "display-message", "-p", "-t", session, "#{pane_current_path}"],
@@ -401,7 +427,7 @@ def resolve_cwd(session, supplied):
                 return Path(resolved)
         except (OSError, subprocess.SubprocessError):
             pass
-    return Path(supplied) if supplied != "-" and usable_dir(supplied) else HOME
+    return HOME
 
 
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
