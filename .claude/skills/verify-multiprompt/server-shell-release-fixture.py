@@ -12,7 +12,7 @@ folder = Path.home() / 'shell-proof-folder'
 folder.mkdir(exist_ok=True)
 subprocess.run(['tmux', 'new-session', '-d', '-s', 'proof-shell', '-c', str(folder)], check=True)
 subprocess.run(['tmux', 'set-option', '-g', 'status', 'off'], check=True)
-subprocess.run(['tmux', 'set-option', '-g', 'mouse', 'off'], check=True)
+subprocess.run(['tmux', 'set-option', '-g', 'mouse', 'on'], check=True)
 source = '''import json, os, time
 from pathlib import Path
 root = Path.home()
