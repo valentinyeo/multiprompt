@@ -1,1 +1,0 @@
-The desktop stalls while background chats update

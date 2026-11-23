@@ -354,11 +354,10 @@ pub fn publishSessionLayout() void {
     const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
     defer base.deinit();
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
-    const synced_bytes = app_state.g_account_base orelse return;
-    const synced = session_layout.parse(arena.allocator(), synced_bytes) catch return;
+    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
     defer synced.deinit();
     const intents = g_appearance orelse return;
-    const stamp = publishGateStamp(arena.allocator(), local, synced.value, app_state.g_account_local_base orelse return, synced_bytes, intents) catch return;
+    const stamp = publishGateStamp(arena.allocator(), local, synced.value, app_state.g_account_local_base orelse return, app_state.g_account_base orelse return, intents) catch return;
     if (g_publish_gate.skip(stamp)) return;
     accountLoadPending() catch return;
     accountWritePending(.{ .base = base.value, .edited = local, .appearance = intents }) catch {
