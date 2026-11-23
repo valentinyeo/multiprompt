@@ -33,7 +33,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-SOFT-3055 reviewed `e36837269c9e70ba730ce58f86d56d4bc34c378f`. The entire canonical inner reader is byte-identical to the original PR base `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, whose file hash matches the previous coverage record. All six covered switch functions are also byte-identical to sync commit `907e75651aa75f57b4cdc8118585b5abe5215aba`. Only the outer installer changed; bounds, decisions, probes, mutations and properties remain unchanged. Hosted CI reruns them against the refreshed source hash. [coverage.json](coverage.json) records the reviewed commit and full-file hashes.
+SOFT-3055 merged master `e11386929a20a51d87f0d91c429a097324c5571b`, including automatic switching and the chat-row identity revert. The canonical inner reader is byte-identical to that master. All six covered switch functions and the switch fixture match master. Only the outer installer differs; bounds, decisions, probes, mutations and properties are unchanged. [coverage.json](coverage.json) records regenerated whole-file hashes. Hosted CI reruns the native probes and mutation checks. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 | Source | Covered behavior |
 | --- | --- |

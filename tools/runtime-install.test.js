@@ -49,6 +49,39 @@ function run(code) {
   assert.equal(result.status, 0, result.stderr + result.stdout);
 }
 
+test('every bundled tool and reader is published together with executable helper entries', () => run(String.raw`
+files = {
+    'mp-send': ('MP_SEND_SOURCE', 'src/mp_send.py'),
+    'multibot-feedback': ('FEEDBACK_SOURCE', 'src/multibot_feedback.py'),
+    'mp-helper': ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
+    'mp-shell': ('MP_SHELL_SOURCE', 'src/mp_shell.py'),
+    'mp-sessions': ('MP_SESSIONS_SOURCE', 'src/mp_sessions.py'),
+    'mp-layout.mjs': ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
+    'mp-fresh': ('MP_FRESH_SOURCE', 'src/mp_fresh.py'),
+    'mp-zsb': ('ZSB_SOURCE', 'src/mp_zsb.sh'),
+}
+ns = dict(__name__='runtime_install_test', MULTIBOT_APP_VERSION='1.0.10')
+for key, file in files.values():
+    ns[key] = base64.b64encode((root / file).read_bytes()).decode()
+exec(compile(source, '<full-bundle>', 'exec'), ns)
+exec(loader, ns)
+expected = install(ns)
+before = selected()
+assert (runtime / 'reader.py').read_bytes() == ns['READER_SOURCE'].encode()
+assert json.loads((runtime / 'active.json').read_text()) == expected[1]
+for name, (_, file) in files.items():
+    payload = before / name
+    assert payload.read_bytes() == (root / file).read_bytes(), name
+    assert stat.S_IMODE(payload.stat().st_mode) == 0o700, name
+    entry = (runtime / name).resolve(strict=True)
+    assert entry.is_relative_to(before), name
+    assert stat.S_IMODE(entry.stat().st_mode) == 0o700, name
+assert (before / 'mp-layout').resolve() == (before / 'mp-layout.mjs').resolve()
+assert stat.S_IMODE((runtime / 'mp-layout').stat().st_mode) == 0o700
+assert install(ns) == expected
+assert selected() == before
+`));
+
 test('partial writes and failed installs leave the complete old tool set visible', () => run(String.raw`
 install(old)
 before = selected()
