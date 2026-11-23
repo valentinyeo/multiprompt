@@ -1,1 +1,0 @@
-When a message from your phone could not be sent, the phone now shows why.
