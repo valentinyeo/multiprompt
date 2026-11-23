@@ -814,6 +814,7 @@ def conversation_event(event, agent):
     else:
         text = content if isinstance(content, str) else ""
     text = _SYSTEM_REMINDER.sub("", text)
+    tracked = _TRACKED_ID.search(text) if role == "user" else None
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
@@ -824,6 +825,8 @@ def conversation_event(event, agent):
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
+    if tracked:
+        result["client_id"] = tracked.group(1)
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -2012,6 +2015,45 @@ def fit_tail(rows, oldest):
     return kept, oldest
 
 
+def history_client_ids(rows, provider, sid):
+    import sqlite3
+    import uuid
+    from contextlib import closing
+    path = message_store_path()
+    if not path.exists() or not any(row.get('role') == 'user' for row in rows):
+        return
+    aliases = {}
+    def bind(native, client):
+        if isinstance(native, str) and native:
+            aliases[native] = client if native not in aliases or aliases[native] == client else None
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+        for (client,) in db.execute('SELECT id FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)):
+            bind(client, client)
+            if provider == 'claude':
+                bind(str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + client)), client)
+        for client, raw in db.execute('SELECT id,binding FROM message_attempts WHERE provider=? AND sid=?', (provider, sid)):
+            binding = json.loads(raw)
+            bind(binding.get('app_id'), client)
+            for native in binding.get('uuids') or []:
+                bind(native, client)
+        for (raw,) in db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='turn.started'", (provider, sid)):
+            event = json.loads(raw)
+            if event.get('kind') != 'turn.started':
+                continue
+            payload = event.get('payload') or {}
+            client = payload.get('message_id')
+            if not isinstance(client, str) or event.get('room_scope') is not None:
+                continue
+            for native in payload.get('uuids') or []:
+                bind(native, client)
+    for row in rows:
+        if row.get('role') != 'user':
+            continue
+        client = aliases.get(row.get('client_id')) or aliases.get(row.get('id'))
+        if client:
+            row['client_id'] = client
+
+
 def response(q, source=None, as_owner=False, resolved=None):
     q["_held_queue_progress"] = False
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -2180,6 +2222,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
         paired = pair_tool_rows(rows)
+        history_client_ids(paired, agent, sid)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
@@ -2773,7 +2816,6 @@ HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
-HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
@@ -2797,12 +2839,13 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
-                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
+                      "Helper chats: `mp-helper --help`.\n"
+                      "Chats: `mp-sessions list --workspace mine`, `mp-sessions send`, `mp-sessions --help`.\n"
                       "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
-                      "Saved locally; an authorized agent token also submits or votes on the board.")
+                      "Saved locally; without an agent token, the host account files it on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
@@ -3436,6 +3479,9 @@ def host_start(provider, sid, source=None):
     if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
     host_clear_stale(provider, sid)
+    owner = host_owner(provider, sid)
+    if owner and owner.get("owner") == "host":
+        return dict(status="error", reason="owner_busy", pid=owner["pid"])
     child = host_spawn(provider, sid, source)
     if child is None:
         return dict(status="error", reason="host_launch_unavailable")
@@ -4388,6 +4434,20 @@ def host_fresh_start(provider, sid, tmux, session, handover_file=None):
     return dict(status="started")
 
 
+def host_feedback_drain_board():
+    if not os.environ.get("HT_TOKEN", "").strip():
+        return False
+    tool = HOME / HOST_RUNTIME_TOOLS / "multibot-feedback"
+    if not tool.is_file():
+        return False
+    try:
+        result = subprocess.run([str(tool), "--drain"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def host_fresh_drain_queued(provider, sid, tmux, session):
     queued = session["state"].pop("fresh_start_queued", None)
     if not isinstance(queued, dict) or host_fresh_busy(session) or session["state"].get("fresh_start"):
@@ -4575,6 +4635,13 @@ def host_switch_handover(rows, provider, target):
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
+def host_switch_abort(target, new_sid, paths=None):
+    paths = paths if paths is not None else host_paths(target, new_sid)
+    pending = host_read(paths["config"])
+    if isinstance(pending, dict):
+        host_write(paths["config"], dict(pending, enabled=False))
+
+
 def host_switch_ai(provider, sid, target):
     moved = host_switch_follow(sid)
     if moved is not None:
@@ -4591,8 +4658,6 @@ def host_switch_ai(provider, sid, target):
         return dict(status="refused", reason="host_handed_over")
     if host_turn_busy(provider, sid):
         return dict(status="busy", reason="chat_busy")
-    if host_owned(provider, sid):
-        host_stop(provider, sid)
     try:
         rows = host_switch_rows(provider, sid, tmux)
         text = host_switch_handover(rows, provider, target)
@@ -4615,6 +4680,16 @@ def host_switch_ai(provider, sid, target):
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
+    except (OSError, ValueError, sqlite3.Error):
+        return dict(status="error", reason="switch_failed")
+    started = host_start(target, new_sid)
+    if started.get("status") not in ("started", "already"):
+        host_switch_abort(target, new_sid, paths)
+        if host_enabled(provider, sid) and not host_alive(provider, sid):
+            host_start(provider, sid)
+        return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
+                    running=HOST_AI_NAMES[provider], start=started)
+    try:
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -4628,14 +4703,17 @@ def host_switch_ai(provider, sid, target):
         host_write(host_switched_path(), moved_map)
         host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        host_stop(target, new_sid)
+        host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
+    if host_owned(provider, sid):
+        host_stop(provider, sid)
     host_log(provider, sid, "switched_ai", dict(to=target, sid=new_sid))
-    started = host_start(target, new_sid)
     return dict(status="switched", provider=target, sid=new_sid, tmux=tmux, start=started.get("status"))
 
 
 def host_session_reset(session, agent=None):
-    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
+    session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
                    control_wait={})
@@ -4831,6 +4909,11 @@ def host_bind_uuid(provider, sid, tmux, session, event):
     if not uuids or not sends:
         return
     sends[-1]["uuid"] = uuids
+    if tmux is not None:
+        entry = sends[-1]
+        with host_db(provider, sid, tmux, session) as db:
+            db.execute("UPDATE message_attempts SET binding=json_set(binding,'$.uuids',json(?)) WHERE provider=? AND sid=? AND id=? AND attempt=?",
+                       (json.dumps(uuids), provider, sid, entry['id'], entry['attempt']))
     host_turn_started(provider, sid, tmux, session, sends[-1])
 
 
@@ -5176,6 +5259,8 @@ def host_handle_request(provider, sid, tmux, session, request):
                     parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
+        session["exit_cause"] = "stop_requested"
+        host_log(provider, sid, "stop_requested")
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
@@ -5441,50 +5526,7 @@ def host_cursor_open(provider, sid, tmux, session):
     pass
 
 
-HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
-
-
-def host_skill_file(name, cwd=None):
-    home = Path.home() / ".claude"
-    if ":" in name:
-        plugin, skill = name.split(":", 1)
-        files = [f for r in (home / "plugins" / "cache").glob("*/" + plugin + "/*") for f in (r / "skills" / skill / "SKILL.md", r / "commands" / (skill + ".md"))]
-    else:
-        bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
-        files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
-    return next((f for f in files if host_readable_file(f)), None)
-
-
-def host_readable_file(path):
-    try:
-        return path.is_file()
-    except OSError:
-        return False
-
-
-def host_skill_user_only(path):
-    try:
-        head = path.read_text(errors="replace")[:4000]
-    except OSError:
-        return False
-    return bool(re.search(r"^disable-model-invocation:\s*true\s*$", head, re.M))
-
-
-def host_claude_lead_skill(text, cwd=None):
-    if not isinstance(text, str) or text.lstrip().startswith("/"):
-        return text
-    found = [(m, f) for m in HOST_SKILL_TOKEN.finditer(text) for f in [host_skill_file(m.group(1), cwd)] if f is not None]
-    if not found:
-        return text
-    match = next((m for m, f in found if host_skill_user_only(f)), found[0][0])
-    rest = (text[:match.start()].rstrip() + " " + text[match.end():].lstrip()).strip()
-    return "/" + match.group(1) + (" " + rest if rest else "")
-
-
 def host_claude_write(provider, sid, session, token, text):
-    config = host_config(provider, sid)
-    if not session.get("state", {}).get("fresh_start"):
-        text = host_claude_lead_skill(text, config.get("cwd") if isinstance(config, dict) else None)
     import uuid
     session["pending_recall_uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "multibot:" + token))
     return host_control_send(session, dict(type="user", uuid=session["pending_recall_uuid"],
@@ -6341,32 +6383,28 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
+            if idle and host_feedback_drain_board():
+                continue
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
                     return
-            idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
-            if idle and idle_expired:
-                host_log(provider, sid, "idle_stop")
-                return
             for key, _ in selector.select(host_flush_timeout(session)):
                 if key.data == "agent":
                     try:
                         chunk = agent.stdout.read1(65536)
                     except (OSError, ValueError):
                         chunk = b""
-                    if chunk:
-                        session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
                         owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
                             host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
+                        session["exit_cause"] = "agent_closed"
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
-                    session["idle"] = time.time()
                     host_accept_client(provider, sid, tmux, session, server)
             host_flush(provider, sid, tmux, session)
 
@@ -6439,6 +6477,9 @@ def host_main(provider, sid):
     except (OSError, ValueError) as error:
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
         return 4
+    except Exception as error:
+        host_log(provider, sid, "crash", dict(error=type(error).__name__))
+        raise
     finally:
         host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
@@ -6459,7 +6500,7 @@ def host_main(provider, sid):
         stopped["stopped"] = time.time()
         host_write(paths["state"], stopped)
         host_release(lock)
-        host_log(provider, sid, "stop")
+        host_log(provider, sid, "stop", dict(cause=session.get("exit_cause") if "session" in locals() else None))
 
 
 def host_nightly_day(now=None):
@@ -6547,6 +6588,7 @@ def host_rotate(provider, sid, session, agent):
     host_flush(provider, sid, host_chat_name(provider, sid), session)
     host_agent_stop(agent)
     session["agent"] = None
+    session["exit_cause"] = "host_update"
     host_log(provider, sid, "rotate", dict(runtime=runtime, generation=host_generation()))
     try:
         os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
@@ -6850,6 +6892,7 @@ def host_dispatch_switch(provider, sid):
 def host_dispatch_start(provider, sid):
     if host_backoff(provider, sid) > 0:
         return dict(status="backoff")
+    host_clear_stale(provider, sid)
     if host_owned(provider, sid):
         return dict(status="owned")
     started = host_start(provider, sid)
@@ -8671,7 +8714,9 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
-    sys.exit(host_main(sys.argv[2], sys.argv[3]))
+    code = host_main(sys.argv[2], sys.argv[3])
+    host_log(sys.argv[2], sys.argv[3], "exit", dict(code=code))
+    sys.exit(code)
 elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
     print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
@@ -8693,8 +8738,15 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 142
+import hashlib as _runtime_hashlib
+
+_runtime_bundle = {name: value for name, value in sorted(globals().items())
+                   if name.isupper() and name.endswith('_SOURCE') and name != 'READER_SOURCE'}
+_runtime_payload = (''.join(name + ' = ' + repr(value) + '\n' for name, value in _runtime_bundle.items()) +
+                    'CONNECTOR_SOURCES = ' + repr(dict(sorted(globals().get('CONNECTOR_SOURCES', {}).items()))) +
+                    '\n' + READER_SOURCE)
+RUNTIME_GENERATION = (1 << 52) | int(_runtime_hashlib.sha256(_runtime_payload.encode('utf-8')).hexdigest()[:13], 16)
+READER_SOURCE = 'RUNTIME_GENERATION = ' + str(RUNTIME_GENERATION) + '\n' + _runtime_payload
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8849,16 +8901,7 @@ if __name__ == '__main__':
                     installed = read(active['sha256'] + '.py', 4 * 1024 * 1024)
                     if _hashlib.sha256(installed).hexdigest() != active['sha256']:
                         raise ValueError('corrupt runtime')
-                    if active['generation'] > generation:
-                        publish_tools(installed)
-                        return installed, active
-                    if active['generation'] == generation:
-                        if active['sha256'] != digest:
-                            publish(digest + '.py', source)
-                            active = dict(protocol=1, generation=generation, sha256=digest)
-                            publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
-                            publish_tools(source)
-                            return source, active
+                    if active['sha256'] == digest:
                         publish_tools(installed)
                         return installed, active
                 try:

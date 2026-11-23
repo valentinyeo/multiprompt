@@ -1,0 +1,1 @@
+VPS shell tabs again support Ctrl+C copy and interrupt plus mouse-wheel scrollback like local shells.
