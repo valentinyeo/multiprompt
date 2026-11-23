@@ -8,7 +8,7 @@ export function validTabState(state, tab) {
     ['chat', 'shell'].includes(state.kind) && (state.sid === null || text(state.sid, 39)) &&
     ['pinned', 'archived', 'waiting', 'closed', 'visible'].every(field => typeof state[field] === 'boolean') &&
     !(state.archived && state.waiting) && (state.hidden_reason === null || text(state.hidden_reason, 64)) &&
-    state.tmux === tab.tmux_session && state.workspace === tab.workspace && state.name === tab.name;
+    state.tmux === tab.tmux_session;
 }
 
 export function projectTabState(tab, position) {

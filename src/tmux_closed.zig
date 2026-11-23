@@ -69,6 +69,10 @@ pub const Closed = struct {
             const session = item.object.get("session") orelse continue;
             const slot = json_reader.unsigned(host, 256);
             if (slot > 3 or session != .string or session.string.len > 63) continue;
+            if (slot == 3) {
+                const state = item.object.get("tab_state") orelse continue;
+                if (state != .object or !std.mem.eql(u8, json_reader.string(json_reader.field(state, "host")) orelse "", "local")) continue;
+            }
             for (session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }
@@ -82,7 +86,7 @@ pub const Closed = struct {
                         const parsed = std.json.parseFromValue(@import("tab_state.zig").State, a, state_value, .{ .allocate = .alloc_always }) catch continue;
                         defer parsed.deinit();
                         @import("tab_state.zig").validate(parsed.value) catch continue;
-                        entry.tab_state = try parsed.value.dupe(a);
+                        entry.tab_state = try parsed.value.dupe(std.heap.page_allocator);
                     }
                     entry.face = if (face < 20) @intCast(face) else null;
                     entry.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
