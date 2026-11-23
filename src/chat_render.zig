@@ -7928,6 +7928,8 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         _ = live.begin(shell_id, 0, sid);
         var entry = app_state.ChatOutboxEntry{ .id = 1668, .state = .queued };
         entry.text = try std.heap.page_allocator.dupe(u16, std.unicode.utf8ToUtf16LeStringLiteral("Please reply."));
+        const landed_wire = "m-1668";
+        @memcpy(entry.message_wire_id[0..landed_wire.len], landed_wire);
         const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
         entry.key_len = @intCast(key.len);
         app_state.g_chat_outbox.append(std.heap.page_allocator, entry) catch |err| {
@@ -7940,8 +7942,10 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         app_state.g_chat_outbox.items[0].state = .delivered;
         app_state.g_chat_outbox.items[0].channel_sent = true;
         layout.chatWorkingIndicatorSync();
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect != null);
         try liveWorkingProofFrame(dc, case.files[1], bytes, info.header, started, case.name, "accepted-before-event");
-        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{}}}]}}";
+        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{\"message_id\":\"m-1668\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, begin));
         session.chatFileOnReady();
         try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");
