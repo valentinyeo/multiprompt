@@ -132,13 +132,14 @@ test('IGSH-1266 the launch buffers hold every path the launch accepts', () => {
 test('IGSH-1266 a pick that starts nothing says which step refused it', () => {
   const palette = read('src/command_palette.zig');
   const main = read('src/main.zig');
-  assert.doesNotMatch(main, /Pick repo: nothing chosen/, 'the catch-all message hid the real reason');
+  const actions = read('src/window_actions.zig');
+  assert.doesNotMatch(main + actions, /Pick repo: nothing chosen/, 'the catch-all message hid the real reason');
   assert.match(main, /if \(!picked\) showPickRepoFailure\(saving_folder\);/, 'every refusal must go through the reason helper');
-  assert.match(main, /\.capacity => \{\},/, 'a capacity refusal already shows its own notice and must not be overwritten');
-  assert.match(main, /Pick repo: that row is gone; open the list again/);
-  assert.match(main, /Pick repo: that folder path cannot start a session/);
-  assert.match(main, /Pick repo: the new tab did not start/);
-  assert.match(main, /Set workspace folder: could not save/);
+  assert.match(actions, /\.capacity => \{\},/, 'a capacity refusal already shows its own notice and must not be overwritten');
+  assert.match(actions, /Pick repo: that row is gone; open the list again/);
+  assert.match(actions, /Pick repo: that folder path cannot start a session/);
+  assert.match(actions, /Pick repo: the new tab did not start/);
+  assert.match(actions, /Set workspace folder: could not save/);
 
   const chosen = palette.slice(palette.indexOf('pub fn pickRepoChoose(target: usize) bool {'), palette.indexOf('fn customCmdMatchesQuery('));
   assert.match(chosen, /g_pick_row_gone = true;/, 'a row that is gone must be named');
