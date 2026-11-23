@@ -281,8 +281,7 @@ pub fn toggleAt(hwnd: HANDLE, x: i32, y: i32) ?u64 {
         if (!chat_composer.pointInRect(area, x, y)) continue;
 
         const mapped = chat_render.ChatDisplay{ .text = sel.text, .offset = sel.start, .source_map = sel.source_map, .reply_ref = sel.reply_ref };
-        const start = if (sel.reply_ref) |r| r.body_start else 0;
-        const body = sliceRange(mapped, start, mapped.text.len);
+        const body = mapped;
         const parts = quote.parse(body.text) orelse continue;
 
         const inner_w = @max(1, area.right - area.left);
@@ -446,4 +445,8 @@ pub fn charAt(hdc: HANDLE, display: chat_render.ChatDisplay, block: md.Block, pa
 
     const suff = sliceRange(display, parts.suffix.start, parts.suffix.end);
     _ = chat_render.chatFlowText(hdc, suff.text, .{ .left = area.left, .top = q_bottom + gap, .right = area.right, .bottom = area.bottom }, false, false, .{ .x = x, .y = y, .char = out_char }, suff.offset, null, suff.source_map, true);
+}
+
+test {
+    _ = @import("chat_user_quote_ui_test.zig");
 }

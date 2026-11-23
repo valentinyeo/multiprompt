@@ -1117,7 +1117,7 @@ fn chatPaintReplyLine(hdc: HANDLE, text: []const u16, maybe_ref: ?chat_reply.Ref
     _ = chatDrawText(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
-fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, width: i32, y: i32, imgs: ?*ChatImgLayout) RECT {
+pub fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, width: i32, y: i32, imgs: ?*ChatImgLayout) RECT {
     return chatMeasureProjectedBlockRect(hdc, buf, block, pos, width, y, imgs, null);
 }
 
@@ -1158,8 +1158,7 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
             const pad = uiScaled(CHAT_BUBBLE_PAD);
             const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
             const ref = display.reply_ref;
-            const start = if (ref) |r| r.body_start else 0;
-            const body_display = display.slice(start);
+            const body_display = display;
             const body = body_display.text;
             const quote_parts = @import("chat_user_quote.zig").parse(body);
             var natural_w: i32 = 0;
@@ -4022,8 +4021,7 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
-            const start = if (display.reply_ref) |r| r.body_start else 0;
-            const body_display = display.slice(start);
+            const body_display = display;
             if (@import("chat_user_quote.zig").parse(body_display.text)) |parts| @import("chat_user_quote_ui.zig").paint(hdc, body_display, block, parts, text_rc) else _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
         },
         .prose => {
@@ -4107,8 +4105,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-    const start = if (display.reply_ref) |r| r.body_start else 0;
-    const body_display = display.slice(start);
+    const body_display = display;
     if (@import("chat_user_quote.zig").parse(body_display.text)) |parts| @import("chat_user_quote_ui.zig").paint(hdc, body_display, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, parts, text_rc) else _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
     if (e.waiting()) chatDimQueuedBubble(hdc, rc);
 }
@@ -4691,8 +4688,8 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
-    const start = if (block.role == .user) (if (display.reply_ref) |r| r.body_start else 0) else 0;
-    if (start > 0) area.top += chatReplyLineHeight(display.reply_ref);
+    const start: usize = 0;
+    if (block.role == .user) area.top += chatReplyLineHeight(display.reply_ref);
     const block_rect = chatSelectionRect(index);
     const content_y = y + app_state.g_chat_scroll_y;
     if (content_y < block_rect.top) return mapped.sourceBoundary(start, true);
@@ -5192,8 +5189,8 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
-    const start = if (block.role == .user) (if (display.reply_ref) |r| r.body_start else 0) else 0;
-    if (start > 0) area.top += chatReplyLineHeight(display.reply_ref);
+    const start: usize = 0;
+    if (block.role == .user) area.top += chatReplyLineHeight(display.reply_ref);
     if (!pointInRect(area, x, y)) return null;
     const dc = GetDC(hwnd);
     if (dc == null) return null;

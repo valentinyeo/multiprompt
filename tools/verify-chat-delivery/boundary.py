@@ -531,6 +531,10 @@ def shell():
         os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         record("resync-rewrite.jsonl", bytes=len(after), before=before.decode(), after=after.decode())
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.__setitem__("queue", []) is None) else 3
+    if op == "user-quote" and len(ARGS) == 2:
+        text = Path(ARGS[1]).read_text(encoding="utf-8").rstrip()
+        fake_event("user", message=dict(role="user", content=text))
+        return 0
     if op == "reply-reference":
         original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))
