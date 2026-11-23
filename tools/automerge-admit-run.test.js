@@ -15,6 +15,7 @@ const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', '
 const checks = checkNames.map(name => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 const snapshot = () => ({ data: { repository: { deleteBranchOnMerge: true, pullRequest: {
   id: 'PR_fixture', number: 42, state: 'OPEN', headRefOid: sha, baseRefOid: master,
+  title: 'SOFT-2713: Tidy the automerge helper',
   baseRef: { target: { oid: master } },
   headRefName: 'feature', baseRefName: 'master', author: { login: 'owner' },
   isCrossRepository: false, isDraft: false, mergeable: 'MERGEABLE', changedFiles: 1,
@@ -48,6 +49,7 @@ if (args[0] === 'api' && args[1] === 'graphql') {
 } else if (args[0] === 'workflow' && args[1] === 'run' && process.env.MERGE_RESPONSE) process.exit(0);
 else if (args[0] === 'api' && args[1] === '--method' && args[2] === 'DELETE' && process.env.MERGE_RESPONSE) process.exit(0);
 else if (args[0] === 'api' && args[1].includes('/files') && process.env.REST_RESPONSE) console.log(process.env.REST_RESPONSE);
+else if (args[0] === 'api' && args[1].includes('/pulls/42/commits')) console.log(process.env.COMMITS_RESPONSE);
 else if (args[0] === 'pr' && args[1] === 'list') console.log(JSON.stringify([{number:42,headRefOid:'${sha}'}]));
 else if (args[0] === 'pr' && args[1] === 'view') console.log(JSON.stringify({headRefOid: '${sha}', changedFiles: 1, statusCheckRollup: []}));
 else if (args[0] === 'api' && args[1].includes('/compare/')) console.log('0');
@@ -64,6 +66,7 @@ else { console.error('Unexpected gh command: ' + JSON.stringify(args)); process.
         CALL_LOG: log, RESPONSE_PATH: path.join(dir, 'response.json'), RUNNER_TEMP: dir,
         GITHUB_EVENT_PATH: path.join(dir, 'event.json'), GITHUB_EVENT_NAME: 'workflow_run',
         GITHUB_REPOSITORY: 'owner/repo', REPO: 'owner/repo', REPO_OWNER: 'owner', DRY_RUN: 'true',
+        COMMITS_RESPONSE: JSON.stringify([[{ sha, commit: { message: 'SOFT-2713: Tidy the automerge helper\n\nUndo: revert this commit.\n\nCo-authored-by: Fixture <fixture@example.com>\n' } }]]),
         EVENT_NAME: 'workflow_run', RUN_CONCLUSION: 'success', RUN_EVENT: 'pull_request', HEAD_BRANCH: 'feature', HEAD_SHA: sha, ...env },
     });
   };
@@ -216,10 +219,16 @@ test('an atomic head-bound merge alone starts three master checks', t => {
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const calls = f.calls();
-  assert.equal(calls.length, 5);
-  assert.ok(calls[1].some(arg => arg.includes('expectedHeadOid: $head')));
-  assert.ok(calls[1].includes(`head=${sha}`));
-  assert.deepEqual(calls.slice(2).map(args => args.slice(0, 3)), [
+  assert.equal(calls.length, 6);
+  assert.ok(calls[1].some(arg => arg.includes('/pulls/42/commits')));
+  assert.ok(calls[2].some(arg => arg.includes('expectedHeadOid: $head')));
+  assert.ok(calls[2].includes(`head=${sha}`));
+  const body = calls[2].find(arg => arg.startsWith('body='));
+  const headline = calls[2].find(arg => arg.startsWith('headline='));
+  assert.equal(headline, 'headline=SOFT-2713: Tidy the automerge helper');
+  assert.ok(body.includes('Undo: revert this commit.'), body);
+  assert.doesNotMatch(body, /co-authored-by/i);
+  assert.deepEqual(calls.slice(3).map(args => args.slice(0, 3)), [
     ['workflow', 'run', 'test.yml'], ['workflow', 'run', 'no-comments.yml'], ['workflow', 'run', 'gitleaks.yml'],
   ]);
 });
@@ -228,7 +237,7 @@ test('a rejected merge race never dispatches master checks', t => {
   const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify({ errors: [{ message: 'Pull Request is not mergeable' }] }) });
   const result = f.run();
   assert.equal(result.status, 1);
-  assert.equal(f.calls().length, 2);
+  assert.equal(f.calls().length, 3);
   assert.match(result.stderr, /failed closed/);
 });
 
@@ -284,8 +293,8 @@ test('successful merge retains branch cleanup when repository auto-deletion is o
   const f = fixture(t, response, event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged) });
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(f.calls().length, 6);
-  assert.deepEqual(f.calls()[5], ['api', '--method', 'DELETE', 'repos/owner/repo/git/refs/heads/ceo%2FIGSH-42']);
+  assert.equal(f.calls().length, 7);
+  assert.deepEqual(f.calls()[6], ['api', '--method', 'DELETE', 'repos/owner/repo/git/refs/heads/ceo%2FIGSH-42']);
 });
 
 for (const [login, verdict] of [['software-factory-runners', 'merge'], ['other-app', 'not a same-repo PR']]) {
