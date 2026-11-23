@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
+
 SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
 
 SOFT-2525 restores Pi login's one-argument live-reply guard by carrying the checked session and bytes together. Compared with `cc067da0c3d9b2c22b9db957ee1c0c9daff113ab`, all nine covered send functions, the extracted timeout branch and restore guard are byte-identical, and every other recorded file hash is unchanged. Only the send file hash and sync commit move; bounds, decisions, probes and properties remain unchanged.
@@ -55,7 +57,7 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
-SOFT-2295 adds only account workspace-archive capability fields to `src/app_state.zig` at `92d1f64d158d669347c3b302220f461c39737888`. Removing those two additions reproduces the recorded file hash; `ChatOutboxEntry` and every other covered file are byte-identical. The coverage hash and sync commit move; the model, decisions, bounds and mutation probes do not change. Hosted CI reruns the existing proofs.
+SOFT-2295 merges master `0594f547443cbd7664afdc16c4298c4f4b5880e4` and retains only the account workspace-archive capability fields in `src/app_state.zig`. Removing those two additions reproduces master's bytes; `ChatOutboxEntry` and every other covered file are byte-identical to master. Coverage was regenerated from the reviewed merged sources, not conflict-merged. The model, decisions, bounds and mutation probes do not change. Hosted CI reruns the existing proofs.
 
 | Source | Covered behavior |
 | --- | --- |

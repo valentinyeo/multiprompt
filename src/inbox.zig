@@ -345,11 +345,12 @@ pub fn publishInboxStateNow() void {
     pos += writeUintTo(json[pos..], @intFromPtr(app_state.g_main_hwnd));
     json[pos] = '"';
     pos += 1;
-    const selection = std.fmt.bufPrint(json[pos..], ",\"active_shell_id\":{d},\"active_workspace\":{d},\"starred_view\":{},\"inbox_active\":{}", .{
+    const selection = std.fmt.bufPrint(json[pos..], ",\"active_shell_id\":{d},\"active_workspace\":{d},\"starred_view\":{},\"inbox_active\":{},\"sidebar_view\":\"{s}\"", .{
         if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0,
         app_state.g_active_workspace,
         app_state.g_starred_workspace,
         app_state.g_inbox_active,
+        if (app_state.g_sidebar_view) |view| view.name() else "",
     }) catch return;
     pos += selection.len;
     if (app_state.g_single_window) {
@@ -707,8 +708,11 @@ fn inboxFrequent(row: InboxRow, now_ms: u64) bool {
 }
 
 fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
-    if (app_state.g_inbox_tab == frequent.frequent_split) {
-        const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+    return rowLessForSplit(app_state.g_inbox_tab, frequent.unixMs(nowFileTime() / 10_000), a, b);
+}
+
+pub fn rowLessForSplit(split: u32, now_ms: u64, a: InboxRow, b: InboxRow) bool {
+    if (split == frequent.frequent_split) {
         const ka = frequent.orderKey(a.visits.optional() orelse &.{}, now_ms, if (a.input != 0) a.input else null);
         const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
         if (ka != kb) return frequent.newestFirst(ka, kb);
@@ -861,6 +865,7 @@ pub fn toggleFavorite(idx: u32) void {
     if (!app_state.g_restoring) saveSession();
     if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
     invalidateSidebar();
+    if (app_state.g_sidebar_view != null) @import("workspaces.zig").refreshSidebarView();
     if (app_state.g_inbox_active) {
         loadInboxModel();
         const count = inboxVisibleCount();
@@ -910,15 +915,25 @@ test "used JSON field supports old and formatted session and inbox records" {
 }
 
 pub fn inboxRowVisible(r: *const InboxRow) bool {
-    if (r.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[r.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
-        const idx = findShellById(r.sid) orelse return false;
-        if (app_state.shells[idx].inbox_excluded) return false;
-        if (app_state.shells[idx].muted) return false;
+    return rowVisibleInSplit(r, app_state.g_inbox_tab, frequent.unixMs(nowFileTime() / 10_000)) and inboxFilterMatches(r);
+}
+
+pub fn rowVisibleInSplit(r: *const InboxRow, split: u32, now_ms: u64) bool {
+    if (r.ws < app_state.g_inbox_ws_count) {
+        const ws = &app_state.g_inbox_ws[r.ws];
+        for (app_state.g_workspaces[0..app_state.g_workspace_count]) |workspace| {
+            if (workspace.archived and std.mem.eql(u8, workspace.id[0..workspace.id_len], ws.id[0..ws.id_len])) return false;
+        }
+        if (ws.hwnd == @intFromPtr(app_state.g_main_hwnd)) {
+            const idx = findShellById(r.sid) orelse return false;
+            if (app_state.shells[idx].inbox_excluded) return false;
+            if (app_state.shells[idx].muted) return false;
+        }
     }
     if (app_state.g_unread_only and !r.att) return false;
-    if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
-    if (app_state.g_inbox_tab == frequent.frequent_split and !inboxFrequent(r.*, frequent.unixMs(nowFileTime() / 10_000))) return false;
-    return inboxFilterMatches(r);
+    if (!favoriteSplitMatches(split, r.ws, r.favorite)) return false;
+    if (split == frequent.frequent_split and !inboxFrequent(r.*, now_ms)) return false;
+    return true;
 }
 
 test "cached inbox navigation skips excluded local rows" {
@@ -1729,7 +1744,7 @@ pub fn closeInbox(hwnd: HANDLE) void {
     app_state.g_inbox_filter_len = 0;
     updateMainWindowTitle();
     _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
-    if (app_state.g_starred_workspace) _ = SetTimer(hwnd, TIMER_INBOX_REFRESH, 1000, null);
+    if (app_state.g_starred_workspace or app_state.g_sidebar_view != null) _ = SetTimer(hwnd, TIMER_INBOX_REFRESH, 1000, null);
     if (app_state.g_chat_active) {
         if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
         if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
