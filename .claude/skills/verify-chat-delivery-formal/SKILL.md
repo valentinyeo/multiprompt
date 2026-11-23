@@ -47,6 +47,8 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-2642 changes only the working-dots paint and invalidation path in `src/chat_render.zig` (`chatWorkingSync`, `chatPaintWorking`, `chatSetTopPad`). The covered `chatRelayout` and `chatEchoNotSent` bodies and every delivery decision are unchanged, so the native decision table is identical and only that file's hash moved; the sync commit now names the product fix.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
