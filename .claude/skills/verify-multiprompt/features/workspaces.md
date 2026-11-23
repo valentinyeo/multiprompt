@@ -2,8 +2,6 @@
 
 Read the current workspace name above the sessions. Click the name to open the workspace card, select another named workspace, or create a workspace. The workspaces journey verifies native clicks and screenshots in every theme, including AMOLED. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
 
-The focused [workspace menu](workspace-menu.md) journey measures first paint and window responsiveness while the production registry mutex is held. It also checks pointer and arrow-key highlight pixels and preserves both local workspace identities.
-
 ## Sub-features
 
 - `workspace-create`: add one in-process workspace with a real CMD session.
