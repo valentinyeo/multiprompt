@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -23,6 +25,9 @@ SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{16,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}\Z")
 MENTION = re.compile(r"@?(.*?)\{([A-Za-z0-9_.:-]{1,64})\}\Z", re.S)
+FOLDER_PATH = re.compile(r"[A-Za-z0-9_./~+ -]{1,220}\Z")
+VERIFY_TRIES = 4
+VERIFY_PAUSE = 1.0
 _reader = None
 
 
@@ -149,6 +154,109 @@ def read_json(path):
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def write_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name("." + path.name + "." + str(os.getpid()) + ".tmp")
+    handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(value, separators=(",", ":"), sort_keys=True))
+    os.replace(temporary, path)
+
+
+def host_root():
+    return state_root() / "agent-host"
+
+
+def host_config_key(provider, sid):
+    return hashlib.sha256((provider + ":" + sid).encode()).hexdigest()[:32]
+
+
+def reader_cli(*args):
+    reader = str(reader_path())
+    try:
+        done = subprocess.run([sys.executable, reader, "host", *args], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("host command failed: " + str(error))
+    try:
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise ValueError("host command gave no answer")
+    return reply if isinstance(reply, dict) else {}
+
+
+def zsb_command():
+    here = Path(__file__).resolve()
+    candidates = [here.with_name("mp-zsb")]
+    found = shutil.which("zsb")
+    if found:
+        candidates.append(Path(found))
+    candidates.append(Path.home() / ".local/bin/zsb")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "zsb"
+
+
+def zsb(*args):
+    try:
+        done = subprocess.run([zsb_command(), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        return dict(ok=False, error="zsb_unavailable", message=str(error))
+    try:
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return dict(ok=False, error="zsb_no_answer", message=(done.stderr or "").strip()[:200])
+    return reply if isinstance(reply, dict) else dict(ok=False, error="zsb_no_answer")
+
+
+def iter_tabs(listing):
+    for workspace in listing.get("workspaces") or []:
+        for tab in workspace.get("tabs") or []:
+            yield workspace.get("name"), None, tab
+        for group in workspace.get("groups") or []:
+            for tab in group.get("tabs") or []:
+                yield workspace.get("name"), group.get("name"), tab
+
+
+def find_tab(listing, tmux):
+    for workspace, group, tab in iter_tabs(listing):
+        if tab.get("tmux") == tmux:
+            return workspace, group, tab
+    return None, None, None
+
+
+def verify_tab(tmux):
+    for attempt in range(VERIFY_TRIES):
+        if attempt:
+            time.sleep(VERIFY_PAUSE)
+        listing = zsb("workspace-list")
+        tab = find_tab(listing, tmux)[2] if listing.get("ok") is True else None
+        if tab:
+            return tab
+    return None
+
+
+def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_tab=None):
+    if listing.get("ok") is not True:
+        return dict(ok=False, error=listing.get("error") or "zsb_failed")
+    existing = find_tab(listing, tmux)[2]
+    if existing:
+        return dict(ok=True, tab=existing.get("id"), existing=True)
+    common = ("--host", host, "--tmux", tmux, "--name", title)
+    if after_tab is not None:
+        opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(after_tab), *common)
+    elif group:
+        opened = zsb("session-open", "--workspace", workspace, "--group", group, *common)
+    else:
+        return dict(ok=False, error="no_placement")
+    if opened.get("ok") is not True and opened.get("error") == "reply_timeout":
+        tab = verify_tab(tmux)
+        if tab:
+            return dict(ok=True, tab=tab.get("id"), verified=True)
+    return opened
 
 
 def pid_alive(pid):
