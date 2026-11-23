@@ -99,6 +99,7 @@
   "chat_send.zig": [
     "chatCancelFinish: CANCEL_TAKEN=>showHeaderNoticeAscii(\"Message already sent to the terminal; cannot cancel\",4000,true)",
     "chatCancelFinish: else=>showHeaderNoticeAscii(\"Could not cancel the message; try again\",3500,true)",
+    "chatClearServerChat: showHeaderNoticeAscii(\"Wait for the chat to finish sending\",3500,false)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(\"No unsent messages for this tab\",3000,false)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(msg,3000,false)",
     "chatEchoPushQueuedForShell: if(!quiet)showHeaderNoticeAscii(\"Could not ask this chat's agent to take the queued message now\",4000,true)",
@@ -134,6 +135,7 @@
     "chatResetForShell: showHeaderNoticeAscii(\"Cannot reset yet. Check the connection\",5000,true)",
     "chatResetForShell: showHeaderNoticeAscii(\"Could not save reset. Try again\",5000,true)",
     "chatResetForShell: showHeaderNoticeAscii(\"Reset in progress\",3000,false)",
+    "chatRestartAiRefused: showHeaderNoticeAscii(text,5000,true)",
     "chatSendChoice: showHeaderNoticeAscii(\"Could not save the message; try again\",3500,true)",
     "chatSendNowFinish: SEND_NOW_NOT_WAITING=>showHeaderNoticeAscii(\"This chat is not holding that message in its queue any more\",4000,true)",
     "chatSendNowFinish: SEND_NOW_OK=>showHeaderNoticeAscii(\"Asked this chat to take the queued message now\",2500,false)",
@@ -141,6 +143,7 @@
     "chatSendNowFinish: SEND_NOW_UNSUPPORTED=>showHeaderNoticeAscii(\"This chat cannot take a queued message early; it runs at its next step\",5000,true)",
     "chatSendVerifyTick: showHeaderNoticeAscii(\"Delivery unconfirmed - check the terminal before sending again\",8000,true)",
     "chatSettingNotice: showHeaderNoticeAscii(text,3000,false)",
+    "chatTmuxSendFinish: if(job.clear_notice_len!=0)showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len],5000,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Could not remove yet. Try again\",3500,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Could not save reset. Retrying\",5000,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Reset unconfirmed. Messages remain here\",5000,true)",
