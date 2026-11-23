@@ -777,6 +777,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
         const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
         const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
+        if (key_down and foregroundIsOurs() and @import("workspace_switcher.zig").isOpen()) {
+            switch (kb.vkCode) {
+                0x1B, 0x26, 0x28, 0x0D, 0x20 => {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_KEYDOWN, kb.vkCode, 0);
+                    return 1;
+                },
+                else => {},
+            }
+        }
         if (key_down and !((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and app_state.g_browser_focus_chord_held) and
             @import("browser_pane.zig").browserHotkeyPasses(kb.vkCode))
         {
