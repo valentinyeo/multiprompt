@@ -1,0 +1,1 @@
+Multiprompt: Ctrl+T folder picker keeps your highlight when the folder list refreshes
