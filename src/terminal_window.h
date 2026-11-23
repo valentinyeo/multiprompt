@@ -10,4 +10,5 @@ void mp_terminal_window_style(HWND, const LOGFONTW *, uint32_t, uint32_t, const 
 void mp_terminal_window_report(HWND);
 int mp_terminal_window_copy(HWND);
 void mp_terminal_window_paste(HWND);
+void mp_terminal_window_repair_caret(HWND);
 #endif
