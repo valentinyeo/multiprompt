@@ -1,0 +1,11 @@
+/pstack:poteto-help > **The fix itself is small. The time goes into waiting and checks around it.**
+>
+> How the hours went:
+>
+> 1. **Waiting in line (about 4 hours):** the fix was ready this afternoon. But the system that checks every change was itself broken, so nothing could merge until that was repaired, and that repair failed twice.
+>
+> 2. **Checks (about 1.5 hours):** every change runs the full test set on Windows machines in the cloud, even a small one.
+>
+> 3. **A build error (about 1 hour):** the fix broke the build once, so it had to be corrected and checked again.
+>
+> … i thoughtwith pstack thinks speed up now we wait 7  hours for a very  urgent bug fix emergenyc or not?

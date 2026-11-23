@@ -256,8 +256,9 @@ test "ISSUE-263 production tool geometry painting folding hit testing and open-a
 function runHarness(oldColor = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh299-'));
   try {
-    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'link_detect.zig'], dir);
+    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'chat_user_quote.zig', 'link_detect.zig'], dir);
     require('./fixtures/inline-stubs').writeChatMention(dir);
+    fs.writeFileSync(path.join(dir, 'chat_user_quote_ui.zig'), 'pub fn measureNaturalWidth(_: anytype, _: anytype, _: anytype, _: anytype, max_w: i32) i32 { return max_w; }\npub fn measureHeight(_: anytype, _: anytype, _: anytype, _: anytype, _: i32) i32 { return 60; }\npub fn paint(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype) void {}\n');
     const paintNames = ['chatReplyLineHeight', 'chatPaintReplyLine', 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatDisplayForBlock', 'chatMeasureBlockRect', 'chatMeasureProjectedBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatPaintProjectedBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'];
     let functions = paintNames.filter(name => source.includes(`fn ${name}(`)).map(body).join('\n');
     if (source.includes('fn chatPaintTableExpand(')) functions += '\nfn chatPaintTableExpand(_: HANDLE, _: RECT, _: ChatBlock) void {}\n';

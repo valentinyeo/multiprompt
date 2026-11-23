@@ -575,10 +575,7 @@ fn chatReplyRefreshPreview() void {
     defer a.free(text);
     const wide = std.unicode.utf8ToUtf16LeAlloc(a, text) catch return;
     defer a.free(wide);
-    var n = @min(wide.len, app_state.g_chat_reply_preview.len);
-    if (n > 0 and std.unicode.utf16IsHighSurrogate(wide[n - 1])) n -= 1;
-    @memcpy(app_state.g_chat_reply_preview[0..n], wide[0..n]);
-    app_state.g_chat_reply_preview_len = n;
+    app_state.g_chat_reply_preview_len = @import("chat_user_quote.zig").stripInlineMarkdown(wide, &app_state.g_chat_reply_preview);
 }
 
 pub fn selectChatReply(text: []const u16) bool {

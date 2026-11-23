@@ -300,7 +300,7 @@ fn chatLinkFont(code: bool) HANDLE {
     return slot.*;
 }
 
-fn chatTextWidth(hdc: HANDLE, text: []const u16) i32 {
+pub fn chatTextWidth(hdc: HANDLE, text: []const u16) i32 {
     if (text.len == 0) return 0;
     var size: SIZE = undefined;
     return if (GetTextExtentPoint32W(hdc, text.ptr, @intCast(text.len), &size) != 0) size.cx else 0;
@@ -324,7 +324,7 @@ fn chatSelBrush() DWORD {
     return RGB(56, 78, 112);
 }
 
-fn chatCharAtX(hdc: HANDLE, segment: []const u16, x_rel: i32) usize {
+pub fn chatCharAtX(hdc: HANDLE, segment: []const u16, x_rel: i32) usize {
     if (x_rel <= 0) return 0;
     if (x_rel >= chatTextWidth(hdc, segment)) return segment.len;
     var acc: i32 = 0;
@@ -339,7 +339,7 @@ fn chatCharAtX(hdc: HANDLE, segment: []const u16, x_rel: i32) usize {
     return segment.len;
 }
 
-fn chatPaintSelectionRun(hdc: HANDLE, segment: []const u16, base: usize, seg_left: i32, seg_top: i32, line_h: i32) void {
+pub fn chatPaintSelectionRun(hdc: HANDLE, segment: []const u16, base: usize, seg_left: i32, seg_top: i32, line_h: i32) void {
     const sel = chatSelRange() orelse return;
     const seg_end = base + segment.len;
     if (sel.end <= base or sel.start >= seg_end) return;
@@ -468,7 +468,7 @@ fn chatDisplayForBlock(buf: []const u16, block: ChatBlock, projection: ?*const c
     return .{ .text = raw, .offset = range.start, .reply_ref = original_ref };
 }
 
-fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize, comptime skill_pills: bool) ?link_detect.Range {
+pub fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize, comptime skill_pills: bool) ?link_detect.Range {
     const base = if (code) ensureChatCodeFont() else ensureChatFont();
     const old_font = SelectObject(hdc, base);
     defer _ = SelectObject(hdc, old_font);
@@ -685,7 +685,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     return null;
 }
 
-fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
+pub fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
     if (style.code) {
         if (!style.bold) return ensureChatCodeFont();
         if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-chatCodeFontPx(), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
@@ -1079,7 +1079,7 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
     return chatRichText(hdc, text, area, @intCast(block.level), paint, hit, offset, height, false);
 }
 
-fn chatUserBubbleColor() DWORD {
+pub fn chatUserBubbleColor() DWORD {
     return customColorOr("chat_user_bg", chat_style.bubbleColors(themeConsoleBg()).user);
 }
 
@@ -1091,7 +1091,7 @@ fn chatAgentBubbleColor() DWORD {
     return customColorOr("chat_agent_bg", chat_style.bubbleColors(themeConsoleBg()).agent);
 }
 
-fn chatCodePanelColor() DWORD {
+pub fn chatCodePanelColor() DWORD {
     return customColorOr("overlay_bg", chatAgentBubbleColor());
 }
 
@@ -1113,16 +1113,7 @@ fn chatPaintReplyLine(hdc: HANDLE, text: []const u16, maybe_ref: ?chat_reply.Ref
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
     var line = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.top + chatReplyLineHeight(maybe_ref) };
     var preview: [512]u16 = undefined;
-    preview[0] = 0x21a9;
-    preview[1] = ' ';
-    var n = @min(ref.preview_end - ref.preview_start, preview.len - 3);
-    if (n > 0 and text[ref.preview_start + n - 1] >= 0xd800 and text[ref.preview_start + n - 1] <= 0xdbff) n -= 1;
-    @memcpy(preview[2..][0..n], text[ref.preview_start..][0..n]);
-    var len = n + 2;
-    if (ref.preview_start + n < ref.preview_end) {
-        preview[len] = 0x2026;
-        len += 1;
-    }
+    const len = @import("chat_user_quote.zig").formatReplyPreview(text[ref.preview_start..ref.preview_end], &preview);
     _ = chatDrawText(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
@@ -1166,35 +1157,42 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
         .user => {
             const pad = uiScaled(CHAT_BUBBLE_PAD);
             const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
-            var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
-            const old_font = SelectObject(hdc, ensureChatFont());
             const ref = display.reply_ref;
-            const body = text[if (ref) |r| r.body_start else 0..];
-            var measure_text = body;
-            var stripped: []u16 = &.{};
-            defer if (stripped.len != 0) std.heap.page_allocator.free(stripped);
-            if (@import("chat_mention.zig").hasMarker(body)) {
-                stripped = std.heap.page_allocator.alloc(u16, body.len) catch &.{};
-                if (stripped.len == body.len) measure_text = @import("chat_mention.zig").copyVisible(body, &.{}, stripped);
-            }
-            _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-            var natural_w = calc.right;
-            if (std.mem.indexOfScalar(u16, body, '@') != null) {
-                const live = @import("chat_mention.zig").currentLive(null);
-                var scan: usize = 0;
-                while (scan < body.len) {
-                    const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse {
-                        scan += 1;
-                        continue;
-                    };
-                    natural_w = @max(natural_w, @min(max_text_w, chatTextWidth(hdc, body[span.start..span.visible_end])));
-                    scan = if (span.end > scan) span.end else scan + 1;
+            const start = if (ref) |r| r.body_start else 0;
+            const body_display = display.slice(start);
+            const body = body_display.text;
+            const quote_parts = @import("chat_user_quote.zig").parse(body);
+            var natural_w: i32 = 0;
+            const old_font = SelectObject(hdc, ensureChatFont());
+            if (quote_parts) |parts| {
+                natural_w = @import("chat_user_quote_ui.zig").measureNaturalWidth(hdc, body_display, block, parts, max_text_w);
+            } else {
+                var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
+                var measure_text = body;
+                var stripped: []u16 = &.{};
+                defer if (stripped.len != 0) std.heap.page_allocator.free(stripped);
+                if (@import("chat_mention.zig").hasMarker(body)) {
+                    stripped = std.heap.page_allocator.alloc(u16, body.len) catch &.{};
+                    if (stripped.len == body.len) measure_text = @import("chat_mention.zig").copyVisible(body, &.{}, stripped);
+                }
+                _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                natural_w = calc.right;
+                if (std.mem.indexOfScalar(u16, body, '@') != null) {
+                    const live = @import("chat_mention.zig").currentLive(null);
+                    var scan: usize = 0;
+                    while (scan < body.len) {
+                        const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse { scan += 1; continue; };
+                        natural_w = @max(natural_w, @min(max_text_w, chatTextWidth(hdc, body[span.start..span.visible_end])));
+                        scan = if (span.end > scan) span.end else scan + 1;
+                    }
                 }
             }
             if (ref) |r| {
                 _ = SelectObject(hdc, chatMetadataFont());
+                var preview_buf: [512]u16 = undefined;
+                const preview_len = @import("chat_user_quote.zig").stripInlineMarkdown(text[r.preview_start..r.preview_end], &preview_buf);
                 var preview: RECT = .{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
-                _ = DrawTextW(hdc, text[r.preview_start..r.preview_end].ptr, @intCast(r.preview_end - r.preview_start), &preview, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+                _ = DrawTextW(hdc, &preview_buf, @intCast(preview_len), &preview, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
                 natural_w = @max(natural_w, @min(max_text_w, preview.right + uiScaled(20)));
             }
             _ = SelectObject(hdc, old_font);
@@ -1204,9 +1202,9 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
                 shown = chatImgMeasure(body, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width, uiScaled(720)), shown.max_w + 2 * pad));
             }
-            const start = if (ref) |r| r.body_start else 0;
-            const body_display = display.slice(start);
-            _ = chatFlowText(hdc, body_display.text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, body_display.offset, &flow_h, body_display.source_map, true);
+            if (quote_parts) |parts| {
+                flow_h = @import("chat_user_quote_ui.zig").measureHeight(hdc, body_display, block, parts, @max(1, bubble_w - 2 * pad));
+            } else _ = chatFlowText(hdc, body_display.text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, body_display.offset, &flow_h, body_display.source_map, true);
             flow_h += chatReplyLineHeight(display.reply_ref);
             var bubble_h = flow_h + 2 * pad;
             if (shown.count > 0) {
@@ -4026,7 +4024,7 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
             _ = SetTextColor(hdc, text_color);
             const start = if (display.reply_ref) |r| r.body_start else 0;
             const body_display = display.slice(start);
-            _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
+            if (@import("chat_user_quote.zig").parse(body_display.text)) |parts| @import("chat_user_quote_ui.zig").paint(hdc, body_display, block, parts, text_rc) else _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
         },
         .prose => {
             fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -4111,7 +4109,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
-    _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
+    if (@import("chat_user_quote.zig").parse(body_display.text)) |parts| @import("chat_user_quote_ui.zig").paint(hdc, body_display, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, parts, text_rc) else _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
     if (e.waiting()) chatDimQueuedBubble(hdc, rc);
 }
 
@@ -4530,7 +4528,7 @@ fn chatCopyTextToClipboard(text: []const u16) void {
     }
 }
 
-fn chatTranscriptBlockAtPoint(y_client: i32) ?usize {
+pub fn chatTranscriptBlockAtPoint(y_client: i32) ?usize {
     const content_y = y_client + app_state.g_chat_scroll_y;
     for (0..app_state.g_chat_block_count) |i| {
         const rc = app_state.g_chat_layout_rects[i];
@@ -4602,7 +4600,7 @@ pub fn chatDisplayForIndex(index: usize) ?ChatDisplay {
     return chatDisplayForBlock(buf, app_state.g_chat_blocks[index], g_reaction_view.projected(index));
 }
 
-const ChatSelectionDisplay = struct {
+pub const ChatSelectionDisplay = struct {
     block: ChatBlock,
     text: []const u16,
     start: usize,
@@ -4614,7 +4612,7 @@ const ChatSelectionDisplay = struct {
     }
 };
 
-fn chatSelectionDisplay(index: usize) ?ChatSelectionDisplay {
+pub fn chatSelectionDisplay(index: usize) ?ChatSelectionDisplay {
     if (index < app_state.g_chat_block_count) {
         const block = app_state.g_chat_blocks[index];
         const display = chatDisplayForIndex(index) orelse return null;
@@ -4637,7 +4635,7 @@ fn chatSelectionDisplay(index: usize) ?ChatSelectionDisplay {
     return null;
 }
 
-fn chatSelectionRect(index: usize) RECT {
+pub fn chatSelectionRect(index: usize) RECT {
     if (index >= app_state.g_chat_block_count) return app_state.g_chat_echo_layout[index - app_state.g_chat_block_count];
     var rc = app_state.g_chat_layout_rects[index];
     rc.left += app_state.g_chat_content_left;
@@ -4705,7 +4703,7 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
     defer _ = ReleaseDC(hwnd, dc);
     const body = mapped.slice(start);
     if (block.role == .user) {
-        _ = chatFlowText(dc, body.text, area, false, false, .{ .x = x, .y = y, .char = &char }, body.offset, null, body.source_map, true);
+        if (@import("chat_user_quote.zig").parse(body.text)) |parts| @import("chat_user_quote_ui.zig").charAt(dc, body, block, parts, area, x, y, &char) else _ = chatFlowText(dc, body.text, area, false, false, .{ .x = x, .y = y, .char = &char }, body.offset, null, body.source_map, true);
     } else {
         _ = chatFlowBlock(dc, body.text, block, area, false, .{ .x = x, .y = y, .char = &char }, body.offset, null);
     }
@@ -5201,7 +5199,7 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
     if (dc == null) return null;
     defer _ = ReleaseDC(hwnd, dc);
     const body = display.slice(start);
-    if (block.role == .user) return chatFlowText(dc, body.text, area, false, false, .{ .x = x, .y = y }, body.offset, null, body.source_map, true);
+    if (block.role == .user) return if (@import("chat_user_quote.zig").parse(body.text)) |parts| @import("chat_user_quote_ui.zig").linkAt(dc, body, block, parts, area, x, y) else chatFlowText(dc, body.text, area, false, false, .{ .x = x, .y = y }, body.offset, null, body.source_map, true);
     return chatFlowBlock(dc, body.text, block, area, false, .{ .x = x, .y = y }, body.offset, null);
 }
 
@@ -6465,7 +6463,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             var cursor: POINT = undefined;
             _ = GetCursorPos(&cursor);
             _ = ScreenToClient(hwnd, &cursor);
-            if (chatMessageActionAt(cursor.x, cursor.y) != null or chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or chat_hover_table_button or app_state.g_chat_hover_image) {
+            if (chatMessageActionAt(cursor.x, cursor.y) != null or chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or @import("chat_user_quote_ui.zig").toggleAt(hwnd, cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or chat_hover_table_button or app_state.g_chat_hover_image) {
                 _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                 return 1;
             }
@@ -6497,6 +6495,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatReplyJump(index);
                 return 0;
             }
+            if (@import("chat_user_quote_ui.zig").handleClick(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             chatNavClear();
             if (chatTableExpandAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatExpandTable(index);
@@ -6612,6 +6611,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatImageReady();
                 return 0;
             }
+            if (@import("chat_user_quote_ui.zig").handleClick(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatTableExpandAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatExpandTable(index);
                 return 0;
