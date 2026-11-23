@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const json_reader = @import("json_reader.zig");
 const same = @import("tmux_identity.zig").same;
 
@@ -40,8 +41,26 @@ pub const Entry = struct {
 pub const LayoutTab = struct { host: u8, session: []const u8 };
 
 pub fn now() ?u64 {
-    const seconds = std.time.timestamp();
-    return if (seconds > 0) @intCast(seconds) else null;
+    const seconds: u64 = switch (builtin.os.tag) {
+        .windows => windowsSeconds(),
+        .linux => linuxSeconds(),
+        else => return null,
+    };
+    return if (seconds > 0) seconds else null;
+}
+
+fn windowsSeconds() u64 {
+    const win = @import("win32.zig");
+    var stamp: [2]win.DWORD = undefined;
+    win.GetSystemTimeAsFileTime(&stamp);
+    const ticks = (@as(u64, stamp[1]) << 32) | stamp[0];
+    return (ticks / 10_000_000) -| 11_644_473_600;
+}
+
+fn linuxSeconds() u64 {
+    var ts: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(.REALTIME, &ts);
+    return if (ts.sec > 0) @intCast(ts.sec) else 0;
 }
 
 pub const Closed = struct {
