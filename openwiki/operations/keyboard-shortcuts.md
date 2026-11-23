@@ -245,6 +245,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
+| mb / mp-sessions | Open, close, move, pin, unpin, archive, unarchive, wait or restore a named tab; --json reads back desktop state |
 | Ctrl+K / right-click tab → Bot face / Bot color | Remote faces, colors and pictures sync. |
 | Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
@@ -267,6 +268,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+A in Chat View | Select all transcript text (transcript focus; composer keeps its own Ctrl+A) |
 | Ctrl+K "Chat View: Resync chat" | Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending |
 | Ctrl+K "Chat View: Fresh start" / right-click tab | Save a handover and start empty context in the same chat; keep its name, picture, address and readable history. Wait for the current reply first |
+| Ctrl+K "Chat View: Restart this chat in place" / right-click tab | Restart a live chat without closing its tab so a new login or setting takes effect; keep its name, address, tab and pin |
 | Ctrl+K "Chat View: Switch AI to Claude" (Codex, Pi) / right-click tab | Move this chat to another AI and keep its name, picture, place, address and readable history. The new AI starts from a saved handover. Wait for the current reply first |
 | Ctrl+K "Chat View: Auto-switch AI when a plan runs out" | When this chat's AI runs out of plan, the host moves the chat to the next AI with plan left, on its own. The name, history and unanswered message follow it, and a row says which AI ran out. Off switches that off, and an AI that ran out is skipped for an hour |
 | Ctrl+K "Chat View: Restart this chat on the newest version" | Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends |

@@ -1,0 +1,1 @@
+Show whether each chat can reach its host and display its history

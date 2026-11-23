@@ -798,6 +798,7 @@ const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_AL
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
+const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_IN_PLACE;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
@@ -1442,27 +1443,7 @@ const resetSidebarDrag = @import("sidebar_input.zig").resetSidebarDrag;
 const sidebarDragValid = @import("sidebar_input.zig").sidebarDragValid;
 const clearSelectionForClick = @import("sidebar_input.zig").clearSelectionForClick;
 
-fn showPickRepoFailure(saving_folder: bool) void {
-    const palette = @import("command_palette.zig");
-    if (palette.g_pick_repo_offline) {
-        showHeaderNoticeAscii("Pick repo: server is offline", 4000, true);
-        return;
-    }
-    if (saving_folder) {
-        showHeaderNoticeAscii("Set workspace folder: could not save", 4000, true);
-        return;
-    }
-    if (palette.g_pick_row_gone) {
-        showHeaderNoticeAscii("Pick repo: that row is gone; open the list again", 4000, true);
-        return;
-    }
-    switch (palette.g_start_fail) {
-        .capacity => {},
-        .launch_command => showHeaderNoticeAscii("Pick repo: that folder path cannot start a session", 5000, true),
-        .spawn_shell => showHeaderNoticeAscii("Pick repo: the new tab did not start", 5000, true),
-        .none => showHeaderNoticeAscii("Pick repo: nothing started", 4000, true),
-    }
-}
+const showPickRepoFailure = @import("pick_repo_notice.zig").showPickRepoFailure;
 
 const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
@@ -7549,7 +7530,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_RESTART_IN_PLACE or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7583,6 +7564,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("command_palette.zig").startSwitchAi(ti, if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) 1 else if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) 2 else 3);
                         } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
                             _ = @import("chat_send.zig").chatRestartAi(ti);
+                        } else if (target == SEARCH_TABCTX_CHAT_RESTART_IN_PLACE) {
+                            _ = @import("command_palette.zig").startRestartChatInPlace(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {
                             chatResetForShell(ti);
                         } else if (target == SEARCH_TABCTX_FAVORITE) {

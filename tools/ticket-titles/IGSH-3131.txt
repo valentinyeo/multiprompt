@@ -1,0 +1,1 @@
+Restart puts a closed chat back in its own workspace and group

@@ -253,6 +253,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (!@import("tab_state_desktop.zig").appendState(&json_buf, &pos, i)) return false;
+
         const wake_id: u32 = if (workspace_filter != null) @intCast(written_tabs) else app_state.shells[i].wake_id;
         if (wake_id != 0) {
             const pre_id = ",\"wake_id\":";
@@ -826,12 +828,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             const gmid = ",\"name\":\"";
             @memcpy(json_buf[pos .. pos + gmid.len], gmid);
             pos += gmid.len;
-            for (0..app_state.groups[gi].name_len) |j| {
-                const u = app_state.groups[gi].name[j];
-                const b: u8 = if (u < 128) @intCast(u) else '?';
-                appendJsonEscaped(&json_buf, &pos, &.{b});
-                if (pos >= json_buf.len - 40) break;
-            }
+            appendJsonEscapedWide(&json_buf, &pos, app_state.groups[gi].name[0..app_state.groups[gi].name_len]);
             json_buf[pos] = '"';
             pos += 1;
             if (app_state.groups[gi].collapsed) {
@@ -996,6 +993,8 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     const idx = app_state.shell_count;
     var shell = empty_shell;
     shell.kind = tab.kind;
+    shell.tab_key = tab.tab_key;
+    shell.tab_key_len = tab.tab_key_len;
     shell.shell_id = app_state.allocateShellId() orelse return null;
     shell.wake_id = tab.wake_id;
     shell.chat_id = tab.chat_id;
@@ -1006,7 +1005,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     if (tab.tmux_session_len > 0) {
         @memcpy(shell.tmux_session[0..tab.tmux_session_len], tab.tmux_session[0..tab.tmux_session_len]);
         shell.tmux_session_len = tab.tmux_session_len;
-        shell.ssh_reconnect.restored_session = tab.tmux_session_len > 0;
+        shell.ssh_reconnect.restored_session = tab.kind == .tmux;
     }
     if (tab.cwd_len > 0) {
         @memcpy(shell.cached_cwd[0..tab.cwd_len], tab.cwd[0..tab.cwd_len]);
@@ -1408,108 +1407,6 @@ test "session names serialize localized text without invalid UTF-8 bytes" {
     try std.testing.expectEqual(@as(u16, 0xF3), tabs[0].name[6]);
 }
 
-fn applySavedTabFields(idx: u32, tab: *const SavedTab) void {
-    for (0..tab.name_len) |j| app_state.shells[idx].name[j] = @intCast(tab.name[j]);
-    app_state.shells[idx].name[tab.name_len] = 0;
-    app_state.shells[idx].name_len = tab.name_len;
-    app_state.shells[idx].name_source = if (tab.manual) .manual else if (tab.sem) .semantic else .default;
-    app_state.shells[idx].restored_name_hold = app_state.shells[idx].name_source == .default and tab.name_len > 0;
-    if ((tab.kind == .vps or tab.kind == .vps2) and tab.tmux_session_len == 0 and app_state.shells[idx].name_source == .semantic) {
-        app_state.shells[idx].name_source = .default;
-    }
-    app_state.shells[idx].tmux_host = tab.tmux_host;
-    app_state.shells[idx].tmux_identity = tab.tmux_identity;
-    app_state.shells[idx].tmux_identity_len = tab.tmux_identity_len;
-    if (tab.tmux_session_len > 0) {
-        @memcpy(app_state.shells[idx].tmux_session[0..tab.tmux_session_len], tab.tmux_session[0..tab.tmux_session_len]);
-        app_state.shells[idx].tmux_session_len = tab.tmux_session_len;
-    }
-    if (tab.cwd_len > 0) {
-        @memcpy(app_state.shells[idx].cached_cwd[0..tab.cwd_len], tab.cwd[0..tab.cwd_len]);
-        app_state.shells[idx].cached_cwd_len = tab.cwd_len;
-    }
-    app_state.shells[idx].muted = tab.muted;
-    app_state.shells[idx].sync_owned = tab.sync_owned;
-    app_state.shells[idx].keep_alive = tab.keep_alive;
-    app_state.shells[idx].pinned_top = tab.pinned_top;
-    app_state.shells[idx].starred_pinned_top = tab.starred_pinned_top;
-    app_state.shells[idx].inbox_excluded = tab.inbox_excluded;
-    app_state.shells[idx].favorite = tab.favorite;
-    app_state.shells[idx].face = tab.face;
-    app_state.shells[idx].color = tab.color;
-    if (std.mem.allEqual(u8, &app_state.shells[idx].avatar_local_id, 0)) app_state.shells[idx].avatar_local_id = tab.avatar_local_id;
-    @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
-    app_state.shells[idx].last_used = tab.last_used;
-    app_state.shells[idx].input = tab.input;
-    app_state.shells[idx].visits = tab.visits;
-    app_state.shells[idx].claude_session = tab.claude_session;
-    app_state.shells[idx].wake_id = tab.wake_id;
-    app_state.shells[idx].chat_id = tab.chat_id;
-    app_state.shells[idx].group_id = tab.group_id;
-    app_state.shells[idx].starred_group_id = tab.starred_group_id;
-    app_state.shells[idx].workspace = tab.workspace;
-    app_state.shells[idx].last_active = if (tab.last_active != 0) tab.last_active else nowFileTime();
-    app_state.shells[idx].last_viewed = tab.last_viewed;
-    app_state.shells[idx].activity = .idle;
-    app_state.shells[idx].needs_attention = tab.needs_attention;
-    app_state.shells[idx].last_active_event = 0;
-    if (tab.claude_sid_len > 0) {
-        @memcpy(app_state.shells[idx].claude_sid[0..tab.claude_sid_len], tab.claude_sid[0..tab.claude_sid_len]);
-        app_state.shells[idx].claude_sid_len = tab.claude_sid_len;
-        app_state.shells[idx].ai_agent = if (tab.ai_agent != 0) tab.ai_agent else 1;
-        app_state.shells[idx].hook_capable = true;
-    }
-    noteRestoredBlueDot(idx);
-    if (tab.claude_cwd_len > 0) {
-        @memcpy(app_state.shells[idx].claude_cwd[0..tab.claude_cwd_len], tab.claude_cwd[0..tab.claude_cwd_len]);
-        app_state.shells[idx].claude_cwd_len = tab.claude_cwd_len;
-    }
-    restoreBrowserStateFromSavedTab(idx, tab);
-    if (tab.favicon_path_len > 0 and tab.favicon_path_len < 512) {
-        var fav_wpath: [512]u16 = undefined;
-        for (0..tab.favicon_path_len) |pi| fav_wpath[pi] = @as(u16, tab.favicon_path[pi]);
-        fav_wpath[tab.favicon_path_len] = 0;
-        const INVALID_FA: DWORD = 0xFFFFFFFF;
-        if (GetFileAttributesW(@ptrCast(&fav_wpath)) != INVALID_FA) {
-            const LR_LOADFROMFILE_R: UINT = 0x00000010;
-            const LR_DEFAULTSIZE_R: UINT = 0x00000040;
-            const hico = LoadImageW(null, @ptrCast(&fav_wpath), IMAGE_ICON, 16, 16, LR_LOADFROMFILE_R | LR_DEFAULTSIZE_R);
-            if (hico != null) {
-                app_state.shells[idx].favicon_hicon = hico;
-                @memcpy(app_state.shells[idx].favicon_path[0..tab.favicon_path_len], tab.favicon_path[0..tab.favicon_path_len]);
-                app_state.shells[idx].favicon_path_len = tab.favicon_path_len;
-            }
-        }
-    }
-    if (tab.muted) {
-        var name_utf8: [192]u8 = undefined;
-        debugLog2("restoreSession: restored MUTED tab: ", json_reader.utf8(tab.name[0..tab.name_len], &name_utf8));
-    }
-}
-
-fn restoreCachedSavedTab(idx: u32, tab: *const SavedTab) bool {
-    if (idx >= app_state.shell_count or app_state.shells[idx].shell_id != tab.shell_id) return false;
-    if (findLocalTmuxTab(tab.tmux_host, tab.tmux_session[0..tab.tmux_session_len])) |existing| return existing == idx;
-    const tmux_name: ?[]const u8 = if (isRemoteShellKind(tab.kind) and tab.tmux_session_len > 0)
-        tab.tmux_session[0..tab.tmux_session_len]
-    else
-        null;
-    const tab_cwd: ?[]const u8 = if (tab.cwd_len > 0) tab.cwd[0..tab.cwd_len] else if (tab.claude_session and tab.claude_cwd_len > 0) tab.claude_cwd[0..tab.claude_cwd_len] else null;
-    const previous_identity = app_state.g_pending_tmux_identity;
-    app_state.g_pending_tmux_identity = tab.tmux_identity[0..tab.tmux_identity_len];
-    defer app_state.g_pending_tmux_identity = previous_identity;
-    app_state.g_pending_tmux_host = tab.tmux_host;
-    defer app_state.g_pending_tmux_host = 0;
-    app_state.shells[idx].kind = tab.kind;
-    const ok = if (tmux_name != null)
-        @import("console.zig").resumeShellAt(idx, tab.kind, tmux_name, null, null)
-    else
-        @import("console.zig").resumeShellAt(idx, tab.kind, null, tab_cwd, null);
-    if (!ok) return false;
-    applySavedTabFields(idx, tab);
-    return true;
-}
-
 pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.ClaudeResume) bool {
     if (findLocalTmuxTab(tab.tmux_host, tab.tmux_session[0..tab.tmux_session_len])) |existing| {
         if (!app_state.g_restoring) switchToShell(existing);
@@ -1517,7 +1414,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     }
     const tabs = [_]SavedTab{tab.*};
     const t: usize = 0;
-    const tmux_name: ?[]const u8 = if (isRemoteShellKind(tabs[t].kind) and tabs[t].tmux_session_len > 0)
+    const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
         tabs[t].tmux_session[0..tabs[t].tmux_session_len]
     else
         null;
@@ -1576,7 +1473,87 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         spawnShellWithSession(tabs[t].kind, null, tab_cwd, startup_cmd);
 
     if (!ok) return false;
-    applySavedTabFields(app_state.shell_count - 1, &tabs[t]);
+    const idx = app_state.shell_count - 1;
+    for (0..tabs[t].name_len) |j| {
+        app_state.shells[idx].name[j] = @intCast(tabs[t].name[j]);
+    }
+    app_state.shells[idx].name[tabs[t].name_len] = 0;
+    app_state.shells[idx].name_len = tabs[t].name_len;
+    app_state.shells[idx].name_source = if (tabs[t].manual) .manual else if (tabs[t].sem) .semantic else .default;
+    app_state.shells[idx].restored_name_hold = app_state.shells[idx].name_source == .default and tabs[t].name_len > 0;
+    if ((tabs[t].kind == .vps or tabs[t].kind == .vps2) and tabs[t].tmux_session_len == 0 and app_state.shells[idx].name_source == .semantic) {
+        app_state.shells[idx].name_source = .default;
+    }
+    app_state.shells[idx].tab_key = tabs[t].tab_key;
+    app_state.shells[idx].tab_key_len = tabs[t].tab_key_len;
+    app_state.shells[idx].tmux_host = tabs[t].tmux_host;
+    app_state.shells[idx].tmux_identity = tabs[t].tmux_identity;
+    app_state.shells[idx].tmux_identity_len = tabs[t].tmux_identity_len;
+    if (tabs[t].tmux_session_len > 0) {
+        @memcpy(app_state.shells[idx].tmux_session[0..tabs[t].tmux_session_len], tabs[t].tmux_session[0..tabs[t].tmux_session_len]);
+        app_state.shells[idx].tmux_session_len = tabs[t].tmux_session_len;
+    }
+    if (tabs[t].cwd_len > 0) {
+        @memcpy(app_state.shells[idx].cached_cwd[0..tabs[t].cwd_len], tabs[t].cwd[0..tabs[t].cwd_len]);
+        app_state.shells[idx].cached_cwd_len = tabs[t].cwd_len;
+    }
+    app_state.shells[idx].muted = tabs[t].muted;
+    app_state.shells[idx].sync_owned = tabs[t].sync_owned;
+    app_state.shells[idx].keep_alive = tabs[t].keep_alive;
+    app_state.shells[idx].pinned_top = tabs[t].pinned_top;
+    app_state.shells[idx].starred_pinned_top = tabs[t].starred_pinned_top;
+    app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
+    app_state.shells[idx].favorite = tabs[t].favorite;
+    app_state.shells[idx].face = tabs[t].face;
+    app_state.shells[idx].color = tabs[t].color;
+    app_state.shells[idx].avatar_local_id = tabs[t].avatar_local_id;
+    @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
+    app_state.shells[idx].last_used = tabs[t].last_used;
+    app_state.shells[idx].input = tabs[t].input;
+    app_state.shells[idx].visits = tabs[t].visits;
+    app_state.shells[idx].claude_session = tabs[t].claude_session;
+    app_state.shells[idx].wake_id = tabs[t].wake_id;
+    app_state.shells[idx].chat_id = tabs[t].chat_id;
+    app_state.shells[idx].group_id = tabs[t].group_id;
+    app_state.shells[idx].starred_group_id = tabs[t].starred_group_id;
+    app_state.shells[idx].workspace = tabs[t].workspace;
+    app_state.shells[idx].last_active = if (tabs[t].last_active != 0) tabs[t].last_active else nowFileTime();
+    app_state.shells[idx].last_viewed = tabs[t].last_viewed;
+    app_state.shells[idx].activity = .idle;
+    app_state.shells[idx].needs_attention = tabs[t].needs_attention;
+    app_state.shells[idx].last_active_event = 0;
+    if (tabs[t].claude_sid_len > 0) {
+        @memcpy(app_state.shells[idx].claude_sid[0..tabs[t].claude_sid_len], tabs[t].claude_sid[0..tabs[t].claude_sid_len]);
+        app_state.shells[idx].claude_sid_len = tabs[t].claude_sid_len;
+        app_state.shells[idx].ai_agent = if (tabs[t].ai_agent != 0) tabs[t].ai_agent else 1;
+        app_state.shells[idx].hook_capable = true;
+    }
+    noteRestoredBlueDot(idx);
+    if (tabs[t].claude_cwd_len > 0) {
+        @memcpy(app_state.shells[idx].claude_cwd[0..tabs[t].claude_cwd_len], tabs[t].claude_cwd[0..tabs[t].claude_cwd_len]);
+        app_state.shells[idx].claude_cwd_len = tabs[t].claude_cwd_len;
+    }
+    restoreBrowserStateFromSavedTab(@intCast(idx), &tabs[t]);
+    if (tabs[t].favicon_path_len > 0 and tabs[t].favicon_path_len < 512) {
+        var fav_wpath: [512]u16 = undefined;
+        for (0..tabs[t].favicon_path_len) |pi| fav_wpath[pi] = @as(u16, tabs[t].favicon_path[pi]);
+        fav_wpath[tabs[t].favicon_path_len] = 0;
+        const INVALID_FA: DWORD = 0xFFFFFFFF;
+        if (GetFileAttributesW(@ptrCast(&fav_wpath)) != INVALID_FA) {
+            const LR_LOADFROMFILE_R: UINT = 0x00000010;
+            const LR_DEFAULTSIZE_R: UINT = 0x00000040;
+            const hico = LoadImageW(null, @ptrCast(&fav_wpath), IMAGE_ICON, 16, 16, LR_LOADFROMFILE_R | LR_DEFAULTSIZE_R);
+            if (hico != null) {
+                app_state.shells[idx].favicon_hicon = hico;
+                @memcpy(app_state.shells[idx].favicon_path[0..tabs[t].favicon_path_len], tabs[t].favicon_path[0..tabs[t].favicon_path_len]);
+                app_state.shells[idx].favicon_path_len = tabs[t].favicon_path_len;
+            }
+        }
+    }
+    if (tabs[t].muted) {
+        var name_utf8: [192]u8 = undefined;
+        debugLog2("restoreSession: restored MUTED tab: ", json_reader.utf8(tabs[t].name[0..tabs[t].name_len], &name_utf8));
+    }
     return true;
 }
 
@@ -1737,14 +1714,18 @@ pub fn restoreSession() u32 {
         const entries = app_state.g_tmux_closed.entries.items;
         const start = entries.len - @min(entries.len, app_state.MAX_CLOSED_HISTORY);
         for (entries[start..]) |entry| {
+            if (entry.host > 2 and entry.tab_state == null) continue;
+            const plain = std.mem.startsWith(u8, entry.name[0..entry.len], "@shell-");
             var name: [64]u16 = @splat(0);
             for (entry.name[0..entry.len], 0..) |c, i| name[i] = c;
             app_state.g_closed_history[app_state.g_closed_count] = .{
-                .kind = .tmux,
+                .kind = if (!plain) .tmux else if (entry.host == 3) .cmd else if (entry.host == 0) .vps else .vps2,
+                .tab_key = if (plain) entry.name else @splat(0),
+                .tab_key_len = if (plain) @intCast(entry.len) else 0,
                 .name = name,
                 .name_len = @intCast(entry.len),
                 .tmux_session = entry.name,
-                .tmux_session_len = @intCast(entry.len),
+                .tmux_session_len = if (plain) 0 else @intCast(entry.len),
                 .tmux_host = entry.host,
                 .face = entry.face,
                 .color = entry.color,
@@ -1903,12 +1884,13 @@ pub fn restoreSession() u32 {
         if (@import("launch_cache.zig").pending and tabs[t].shell_id != 0) {
             if (findShellById(tabs[t].shell_id)) |idx| {
                 if (idx < live_shell_count) {
-                    if (restoreCachedSavedTab(idx, &tabs[t])) {
-                        restored_shell_ids[t] = app_state.shells[idx].shell_id;
-                        if (restored_active_tab != null and restored_active_tab.? == t) restored_active_shell_id = app_state.shells[idx].shell_id;
-                        spawned += 1;
-                        continue;
-                    }
+                    app_state.shells[idx].tab_key = tabs[t].tab_key;
+                    app_state.shells[idx].tab_key_len = tabs[t].tab_key_len;
+                    if (std.mem.allEqual(u8, &app_state.shells[idx].avatar_local_id, 0)) app_state.shells[idx].avatar_local_id = tabs[t].avatar_local_id;
+                    restored_shell_ids[t] = app_state.shells[idx].shell_id;
+                    if (restored_active_tab != null and restored_active_tab.? == t) restored_active_shell_id = app_state.shells[idx].shell_id;
+                    spawned += 1;
+                    continue;
                 }
             }
         }
@@ -1991,7 +1973,7 @@ pub fn restoreSession() u32 {
     seedActiveWorkspaceLastShell(app_state.shells[0..app_state.shell_count], app_state.active_shell, &app_state.g_ws_last_shell);
     restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));
 
-    if (spawned > 0 and app_state.active_shell < app_state.shell_count and @import("chat_composer.zig").shellConsoleReachable(app_state.active_shell)) {
+    if (spawned > 0 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "restoreSession");
         app_state.g_nudge_repaint = true;
         repositionActive();
