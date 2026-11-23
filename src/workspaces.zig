@@ -902,6 +902,7 @@ pub fn archiveWorkspaceByIndex(wi: u32) bool {
     app_state.g_workspaces[cur].archived = true;
     app_state.g_workspaces[cur].restore = false;
     writeWorkspaceRegistryFile();
+    @import("account_desktop.zig").publishSessionLayout();
     return true;
 }
 
@@ -913,6 +914,7 @@ pub fn archiveCurrentWorkspaceOnClose() void {
         app_state.g_workspaces[wi].archived = true;
         app_state.g_workspaces[wi].restore = false;
         writeWorkspaceRegistryFile();
+        @import("account_desktop.zig").publishSessionLayout();
     }
 }
 
@@ -1151,8 +1153,123 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     if (findWorkspace(id)) |cur| removeWorkspaceEntryAt(cur);
     writeWorkspaceRegistryFile();
     rememberRemovedWorkspace(name_copy[0..name_len]);
+    @import("account_desktop.zig").publishSessionLayout();
     debugLog2("workspace-delete result=deleted id=", id);
     return true;
+}
+
+pub fn applyAccountWorkspaceArchives(a: std.mem.Allocator, target: @import("session_layout.zig").Layout, previous: []const @import("session_layout.zig").Workspace) !void {
+    const was_applying = app_state.g_account_applying;
+    const was_restoring = app_state.g_restoring;
+    app_state.g_account_applying = true;
+    app_state.g_restoring = true;
+    defer {
+        app_state.g_account_applying = was_applying;
+        app_state.g_restoring = was_restoring;
+    }
+    const registry_lock = lockWorkspaceRegistry() orelse return error.Storage;
+    defer unlockWorkspaceRegistry(registry_lock);
+    mergeWorkspaceRegistryFromDisk();
+    if (app_state.g_single_window) {
+        var slot = app_state.g_lws_count;
+        while (slot > 0) {
+            slot -= 1;
+            var name_buf: [32]u8 = undefined;
+            const name = workspaceDisplayName(slot, &name_buf);
+            const current = for (target.workspaces) |workspace| {
+                if (std.mem.eql(u8, workspace.name, name)) break workspace;
+            } else null;
+            const was_synced = for (previous) |workspace| {
+                if (std.mem.eql(u8, workspace.name, name)) break true;
+            } else false;
+            if (current) |workspace| {
+                if (!(workspace.archived orelse false)) continue;
+            } else if (!was_synced) continue;
+            ensureWorkspaceSlotId(slot);
+            if (std.mem.eql(u8, app_state.g_ws_ids[slot][0..app_state.g_ws_id_len[slot]], getInstanceName())) {
+                app_state.g_ws_id_len[slot] = 0;
+                ensureWorkspaceSlotId(slot);
+            }
+            if (!exportSlotSessionFile(slot)) return error.Storage;
+            const id = app_state.g_ws_ids[slot];
+            const id_len = app_state.g_ws_id_len[slot];
+            var name_copy: [32]u8 = undefined;
+            @memcpy(name_copy[0..name.len], name);
+            var si = app_state.shell_count;
+            while (si > 0) {
+                si -= 1;
+                if (app_state.shells[si].workspace == slot) hibernateWorkspaceShell(si);
+            }
+            removeWorkspaceSlot(slot);
+            if (current != null) {
+                addOrUpdateWorkspaceHosted(id[0..id_len], name_copy[0..name.len], false, "");
+            } else {
+                rememberRemovedWorkspace(name_copy[0..name.len]);
+                var path_buf: [512]u8 = undefined;
+                var stamp_buf: [32]u8 = undefined;
+                if (getSessionPathForWorkspace(&path_buf, id[0..id_len])) |path| archiveWorkspaceFile(path, workspaceDeleteStamp(&stamp_buf));
+            }
+        }
+    }
+    for (target.workspaces) |workspace| {
+        if (!(workspace.archived orelse false)) continue;
+        const wi = for (app_state.g_workspaces[0..app_state.g_workspace_count], 0..) |entry, i| {
+            if (std.mem.eql(u8, entry.name[0..entry.name_len], workspace.name)) break @as(u32, @intCast(i));
+        } else blk: {
+            var id_buf: [32]u8 = undefined;
+            const id = try std.fmt.bufPrint(&id_buf, "account-{x:0>16}", .{std.hash.Wyhash.hash(0, workspace.name)});
+            addOrUpdateWorkspace(id, workspace.name, false);
+            break :blk findWorkspace(id) orelse return error.LayoutCapacity;
+        };
+        const entry = &app_state.g_workspaces[wi];
+        var tabs: std.ArrayList(@import("session_layout.zig").Tab) = .empty;
+        for (target.tabs) |tab| {
+            if (std.mem.eql(u8, tab.workspace, workspace.name)) try tabs.append(a, tab);
+        }
+        var path_buf: [512]u8 = undefined;
+        const path = getSessionPathForWorkspace(&path_buf, entry.id[0..entry.id_len]) orelse return error.Storage;
+        const old = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY);
+        defer if (old) |bytes| std.heap.page_allocator.free(bytes);
+        const snapshot = try @import("account_layout.zig").prepareCache(a, old orelse "{\"tabs\":[]}", .{ .workspaces = &.{.{ .name = workspace.name, .color = workspace.color }}, .tabs = tabs.items });
+        if (!writeFileAtomicW(path, snapshot)) return error.Storage;
+        entry.archived = true;
+        entry.restore = false;
+        entry.host_len = 0;
+    }
+    var wi: u32 = 0;
+    while (wi < app_state.g_workspace_count) {
+        const entry = &app_state.g_workspaces[wi];
+        const name = entry.name[0..entry.name_len];
+        const current = for (target.workspaces) |workspace| {
+            if (std.mem.eql(u8, workspace.name, name)) break workspace;
+        } else null;
+        if (current) |workspace| {
+            if (workspace.archived) |archived| {
+                if (!archived and entry.archived and app_state.g_single_window and findMyWorkspaceSlot(entry.id[0..entry.id_len]) == null) {
+                    const id = entry.id;
+                    const id_len = entry.id_len;
+                    const saved_name = entry.name;
+                    const name_len = entry.name_len;
+                    if (!absorbWorkspaceIntoSlots(id[0..id_len], saved_name[0..name_len])) return error.Storage;
+                    if (findWorkspace(id[0..id_len])) |restored| app_state.g_workspaces[restored].archived = false;
+                } else entry.archived = archived;
+            }
+        } else {
+            const was_synced = for (previous) |workspace| {
+                if (std.mem.eql(u8, workspace.name, name)) break true;
+            } else false;
+            if (entry.archived and was_synced) {
+                rememberRemovedWorkspace(name);
+                var path_buf: [512]u8 = undefined;
+                var stamp_buf: [32]u8 = undefined;
+                if (getSessionPathForWorkspace(&path_buf, entry.id[0..entry.id_len])) |path| archiveWorkspaceFile(path, workspaceDeleteStamp(&stamp_buf));
+                removeWorkspaceEntryAt(wi);
+                continue;
+            }
+        }
+        wi += 1;
+    }
+    writeWorkspaceRegistryFile();
 }
 
 pub fn saveWorkspaceRegistry() void {

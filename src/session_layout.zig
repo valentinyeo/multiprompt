@@ -16,7 +16,7 @@ pub fn decodeTransferColor(value: u8) ?u8 {
 pub const max_bytes = 1024 * 1024;
 pub const max_groups = 16;
 pub const Host = @import("account_hosts.zig").Host;
-pub const Workspace = struct { name: []const u8, color: ?u8 = null };
+pub const Workspace = struct { name: []const u8, color: ?u8 = null, archived: ?bool = null };
 
 pub fn workspaceColor(order: usize, override: ?u8) u8 {
     return override orelse @as(u8, @intCast(order % color_count));
@@ -187,6 +187,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
         var found = false;
         for (workspaces.items) |*old| if (std.mem.eql(u8, old.name, ws.name)) {
             old.color = ws.color;
+            if (ws.archived) |archived| old.archived = archived;
             found = true;
             break;
         };

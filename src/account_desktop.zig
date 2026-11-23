@@ -185,7 +185,11 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             break :blk workspaceDisplayName(@intCast(ws), &name_buf);
         } else getInstanceName();
         if (name.len > 32) return error.InvalidLayout;
-        try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
+        const archived = if (!app_state.g_single_window) blk: {
+            const wi = @import("workspaces.zig").findWorkspace(getInstanceName()) orelse break :blk false;
+            break :blk app_state.g_workspaces[wi].archived;
+        } else false;
+        try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws], .archived = archived });
     }
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         const remote = shell.tmux_session_len > 0;
@@ -210,6 +214,28 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .tmux_host = shell.tmux_host,
             .workspace = workspaces.items[ws].name,
         });
+    }
+    for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
+        if (!entry.archived or entry.name_len == 0 or entry.name_len > 32) continue;
+        const name = entry.name[0..entry.name_len];
+        const present = for (workspaces.items) |workspace| {
+            if (std.mem.eql(u8, workspace.name, name)) break true;
+        } else false;
+        if (present) continue;
+        var archived = session_layout.Workspace{ .name = try a.dupe(u8, name), .archived = true };
+        var path_buf: [512]u8 = undefined;
+        if (@import("session.zig").getSessionPathForWorkspace(&path_buf, entry.id[0..entry.id_len])) |path| {
+            if (readFileAllocWin32(path, SESSION_JSON_CAPACITY)) |cache| {
+                defer std.heap.page_allocator.free(cache);
+                if (account_layout.archivedWorkspaceFromCache(a, cache, name)) |saved| {
+                    archived = saved.workspaces[0];
+                    for (saved.tabs) |tab| {
+                        if (account_layout.find(tabs.items, tab) == null) try tabs.append(a, tab);
+                    }
+                } else |_| {}
+            }
+        }
+        try workspaces.append(a, archived);
     }
     const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
     return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
@@ -339,7 +365,8 @@ fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !sessio
         t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
     const kept = try account_layout.keepHeld(a, base, local, closed);
     if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
-    return kept;
+    var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    return account_layout.withoutRemovedWorkspaces(a, kept, removedWorkspaceNames(&removed_storage));
 }
 pub fn publishSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
@@ -368,6 +395,11 @@ pub fn publishSessionLayout() void {
         plain_local = account_layout.withoutStarredGroups(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutStarredGroups(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutStarredGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_workspace_archive_supported) {
+        plain_local = account_layout.activeWorkspaces(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.activeWorkspaces(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.activeWorkspaces(arena.allocator(), plain_synced) catch return;
     }
     if (!app_state.g_account_group_order_supported) {
         plain_local = account_layout.withoutGroupOrder(plain_local);
@@ -824,6 +856,7 @@ pub fn accountSignOut() void {
     app_state.g_account_appearance_supported = false;
     app_state.g_account_groups_supported = false;
     app_state.g_account_group_order_supported = false;
+    app_state.g_account_workspace_archive_supported = false;
     app_state.g_account_starred_groups_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
@@ -1418,6 +1451,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
+    reply.workspace_archive_supported = remote.workspace_archive_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
@@ -1491,6 +1525,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         synced_hosts = merged_hosts;
         if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
         if (!remote.group_order_supported) rebased = account_layout.withoutGroupOrder(rebased);
+        if (!remote.workspace_archive_supported) rebased = try account_layout.activeWorkspaces(alloc, rebased);
         if (!remote.starred_groups_supported) rebased = try account_layout.withoutStarredGroups(alloc, rebased);
         if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
@@ -1524,6 +1559,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
+    reply.workspace_archive_supported = remote.workspace_archive_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
@@ -1653,9 +1689,11 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
     restored = try appearance_intent.overlay(a, restored, g_appearance orelse &.{});
     var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
     restored = try account_layout.withoutRemovedWorkspaces(a, restored, removedWorkspaceNames(&removed_storage));
-    const cache = try account_layout.restoreCache(a, valid, restored) orelse return error.LayoutCapacity;
     const normalized = try session_layout.encode(out, restored);
     errdefer out.free(normalized);
+    try @import("workspaces.zig").applyAccountWorkspaceArchives(a, restored, &.{});
+    restored = try account_layout.activeWorkspaces(a, restored);
+    const cache = try account_layout.restoreCache(a, valid, restored) orelse return error.LayoutCapacity;
     if (!writeFileAtomicW(path, cache)) return error.Storage;
     return normalized;
 }
@@ -1738,10 +1776,17 @@ pub fn applyServerLayout(json: []const u8) !void {
     defer server.deinit();
     var filled_before: [app_state.MAX_GROUPS]u32 = undefined;
     const had_members = groupsWithMembers(&filled_before);
-    const local = try captureSessionLayout(a, true);
+    var removed_archive_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
+    const full = try account_layout.withoutRemovedWorkspaces(a, server.value, removedWorkspaceNames(&removed_archive_storage));
+    const previous = if (app_state.g_account_base) |base| try session_layout.parse(a, base) else null;
+    defer if (previous) |parsed| parsed.deinit();
+    try @import("workspaces.zig").applyAccountWorkspaceArchives(a, full, if (previous) |parsed| parsed.value.workspaces else &.{});
+    const active = try account_layout.activeWorkspaces(a, full);
+    const captured = try captureSessionLayout(a, true);
+    const local = try account_layout.activeWorkspaces(a, captured);
     var owned: [MAX_SHELLS]bool = undefined;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
-    var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], active, MAX_LWS, MAX_SHELLS);
     var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
     desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
@@ -1767,7 +1812,7 @@ pub fn applyServerLayout(json: []const u8) !void {
     var i = app_state.shell_count;
     while (i > 0) {
         i -= 1;
-        if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null) {
+        if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(active.tabs, local.tabs[i]) == null) {
             debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
             logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
             closeShellRemember(i, false);
@@ -1803,6 +1848,14 @@ pub fn applyServerLayout(json: []const u8) !void {
             app_state.g_ws_last_shell[wi] = old_last_shell[oi];
             app_state.g_ws_focus[wi] = old_focus[oi];
             break;
+        }
+        if (app_state.g_ws_id_len[wi] == 0) {
+            for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
+                if (!std.mem.eql(u8, entry.name[0..entry.name_len], name) or entry.id_len > app_state.g_ws_ids[wi].len) continue;
+                @memcpy(app_state.g_ws_ids[wi][0..entry.id_len], entry.id[0..entry.id_len]);
+                app_state.g_ws_id_len[wi] = entry.id_len;
+                break;
+            }
         }
         ensureWorkspaceSlotId(@intCast(wi));
     }
@@ -2101,15 +2154,22 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const alloc = arena.allocator();
-    const server = session_layout.parse(alloc, bytes) catch return;
+    const received = session_layout.parse(alloc, bytes) catch return;
+    defer received.deinit();
+    const archive_base = session_layout.parse(alloc, app_state.g_account_local_base orelse bytes) catch return;
+    defer archive_base.deinit();
+    const local_archive = accountCapturePush(alloc, archive_base.value) catch return;
+    const compatible = if (reply.workspace_archive_supported) received.value else account_layout.workspaceArchiveFrom(alloc, received.value, local_archive) catch return;
+    const server = session_layout.parse(alloc, session_layout.encode(alloc, compatible) catch return) catch return;
     defer server.deinit();
     g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
     app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_group_order_supported = reply.group_order_supported;
+    app_state.g_account_workspace_archive_supported = reply.workspace_archive_supported;
     app_state.g_account_starred_groups_supported = reply.starred_groups_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
-    var to_apply = bytes;
+    var to_apply = session_layout.encode(alloc, server.value) catch return;
     if (!reply.colors_supported and reply.job.edited != null) {
         const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
         defer edited.deinit();
@@ -2142,7 +2202,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const edit = reply.job.edited.?;
         const sent = session_layout.parse(alloc, edit) catch return;
         defer sent.deinit();
-        var ownership: [MAX_SHELLS]bool = undefined;
+        const ownership = alloc.alloc(bool, sent.value.tabs.len) catch return;
         const previous = session_layout.parse(alloc, app_state.g_account_base orelse bytes) catch return;
         defer previous.deinit();
         for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
@@ -2325,7 +2385,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         defer ack.deinit();
         local_ack = session_layout.encode(alloc, account_layout.unacknowledgedWhiteWorkspaces(alloc, ack.value, old_base.value, edited.value) catch return) catch return;
     }
-    const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, bytes) catch return;
+    const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, session_layout.encode(alloc, server.value) catch return) catch return;
     defer ack_parsed.deinit();
     const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
     accountWritePending(.{ .base = ack_parsed.value, .edited = edited_now, .appearance = owned_remaining }) catch {

@@ -77,7 +77,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!sameNames(a.group_order orelse &.{}, b.group_order orelse &.{})) return false;
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
-    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
+    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color or (x.archived orelse false) != (y.archived orelse false)) return false;
     for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
@@ -88,6 +88,11 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     var ws: std.ArrayList(layout.Workspace) = .empty;
     var tabs: std.ArrayList(Tab) = .empty;
     try ws.appendSlice(a, remote.workspaces);
+    for (ws.items) |*workspace| {
+        if (workspace.archived == null) {
+            if (workspaceIndex(local.workspaces, workspace.name)) |i| workspace.archived = local.workspaces[i].archived;
+        }
+    }
     try tabs.appendSlice(a, remote.tabs);
     for (tabs.items) |*tab| {
         if (find(local.tabs, tab.*)) |i| {
@@ -105,7 +110,16 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
         if (workspaceIndex(ws.items, tab.workspace) == null) try ws.append(a, if (workspaceIndex(local.workspaces, tab.workspace)) |i| local.workspaces[i] else .{ .name = tab.workspace });
         try tabs.append(a, tab);
     }
-    if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
+    var active_ws: usize = 0;
+    for (ws.items) |workspace| {
+        if (!(workspace.archived orelse false)) active_ws += 1;
+    }
+    var active_tabs: usize = 0;
+    for (tabs.items) |tab| {
+        const wi = workspaceIndex(ws.items, tab.workspace) orelse return error.InvalidLayout;
+        if (!(ws.items[wi].archived orelse false)) active_tabs += 1;
+    }
+    if (active_ws > max_ws or active_tabs > max_tabs) return error.LayoutCapacity;
     return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .group_order = remote.group_order, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
@@ -120,6 +134,87 @@ pub fn withoutRemovedWorkspaces(a: Allocator, target: Layout, removed: []const [
     for (target.tabs) |tab| {
         if (containsName(removed, tab.workspace)) continue;
         try tabs.append(a, tab);
+    }
+    var result = target;
+    result.workspaces = try ws.toOwnedSlice(a);
+    result.tabs = try tabs.toOwnedSlice(a);
+    return result;
+}
+
+pub fn archivedWorkspaceFromCache(a: Allocator, cache: []const u8, name: []const u8) !Layout {
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, cache, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidLayout;
+    const cached_tabs = parsed.value.object.get("tabs") orelse return error.InvalidLayout;
+    if (cached_tabs != .array) return error.InvalidLayout;
+    var workspace = layout.Workspace{ .name = try a.dupe(u8, name), .archived = true };
+    const cached_ws = @import("json_reader.zig").array(@import("json_reader.zig").field(parsed.value, "workspaces"));
+    if (cached_ws.len > 0) {
+        const color = @import("json_reader.zig").uintDefault(cached_ws[0], "color", layout.color_count);
+        if (color < layout.color_count) workspace.color = @intCast(color);
+    }
+    var tabs: std.ArrayList(Tab) = .empty;
+    for (cached_tabs.array.items) |item| {
+        if (item != .object) continue;
+        const session = item.object.get("tmux_session") orelse continue;
+        if (session != .string or session.string.len == 0) continue;
+        var normalized: std.json.Value = .{ .object = .empty };
+        var fields_iter = item.object.iterator();
+        while (fields_iter.next()) |field| try normalized.object.put(a, field.key_ptr.*, field.value_ptr.*);
+        try normalized.object.put(a, "kind", .{ .string = "tmux" });
+        try normalized.object.put(a, "workspace", .{ .string = name });
+        if (!normalized.object.contains("tmux_host")) try normalized.object.put(a, "tmux_host", .{ .integer = 0 });
+        inline for (.{ .{ "group", "group_id" }, .{ "starred_group", "starred_group_id" } }) |fields| {
+            const id = @import("json_reader.zig").uint(item, fields[1]);
+            for (@import("json_reader.zig").array(@import("json_reader.zig").field(parsed.value, "groups"))) |group| {
+                if (group != .object) continue;
+                if (id != 0 and @import("json_reader.zig").uint(group, "id") == id) {
+                    if (group.object.get("name")) |group_name| try normalized.object.put(a, fields[0], group_name);
+                }
+            }
+        }
+        const tab = try std.json.parseFromValueLeaky(Tab, a, normalized, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
+        try tabs.append(a, tab);
+    }
+    const workspaces = try a.alloc(layout.Workspace, 1);
+    workspaces[0] = workspace;
+    const result = Layout{ .workspaces = workspaces, .tabs = try tabs.toOwnedSlice(a) };
+    try layout.validate(result);
+    return result;
+}
+
+pub fn activeWorkspaces(a: Allocator, target: Layout) !Layout {
+    var ws: std.ArrayList(layout.Workspace) = .empty;
+    var tabs: std.ArrayList(Tab) = .empty;
+    for (target.workspaces) |workspace| {
+        if (workspace.archived orelse false) continue;
+        var active = workspace;
+        active.archived = null;
+        try ws.append(a, active);
+    }
+    for (target.tabs) |tab| {
+        if (workspaceIndex(ws.items, tab.workspace) != null) try tabs.append(a, tab);
+    }
+    var result = target;
+    result.workspaces = try ws.toOwnedSlice(a);
+    result.tabs = try tabs.toOwnedSlice(a);
+    return result;
+}
+
+pub fn workspaceArchiveFrom(a: Allocator, target: Layout, source: Layout) !Layout {
+    var ws: std.ArrayList(layout.Workspace) = .empty;
+    var tabs: std.ArrayList(Tab) = .empty;
+    try ws.appendSlice(a, target.workspaces);
+    try tabs.appendSlice(a, target.tabs);
+    for (source.workspaces) |workspace| {
+        if (workspaceIndex(ws.items, workspace.name)) |i| {
+            ws.items[i].archived = workspace.archived;
+        } else if (workspace.archived orelse false) {
+            try ws.append(a, workspace);
+            for (source.tabs) |tab| {
+                if (eq(u8, tab.workspace, workspace.name) and find(tabs.items, tab) == null) try tabs.append(a, tab);
+            }
+        }
     }
     var result = target;
     result.workspaces = try ws.toOwnedSlice(a);
@@ -255,8 +350,14 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
     }
     var ws: std.ArrayList(layout.Workspace) = .empty;
     try ws.appendSlice(a, edited.workspaces);
+    for (ws.items) |*workspace| {
+        if ((workspace.archived orelse false) and workspace.color == null) {
+            if (workspaceIndex(base.workspaces, workspace.name)) |wi| workspace.color = base.workspaces[wi].color;
+        }
+    }
     for (base.tabs, 0..) |t, i| {
-        if (t.tmux_session.len == 0 or find(edited.tabs, t) != null or find(closed, t) != null) continue;
+        const archived = if (workspaceIndex(edited.workspaces, t.workspace)) |wi| edited.workspaces[wi].archived orelse false else false;
+        if (t.tmux_session.len == 0 or find(edited.tabs, t) != null or (!archived and find(closed, t) != null)) continue;
         try tabs.insert(a, @min(i, tabs.items.len), t);
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(base.workspaces, t.workspace)) |wi| base.workspaces[wi] else .{ .name = t.workspace });
     }
@@ -298,11 +399,17 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         const ei = workspaceIndex(edited.workspaces, workspace.name) orelse continue;
         const bi = workspaceIndex(base.workspaces, workspace.name) orelse {
             if (edited.workspaces[ei].color) |color| workspace.color = color;
+            if (edited.workspaces[ei].archived) |archived| workspace.archived = archived;
             continue;
         };
         if (edited.workspaces[ei].color != base.workspaces[bi].color) workspace.color = edited.workspaces[ei].color;
+        if (workspace.archived == null) workspace.archived = base.workspaces[bi].archived;
+        if (edited.workspaces[ei].archived) |archived| {
+            if (archived != (base.workspaces[bi].archived orelse false)) workspace.archived = archived;
+        }
     }
     for (remote.tabs) |r| {
+        if (workspaceIndex(base.workspaces, r.workspace) != null and workspaceIndex(edited.workspaces, r.workspace) == null) continue;
         var t = r;
         if (find(edited.tabs, r)) |ei| {
             t.used = layout.maxUsed(t.used, edited.tabs[ei].used);
@@ -359,6 +466,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         try tabs.append(a, t);
     }
     for (edited.tabs) |t| {
+        if (workspaceIndex(base.workspaces, t.workspace) != null and workspaceIndex(remote.workspaces, t.workspace) == null) continue;
         if (find(base.tabs, t) == null and find(tabs.items, t) == null) try tabs.append(a, t);
     }
     for (tabs.items) |t| if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(edited.workspaces, t.workspace)) |i| edited.workspaces[i] else .{ .name = t.workspace });
@@ -1424,4 +1532,114 @@ test "IGSH-1890 Favorites groups sync between desktops and an empty first sync n
     const stripped = try withoutStarredGroups(a, pc1);
     try std.testing.expect(stripped.tabs[0].starred_group == null);
     try std.testing.expectEqualStrings("Hypertask", pc1.tabs[0].starred_group.?);
+}
+
+test "SOFT-2295 two desktops archive restore and delete through encoded account layouts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const active = Layout{ .workspaces = &.{ .{ .name = "Other" }, .{ .name = "Project", .color = 3, .archived = false } }, .tabs = &.{.{ .name = "Runner", .tmux_session = "runner", .tmux_host = 0, .workspace = "Project" }} };
+    const closed = active.tabs;
+    const archived_local = Layout{ .workspaces = &.{ active.workspaces[0], .{ .name = "Project", .archived = true } }, .tabs = &.{} };
+    const held = try keepHeld(a, active, archived_local, closed);
+    try std.testing.expectEqual(@as(usize, 1), held.tabs.len);
+    try std.testing.expectEqual(@as(?u8, 3), held.workspaces[1].color);
+    const uploaded = try rebase(a, active, held, active);
+    const downloaded = try layout.parse(a, try layout.encode(a, uploaded));
+    defer downloaded.deinit();
+    const second = try apply(a, active, &.{true}, downloaded.value, 9, 256);
+    try std.testing.expect(second.workspaces[1].archived.?);
+    try std.testing.expectEqualStrings("runner", second.tabs[0].tmux_session);
+    const visible = try activeWorkspaces(a, second);
+    try std.testing.expectEqual(@as(usize, 1), visible.workspaces.len);
+    try std.testing.expectEqual(@as(usize, 0), visible.tabs.len);
+    const restored = try rebase(a, second, active, downloaded.value);
+    const restored_wire = try layout.parse(a, try layout.encode(a, restored));
+    defer restored_wire.deinit();
+    const first = try apply(a, uploaded, &.{true}, restored_wire.value, 9, 256);
+    try std.testing.expect(!first.workspaces[1].archived.?);
+    try std.testing.expectEqual(@as(usize, 1), (try activeWorkspaces(a, first)).tabs.len);
+    const archived_again = try rebase(a, first, held, first);
+    const deleted = try withoutRemovedWorkspaces(a, archived_again, &.{"Project"});
+    const deleted_wire = try layout.parse(a, try layout.encode(a, try rebase(a, archived_again, deleted, archived_again)));
+    defer deleted_wire.deinit();
+    const gone = try apply(a, archived_again, &.{true}, deleted_wire.value, 9, 256);
+    try std.testing.expectEqual(@as(usize, 1), gone.workspaces.len);
+    try std.testing.expectEqual(@as(usize, 0), gone.tabs.len);
+    try std.testing.expect(equal(gone, try rebase(a, archived_again, archived_again, deleted_wire.value)));
+}
+
+test "SOFT-2295 archive conflicts preserve unrelated edits and explicit restore" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = Layout{ .workspaces = &.{.{ .name = "Project", .archived = false }}, .tabs = &.{} };
+    const archived = Layout{ .workspaces = &.{.{ .name = "Project", .archived = true }}, .tabs = &.{} };
+    const colored = Layout{ .workspaces = &.{.{ .name = "Project", .color = 2, .archived = false }}, .tabs = &.{} };
+    const merged = try rebase(a, base, colored, archived);
+    try std.testing.expect(merged.workspaces[0].archived.?);
+    try std.testing.expectEqual(@as(?u8, 2), merged.workspaces[0].color);
+    const restored = try rebase(a, archived, base, merged);
+    try std.testing.expect(!restored.workspaces[0].archived.?);
+    try std.testing.expectEqual(@as(?u8, 2), restored.workspaces[0].color);
+    try std.testing.expect(!(try rebase(a, archived, archived, restored)).workspaces[0].archived.?);
+    try std.testing.expect(publishNeeded(archived, base, base));
+    try std.testing.expect(publishNeeded(base, archived, archived));
+}
+
+test "SOFT-2295 workspace deletion wins over a concurrent session addition" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = Layout{ .workspaces = &.{ .{ .name = "Other" }, .{ .name = "Project", .archived = true } }, .tabs = &.{} };
+    const deleted = Layout{ .workspaces = base.workspaces[0..1], .tabs = &.{} };
+    const added = Layout{ .workspaces = base.workspaces, .tabs = &.{.{ .name = "New", .tmux_session = "new", .tmux_host = 0, .workspace = "Project" }} };
+    for ([_]Layout{ try rebase(a, base, deleted, added), try rebase(a, base, added, deleted) }) |result| {
+        try std.testing.expectEqual(@as(usize, 1), result.workspaces.len);
+        try std.testing.expectEqual(@as(usize, 0), result.tabs.len);
+    }
+}
+
+test "SOFT-2295 older wire schema stays strict and local archive state survives its round trip" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const legacy = try layout.parse(a, "{\"schema\":1,\"revision\":1,\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}");
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(?bool, null), legacy.value.workspaces[0].archived);
+    const local = Layout{ .workspaces = &.{ .{ .name = "Other", .archived = false }, .{ .name = "Project", .archived = true } }, .tabs = &.{.{ .name = "Runner", .tmux_session = "runner", .tmux_host = 0, .workspace = "Project" }} };
+    const wire = try layout.encode(a, try activeWorkspaces(a, local));
+    const LegacyLayout = struct { schema: u32, revision: u64, workspaces: []const struct { name: []const u8, color: ?u8 = null }, tabs: []const Tab };
+    const old_reader = try std.json.parseFromSlice(LegacyLayout, a, wire, .{});
+    defer old_reader.deinit();
+    try std.testing.expectEqual(@as(usize, 1), old_reader.value.workspaces.len);
+    try std.testing.expectEqual(@as(usize, 0), old_reader.value.tabs.len);
+    const echoed = try layout.parse(a, wire);
+    defer echoed.deinit();
+    const preserved = try workspaceArchiveFrom(a, echoed.value, local);
+    try std.testing.expect(preserved.workspaces[1].archived.?);
+    try std.testing.expectEqual(@as(usize, 1), preserved.tabs.len);
+    try std.testing.expect(equal(try activeWorkspaces(a, preserved), echoed.value));
+    const supported = try layout.parse(a, try layout.encode(a, preserved));
+    defer supported.deinit();
+    try std.testing.expect(supported.value.workspaces[1].archived.?);
+    try std.testing.expectError(error.UnexpectedToken, layout.parse(a, "{\"workspaces\":[{\"name\":\"Other\",\"archived\":\"true\"}],\"tabs\":[]}"));
+}
+
+test "SOFT-2295 an offline archive captures saved remote sessions without uploading local processes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const snapshot = "{\"workspaces\":[{\"name\":\"Project\",\"color\":2}],\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Local\",\"pid\":123},{\"kind\":\"tmux\",\"name\":\"Runner\",\"tmux_session\":\"runner\",\"workspace\":0,\"group_id\":7,\"starred_group_id\":9,\"pid\":456}],\"groups\":[{\"id\":7,\"name\":\"Work\"},{\"id\":9,\"name\":\"Pinned\"}]}";
+    const captured = try archivedWorkspaceFromCache(a, snapshot, "Project");
+    try std.testing.expect(captured.workspaces[0].archived.?);
+    try std.testing.expectEqual(@as(?u8, 2), captured.workspaces[0].color);
+    try std.testing.expectEqual(@as(usize, 1), captured.tabs.len);
+    try std.testing.expectEqual(@as(u8, 0), captured.tabs[0].tmux_host);
+    try std.testing.expectEqualStrings("Project", captured.tabs[0].workspace);
+    try std.testing.expectEqualStrings("Work", captured.tabs[0].group.?);
+    try std.testing.expectEqualStrings("Pinned", captured.tabs[0].starred_group.?);
+    const wire = try layout.encode(a, captured);
+    try std.testing.expect(std.mem.indexOf(u8, wire, "pid") == null);
+    try std.testing.expect(std.mem.indexOf(u8, wire, "Local") == null);
 }
