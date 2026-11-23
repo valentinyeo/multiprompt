@@ -296,6 +296,7 @@ pub fn headerClick(x: i32, y: i32) bool {
     opened = true;
     _ = w.MoveWindow(hwnd, anchor.left, top, width, height, 0);
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
+    _ = focus.SetFocus(hwnd);
     _ = w.SetCapture(hwnd);
     _ = w.InvalidateRect(hwnd, null, 0);
     return true;

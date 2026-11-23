@@ -27,6 +27,17 @@ test('IGSH-2281 workspace card rows skip the hidden empty Main', () => {
   assert.match(native, /MouseAt\(point\.X, point\.Y, 0\);\s+MouseAt\(point\.X, point\.Y, 2\);\s+MouseAt\(point\.X, point\.Y, 4\);/);
 });
 
+test('SOFT-2380 opening the workspace card gives its keyboard handler focus', () => {
+  const open = body('headerClick');
+  const show = open.indexOf('w.SWP_SHOWWINDOW');
+  const focus = open.indexOf('focus.SetFocus(hwnd)', show);
+  const capture = open.indexOf('w.SetCapture(hwnd)', show);
+  assert.ok(show >= 0 && focus > show && capture > focus, 'show and focus the card before capturing mouse input');
+  const journey = read('.claude/skills/verify-multiprompt/workspace-switcher.ps1');
+  assert.match(journey, /GetFocusedWindow\(\$script:window\) -eq \$card/);
+  assert.match(journey, /'Enter activates arrow-selected workspace'/);
+});
+
 test('IGSH-2281 an empty Main workspace stays out of the menu', () => {
   const empty = body('emptyHome');
   assert.match(empty, /eql\(u8, entry\.id\[0\.\.entry\.id_len\], "default"\)/);

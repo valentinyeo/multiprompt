@@ -20,6 +20,8 @@ function Open-WorkspaceCard([string]$Shot) {
     Record 'Click workspace name above the sessions'
     [VerifyNative]::ClickClient($script:window, 80, ($top + 26))
     Wait-Until { (Get-WorkspaceCard) -ne [IntPtr]::Zero } 'native workspace card visible'
+    $card = Get-WorkspaceCard
+    Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $card } 'native workspace card owns keyboard focus'
     Snapshot $Shot
     return Get-WorkspaceCard
 }
