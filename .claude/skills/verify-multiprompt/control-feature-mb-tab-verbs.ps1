@@ -80,7 +80,119 @@ function Invoke-MbLayoutNode([string[]]$NodeArgs) {
     return $combined.Trim()
 }
 
+function Convert-MbTabUnixPath([string]$WindowsPath) {
+    $full = [IO.Path]::GetFullPath($WindowsPath)
+    if ($full -match '^([A-Za-z]):\\(.*)$') { return ('/' + $Matches[1].ToLower() + '/' + ($Matches[2] -replace '\\', '/')) }
+    return ($full -replace '\\', '/')
+}
+
+function Test-MbTabStandInVerb([string[]]$NodeArgs) {
+    if ($NodeArgs.Count -lt 1) { return $false }
+    return @('open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore') -contains $NodeArgs[0]
+}
+
+function Wait-MbTabTunnelPort() {
+    if ($null -eq $appProcess) { throw 'Desktop process is missing before tunnel wait' }
+    Wait-MbTab 'tunnel-inbound listener' {
+        if (!(Test-Path -LiteralPath $logPath)) { return $false }
+        $listener = [regex]::Match((Read-MbTabText $logPath), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+        if (-not $listener.Success) { return $false }
+        $port = [int]$listener.Groups[1].Value
+        $appProcess.Refresh()
+        if ($appProcess.HasExited) { return $false }
+        $owned = @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -eq $appProcess.Id })
+        if ($owned.Count -ne 1) { return $false }
+        $script:MbTabZsbPort = $port
+        return $true
+    } 60
+}
+
+function Initialize-MbTabStandIn() {
+    if ($script:MbTabZsbPort -le 0) { throw 'tunnel-inbound port is not ready' }
+    $MbTabStandInRoot = Join-Path $workRoot 'stand-in'
+    $standInBin = Join-Path $MbTabStandInRoot 'local/bin'
+    New-Item -ItemType Directory -Force -Path $standInBin | Out-Null
+    $zsbShipped = Join-Path $repoRoot 'src/mp_zsb.sh'
+    if (!(Test-Path -LiteralPath $zsbShipped)) { throw 'src/mp_zsb.sh is missing on the branch under test' }
+    Copy-Item -LiteralPath $zsbShipped -Destination (Join-Path $standInBin 'zsb') -Force
+    $python = (Get-Command python.exe -ErrorAction Stop).Source
+    $pythonUnix = (Convert-MbTabUnixPath $python) -replace "'", "'\\''"
+    [IO.File]::WriteAllText((Join-Path $standInBin 'python3'), ("#!/usr/bin/env bash`nexec '" + $pythonUnix + "' `"$@`"`n"))
+    $script:MbTabStandInRoot = $MbTabStandInRoot
+    $script:MbTabStandInUnix = Convert-MbTabUnixPath $MbTabStandInRoot
+    $script:MbTabStandInBinUnix = Convert-MbTabUnixPath $standInBin
+    $script:MbTabRepoUnix = Convert-MbTabUnixPath $repoRoot
+    $script:MbTabNodeUnix = Convert-MbTabUnixPath $MbTabNode
+    try { $script:MbTabBash = (Join-Path (Split-Path (Split-Path (Get-Command git.exe -ErrorAction Stop).Source)) 'bin/bash.exe') }
+    catch { throw 'Git Bash is required for the mb tab stand-in shell' }
+    if (!(Test-Path -LiteralPath $script:MbTabBash)) { throw 'Git Bash was not found for the mb tab stand-in shell' }
+    $script:MbTabZsbOrdinal = 0
+}
+
+function Read-MbTabZsbJson([string]$Text) {
+    $lines = @($Text -split "`n" | Where-Object { $_.Trim() -ne '' })
+    if ($lines.Count -lt 1) { return $null }
+    try { return ($lines[$lines.Count - 1] | ConvertFrom-Json) } catch { return $null }
+}
+
+function Invoke-MbTabStandInZsb([string[]]$ZsbArgs, [string]$EvidenceStem) {
+    if ($script:MbTabZsbPort -le 0 -or -not $script:MbTabBash) { throw 'mb tab stand-in is not initialized' }
+    $argText = ($ZsbArgs | ForEach-Object {
+        if ($_ -notmatch '[\s"$`\\]') { $_ } else { '"' + ($_ -replace '\\', '\\\\' -replace '"', '\\"' -replace '\$', '\\$' -replace '`', '\\`') + '"' }
+    }) -join ' '
+    $outputPath = Join-Path $workRoot ($EvidenceStem + '-zsb-out.txt')
+    $errorPath = Join-Path $workRoot ($EvidenceStem + '-zsb-err.txt')
+    $command = "export HOME='" + $script:MbTabStandInUnix + "' ZSB_PORT='" + $script:MbTabZsbPort + "' PATH='" + $script:MbTabStandInBinUnix + ":'`$PATH; bash '" + $script:MbTabStandInBinUnix + "/zsb' " + $argText
+    $bashProcess = Start-Process -FilePath $script:MbTabBash -ArgumentList @('--noprofile', '--norc', '-c', $command) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $combined = (Read-MbTabText $outputPath) + (Read-MbTabText $errorPath)
+    Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
+    if ($bashProcess.ExitCode -ne 0) { throw ('zsb ' + ($ZsbArgs -join ' ') + " exited $($bashProcess.ExitCode): $($combined.Trim())") }
+    $parsed = Read-MbTabZsbJson $combined
+    $lastLine = (@($combined -split "`n" | Where-Object { $_.Trim() -ne '' }))[-1]
+    if ($lastLine) { [IO.File]::WriteAllText((Join-Path $Evidence ($EvidenceStem + '.json')), $lastLine) }
+    return $parsed
+}
+
+function Assert-MbTabZsbBeforeVerb([string]$Label) {
+    $script:MbTabZsbOrdinal = 1 + [int]$script:MbTabZsbOrdinal
+    $stem = ('zsb-before-' + $Label + '-' + $script:MbTabZsbOrdinal)
+    $listed = Invoke-MbTabStandInZsb @('workspace-list') ($stem + '-workspace-list')
+    $pc = Invoke-MbTabStandInZsb @('pc-state') ($stem + '-pc-state')
+    if ($null -ne $listed -and $listed.ok -eq $true -and ($null -eq $pc -or $pc.ok -ne $true)) {
+        $result.verdict = 'fail'
+        $result.status = 'failed'
+        $result.error = 'workspace-list succeeded but pc-state failed on the stand-in shell; this indicates a SOFT-3141 desktop pc-state bug (PR 1312), not mb-tab journey wiring'
+        $result.pc_state_pr1312 = $true
+        $result.step = $stage
+        throw [System.Exception]::new('MB_TAB_PC_STATE_PR1312')
+    }
+    if ($null -eq $listed -or $listed.ok -ne $true) { throw 'zsb workspace-list failed before mb verb on the stand-in shell' }
+    if ($null -eq $pc -or $pc.ok -ne $true) { throw 'zsb pc-state failed before mb verb on the stand-in shell' }
+}
+
+function Invoke-MbTabStandInNode([string[]]$NodeArgs) {
+    Assert-MbTabZsbBeforeVerb ($NodeArgs -join '-')
+    $mbArgs = ($NodeArgs | ForEach-Object {
+        if ($_ -notmatch '[\s"$`\\]') { $_ } else { '"' + ($_ -replace '\\', '\\\\' -replace '"', '\\"' -replace '\$', '\\$' -replace '`', '\\`') + '"' }
+    }) -join ' '
+    $outputPath = Join-Path $workRoot 'mb-out.txt'
+    $errorPath = Join-Path $workRoot 'mb-err.txt'
+    $sessions = Convert-MbTabUnixPath (Join-Path $repoRoot 'tools/mp-sessions')
+    $envText = "export HOME='" + $script:MbTabStandInUnix + "' ZSB_PORT='" + $script:MbTabZsbPort + "' PATH='" + $script:MbTabStandInBinUnix + ":'`$PATH MULTIPROMPT_MP_SESSIONS='" + $sessions + "' MULTIPROMPT_HOST='0'"
+    if ($env:MULTIPROMPT_KEY) { $envText += " MULTIPROMPT_KEY='" + ([string]$env:MULTIPROMPT_KEY -replace "'", "'\\''") + "'" }
+    if ($env:MULTIPROMPT_URL) { $envText += " MULTIPROMPT_URL='" + ([string]$env:MULTIPROMPT_URL -replace "'", "'\\''") + "'" }
+    $command = $envText + "; cd '" + $script:MbTabRepoUnix + "'; '" + $script:MbTabNodeUnix + "' tools/mb.mjs " + $mbArgs
+    $bashProcess = Start-Process -FilePath $script:MbTabBash -ArgumentList @('--noprofile', '--norc', '-c', $command) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $combined = (Read-MbTabText $outputPath) + (Read-MbTabText $errorPath)
+    Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
+    $reported = ($combined -replace 'mpk_[A-Za-z0-9_-]+', '<redacted>').Trim()
+    if ($bashProcess.ExitCode -ne 0) { throw ('mb ' + ($NodeArgs -join ' ') + " exited $($bashProcess.ExitCode): $reported") }
+    if ($reported -ne $combined.Trim()) { throw ('mb printed a service key: ' + $reported) }
+    return $combined.Trim()
+}
+
 function Invoke-MbTabNode([string[]]$NodeArgs) {
+    if (Test-MbTabStandInVerb $NodeArgs) { return Invoke-MbTabStandInNode $NodeArgs }
     $mbTool = Join-Path $repoRoot 'tools/mb.mjs'
     $outputPath = Join-Path $workRoot 'mb-out.txt'
     $errorPath = Join-Path $workRoot 'mb-err.txt'
@@ -236,6 +348,10 @@ try {
     $stage = 'desktop launch'
     $appProcess = Start-Process -FilePath $Exe -ArgumentList @('--single-window', '--name', 'mb-tab-verbs', '--no-window-restore') -PassThru -RedirectStandardOutput (Join-Path $workRoot 'desktop.log') -RedirectStandardError (Join-Path $workRoot 'desktop.err.log')
     Wait-MbTab 'desktop window' { $appProcess.Refresh(); $appProcess.MainWindowHandle -ne [IntPtr]::Zero } 60
+    $stage = 'tunnel-inbound'
+    Wait-MbTabTunnelPort
+    $stage = 'mb-tab-stand-in'
+    Initialize-MbTabStandIn
     Save-MbTabSession 'before'
     Save-MbTabShot (Join-Path $Evidence 'before.png')
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
@@ -349,7 +465,7 @@ try {
     $result = @{ verdict = 'pass'; status = 'passed'; feature = $Feature; verb = $MbTabVerb; checks = @($MbTabVerb); cleanup = 'pending' }
 } catch {
     $failure = $_
-    $result.error = $_.Exception.Message
+    if ($_.Exception.Message -ne 'MB_TAB_PC_STATE_PR1312') { $result.error = $_.Exception.Message }
     $result.step = $stage
 } finally {
     $remaining = 0
