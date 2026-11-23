@@ -159,6 +159,16 @@ def answer_as_owner(line, cwd, supplied):
     return None
 
 
+def cross_owner_chat(cwd, supplied):
+    candidates = [cwd]
+    if supplied not in (None, "-") and str(supplied) != str(cwd):
+        candidates.append(supplied)
+    for candidate in candidates:
+        if owner_for_cwd(candidate, HOME) is not None:
+            return True
+    return False
+
+
 def project_and_plugins(cwd, settings):
     overrides = settings.get("skillOverrides") or {}
     rows = scan(HOME / ".claude/skills", "", "S", overrides)
@@ -747,6 +757,9 @@ def request(line):
         answer = answer_as_owner(line, cwd, fields[4])
         if answer is not None:
             return answer
+        if cross_owner_chat(cwd, fields[4]):
+            header = ["@mp", rid, op, "error", clean(str(cwd), 700), "0"]
+            return "\n".join(("\t".join(header), END, ""))
     if op == "ping":
         status, rows = "ok", []
     elif op == "files":

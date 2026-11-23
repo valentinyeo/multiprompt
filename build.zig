@@ -766,8 +766,10 @@ pub fn build(b: *std.Build) void {
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js", "tools/chat-skill-pill-proof.test.mjs" });
     test_step.dependOn(&chat_rich_tests.step);
     test_step.dependOn(&chat_view_gaps_tests.step);
-    const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js", "tools/chat-skills-refresh.test.js" });
+    const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js", "tools/chat-skills-refresh.test.js", "tools/chat-command-owner.test.js", "tools/chat-skill-owner.test.js" });
     test_step.dependOn(&chat_autocomplete_tests.step);
+    const chat_skill_owner_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-owner.test.js" });
+    vps_test_step.dependOn(&chat_skill_owner_linux_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });
     const run_bridge_tests = b.addRunArtifact(bridge_tests);
     test_step.dependOn(&run_bridge_tests.step);
