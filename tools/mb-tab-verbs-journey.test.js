@@ -43,4 +43,6 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   const { touchedJourneys } = require('./touched-journeys.cjs');
   const picked = touchedJourneys(['src/session_layout_sync.zig'], path.join(root, skill, 'features'));
   assert.deepEqual(picked.features, ['mb-tab-layout-sync']);
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /Install browser toggle recorder[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
 });

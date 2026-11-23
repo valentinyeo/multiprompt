@@ -531,7 +531,7 @@ jobs:
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || startsWith(env.FEATURE, 'mb-tab-') || inputs.candidate_artifact != ''
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
