@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dots } from './chat-working-proof.mjs';
+import { dots, dotRows } from './chat-working-proof.mjs';
 
 function frame(centers = [], fill = 100, radius = 3) {
   const image = { width: 200, height: 100, pixels: Buffer.alloc(200 * 100 * 4, 24) };
@@ -27,6 +27,14 @@ test('visible three-dot frames are distinguished from idle, one dot and separate
 
 test('full strength glyph-sized blobs are not dots', () => {
   assert.equal(dots(frame([[20, 48], [30, 50], [40, 50]], 200, 3), area), null);
+});
+
+test('SOFT-2642 every row of working dots is counted, not just the first one', () => {
+  assert.equal(dotRows(frame([[20, 20], [30, 20], [40, 20]]), area).length, 1);
+  const stacked = frame([[20, 20], [30, 20], [40, 20], [20, 50], [30, 50], [40, 50]]);
+  assert.equal(dotRows(stacked, area).length, 2);
+  assert.deepEqual(dots(stacked, area), dotRows(stacked, area)[0]);
+  assert.equal(dotRows(frame([[20, 20], [30, 50], [40, 80]]), area).length, 0);
 });
 
 test('small dim dots are still found', () => {

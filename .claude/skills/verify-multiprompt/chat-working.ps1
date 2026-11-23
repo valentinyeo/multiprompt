@@ -68,6 +68,16 @@ Wait-Until {
     ($first.dots | ConvertTo-Json -Compress) -cne ($next.dots | ConvertTo-Json -Compress)
 } 'IGSH-924 dots animate' -Seconds 20
 $check.frames += (Get-Content (Join-Path $Evidence 'working-1.json') -Raw | ConvertFrom-Json)
+$single = @{ name = 'SOFT-2642-one-set-of-dots'; passed = $false; rows = @() }
+$result.checks += $single
+foreach ($frame in @('working-still-0', 'working-still-1', 'working-still-2')) {
+    Wait-Until { & $probe $frame 'busy' } ('SOFT-2642 one set of dots on the empty session frame ' + $frame) -Seconds 20
+    $single.rows += (Get-Content (Join-Path $Evidence ($frame + '.json')) -Raw | ConvertFrom-Json).rows
+    Start-Sleep -Milliseconds 750
+}
+if (@($single.rows | Where-Object { $_ -ne 1 }).Count) { throw ('SOFT-2642 empty session showed more than one set of dots: ' + ($single.rows -join ',')) }
+$single.passed = $true
+Save-Json $single 'working-one-set.json'
 & $captureSecondLines 'working'
 $ready = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
 $replyEvent = [Threading.EventWaitHandle]::OpenExisting(('Local\MultipromptInlineReply-' + $ready.pid))

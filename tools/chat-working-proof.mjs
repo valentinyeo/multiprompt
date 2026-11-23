@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBmp, writeCrop } from './chat-code-font-proof.mjs';
 
-export function dots(image, area) {
+export function dotBlobs(image, area) {
   const rgb = (x, y) => {
     const n = (y * image.width + x) * 4;
     return [image.pixels[n], image.pixels[n + 1], image.pixels[n + 2]];
@@ -35,20 +35,45 @@ export function dots(image, area) {
     const w = blob.right - blob.left, h = blob.bottom - blob.top;
     if (w >= 4 && w <= 12 && h >= 4 && h <= 12 && Math.abs(w - h) <= 1 && blob.pixels / (w * h) >= 0.55 && blob.peak <= 120) blobs.push(blob);
   }
-  blobs.sort((a, b) => a.left - b.left);
-  for (const a of blobs) for (const b of blobs) for (const c of blobs) {
-    const dx = b.left - a.left;
-    if (dx < 7 || dx > 18 || Math.abs(c.left - b.left - dx) > 1 || Math.max(a.top, b.top, c.top) - Math.min(a.top, b.top, c.top) > 4) continue;
-    return [a, b, c];
+  return blobs.sort((a, b) => a.left - b.left || a.top - b.top);
+}
+
+export function dotRows(image, area) {
+  const found = dotBlobs(image, area);
+  const used = new Set();
+  const rows = [];
+  for (const a of found) {
+    if (used.has(a)) continue;
+    const row = (() => {
+      for (const b of found) {
+        if (used.has(b) || b === a) continue;
+        const dx = b.left - a.left;
+        if (dx < 7 || dx > 18 || Math.abs(b.top - a.top) > 4) continue;
+        for (const c of found) {
+          if (used.has(c) || c === a || c === b) continue;
+          if (Math.abs(c.left - b.left - dx) > 1 || Math.abs(c.top - a.top) > 4) continue;
+          return [a, b, c];
+        }
+      }
+      return null;
+    })();
+    if (!row) continue;
+    for (const dot of row) used.add(dot);
+    rows.push(row);
   }
-  return null;
+  return rows.sort((left, right) => left[0].top - right[0].top || left[0].left - right[0].left);
+}
+
+export function dots(image, area) {
+  return dotRows(image, area)[0] || null;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [file, areaFile, output, state, previousFile] = process.argv.slice(2);
   const image = readBmp(file);
   const area = JSON.parse(fs.readFileSync(areaFile, 'utf8').replace(/^\uFEFF/, ''));
-  const found = dots(image, area);
+  const rows = dotRows(image, area);
+  const found = rows[0] || null;
   let replyPixels = 0;
   if (state === 'idle') {
     const previous = JSON.parse(fs.readFileSync(previousFile, 'utf8')).dots;
@@ -62,8 +87,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     if (replyPixels < 60) throw new Error('IGSH-924 reply not painted in the former dots slot');
   }
-  fs.writeFileSync(output, JSON.stringify({ dots: found, area, replyPixels }, null, 2));
+  fs.writeFileSync(output, JSON.stringify({ dots: found, rows: rows.length, area, replyPixels }, null, 2));
   if ((state === 'busy') !== !!found) throw new Error(`IGSH-924 ${state === 'busy' ? 'missing inline dots' : 'dots remain after reply'}`);
+  if (rows.length > 1) throw new Error(`SOFT-2642 ${rows.length} sets of working dots painted at once`);
   if (found) writeCrop(image, { left: Math.max(area.left, found[0].left - 8), top: Math.max(area.top, Math.min(...found.map(d => d.top)) - 8), right: Math.min(area.right, found[2].right + 8), bottom: Math.min(area.bottom, Math.max(...found.map(d => d.bottom)) + 8) }, 4, output.replace(/\.json$/, '-crop.png'));
   console.log(state === 'busy' ? 'INLINE_DOTS_VISIBLE' : 'INLINE_DOTS_ABSENT');
 }

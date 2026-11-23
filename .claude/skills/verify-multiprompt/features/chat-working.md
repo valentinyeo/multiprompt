@@ -4,7 +4,7 @@ Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, s
 
 ## Sub-features
 
-- Three dots sit in the next assistant reply slot while the existing working signal is active.
+- Three dots sit in the next assistant reply slot while the existing working signal is active. The row is painted once per frame and the area it left behind is repainted, so a moved indicator never stacks copies (SOFT-2642).
 - Animation changes the dots, without changing message geometry.
 - Finishing or waiting for permission removes the indicator.
 
@@ -19,6 +19,7 @@ The job-only console stand-in prints a question and Claude's working line.
 The journey emits the supported ACTIVE and DONE hook notifications for that owned session, as a real hooked agent does.
 The real app detects it and paints its native transcript.
 The journey finds three separate round dots from screenshot pixels, requires a different animation frame, signals the stand-in to finish, and requires the dots to disappear only once the chat is idle.
+SOFT-2642 captures three more frames of the still-empty chat 750 ms apart and fails when any frame shows more than one row of dots, so a moved indicator that repaints itself in a new slot cannot leave copies behind (`working-still-*.png`, `working-one-set.json`).
 Inspect `working-0.png`, `working-1.png`, their crops, `after.png` and `working-proof.json`.
 IGSH-1665 waits for the published current step plus minutes or the exact idle Ready reply, then captures `second-line-{working,finished}-{light,amoled,edgegray}-{inbox,sidebar}.png` through real keyboard actions.
 The existing gray theme is Edge Grey, not Graphite 2. These captures do not claim an unavailable theme.
