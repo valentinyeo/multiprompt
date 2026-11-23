@@ -2,10 +2,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -428,46 +430,112 @@ class MpSessionsTest(unittest.TestCase):
             self.assertEqual(row["workspace"], "Studio")
             self.assertEqual(row["self"], row["tmux"] == "live-1111aaaa")
 
+    def serve_hosted_fixture(self, entries):
+        self.seed_hosted_fixture(entries)
+        sock_temp = tempfile.TemporaryDirectory(prefix="mp-", dir="/tmp")
+        self.addCleanup(sock_temp.cleanup)
+        sock_root = Path(sock_temp.name) / ("mp-agent-host-" + str(os.getuid()))
+        sock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        sock_root.chmod(0o700)
+        delivered = []
+        stop = threading.Event()
+        servers = []
+        threads = []
+        for tmux, entry in entries.items():
+            sid = entry["sid"]
+            key = hashlib.sha256(("claude:" + sid).encode()).hexdigest()[:32]
+            (self.host / (key + ".owner.json")).write_text(json.dumps(dict(
+                owner="host", pid=os.getpid())), encoding="utf-8")
+            sock_path = sock_root / (key + ".sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(str(sock_path))
+            server.listen(8)
+            server.settimeout(0.1)
+            servers.append((server, sock_path))
+
+            def serve(listener=server, session_tmux=tmux):
+                while not stop.is_set():
+                    try:
+                        conn, _ = listener.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    with conn:
+                        conn.settimeout(2.0)
+                        data = b""
+                        while b"\n" not in data and len(data) <= 65536:
+                            chunk = conn.recv(65536)
+                            if not chunk:
+                                break
+                            data += chunk
+                        if not data.strip():
+                            continue
+                        req = json.loads(data.split(b"\n", 1)[0].decode("utf-8"))
+                        if req.get("op") == "ping":
+                            reply = dict(status="ok", pid=os.getpid())
+                        elif req.get("op") == "deliver":
+                            delivered.append((session_tmux, req.get("id"), req.get("text")))
+                            reply = dict(status="sent")
+                        else:
+                            reply = dict(status="ok")
+                        conn.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode("utf-8"))
+
+            worker = threading.Thread(target=serve, daemon=True)
+            worker.start()
+            threads.append(worker)
+
+        def close_servers():
+            stop.set()
+            for server, sock_path in servers:
+                try:
+                    server.close()
+                except OSError:
+                    pass
+                try:
+                    sock_path.unlink()
+                except OSError:
+                    pass
+            for worker in threads:
+                worker.join(timeout=2.0)
+
+        self.addCleanup(close_servers)
+        return sock_temp.name, delivered
+
     def test_MUBO_194_send_workspace_mine_messages_peers_by_name_and_repeat_is_harmless(self):
         fixture = json.loads((MUBO_194_FIXTURES / "chat-names.json").read_text(encoding="utf-8"))
-        self.seed_hosted_fixture(fixture)
+        tmp_dir, delivered = self.serve_hosted_fixture(fixture)
         (self.home / ".local/state/multiprompt/chat-names.json").write_text(
             json.dumps(fixture), encoding="utf-8")
         offline = json.dumps(dict(ok=False, error="bridge_offline"))
-        first = self.run_sessions("send", "--workspace", "mine", "sync up at noon",
-                                  MP_SESSIONS_TEST_LIST=offline,
-                                  MULTIBOT_SESSION="live-1111aaaa",
-                                  MULTIPROMPT_READER_SOURCE=str(READER))
-        self.assertIn(first.returncode, (0, 3), first.stderr)
+        extra = dict(MP_SESSIONS_TEST_LIST=offline, MULTIBOT_SESSION="live-1111aaaa",
+                     MULTIPROMPT_READER_SOURCE=str(READER), TMPDIR=tmp_dir, TEMP=tmp_dir, TMP=tmp_dir)
+        first = self.run_sessions("send", "--workspace", "mine", "sync up at noon", **extra)
+        self.assertEqual(first.returncode, 0, first.stderr)
         first_payload = json.loads(first.stdout)
         self.assertEqual({row["name"] for row in first_payload}, {"Design Peer", "QA Peer"})
         self.assertEqual({row["sid"] for row in first_payload},
                          {"22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"})
+        self.assertEqual({row["state"] for row in first_payload}, {"sent"})
         rows_after_first = self.message_rows()
         self.assertEqual(len(rows_after_first), 2)
+        self.assertEqual(len(delivered), 2)
         for row in rows_after_first:
             self.assertEqual(row[3], "From Lead Chat: sync up at noon")
             self.assertEqual(row[4], "agent")
-        second = self.run_sessions("send", "--workspace", "mine", "sync up at noon",
-                                   MP_SESSIONS_TEST_LIST=offline,
-                                   MULTIBOT_SESSION="live-1111aaaa",
-                                   MULTIPROMPT_READER_SOURCE=str(READER))
-        self.assertIn(second.returncode, (0, 3), second.stderr)
+        second = self.run_sessions("send", "--workspace", "mine", "sync up at noon", **extra)
+        self.assertEqual(second.returncode, 0, second.stderr)
         second_payload = json.loads(second.stdout)
         self.assertEqual({row["id"] for row in second_payload}, {row["id"] for row in first_payload})
         self.assertEqual(len(self.message_rows()), 2)
-        direct_first = self.run_sessions("send", "Design Peer", "direct ping",
-                                         MP_SESSIONS_TEST_LIST=offline,
-                                         MULTIBOT_SESSION="live-1111aaaa",
-                                         MULTIPROMPT_READER_SOURCE=str(READER))
-        self.assertIn(direct_first.returncode, (0, 3), direct_first.stderr)
-        direct_second = self.run_sessions("send", "Design Peer", "direct ping",
-                                          MP_SESSIONS_TEST_LIST=offline,
-                                          MULTIBOT_SESSION="live-1111aaaa",
-                                          MULTIPROMPT_READER_SOURCE=str(READER))
-        self.assertIn(direct_second.returncode, (0, 3), direct_second.stderr)
+        self.assertEqual(len(delivered), 2)
+        direct_first = self.run_sessions("send", "Design Peer", "direct ping", **extra)
+        self.assertEqual(direct_first.returncode, 0, direct_first.stderr)
+        direct_second = self.run_sessions("send", "Design Peer", "direct ping", **extra)
+        self.assertEqual(direct_second.returncode, 0, direct_second.stderr)
         self.assertEqual(json.loads(direct_first.stdout)["id"], json.loads(direct_second.stdout)["id"])
         self.assertEqual(len(self.message_rows()), 3)
+        self.assertEqual(len(delivered), 3)
 
     def test_MUBO_194_chat_names_publish_persists_workspace_and_group(self):
         script = (

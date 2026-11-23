@@ -413,7 +413,7 @@ def recent_same_agent_message(reader, provider, sid, text, window=60.0):
     if not path.is_file():
         return None
     since = time.time() - window
-    sql = "SELECT id, state FROM shared_messages WHERE origin='agent' AND provider=? AND sid=? AND text=? AND created>? ORDER BY position DESC LIMIT 1"
+    sql = "SELECT id, state FROM shared_messages WHERE origin='agent' AND provider=? AND sid=? AND text=? AND state NOT IN ('failed','cancelled') AND created>? ORDER BY position DESC LIMIT 1"
     try:
         with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
             row = db.execute(sql, (provider, sid, text, since)).fetchone()
