@@ -1,30 +1,33 @@
-# Server shell tabs
+# Server shell release proof
 
-Source files: src/session.zig, src/json_reader.zig, src/shell_poll.zig, src/main.zig, src/command_palette.zig, src/browser_bridge.zig, src/mp_shell.py, tools/verify-chat-delivery/boundary.py, .claude/skills/verify-multiprompt/control-feature-server-shell-tabs.ps1, .claude/skills/verify-multiprompt/control.ps1
+Source files: src/clipboard.zig, src/native_session.zig, src/terminal_window.c, src/session.zig, src/shell_poll.zig, src/command_palette.zig, src/mp_shell.py, .claude/skills/verify-multiprompt/control-feature-server-shell-tabs.ps1, .claude/skills/verify-multiprompt/server-shell-release-setup.ps1, .claude/skills/verify-multiprompt/server-shell-release-cleanup.ps1, .claude/skills/verify-multiprompt/server-shell-release-fixture.py
 
 ## Sub-features
 
-- SOFT-3002: a saved tmux row with no session name stays a server tab through launch and a normal quit and relaunch, and Ctrl+K Reopen server shell attaches a detached session on that tab's server.
-- SOFT-3003: the desktop opens a plain VPS shell tab on the chat's server, placed below the chat tab, running the chat's folder first.
-
-Ctrl+C copy and interrupt in a shell tab is [Server shell input](server-shell-input.md), not this journey.
+- SOFT-3001: exact clipboard text from a selected terminal row while the same remote command keeps running, followed by Ctrl+C without selection interrupting that command.
+- SOFT-3002: normal quit and restart restores an attached server tab; Close tab followed by Ctrl+K Reopen server shell reattaches the identical tmux session, pane and shell process.
+- SOFT-3003: from the real server chat, Ctrl+K Open shell on VPS 1 opens a shell on that server in the chat's non-default folder. A wrong folder fails rather than substituting a direct bridge call.
 
 ## How to get to it (user POV)
 
-Open a server tab that ran tmux without a known session name, quit Multiprompt and start it again; the tab is still there. Then close it and run Ctrl+K Reopen server shell to attach a detached session on that server. From a chat on the server, run `mp-shell open --folder <chat folder>`; a VPS shell tab opens below the chat tab on that server, in that folder.
+Select text in a running shell and press Ctrl+C, then press it again with no selection. Quit with a server shell tab open, restart, close that tab through Ctrl+K Close tab, then use Reopen server shell to choose the same session. Select the server chat, open Chat View with Alt+C, and use Ctrl+K Open shell on VPS 1.
 
 ## Driving it with control.ps1
 
 ```sh
-gh workflow run verify.yml --ref <branch> -f feature=server-shell-tabs -f tag=v0.28.<n>
+gh workflow run verify.yml --ref <branch> -f feature=server-chat -f tag=v0.28.<n>
 ```
 
-The journey seeds two tabs on one stand-in host once before launch: a `tmux` row with `tmux_host` and no `tmux_session`, which the fix keeps, and a plain VPS shell. It requires both tabs after launch, a live transport for the plain shell, a normal quit and relaunch of the verified executable in the same isolated profile, both tabs back, a fresh transport and a keystroke receipt in the restored shell, then deletes the plain shell with Ctrl+Shift+W and uses the real Ctrl+K Reopen server shell rows to attach the one detached session the boundary serves. It finishes with a real `shell-open` bridge call carrying the chat host, the anchor tab and the chat folder, and requires the new plain shell tab below its anchor on the same host with a live transport.
+Use one dispatch. A tagged `server-chat` run first reuses the existing real-server chat journey in its own PowerShell process, then extends it with these shell checks in `shell-release/`. The existing server-chat setup owns the WSL2 server, OpenSSH keys, real tmux and deterministic paid-provider substitute. No workflow changes are required. Do not dispatch `server-shell-tabs` alone because it needs the `server-chat` WSL installation.
 
-Require `result.json` status `passed`, `before.png`, `server-shell-after-restart.png`, `action.png`, `server-shell-chat-tab.png`, `after.png`, and a zero-process cleanup.
+The fixture adds a real shell session and places the chat provider in `/home/mpverify/shell-proof-folder`. Before launch only, it seeds two saved tabs. Every subsequent action uses real keyboard or mouse input. Remote reads retain stdout, stderr and exit codes. A Python command writes an atomic heartbeat and an interrupt receipt. The selected first row has a known marker padded to the actual terminal width; the clipboard must match it byte for byte.
+
+Restart uses the same `Restart-SessionRestore` helper as the SOFT-3039 journey on `soft-3053-release-proof`. Remote tmux session ID, pane ID and shell PID must remain identical, and typed commands must produce new remote receipts after restart and reopen. Ctrl+K Close tab detaches; Ctrl+Shift+W deletes the remote session and is not the close action for this proof.
+
+Inspect `shell-release/SOFT-3001-result.json`, `SOFT-3002-result.json`, `SOFT-3003-result.json`, exact clipboard/expected text, heartbeat and interrupt receipts, restart/reopen identities, chat folder state, and the corresponding `SOFT-*.png` screenshots. Each case records failures independently. Runner keys are removed before scratch evidence is copied; WSL is stopped during cleanup.
 
 ## Gotchas
 
-- Only SSH and tmux are stand-ins. No credentials, real server or agent turn are used, so the chat's own `mp-shell` call is not executed from an agent; `tools/mp-shell-test.py` proves mp-shell turns the chat folder into the `--run` prefix this journey sends to the same bridge verb.
-- The boundary serves one detached session, so the Reopen list has a single row.
-- `used` must be non-zero on the seeded row: a tmux row without a session name and without a saved use time is still dropped by design.
+- SOFT-3003 itself ships `mp-shell open` for server agents. Source and the shortcut table have no chat-specific folder-preserving open-shell row. The nearest real palette row is Open shell on VPS 1 (`2003`); its actual folder is measured, not assumed. This journey does not claim it proves the separate agent command.
+- Only the paid provider is deterministic. SSH, tmux, shell processes, signals, clipboard and server folders are real and runner-owned. No user machine, credentials or shared VPS is involved.
+- Shell copy/scroll geometry comes from the existing server-shell-input journey. This release proof adds the exact-selection and running-process checks it did not assert.

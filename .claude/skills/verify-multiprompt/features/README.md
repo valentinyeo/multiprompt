@@ -123,7 +123,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Relaunch saved sessions](relaunch-saved-sessions.md): the relaunch check. A seeded Starred workspace of 14 live sessions and 6 cached copies is launched and quit three times, the last two with every notification port occupied; each session must appear once and the selected chat must stay.
 - [Saved terminal binding](tmux-binding.md): adopted remote identities survive missing status text and five reopens.
 - [Server shell input](server-shell-input.md): VPS native terminal copy, interrupt and wheel scrollback match local shells.
-- [Server shell tabs](server-shell-tabs.md): a session-less tmux row survives a relaunch, Ctrl+K Reopen server shell attaches a detached session, and a chat's shell-open call opens a VPS tab in the chat folder.
+- [Server shell tabs](server-shell-tabs.md): tagged server-chat runs prove exact selected copy without interrupting a running command, restore and reopen the same real tmux session, and check the chat palette shell's actual folder.
 - [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.

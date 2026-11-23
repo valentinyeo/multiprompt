@@ -19,8 +19,18 @@ if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requ
 if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
         'server-chat' {
-            & "$PSScriptRoot/../../../tools/verify-server-chat/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
-            return
+            if (-not $env:RELEASE_TAG) {
+                & "$PSScriptRoot/../../../tools/verify-server-chat/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+                return
+            }
+            $baseline = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSScriptRoot/../../../tools/verify-server-chat/drive.ps1`"", '-Exe', "`"$Exe`"", '-ExpectedVersion', $ExpectedVersion, '-ExpectedHash', $ExpectedHash, '-Evidence', "`"$Evidence`"") -NoNewWindow -PassThru
+            try {
+                $null = $baseline.Handle
+                if (-not $baseline.WaitForExit(900000)) { $baseline.Kill(); throw 'Server chat baseline exceeded 15 minutes' }
+                if ($baseline.ExitCode -ne 0) { Write-Warning 'Server chat baseline failed; continuing the independent shell cases and retaining its failed result' }
+            } finally { $baseline.Dispose() }
+            $Feature = 'server-shell-tabs'
+            $Evidence = Join-Path $Evidence 'shell-release'
         }
         'session-actions' {
             & "$PSScriptRoot/../../../tools/verify-session-actions/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
@@ -109,6 +119,7 @@ $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $scratch = Join-Path $env:RUNNER_TEMP ('multiprompt-verify-' + [guid]::NewGuid().ToString('N'))
 $process = $null
+$usageCollector = $null
 $job = $null
 $warmupJob = $null
 $warmup = $null
@@ -354,22 +365,7 @@ try {
         $result.seedBoundary = 'One saved VPS tab with shared server connection enabled. Only SSH is replaced by the transport boundary, which seeds scrollback, a selectable marker and interrupt receipts for the native terminal child.'
     }
     if ($Feature -eq 'server-shell-tabs') {
-        $serverShellTabsState = Join-Path $scratch 'server-shell-tabs-state'
-        New-Item -ItemType Directory -Force $serverShellTabsState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $serverShellTabsDocument = @{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; sessions = @('verify-agent-1') }
-        [IO.File]::WriteAllText((Join-Path $serverShellTabsState 'state.json'), ($serverShellTabsDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
-        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
-        $env:MP_VERIFY_STATE = $serverShellTabsState
-        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
-        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
-        $serverShellTabsSeed = @{ active_tab = 1; single_window = $true; tabs = @(
-            @{ kind = 'tmux'; name = 'Server work'; manual = $true; tmux_host = 0; shell_id = 1; used = 1795000000; pid = 0 },
-            @{ kind = 'vps'; name = 'Server shell'; manual = $true; tmux_host = 0; shell_id = 2; used = 1795000001; pid = 0 }
-        ) }
-        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $serverShellTabsSeed -Depth 5), (New-Object Text.UTF8Encoding($false)))
-        Save-Json $serverShellTabsSeed 'seed-session.json'
-        $result.seedBoundary = 'Two saved tabs on one stand-in host: a tmux row with no session name, the shape SOFT-3002 dropped before the fix, and a plain VPS shell. Only SSH and tmux are replaced by the transport boundary, which serves one detached session and records logins, attaches and keystrokes. No credentials or real server are used.'
+        . (Join-Path $PSScriptRoot 'server-shell-release-setup.ps1')
     }
     if ($Feature -in @('chat-switch-speed', 'chat-still', 'chat-options', 'chat-slash')) {
         $remoteState = Join-Path $scratch 'remote-state'
@@ -795,6 +791,7 @@ try {
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }
+                    if ($Feature -eq 'server-shell-tabs') { . (Join-Path $PSScriptRoot 'server-shell-release-cleanup.ps1') }
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
