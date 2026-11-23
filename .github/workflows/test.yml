@@ -643,7 +643,7 @@ jobs:
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Read the pre-change chat row source
-        if: github.event_name == 'pull_request' && steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -651,7 +651,7 @@ jobs:
           sparse-checkout: src
           persist-credentials: false
       - name: Prove hosted row regressions fail on the identity-only source
-        if: github.event_name == 'pull_request' && steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
         env:
           CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
         run: |

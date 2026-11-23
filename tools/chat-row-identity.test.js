@@ -60,20 +60,23 @@ test "SOFT-3097 rereading id-less hosted rows after file replacement keeps one o
 }
 `;
 
-for (const name of [
-  'SOFT-3097 hosted pending retires above its reply without a transcript client id',
-  'SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair',
-]) {
-  test(name, () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-row-identity-'));
-    try {
-      copyZig(['chat_echo.zig', 'chat_history.zig'], dir, path.join(root, 'src'));
-      require('./fixtures/inline-stubs').writeChatMention(dir);
-      fs.writeFileSync(path.join(dir, 'test.zig'), harness);
-      const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', name], { encoding: 'utf8', timeout: 60000 });
-      assert.equal(result.status, 0, result.stdout + result.stderr);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
+function runZigTest(name) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-row-identity-'));
+  try {
+    copyZig(['chat_echo.zig', 'chat_history.zig'], dir, path.join(root, 'src'));
+    require('./fixtures/inline-stubs').writeChatMention(dir);
+    fs.writeFileSync(path.join(dir, 'test.zig'), harness);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', name], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
+
+test('SOFT-3097 hosted pending retires above its reply without a transcript client id', () => {
+  runZigTest('SOFT-3097 hosted pending retires above its reply without a transcript client id');
+});
+
+test('SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair', () => {
+  runZigTest('SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair');
+});
