@@ -128,7 +128,7 @@ function Save-MbTabShot([string]$Path) {
 function Ensure-MbTabOpen() {
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
     try {
-        $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--name', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
+        $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
         if ($line -notmatch 'opened|already open') { throw "open did not publish the tab: $line" }
     } finally { Remove-Item Env:\MULTIPROMPT_KEY -ErrorAction SilentlyContinue }
     Wait-MbTab 'imported tab' { $null -ne (Find-MbTab (Read-MbTabSession)) }
@@ -225,7 +225,7 @@ try {
     $stage = $MbTabVerb
     switch ($MbTabVerb) {
         'open' {
-            $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--name', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
+            $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
             if ($line -notmatch 'opened') { throw "open did not publish the tab: $line" }
             Wait-MbTab 'open tab visible' {
                 $state = Read-MbTabSession
