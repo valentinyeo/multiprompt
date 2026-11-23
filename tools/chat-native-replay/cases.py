@@ -1,4 +1,3 @@
-"""Evidence-specific oracles for the full structural corpus."""
 import json
 from pathlib import Path
 

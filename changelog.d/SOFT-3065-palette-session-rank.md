@@ -1,0 +1,1 @@
+Ctrl+K puts a matching open session ahead of commands that share the same search words.

@@ -48,6 +48,7 @@ export const reviewedCommits = {
   '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
   '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
   '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9': 'SOFT-2902',
+  '4629193865d76f4f99483934dfc1eb26f1206424': ['SOFT-2883', 'SOFT-3075'],
 };
 
 const mainPath = 'src/main.zig';

@@ -37,11 +37,11 @@ test('native session spawn keeps remote tabs off per-tab ssh', () => {
 });
 
 test('remote typing path has no Windows console to answer device attributes', () => {
-  const start = body(read('src/chat_transport.zig'), 'start');
-  assert.match(start, /"-T -o BatchMode=yes /);
-  assert.match(start, /si\.hStdInput = child_input;/);
-  assert.match(start, /si\.hStdOutput = child_output;/);
-  assert.match(start, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, console\.SSH_HELPER_FLAGS,/);
+  const boot = body(read('src/chat_transport.zig'), 'bootHost');
+  assert.match(boot, /"-T -o BatchMode=yes /);
+  assert.match(boot, /si\.hStdInput = child_input;/);
+  assert.match(boot, /si\.hStdOutput = child_output;/);
+  assert.match(boot, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, console\.SSH_HELPER_FLAGS,/);
   assert.match(read('src/console.zig'), /pub const SSH_HELPER_FLAGS: u32 = 0x00000008;/);
   const vendored = 'src/terminal/vendor/libvterm/src/state.c';
   assert.ok(fs.existsSync(path.join(root, vendored)), vendored);

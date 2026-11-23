@@ -365,6 +365,7 @@ fn requestWebView2Focus() void {}
 fn requestNativeBrowserFocus() void {}
 ${body('clickedLinkUrl')}
 ${source.match(/test "IGSH-403 [\s\S]*?\n}/)[0]}
+fn openTmuxLink(_: []const u16) bool { return false; }
 ${body('openClickedLink')}
 test "IGSH-403 click preserves Unicode in a detected transcript link" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("see https://example.test/Kraków");

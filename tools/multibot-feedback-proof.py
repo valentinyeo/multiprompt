@@ -129,7 +129,7 @@ def main():
         for _ in range(2):
             result = subprocess.run([sys.executable, str(tool), WISH, '--why', WHY, '--attach', str(image_path)], capture_output=True, text=True, timeout=180)
             output = result.stdout.strip()
-            if result.returncode or not re.fullmatch(r'Feedback (submitted|voted): https://app\.hypertask\.ai/detail/project-2060/\d+', output):
+            if result.returncode or not re.fullmatch(r'filed https://app\.hypertask\.ai/detail/project-2060/\d+', output):
                 error = RuntimeError('submission not confirmed')
                 safe_diagnose(error)
                 raise error
