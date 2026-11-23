@@ -90,6 +90,7 @@ const CreateToolhelp32Snapshot = @import("win32.zig").CreateToolhelp32Snapshot;
 const Process32FirstW = @import("win32.zig").Process32FirstW;
 const Process32NextW = @import("win32.zig").Process32NextW;
 const GetExitCodeProcess = @import("win32.zig").GetExitCodeProcess;
+const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
 const STILL_ACTIVE = @import("win32.zig").STILL_ACTIVE;
 const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
@@ -419,6 +420,24 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
     registerShellExitWait(idx);
     debugLog("reclaimShell: successfully reclaimed process");
     return true;
+}
+
+pub fn killSavedOrphanIfStale(pid: DWORD, kind: ShellKind) void {
+    if (pid == 0 or pid == GetCurrentProcessId()) return;
+    const proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE, 0, pid) orelse return;
+    defer _ = CloseHandle(proc);
+    var exit_code: DWORD = 0;
+    if (GetExitCodeProcess(proc, &exit_code) == 0 or exit_code != STILL_ACTIVE) return;
+    const still_a_shell = if (kind == .gitbash)
+        findWindowByClassAndPid(pid, "mintty") != null
+    else
+        findConsoleWindowByPid(pid) != null;
+    if (!still_a_shell) return;
+    killProcessTree(pid);
+}
+
+test "saved orphan cleanup leaves the app process alone" {
+    killSavedOrphanIfStale(GetCurrentProcessId(), .cmd);
 }
 
 pub const BundledConsoleFonts = struct {
