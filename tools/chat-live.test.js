@@ -41,7 +41,7 @@ test('D1 the live channel is opened only for a hosted agent chat and feeds the m
   const session = read('src/chat_session.zig');
   assert.match(session, /chatMessageGoesToHost\(shell\.kind, shell\.ai_agent\)/);
   assert.match(session, /chatLiveStreamEnsure\(key\)/);
-  assert.match(session, /subscribeLine\(a, stream\.identity\.owner, stream\.identity\.provider\(\), sid, after\)/);
+  assert.match(session, /subscribeLine\(a, stream\.shell_id, key\.provider\(\), sid, after\)/);
   const wanted = session.slice(session.indexOf('fn chatLiveWanted('), session.indexOf('fn chatLiveStreamRelease('));
   assert.doesNotMatch(wanted, /key\.(?:codex|pi)/);
   assert.match(session, /@import\("chat_live\.zig"\)\.applyPage\(/);
@@ -58,7 +58,7 @@ test('provider identity stays attached to controls and restored chats', () => {
   const session = read('src/chat_session.zig');
   assert.match(session, /key\.pi == entry\.key\.pi/);
   assert.match(session, /ai_agent = if \(entry\.key\.pi\) 3 else if \(entry\.key\.codex\) 2 else 1/);
-  assert.match(session, /current\.identity\.same\(identity\)/);
+  assert.match(session, /std\.mem\.eql\(u8, current\.provider, key\.provider\(\)\)/);
 });
 
 test('D1 the live tail renders inside the same transcript buffer the view reads', () => {
@@ -96,7 +96,7 @@ test('D2 the three existing card buttons reply with the request id on the live c
   assert.match(send, /\.decisionFor\(action\)/);
   assert.match(send, /chatLiveWrite\(/);
   const session = read('src/chat_session.zig');
-  assert.match(session, /pub fn chatLiveWrite\(identity: @import\("session_identity\.zig"\)\.Session, line: \[\]const u8\) bool/);
+  assert.match(session, /pub fn chatLiveWrite\(line: \[\]const u8\) bool/);
 });
 
 test('D2 escape on a live approval cancels it instead of typing into a pane', () => {

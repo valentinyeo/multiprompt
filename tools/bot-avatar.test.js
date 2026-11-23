@@ -1,4 +1,3 @@
-const { copyZig } = require('./zig-copy');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -81,7 +80,6 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
   const hit = block(sidebar, 'pub fn hitTestSidebar(');
   const height = block(sidebar, 'pub fn rowTotalHeight(');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-layout-'));
-  copyZig(['workspace_view.zig'], dir);
   require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 0; }\n');
   fs.writeFileSync(path.join(dir, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 20; }\n');
@@ -97,8 +95,6 @@ ${block(read('src/app_state.zig'), 'pub const HitTarget = union(enum)')};
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
-const g_sidebar_view: ?@import("workspace_view.zig").Builtin = null;
-fn layoutViewRows(_: *[MAX_ROWS]Row, _: @import("workspace_view.zig").Builtin) u32 { unreachable; }
 var pinned_collapsed = false;
 var pinned_count: usize = 4;
 const SECTION_HEADER_H = 24;
@@ -275,55 +271,6 @@ test "console buffer is used and released, never the inherited log file" {
 }
 `);
     const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'preview.zig')], {encoding: 'utf8', timeout: 120000});
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
-});
-
-test('tmux status adoption reads the attached console even when stdout is redirected', () => {
-  const source = read('src/shell_poll.zig');
-  for (const prefix of ['pub fn extractTmuxSessionFromStatus(', 'fn isTmuxRunningInConsole(', 'fn readTmuxStatusTitle(']) {
-    const section = block(source, prefix);
-  assert.doesNotMatch(section, /GetStdHandle\(STD_OUTPUT_HANDLE\)/, `${prefix} must not read inherited stdout`);
-  assert.match(section, /openAttachedConsoleOutput\(\)/, `${prefix} must open CONOUT$ after AttachConsole`);
-  }
-  const extract = block(source, 'pub fn extractTmuxSessionFromStatus(');
-  const at = extract.indexOf('    var info: CONSOLE_SCREEN_BUFFER_INFO');
-  assert.ok(at > 0);
-  const prefix = extract.slice(0, at)
-    .replace('openAttachedConsoleOutput', 'output.openAttachedConsoleOutput')
-    .replace('bool {\n', 'bool {\n    _ = out;\n    _ = out_len;\n');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-console-'));
-  try {
-    fs.writeFileSync(path.join(dir, 'extract.zig'), `const std = @import("std");
-const HANDLE = ?*anyopaque;
-const DWORD = u32;
-const COORD = struct { x: i16, y: i16 };
-const CONSOLE_SCREEN_BUFFER_INFO = struct { srWindow: struct { left: i16, top: i16, right: i16, bottom: i16 }, dwCursorPosition: COORD };
-const console: HANDLE = @ptrFromInt(1234);
-const file: HANDLE = @ptrFromInt(5678);
-var closed = false;
-fn FreeConsole() i32 { return 1; }
-fn AttachConsole(_: u32) i32 { return 1; }
-fn GetStdHandle(_: i32) HANDLE { return file; }
-fn CloseHandle(handle: HANDLE) i32 { closed = handle == console; return 1; }
-fn verboseLoggingEnabled() bool { return false; }
-fn debugLog(_: []const u8) void {}
-fn debugLog2(_: []const u8, _: []const u8) void {}
-fn ReadConsoleOutputCharacterW(_: HANDLE, _: *anyopaque, _: u32, _: COORD, _: *DWORD) i32 { return 0; }
-fn GetConsoleScreenBufferInfo(_: HANDLE, _: *CONSOLE_SCREEN_BUFFER_INFO) i32 { return 0; }
-fn extractTmuxSessionFromStatusLine(_: []const u16, _: *[64]u8, _: *u32) bool { return false; }
-const output = struct { fn openAttachedConsoleOutput() ?HANDLE { return console; } };
-${prefix}
-    return handle == console;
-}
-test "tmux adoption uses CONOUT$, not the redirected log handle" {
-    var out: [64]u8 = undefined;
-    var n: u32 = 0;
-    try std.testing.expect(extractTmuxSessionFromStatus(42, &out, &n));
-    try std.testing.expect(closed);
-}
-`);
-    const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'extract.zig')], {encoding: 'utf8', timeout: 120000});
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });

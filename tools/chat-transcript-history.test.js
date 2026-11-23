@@ -46,9 +46,6 @@ var g_chat_browser_swap: chat_switch.Pending = .{};
 var g_chat_working_applied_len: usize = 0;
 var g_chat_layout_dirty = false;
 var g_chat_live_seen_revision: u64 = 0;
-var g_chat_live_preview_shell: u32 = 0;
-var g_chat_live_preview: @import("agent_second_line.zig").Line = .{};
-fn chatViewLayout() struct { pane: RECT } { return .{ .pane = std.mem.zeroes(RECT) }; }
 fn chatLiveSyncCard() void {}
 fn chatLiveSyncQuestion() void {}
 fn chatLiveSyncWorking() void {}
@@ -518,7 +515,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_live.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'agent_second_line.zig'), 'pub const Line = struct { text: [96]u8 = @splat(0), len: usize = 0 };\npub var calls: usize = 0;\npub fn forShell(_: usize) Line { calls += 1; return .{}; }\n');
+    fs.writeFileSync(path.join(dir, 'agent_second_line.zig'), 'pub var calls: usize = 0;\npub fn forShell(_: usize) u8 { calls += 1; return 0; }\n');
     fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn invalidateSidebar() void {}\n');
     fs.writeFileSync(path.join(dir, 'inbox.zig'), 'pub fn publishInboxState() void {}\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
@@ -530,12 +527,6 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
 }
 test('IGSH-1754 a chat switch clears the last batch time', () => {
   assert.match(fn('chatDeferTranscriptLoad'), /g_chat_batch_boundary = \.\{}/);
-});
-test('SOFT-2373 a live revision change repaints only the chat pane and republishes the sidebar only when the preview line differs', () => {
-  const ready = fn('chatFileOnReady');
-  assert.doesNotMatch(ready, /InvalidateRect\(app_state\.g_main_hwnd, null, 0\)/);
-  assert.match(ready, /chatViewLayout\(\)\.pane/);
-  assert.match(ready, /std\.meta\.eql\(g_chat_live_preview, preview\)/);
 });
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
@@ -722,7 +713,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.match(fn('chatReaderBundle'), /@embedFile\("chat_history_reader.py"\)/);
   assert.match(fn('chatHistoryChannelStart'), /transport.open/);
   assert.match(fs.readFileSync('src/chat_transport.zig', 'utf8'), /chatReaderBundle/);
-  assert.match(fn('chatHistoryRequest'), /chatHistoryChannelClose\(ch\);\s*ch\.retry_at = GetTickCount64\(\) \+ 250;/);
+  assert.match(fn('chatHistoryPersistent'), /chatHistoryChannelClose\(ch\);\s*ch\.retry_at = GetTickCount64\(\) \+ 250;/);
   assert.match(fn('chatHistoryFetchOnce'), /chatHistoryPersistent/);
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
   assert.match(fn('chatPaintTranscriptContent'), /Could not load the conversation, retrying/);

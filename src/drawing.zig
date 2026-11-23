@@ -232,10 +232,6 @@ pub fn resetFontCache() void {
         _ = DeleteObject(app_state.g_chat_code_font);
         app_state.g_chat_code_font = null;
     }
-    if (app_state.g_chat_emoji_font != null) {
-        _ = DeleteObject(app_state.g_chat_emoji_font);
-        app_state.g_chat_emoji_font = null;
-    }
     if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null and app_state.g_chat_layout_width > 0) {
         chatRelayout(app_state.g_chat_layout_width);
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
@@ -1402,20 +1398,12 @@ test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 perc
     }
 }
 
-fn reconnectConsolePlacementAllowed(idx: u32) bool {
+pub fn reconnectTabVisible(idx: u32) bool {
     return idx < app_state.shell_count and idx == app_state.active_shell and
         (!app_state.g_single_window or app_state.shells[idx].workspace == app_state.g_active_workspace) and
         !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
         !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
-        !app_state.g_snippet_create_active and !app_state.g_account_locked;
-}
-
-pub fn reconnectConsoleLayoutAllowed(idx: u32) bool {
-    return reconnectConsolePlacementAllowed(idx);
-}
-
-pub fn reconnectTabVisible(idx: u32) bool {
-    return reconnectConsolePlacementAllowed(idx) and !app_state.g_restoring;
+        !app_state.g_snippet_create_active and !app_state.g_restoring and !app_state.g_account_locked;
 }
 
 pub fn invalidateReconnectContent(idx: u32) void {

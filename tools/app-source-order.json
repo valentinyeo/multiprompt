@@ -397,7 +397,6 @@
   ["shell_poll.zig", "fn agentLabel"],
   ["app_state.zig", "const HIDDEN_IDLE_WATCHDOG_POLLS"],
   ["shell_poll.zig", "fn shouldAdvanceHiddenIdleWatchdog"],
-  ["workspace_view_ui.zig", "fn appendSearchResults"],
   ["main.zig", "fn wndProc"],
   ["account_desktop.zig", "test \"account lock prevents restore and every shell spawn entry point\""]
 ]

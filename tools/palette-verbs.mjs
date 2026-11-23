@@ -45,11 +45,7 @@ export const verbs = {
   "SEARCH_THREADTITLE_OFFSET": "rename",
   "SEARCH_WORKSPACE_COLOR_OFFSET": "workspace",
   "SEARCH_WSMOVE_NEW_OFFSET": "workspace",
-  "SEARCH_WSMOVE_OFFSET": "move",
-  "SEARCH_MOVE_WORKSPACE_SERVER_OFFSET": "workspace",
-  "SEARCH_NEW_TAB_ON_SERVER_OFFSET": "open",
-  "SEARCH_WORKSPACE_SERVER_ROW_OFFSET": "open",
-  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open"
+  "SEARCH_WSMOVE_OFFSET": "move"
 };
 
 export const screen = {
@@ -117,7 +113,6 @@ export const screen = {
   "SEARCH_CHAT_SWITCH_CLAUDE_OFFSET": "chat",
   "SEARCH_CHAT_SWITCH_CODEX_OFFSET": "chat",
   "SEARCH_CHAT_SWITCH_PI_OFFSET": "chat",
-  "SEARCH_CHAT_AUTO_SWITCH_OFFSET": "chat",
   "SEARCH_TABCTX_SWITCH_CLAUDE": "chat",
   "SEARCH_TABCTX_SWITCH_CODEX": "chat",
   "SEARCH_TABCTX_SWITCH_PI": "chat",
@@ -175,7 +170,6 @@ export const screen = {
   "SEARCH_OPENFOLDER_OFFSET": "focus",
   "SEARCH_OPEN_SESSION_MENU_OFFSET": "menu",
   "SEARCH_PICK_REPO_BACK_OFFSET": "menu",
-  "SEARCH_WORKSPACE_SERVER_BACK_OFFSET": "menu",
   "SEARCH_PICK_REPO_OFFSET": "focus",
   "SEARCH_PI_MODEL_ROW_OFFSET": "menu",
   "SEARCH_PI_MODELS_BACK_OFFSET": "menu",
@@ -196,7 +190,6 @@ export const screen = {
   "SEARCH_REMOVE_SERVER_2_OFFSET": "account",
   "SEARCH_REMOVE_SERVER_3_OFFSET": "account",
   "SEARCH_REOPEN_OFFSET": "local",
-  "SEARCH_REOPEN_SERVER_SHELL_OFFSET": "menu",
   "SEARCH_RESTART_OFFSET": "local",
   "SEARCH_ROOM_ROW_OFFSET": "focus",
   "SEARCH_SERVERS_OFFSET": "account",
@@ -220,9 +213,6 @@ export const screen = {
   "SEARCH_SNIPPET_OFFSET": "menu",
   "SEARCH_SOUND_OFFSET": "window",
   "SEARCH_STARRED_OFFSET": "focus",
-  "SEARCH_WORKSPACE_ALL_OFFSET": "focus",
-  "SEARCH_WORKSPACE_FREQUENT_OFFSET": "focus",
-  "SEARCH_WORKSPACE_FAVORITES_OFFSET": "focus",
   "SEARCH_SYNC_SIGNOUT_OFFSET": "account",
   "SEARCH_SYNC_STATUS_OFFSET": "account",
   "SEARCH_TABCTX_ADOPT_HOST": "local",

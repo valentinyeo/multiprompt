@@ -39,7 +39,6 @@ const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
 const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
-const GetCurrentThreadId = @import("win32.zig").GetCurrentThreadId;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetEnvironmentVariableW = @import("win32.zig").GetEnvironmentVariableW;
 const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
@@ -626,7 +625,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (live_shell_id != 0 and key.shell_id == live_shell_id) {
         if (chatLiveWanted(key)) chatLiveStreamEnsure(key) else chatLiveStreamStop();
     }
-    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or !key.hasSession()) return;
+    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or key.shell_id == 0) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
@@ -759,7 +758,11 @@ pub fn chatHistoryStreamsKeep(shell_id: u32) void {
 }
 
 const ChatLiveStream = struct {
-    identity: @import("session_identity.zig").Session,
+    shell_id: u32 = 0,
+    host: u8 = 0,
+    provider: []const u8 = "claude",
+    sid: [40]u8 = @splat(0),
+    sid_len: usize = 0,
     refs: std.atomic.Value(u32) = .init(2),
     mutex: @import("app_state.zig").SpinMutex = .{},
     cancelled: std.atomic.Value(bool) = .init(false),
@@ -794,11 +797,11 @@ pub fn chatSettingsPending(shell_id: u32) bool {
     const stream = g_chat_live_stream orelse return false;
     if (app_state.active_shell >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return stream.identity.owner == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and std.mem.eql(u8, stream.identity.provider(), key.provider()) and stream.pending_settings.pending();
+    return stream.shell_id == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and std.mem.eql(u8, stream.provider, key.provider()) and stream.pending_settings.pending();
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (chatBenchEnabled() or key.shell_id == 0 or key.sid[0] == 0) return false;
+    if (key.shell_id == 0 or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
@@ -819,7 +822,7 @@ fn chatLiveStreamStopLocked() void {
         if (stream.channel.shared) |channel| transport.cancel(channel);
         stream.mutex.unlock();
     }
-    @import("chat_live.zig").park(stream.identity.owner);
+    @import("chat_live.zig").park(stream.shell_id);
     chatLiveStreamRelease(stream);
 }
 
@@ -830,18 +833,22 @@ pub fn chatLiveStreamStop() void {
 }
 
 fn chatLiveStreamEnsure(key: chat_transcript.Identity) void {
-    const identity = key.checked() orelse return;
+    const sid = std.mem.sliceTo(&key.sid, 0);
     chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     if (g_chat_live_stream) |current| {
-        const same = !current.ended.load(.acquire) and current.identity.same(identity);
+        const same = !current.ended.load(.acquire) and current.shell_id == key.shell_id and current.host == key.host and
+            std.mem.eql(u8, current.provider, key.provider()) and
+            std.mem.eql(u8, current.sid[0..current.sid_len], sid);
         if (same) return;
         chatLiveStreamStopLocked();
     }
     const a = std.heap.page_allocator;
     const stream = a.create(ChatLiveStream) catch return;
-    stream.* = .{ .identity = identity };
-    const thread = std.Thread.spawn(.{}, chatLiveStreamThread, .{stream}) catch {
+    stream.* = .{ .shell_id = key.shell_id, .host = key.host, .provider = key.provider() };
+    stream.sid_len = @min(sid.len, stream.sid.len);
+    @memcpy(stream.sid[0..stream.sid_len], sid[0..stream.sid_len]);
+    const thread = std.Thread.spawn(.{}, chatLiveStreamThread, .{ stream, key }) catch {
         a.destroy(stream);
         return;
     };
@@ -860,7 +867,7 @@ fn chatSettingsFailureNotice() void {
     if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(text.ptr))) == 0) a.free(text);
 }
 
-fn chatLiveStreamThread(stream: *ChatLiveStream) void {
+fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) void {
     const a = std.heap.page_allocator;
     defer chatLiveStreamRelease(stream);
     defer {
@@ -870,20 +877,20 @@ fn chatLiveStreamThread(stream: *ChatLiveStream) void {
         stream.mutex.unlock();
         if (pending > 0) chatSettingsFailureNotice();
     }
-    const sid = std.mem.sliceTo(&stream.identity.sid, 0);
-    const after = @import("chat_live.zig").begin(stream.identity.owner, stream.identity.host.index(), sid);
+    const sid = stream.sid[0..stream.sid_len];
+    const after = @import("chat_live.zig").begin(stream.shell_id, stream.host, sid);
     while (!stream.mutex.tryLock()) Sleep(1);
-    const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(stream.identity.host.index(), &stream.channel);
+    const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
     if (stream.cancelled.load(.acquire)) {
         if (stream.channel.shared) |channel| transport.cancel(channel);
     }
     stream.mutex.unlock();
-    chatLiveLog("start", stream.identity.owner, after, @intFromBool(started));
+    chatLiveLog("start", stream.shell_id, after, @intFromBool(started));
     if (!started or stream.cancelled.load(.acquire)) return;
-    const line = @import("chat_live.zig").subscribeLine(a, stream.identity.owner, stream.identity.provider(), sid, after) catch return;
+    const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, key.provider(), sid, after) catch return;
     defer a.free(line);
     if (!transport.write(stream.channel.shared orelse return, line)) {
-        chatLiveLog("write-failed", stream.identity.owner, after, 0);
+        chatLiveLog("write-failed", stream.shell_id, after, 0);
         return;
     }
     var frame: std.ArrayList(u8) = .empty;
@@ -892,11 +899,11 @@ fn chatLiveStreamThread(stream: *ChatLiveStream) void {
     while (!stream.cancelled.load(.acquire)) {
         while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
             const n = transport.read(stream.channel.shared orelse return, &chunk, true) orelse {
-                chatLiveLog("read-ended", stream.identity.owner, frame.items.len, 0);
+                chatLiveLog("read-ended", stream.shell_id, frame.items.len, 0);
                 return;
             };
             if (frame.items.len + n > @import("chat_live.zig").MAX_PAGE + 4096) {
-                chatLiveLog("page-too-big", stream.identity.owner, frame.items.len + n, 0);
+                chatLiveLog("page-too-big", stream.shell_id, frame.items.len + n, 0);
                 return;
             }
             frame.appendSlice(a, chunk[0..n]) catch return;
@@ -905,8 +912,8 @@ fn chatLiveStreamThread(stream: *ChatLiveStream) void {
         if (@import("chat_live.zig").settingReplyFailed(frame.items[0..end])) |failed| {
             if (stream.pending_settings.finish() and failed) chatSettingsFailureNotice();
         }
-        const changed = @import("chat_live.zig").applyPage(stream.identity.owner, sid, frame.items[0..end]);
-        chatLiveLog("page", stream.identity.owner, end, @intFromBool(changed));
+        const changed = @import("chat_live.zig").applyPage(stream.shell_id, sid, frame.items[0..end]);
+        chatLiveLog("page", stream.shell_id, end, @intFromBool(changed));
         std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
         frame.items.len -= end + 1;
         if (changed and app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
@@ -975,16 +982,15 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
     }
 }
 
-pub fn chatLiveWrite(identity: @import("session_identity.zig").Session, line: []const u8) bool {
-    _ = identity.requestId(line) orelse return false;
+pub fn chatLiveWrite(line: []const u8) bool {
     const setting = std.mem.indexOf(u8, line, ",\"op\":\"set_model\",") != null or std.mem.indexOf(u8, line, ",\"op\":\"set_effort\",") != null;
     chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     const stream = g_chat_live_stream orelse return false;
-    if (!stream.identity.same(identity) or stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
+    if (stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
     if (setting) {
         const key = chatFileIdentityForShell(app_state.active_shell);
-        if (stream.identity.owner != key.shell_id or stream.identity.host.index() != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) or !std.mem.eql(u8, stream.identity.provider(), key.provider()) or !std.mem.eql(u8, std.mem.sliceTo(&stream.identity.sid, 0), std.mem.sliceTo(&key.sid, 0))) return false;
+        if (stream.shell_id != key.shell_id or stream.host != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) or !std.mem.eql(u8, stream.provider, key.provider()) or !std.mem.eql(u8, stream.sid[0..stream.sid_len], std.mem.sliceTo(&key.sid, 0))) return false;
     }
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();
@@ -1094,10 +1100,8 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const mp_send = @embedFile("mp_send.py");
     const feedback = @embedFile("multibot_feedback.py");
     const helper = @embedFile("mp_helper.py");
-    const shell = @embedFile("mp_shell.py");
     const sessions = @embedFile("mp_sessions.py");
     const layout = @embedFile("mp_layout.mjs");
-    const mp_fresh = @embedFile("mp_fresh.py");
     const zsb = @embedFile("mp_zsb.sh");
     const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
     defer allocator.free(claude64);
@@ -1109,14 +1113,10 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     defer allocator.free(feedback64);
     const helper64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(helper.len)) catch return null;
     defer allocator.free(helper64);
-    const shell64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(shell.len)) catch return null;
-    defer allocator.free(shell64);
     const sessions64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(sessions.len)) catch return null;
     defer allocator.free(sessions64);
     const layout64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(layout.len)) catch return null;
     defer allocator.free(layout64);
-    const mp_fresh64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(mp_fresh.len)) catch return null;
-    defer allocator.free(mp_fresh64);
     const zsb64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(zsb.len)) catch return null;
     defer allocator.free(zsb64);
     _ = std.base64.standard.Encoder.encode(claude64, claude);
@@ -1124,37 +1124,13 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
     _ = std.base64.standard.Encoder.encode(helper64, helper);
-    _ = std.base64.standard.Encoder.encode(shell64, shell);
     _ = std.base64.standard.Encoder.encode(sessions64, sessions);
     _ = std.base64.standard.Encoder.encode(layout64, layout);
-    _ = std.base64.standard.Encoder.encode(mp_fresh64, mp_fresh);
     _ = std.base64.standard.Encoder.encode(zsb64, zsb);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, sessions64, layout64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
-fn uiThreadBusy() bool {
-    const main = app_state.g_main_hwnd orelse return false;
-    return GetCurrentThreadId() == GetWindowThreadProcessId(main, null);
-}
-
-pub fn chatHistoryPersistent(identity: @import("session_identity.zig").Session, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
-    if (uiThreadBusy()) return false;
-    const id = identity.requestId(query) orelse return false;
-    return chatHistoryRequest(identity.host, id, query, wire_limit, out, request_written);
-}
-
-pub fn chatHostPersistent(host: @import("session_identity.zig").Host, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
-    const parsed = std.json.parseFromSlice(struct { id: u32, host: u8, op: []const u8, all: bool = false }, std.heap.page_allocator, query, .{ .ignore_unknown_fields = true }) catch return false;
-    defer parsed.deinit();
-    const request = parsed.value;
-    if (request.host != host.index()) return false;
-    if (!std.mem.eql(u8, request.op, "chat_names") and !(std.mem.eql(u8, request.op, "host_restart") and request.all)) return false;
-    return chatHistoryRequest(host, request.id, query, wire_limit, out, null);
-}
-
-fn chatHistoryRequest(target: @import("session_identity.zig").Host, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
-    const host = target.index();
-    if (uiThreadBusy()) return false;
+pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
     if (host >= app_state.g_chat_history_channels.len) return false;
     const lock_deadline = GetTickCount64() + 15_000;
     while (!app_state.g_chat_history_channel_mutex.tryLock()) {
@@ -1248,14 +1224,16 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
     defer a.free(query);
     if (chatBenchEnabled()) return chatBenchFetch(key.shell_id, id, query, out);
     const wire_limit: usize = if (before > 0) 64 * 1024 * 1024 else 8 * chat_history.TAIL_BYTES;
-    if (chatHistoryPersistent(key.checked() orelse return false, query, wire_limit, out, null)) return true;
+    if (chatHistoryPersistent(key.host, id, query, wire_limit, out, null)) return true;
     out.clearRetainingCapacity();
     if (app_state.g_chat_history_channels_closing.load(.acquire)) return false;
-    return chatHistoryFetchOnce(key.checked() orelse return false, query, wire_limit, out);
+    return chatHistoryFetchOnce(key.host, query, wire_limit, out);
 }
 
-pub fn chatHistoryFetchOnce(identity: @import("session_identity.zig").Session, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
-    return chatHistoryPersistent(identity, query, wire_limit, out, null);
+pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
+    const parsed = std.json.parseFromSlice(struct { id: u32 }, std.heap.page_allocator, query, .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    return chatHistoryPersistent(host, parsed.value.id, query, wire_limit, out, null);
 }
 
 fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool, pushed: ?ChatHistoryPush) void {
@@ -1444,8 +1422,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
 
 var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
-var g_chat_live_preview_shell: u32 = 0;
-var g_chat_live_preview: @import("agent_second_line.zig").Line = .{};
 
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
@@ -1460,16 +1436,8 @@ pub fn chatFileOnReady() void {
             g_chat_live_seen_revision = live_revision;
             active_changed = true;
             chatLiveSyncWorking();
-            const preview = @import("agent_second_line.zig").forShell(app_state.active_shell);
-            if (g_chat_live_preview_shell != live_shell or !std.meta.eql(g_chat_live_preview, preview)) {
-                g_chat_live_preview_shell = live_shell;
-                g_chat_live_preview = preview;
-                preview_changed = true;
-            }
-            if (app_state.g_main_hwnd != null) {
-                const pane = chatViewLayout().pane;
-                _ = InvalidateRect(app_state.g_main_hwnd, &pane, 0);
-            }
+            preview_changed = true;
+            if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }
@@ -2330,34 +2298,6 @@ test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polli
     try app_state.g_chat_outbox.append(std.testing.allocator, entry);
     try std.testing.expect(chatDeliveryPending(720, true));
     try std.testing.expect(!chatDeliveryPending(720, false));
-}
-
-test "SOFT-3009 a tab with no transcript identity never asks the reader" {
-    try std.testing.expect(!(chat_transcript.Identity{}).hasSession());
-    try std.testing.expect(!(chat_transcript.Identity{ .shell_id = 1 }).hasSession());
-    try std.testing.expect(chat_transcript.Identity.init(1, 0, false, "claude-000", "").hasSession());
-    try std.testing.expect(chat_transcript.Identity.initTmux(1, 0, false, "claude-000", "").hasSession());
-}
-
-test "SOFT-3009 the offline chat bench never opens a live history stream" {
-    const saved_shell = app_state.shells[0];
-    const saved_count = app_state.shell_count;
-    const saved_bench_dir_len = app_state.g_chat_bench_dir_len;
-    defer {
-        app_state.shells[0] = saved_shell;
-        app_state.shell_count = saved_count;
-        app_state.g_chat_bench_dir_len = saved_bench_dir_len;
-    }
-    app_state.shells[0] = app_state.empty_shell;
-    app_state.shells[0].shell_id = 91;
-    app_state.shells[0].kind = .tmux;
-    app_state.shells[0].ai_agent = 1;
-    app_state.shell_count = 1;
-    const key = chat_transcript.Identity.init(91, 0, false, "claude-091", "");
-    app_state.g_chat_bench_dir_len = 0;
-    try std.testing.expect(chatLiveWanted(key));
-    app_state.g_chat_bench_dir_len = 1;
-    try std.testing.expect(!chatLiveWanted(key));
 }
 
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {

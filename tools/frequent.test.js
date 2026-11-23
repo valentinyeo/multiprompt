@@ -138,7 +138,7 @@ fn etaElapsedMs(_: u64, _: i64) u64 { return 0; }
   between('const SavedTab = struct', 'const ISSUE_347_KEEP_FULL_WIDTH') +
   between('const InboxRow = struct', 'var g_session_save_pending') +
   normalize(between('fn stampSessionUse(', 'fn inboxPublishesShell(')) +
-  normalize(between('pub fn sessionFrontSelected(', 'const resetSidebarDrag =', read('src/main.zig'))) +
+  normalize(between('pub fn sessionFrontSelected(', 'fn resetSidebarDrag(', read('src/main.zig'))) +
   between('fn inboxFrequent(', 'fn loadInboxModel(') +
   between('const favoriteSplitMatches =', 'fn toggleFavorite(') +
   between('fn inboxRowVisible(', 'test "cached inbox navigation') +

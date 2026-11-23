@@ -31,32 +31,10 @@ try {
 } finally { Remove-Item $log -ErrorAction SilentlyContinue }
 Write-Host 'PASS: exact rectangle, first-frame dirty layout, width mismatch, missing identity and blank paint controls'
 
-$crop = [int[]]@(100, 200, 102, 202)
-$pixels = [byte[]]@(20, 30, 40, 0, 70, 80, 90, 0, 21, 31, 41, 0, 71, 81, 91, 0)
-[ChatStillObserver]::AssertPixels($pixels, $pixels, 2, $crop, $null)
+$pixels = [byte[]]@(20, 30, 40, 0, 70, 80, 90, 0)
+[ChatStillObserver]::AssertPixels($pixels, $pixels)
 $changed = [byte[]]$pixels.Clone()
 $changed[4]++
-Reject { [ChatStillObserver]::AssertPixels($pixels, $changed, 2, $crop, $null) } 'pixels changed after the first frame'
-Reject { [ChatStillObserver]::AssertPixels($pixels, [byte[]]@(0), 2, $crop, $null) } 'pixel area changed'
-[ChatStillObserver]::AssertPixels($pixels, $changed, 2, $crop, [int[]]@(100, 200, 102, 202))
-Reject { [ChatStillObserver]::AssertPixels($pixels, $changed, 2, $crop, [int[]]@(101, 201, 102, 202)) } 'pixels changed after the first frame'
-$overlay = [byte[]]$pixels.Clone()
-$overlay[12]++
-[ChatStillObserver]::AssertPixels($pixels, $overlay, 2, $crop, [int[]]@(101, 201, 102, 202))
-Reject { [ChatStillObserver]::AssertPixels($pixels, $overlay, 2, $crop, [int[]]@(100, 200, 101, 201)) } 'pixels changed after the first frame'
-Write-Host 'PASS: a one-frame pixel change fails even with unchanged paint rectangles, and only the declared pill is masked'
-$live = @(
-    '[chat] new messages count=0 visible=0 up=1 rect=0,0,0,0',
-    '[chat] new messages count=1 visible=1 up=1 rect=534,546,762,572',
-    'unrelated line') -join "`n"
-$lastSeen = [ChatStillObserver]::ParseOverlay($live)
-if (($lastSeen -join ',') -ne '534,546,762,572') { throw 'The oracle did not read the declared pill rectangle' }
-$cleared = @(
-    '[chat] new messages count=1 visible=1 up=1 rect=534,546,762,572',
-    '[chat] new messages count=1 visible=0 up=0 rect=0,0,0,0') -join "`n"
-$dismissed = [ChatStillObserver]::ParseOverlay($cleared)
-if ($null -ne $dismissed) { throw 'The oracle kept masking a dismissed pill' }
-if ($null -ne [ChatStillObserver]::ParseOverlay('unrelated line')) { throw 'The oracle invented a pill rectangle' }
-$inflated = [ChatStillObserver]::Inflate([int[]]@(534, 546, 762, 572), 2)
-if (($inflated -join ',') -ne '532,544,764,574') { throw 'The pill mask does not allow for the painted border' }
-Write-Host 'PASS: the declared pill rectangle is read from the live log, cleared when dismissed and inflated by its border'
+Reject { [ChatStillObserver]::AssertPixels($pixels, $changed) } 'pixels changed after the first frame'
+Reject { [ChatStillObserver]::AssertPixels($pixels, [byte[]]@(0)) } 'pixel area changed'
+Write-Host 'PASS: a one-frame pixel change fails even with unchanged paint rectangles'

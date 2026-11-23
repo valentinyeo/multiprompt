@@ -352,7 +352,7 @@ test('IGSH-1072 executable resolver rejects stale revisions and wrong versions b
       fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
       const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
         cwd: directory,
-        env: { ...process.env, FEATURE: '', RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: expectedRevision, GITHUB_ENV: path.join(directory, 'github-env') },
+        env: { ...process.env, RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: expectedRevision, GITHUB_ENV: path.join(directory, 'github-env') },
         encoding: 'utf8',
       });
       assert.ifError(result.error);

@@ -60,12 +60,6 @@ print_help() {
         echo '  --name accepts 1-63 UTF-16 units, without control characters.'
         echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
         ;;
-      shell-open) echo 'usage: zsb shell-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --name <tab title> [--attach <tmux session>] [--run <remote command>]'
-        echo '  Opens a server shell tab on the desktop: plain VPS login or attach to a named tmux session.'
-        echo '  --attach adds or revives a tmux tab; --run overrides the remote startup command (for example tmux attach -t work).'
-        echo '  Without --attach host 0 and 1 open a plain shell; host 2 requires --attach.'
-        echo '  --after-tab places the new tab right below tab <id>, in its group.'
-        ;;
       session-close) echo 'usage: zsb session-close --tab <id>'
         echo '  Closes one terminal tab in the background. Local (non-remote) tabs are refused with not_remote_tab, the active tab with active_tab, a pinned tab with pinned_tab.'
         ;;
@@ -153,8 +147,6 @@ Commands and flags:
   workspace-list                    List workspaces, groups, tabs and host names as JSON
   session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE
                                     Attach a remote tmux tab in the background, idempotently
-  shell-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --name TITLE [--attach SESSION] [--run CMD]
-                                    Open a server shell tab or attach to tmux
   session-status --tab ID            Report connection state and exit_code when disconnected
   session-close --tab ID             Close one background terminal tab
   session-rebind --tab ID [--host HOST] --tmux SESSION
@@ -228,7 +220,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -534,36 +526,6 @@ elif args[0] == "session-status":
             raise ValueError()
     except ValueError:
         fail("bad_args", "usage: zsb session-status --tab <positive tab id>")
-elif args[0] == "shell-open":
-    flags = {"--workspace", "--group", "--after-tab", "--host", "--name", "--attach", "--run"}
-    values = {}
-    rest = args[1:]
-    i = 0
-    while i < len(rest):
-        flag = rest[i]
-        if flag not in flags or flag in values:
-            fail("bad_args", "shell-open takes --workspace, --group or --after-tab, --host, --name, and optional --attach and --run once each")
-        if i + 1 >= len(rest):
-            fail("bad_args", f"shell-open flag {flag} needs a value")
-        value = rest[i + 1]
-        if not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
-            fail("bad_args", "shell-open values must be nonempty and must not contain control characters")
-        values[flag] = value
-        i += 2
-    for required in ("--workspace", "--host", "--name"):
-        if required not in values:
-            fail("bad_args", "shell-open requires --workspace, --group or --after-tab, --host and --name")
-    if ("--group" in values) == ("--after-tab" in values):
-        fail("bad_args", "shell-open takes --group or --after-tab, not both")
-    if "--attach" in values:
-        attach = values["--attach"]
-        if len(attach) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in attach):
-            fail("invalid_tmux", "attach session must contain 1-63 letters, digits, hyphens, underscores or dots")
-    if len(values["--name"].encode("utf-16-le")) // 2 > 63:
-        fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
-    if any(len(value.encode()) > 256 for value in values.values()):
-        fail("bad_args", "shell-open argument too long")
-
 elif args[0] == "session-open":
     flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name"}
     values = {}
@@ -758,7 +720,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

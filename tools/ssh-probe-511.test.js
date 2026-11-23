@@ -245,7 +245,7 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
   const respawn = body('respawnShellInPlace', read('console.zig'));
   assert.doesNotMatch(respawn, /ssh_reconnect\.(?:ever_healthy|restored_session|gone_results) =/);
   assert.match(body('start', reconnect), /self\.healthy_attach = false/);
-  assert.match(body('preserveFailedRemoteSavedTab', read('session.zig')), /shell\.ssh_reconnect\.restored_session = tab\.tmux_session_len > 0/);
+  assert.match(body('preserveFailedRemoteSavedTab', read('session.zig')), /shell\.ssh_reconnect\.restored_session = tab\.kind == \.tmux/);
   assert.match(body('applyServerLayout', read('account_desktop.zig')), /shell\.ssh_reconnect\.restored_session = tab\.tmux_session\.len > 0/);
   assert.match(body('spawnShellWithSession', read('console.zig')), /const creating_session = kind == \.tmux and \(app_state\.g_pending_resurrect_len > 0 or app_state\.g_pending_tmux_cmd_len > 0\)/);
   assert.match(body('spawnShellWithSession', read('console.zig')), /\.creating_session = creating_session/);
@@ -263,16 +263,14 @@ test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survi
 test('ISSUE-511 active respawn sizes its console before show without touching any other window', () => {
   const console = read('console.zig');
   const complete = body('finishStartupShell', console);
-  assert.match(complete, /if \(job\.reconnect\) \{\s*if \(idx == app_state\.active_shell and layoutReconnectedConsole\(idx\) and/);
+  assert.match(complete, /if \(job\.reconnect\) \{\s*if \(idx == app_state\.active_shell and @import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*if \(positionReconnectedConsole\(idx\)\) showReconnectedConsole\(idx\)/);
   const reconnectComplete = complete.slice(complete.indexOf('    if (job.reconnect) {'), complete.indexOf('    if (idx == app_state.active_shell) {'));
   assert.doesNotMatch(reconnectComplete, /repositionActive|InvalidateRect|SetFocus|SetForegroundWindow/);
   assert.match(reconnectComplete, /sshRequestSessionProbe\(\)/);
   const position = body('positionReconnectedConsole', console);
-  assert.doesNotMatch(position, /reconnectTabVisible/);
-  assert.match(body('layoutReconnectedConsole', console), /reconnectConsoleLayoutAllowed/);
-  assert.match(position, /finalizeReconnectedConsoleLayout/);
+  assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return false/);
   assert.match(position, /rc = @import\("window_layout\.zig"\)\.activePaneContentRect\(rc\)/);
-  assert.match(position, /const con_top = rc\.top \+ pane\.threadTitleHeight\(\)/);
+  assert.match(position, /rc\.top \+= pane\.threadTitleHeight\(\)/);
   assert.match(position, /pane\.centeredConsoleColumn\(/);
   assert.match(position, /SetWindowPos\(shell\.hwnd,[^\n]*SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW/);
   assert.equal((position.match(/SetWindowPos\(/g) || []).length, 1);

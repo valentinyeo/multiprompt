@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,9 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / 'src/chat_history_reader.py').read_text()
-READER = {'__name__': 'reader_runtime_test'}
-exec(compile(SOURCE, '<runtime-test>', 'exec'), READER)
-GENERATION = READER['RUNTIME_GENERATION']
+GENERATION = int(re.search(r'^RUNTIME_GENERATION = (\d+)$', SOURCE, re.MULTILINE).group(1))
 BOOTSTRAP = 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'
 
 
@@ -43,7 +42,7 @@ class RuntimeTest(unittest.TestCase):
         return json.loads(result.stdout)['engine_info']
 
     def newer(self):
-        return SOURCE.replace('END = "@@MP_END@@"', 'END = "@@MP_NEW_END@@"', 1)
+        return SOURCE.replace(f'RUNTIME_GENERATION = {GENERATION}\n', f'RUNTIME_GENERATION = {GENERATION + 1}\n', 1).replace('END = "@@MP_END@@"', 'END = "@@MP_NEW_END@@"', 1)
 
     def test_selection_and_idempotence_across_bootstraps(self):
         first = self.info()
@@ -52,21 +51,21 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(self.info(), first)
         self.assertEqual(active.stat().st_mtime_ns, before)
         newer = self.info(self.newer())
-        self.assertNotEqual(newer['generation'], GENERATION)
+        self.assertEqual(newer['generation'], GENERATION + 1)
         self.assertNotEqual(first['sha256'], newer['sha256'])
-        self.assertEqual(self.info(self.newer()), newer)
+        self.assertEqual(self.info(), newer)
         query = {'id': 9, 'cwd': '', 'sid': 'missing', 'tmux': '', 'codex': False}
         request = base64.b64encode(json.dumps(query).encode()).decode()
-        result = subprocess.run([sys.executable, '-', request], input=self.newer(), text=True, capture_output=True, env=self.env, timeout=10)
+        result = subprocess.run([sys.executable, '-', request], input=SOURCE, text=True, capture_output=True, env=self.env, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '@mp\t9\thistory\tmissing\t-\t0\tsession transcript not found\n@@MP_NEW_END@@\n')
         self.assertEqual(json.loads(active.read_text()), newer)
 
-    def test_different_source_replaces_the_stale_selection_without_a_bump(self):
+    def test_same_generation_different_source_replaces_the_stale_selection(self):
         first = self.info()
         conflict = SOURCE.replace('PAGE_BYTES = 350000', 'PAGE_BYTES = 350001', 1)
         replaced = self.info(conflict)
-        self.assertNotEqual(replaced['generation'], GENERATION)
+        self.assertEqual(replaced['generation'], GENERATION)
         self.assertNotEqual(replaced['sha256'], first['sha256'])
         self.assertEqual(self.info(conflict), replaced)
         self.assertEqual(self.info()['sha256'], first['sha256'])
@@ -93,7 +92,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn('history\\terror', self.invoke().stdout)
 
     def test_null_selection_cannot_downgrade(self):
-        self.assertNotEqual(self.info(self.newer())['generation'], GENERATION)
+        self.assertEqual(self.info(self.newer())['generation'], GENERATION + 1)
         active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
         active.write_text('null')
         self.assertIn('history\\terror', self.invoke().stdout)
@@ -105,8 +104,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn('from concurrent.futures import ThreadPoolExecutor', prelude)
         self.assertNotIn('from concurrent.futures import ThreadPoolExecutor', serve_head)
 
-    def test_concurrent_fingerprints_publish_a_consistent_selection(self):
-        versions = {self.info()['generation'], self.info(self.newer())['generation']}
+    def test_concurrent_generations_cannot_downgrade(self):
         for attempt in range(50):
             with self.subTest(attempt=attempt):
                 processes = []
@@ -119,9 +117,8 @@ class RuntimeTest(unittest.TestCase):
                     output, error = process.communicate(timeout=10)
                     self.assertEqual(process.returncode, 0, error)
                     self.assertTrue(output.strip(), 'superseded reader dropped an open reply before ThreadPoolExecutor load')
-                    self.assertIn(json.loads(output)['engine_info']['generation'], versions)
-                active = Path(self.home.name) / '.multiprompt-runtime/active.json'
-                self.assertIn(json.loads(active.read_text())['generation'], versions)
+                    self.assertIn(json.loads(output)['engine_info']['generation'], (GENERATION, GENERATION + 1))
+                self.assertEqual(self.info()['generation'], GENERATION + 1)
 
     def test_mp_send_ships_inside_the_runtime(self):
         body = "#!/usr/bin/env python3\nprint('mp-send')\n"
@@ -130,7 +127,6 @@ class RuntimeTest(unittest.TestCase):
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-send'
         self.assertTrue(published.is_symlink())
         self.assertEqual(published.read_text(), body)
-        self.assertTrue(os.access(published, os.X_OK))
 
     def test_zsb_ships_inside_the_runtime_as_an_executable_copy(self):
         body = "#!/bin/sh\necho zsb\n"
@@ -162,21 +158,13 @@ class RuntimeTest(unittest.TestCase):
     def bundle(self):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
-            ('MP_FRESH_SOURCE', 'src/mp_fresh.py'),
             ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
-            ('MP_SHELL_SOURCE', 'src/mp_shell.py'),
             ('MP_SESSIONS_SOURCE', 'src/mp_sessions.py'),
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
         prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
         return prelude + SOURCE
-
-    def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
-        self.info(self.bundle())
-        published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-fresh'
-        self.assertTrue(published.is_symlink())
-        self.assertTrue(os.access(published, os.X_OK))
 
     def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
         self.info(self.bundle())
@@ -218,7 +206,7 @@ class RuntimeTest(unittest.TestCase):
 
     def test_watch_uses_selected_engine(self):
         self.info(self.newer())
-        result = self.invoke(self.newer(), mode='--watch', request={'id': 8, 'cwd': '', 'sid': 'missing', 'tmux': '', 'codex': False})
+        result = self.invoke(mode='--watch', request={'id': 8, 'cwd': '', 'sid': 'missing', 'tmux': '', 'codex': False})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {'id': 8, 'wire': '@mp\t8\thistory\tmissing\t-\t0\tsession transcript not found\n@@MP_NEW_END@@\n'})
 

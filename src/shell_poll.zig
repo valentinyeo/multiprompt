@@ -20,9 +20,10 @@ const OpenProcess = @import("win32.zig").OpenProcess;
 const ReadProcessMemory = @import("win32.zig").ReadProcessMemory;
 const AttachConsole = @import("win32.zig").AttachConsole;
 const FreeConsole = @import("win32.zig").FreeConsole;
+const GetStdHandle = @import("win32.zig").GetStdHandle;
 const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
-const openAttachedConsoleOutput = @import("clipboard.zig").openAttachedConsoleOutput;
+const STD_OUTPUT_HANDLE = @import("win32.zig").STD_OUTPUT_HANDLE;
 const COORD = @import("win32.zig").COORD;
 const CONSOLE_SCREEN_BUFFER_INFO = @import("win32.zig").CONSOLE_SCREEN_BUFFER_INFO;
 const PROCESS_QUERY_INFORMATION = @import("win32.zig").PROCESS_QUERY_INFORMATION;
@@ -734,8 +735,8 @@ fn isTmuxRunningInConsole(pid: DWORD) bool {
     if (AttachConsole(pid) == 0) return false;
     defer _ = FreeConsole();
 
-    const handle = openAttachedConsoleOutput() orelse return false;
-    defer _ = CloseHandle(handle);
+    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == null) return false;
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return false;
@@ -776,8 +777,8 @@ fn readTmuxStatusTitle(pid: DWORD, out: *[256]u16, ram_out: ?*u32) ?u32 {
     if (AttachConsole(pid) == 0) return null;
     defer _ = FreeConsole();
 
-    const handle = openAttachedConsoleOutput() orelse return null;
-    defer _ = CloseHandle(handle);
+    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == null) return null;
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
@@ -862,8 +863,8 @@ fn readVpsPromptCwd(pid: DWORD, out: *[128]u16) ?[]const u16 {
     if (AttachConsole(pid) == 0) return null;
     defer _ = FreeConsole();
 
-    const handle = openAttachedConsoleOutput() orelse return null;
-    defer _ = CloseHandle(handle);
+    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == null) return null;
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
@@ -1036,11 +1037,11 @@ pub fn extractTmuxSessionFromStatus(pid: DWORD, out: *[64]u8, out_len: *u32) boo
     }
     defer _ = FreeConsole();
 
-    const handle = openAttachedConsoleOutput() orelse {
-        debugLog("tmux-extract: no console output handle");
+    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (handle == null) {
+        debugLog("tmux-extract: no stdout handle");
         return false;
-    };
-    defer _ = CloseHandle(handle);
+    }
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) {
@@ -1870,7 +1871,6 @@ pub fn pollShellNames() void {
                         app_state.shells[i].adopt_streak = 0;
                         continue;
                     }
-                    if (i == app_state.active_shell) repositionActive();
                     publishInboxState();
                     saveSession();
                     changed = true;
@@ -1879,14 +1879,10 @@ pub fn pollShellNames() void {
                 app_state.shells[i].adopt_streak = 0;
             }
         } else if (app_state.shells[i].kind != .tmux and det_pid != 0) {
-            var detected: [64]u8 = undefined;
-            var detected_len: u32 = 0;
-            if (isTmuxRunningInConsole(det_pid) and extractTmuxSessionFromStatus(det_pid, &detected, &detected_len)) {
+            if (isTmuxRunningInConsole(det_pid)) {
                 app_state.shells[i].tmux_detect_streak += 1;
                 if (app_state.shells[i].tmux_detect_streak >= 3) {
                     app_state.shells[i].kind = .tmux;
-                    @memcpy(app_state.shells[i].tmux_session[0..detected_len], detected[0..detected_len]);
-                    app_state.shells[i].tmux_session_len = detected_len;
                     app_state.shells[i].tmux_detect_streak = 0;
                     debugLog("pollShellNames: auto-converted tab to TMUX");
                     changed = true;

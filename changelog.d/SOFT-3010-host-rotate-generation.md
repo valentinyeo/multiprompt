@@ -1,1 +1,0 @@
-Nightly host restarts no longer crash when the published chat runtime lacks a generation global.

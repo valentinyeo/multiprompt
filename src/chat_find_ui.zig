@@ -185,10 +185,10 @@ fn worker(job: *app_state.ChatFindJob) void {
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    var ok = if (session.chatBenchEnabled()) session.chatBenchFetch(key_id.shell_id, job.id, query, &wire) else session.chatHistoryPersistent(key_id.checked() orelse return, query, 1024 * 1024, &wire, null);
+    var ok = if (session.chatBenchEnabled()) session.chatBenchFetch(key_id.shell_id, job.id, query, &wire) else session.chatHistoryPersistent(key_id.host, job.id, query, 1024 * 1024, &wire, null);
     if (!ok and !session.chatBenchEnabled() and !app_state.g_chat_history_channels_closing.load(.acquire)) {
         wire.clearRetainingCapacity();
-        ok = session.chatHistoryFetchOnce(key_id.checked() orelse return, query, 1024 * 1024, &wire);
+        ok = session.chatHistoryFetchOnce(key_id.host, query, 1024 * 1024, &wire);
     }
     if (ok) job.result = model.parse(a, wire.items, job.id, key_id.codex, std.mem.sliceTo(&key_id.tmux, 0)) catch null;
 }

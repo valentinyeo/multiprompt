@@ -1,1 +1,0 @@
-Multiprompt: choose the server for a workspace or new tab

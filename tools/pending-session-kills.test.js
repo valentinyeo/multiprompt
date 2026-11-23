@@ -41,9 +41,8 @@ test('IGSH-1516 offline end survives stale account layout and rejects an unaccep
   const admits = /fn queuePendingSessionKill\([^\n]+\) bool/.test(archive);
   native(`const std = @import("std");
 const Closed = @import("tmux_closed.zig").Closed;
-const SessionIdentity = @import("session_identity.zig").Session;
 const Outcome = enum { gone, retry, unsafe };
-const Shell = struct { shell_id: u32 = 7, kind: enum { tmux, vps, vps2, cmd } = .tmux, ai_agent: u8 = 2, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, tmux_host: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0 };
+const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, tmux_host: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0 };
 const app_state = struct {
     var shells: [1]Shell = .{.{}};
     var shell_count: usize = 1;
@@ -61,8 +60,8 @@ fn rememberArchivedTab(_: usize) ?struct { ai_agent: u8 } { return .{ .ai_agent 
 fn rejectPinnedSessionClose(_: usize) bool { return false; }
 fn parkMainWindowBeforeActiveShellRemoval(_: usize) bool { return true; }
 fn focusActiveShell() void {}
-fn killRemoteTmuxSession(_: SessionIdentity${tokenized ? ', _: ?u64' : ''}) Outcome { return kill_outcome; }
-fn queuePendingSessionKill(_: SessionIdentity) ${admits ? 'bool' : 'void'} { queued += 1; ${admits ? 'return admitted;' : ''} }
+fn killRemoteTmuxSession(_: []const u8, _: u8, _: []const u8, _: u8${tokenized ? ', _: ?u64' : ''}) Outcome { return kill_outcome; }
+fn queuePendingSessionKill(_: []const u8, _: u8, _: []const u8, _: u8) ${admits ? 'bool' : 'void'} { queued += 1; ${admits ? 'return admitted;' : ''} }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
 fn removePaneSessionFilesForShell(_: u32) void {}
 fn closeShellRemember(_: u32, remember: bool) void {
@@ -120,7 +119,7 @@ test "full queue and unsafe target preserve tab, successful end needs no retry" 
     try std.testing.expectEqual(@as(usize, 0), queued);
     try std.testing.expect(!app_state.g_tmux_closed.contains(0, "session-one"));
 }
-`, ['session_identity.zig', 'tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'fixtures/issue-415-frequent.json', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
+`, ['tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'fixtures/issue-415-frequent.json', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
 });
 
 test('IGSH-1516 cancelled retry cannot kill or resurrect a replacement intent', () => {
@@ -133,7 +132,6 @@ test('IGSH-1516 cancelled retry cannot kill or resurrect a replacement intent', 
     .replace('@import("archive.zig").', '');
   native(`const std = @import("std");
 const session_kills = @import("session_kills.zig");
-const SessionIdentity = @import("session_identity.zig").Session;
 const app_state = struct {
     var g_restoring = false;
     var g_pending_tmux_host: u8 = 0;
@@ -153,14 +151,12 @@ fn TerminateProcess(process: *anyopaque, _: u32) i32 {
     terminated += 1;
     return 1;
 }
-fn killRemoteTmuxSession(identity: SessionIdentity, token: ?session_kills.Token) session_kills.Outcome {
-    const host = identity.host.index();
-    const session = std.mem.sliceTo(&identity.tmux, 0);
-    std.debug.assert(identity.agent == .codex);
+fn killRemoteTmuxSession(session: []const u8, host: u8, _: []const u8, agent: u8, token: ?session_kills.Token) session_kills.Outcome {
+    std.debug.assert(agent == 2);
     calls += 1;
     tryAttach(token.?);
     cancelPendingSessionKill(host, session);
-    _ = app_state.g_pending_session_kills.add(SessionIdentity.remote(host, session, "replacement", 2).?);
+    _ = app_state.g_pending_session_kills.add(host, session, "replacement", agent);
     return .retry;
 }
 fn tryAttach(token: session_kills.Token) void {
@@ -169,14 +165,14 @@ fn tryAttach(token: session_kills.Token) void {
 ${cancel}
 ${retry}
 test "actual worker finishes only its own cancelled token" {
-    const original = app_state.g_pending_session_kills.add(SessionIdentity.remote(0, "session-one", "", 2).?).?;
+    const original = app_state.g_pending_session_kills.add(0, "session-one", "", 2).?;
     retryPendingSessionKills();
     try std.testing.expectEqual(@as(usize, 1), calls);
     try std.testing.expectEqual(@as(usize, 1), terminated);
     const replacement = app_state.g_pending_session_kills.begin(0).?;
     try std.testing.expect(replacement.token != original);
-    try std.testing.expectEqual(.codex, replacement.identity.agent);
-    try std.testing.expectEqualStrings("replacement", std.mem.sliceTo(&replacement.identity.sid, 0));
+    try std.testing.expectEqual(@as(u8, 2), replacement.ai_agent);
+    try std.testing.expectEqualStrings("replacement", replacement.sid[0..replacement.sid_len]);
 }
 fn spawnAccepted(tmux_session: ?[]const u8) void {
 ${reopen}
@@ -185,7 +181,7 @@ test "only explicit accepted reopen cancels end and clears tombstone" {
     app_state.g_pending_session_kills = .{};
     defer app_state.g_tmux_closed.entries.deinit(std.testing.allocator);
     try app_state.g_tmux_closed.close(std.testing.allocator, 0, "queued");
-    _ = app_state.g_pending_session_kills.add(SessionIdentity.remote(0, "queued", "", 2).?).?;
+    _ = app_state.g_pending_session_kills.add(0, "queued", "", 2).?;
     app_state.g_restoring = true;
     spawnAccepted("queued");
     try std.testing.expect(app_state.g_tmux_closed.contains(0, "queued"));

@@ -2084,15 +2084,6 @@ pub fn editSelected() void {
     view.focus();
 }
 
-pub fn openNewRoom(hwnd: w.HANDLE) void {
-    app_state.g_search_active = false;
-    @import("rename.zig").clearSearchBackdrop();
-    if (app_state.g_inbox_active) @import("inbox.zig").closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) @import("archive.zig").closeAllSessions(hwnd);
-    openCreate();
-    _ = w.InvalidateRect(hwnd, null, 0);
-}
-
 pub fn openCreate() void {
     if (!saveDraft() or !enter()) return;
     restore_pending = false;

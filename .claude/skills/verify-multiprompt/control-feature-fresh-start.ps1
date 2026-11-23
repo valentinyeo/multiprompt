@@ -10,18 +10,11 @@ function Read-HostIdentity([string]$Sid) {
         $statePath = $configPath.FullName -replace '\.config\.json$', '.state.json'
         if (-not (Test-Path $statePath)) { return $null }
         $state = Get-Content $statePath -Raw | ConvertFrom-Json
-        $native = ''
-        if ($state.PSObject.Properties.Name -contains 'native_session' -and $state.native_session) {
-            $native = [string]$state.native_session
-        } elseif ($state.PSObject.Properties.Name -contains 'context_session' -and $state.context_session) {
-            $native = [string]$state.context_session
-        }
-        $provider = if ($config.PSObject.Properties.Name -contains 'provider') { [string]$config.provider } else { 'claude' }
         return @{
             sid = [string]$config.sid
             tmux = [string]$config.tmux
-            provider = $provider
-            native_session = $native
+            provider = [string]$config.provider
+            native_session = [string]$state.native_session
             configFile = $configPath.Name
             stateFile = [IO.Path]::GetFileName($statePath)
         }
@@ -54,8 +47,7 @@ try {
         $state = Read-Session
         $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'tmux' -and
             $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv -and
-            $state.tabs[0].PSObject.Properties['csid'] -and $state.tabs[0].csid -and
-        $state.tabs[0].PSObject.Properties['ai_agent'] -and $state.tabs[0].ai_agent -eq 1
+            $state.tabs[0].PSObject.Properties['csid'] -and $state.tabs[0].csid
     } 'seeded remote Chat View tab restored' 60
     Wait-Until {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
@@ -67,7 +59,7 @@ try {
     $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
     Wait-Until {
         (Get-Content $log -Raw) -match '\[chat\] transcript load shell=\d+ ok'
-    } 'seeded transcript painted before send' 90
+    } 'seeded transcript painted before send' 45
     for ($n = 1; $n -le 2; $n++) {
         $text = "fresh-start probe $n"
         Type-Text $text
@@ -83,17 +75,15 @@ try {
     Invoke-JourneyCommand 'Chat View: Fresh start' -Confirm {
         Press @(0x0D) 'Enter: confirm Chat View: Fresh start'
     }
-    $start = if (Test-Path $log) { (Get-Content $log -Raw).Length } else { 0 }
+    $start = ((Get-Content $log -Raw) -join '').Length
     Wait-Until {
         $identity = Read-HostIdentity $before.csid
         if ($null -eq $identity) { return $false }
         $statePath = Join-Path $hostRoot ($identity.configFile -replace '\.config\.json$', '.state.json')
         $hostState = Get-Content $statePath -Raw | ConvertFrom-Json
-        $hostReady = -not ($hostState.PSObject.Properties.Name -contains 'fresh_start')
+        $hostReady = -not ($hostState.PSObject.Properties['fresh_start'])
         $rotated = $identity.native_session -and $identity.native_session -cne $before.native_session
-        $raw = if (Test-Path $log) { (Get-Content $log -Raw) } else { '' }
-        $traceStart = [Math]::Min($start, $raw.Length)
-        $trace = if ($raw.Length -gt $traceStart) { $raw.Substring($traceStart) } else { '' }
+        $trace = if (Test-Path $log) { (Get-Content $log -Raw).Substring([Math]::Min($start, ((Get-Content $log -Raw) -join '').Length)) } else { '' }
         $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
         $handover = $trace -match 'Finish the saved draft' -or
             ((Test-Path $hostJsonl) -and ((Get-Content $hostJsonl -Raw) -match 'handover_visible|handover_saved'))

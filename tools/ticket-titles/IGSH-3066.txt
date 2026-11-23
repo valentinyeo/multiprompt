@@ -1,1 +1,0 @@
-Keep the app responsive on slow internet

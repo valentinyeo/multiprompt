@@ -1,3 +1,0 @@
-{"event":"init","conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","init":{"model":"gemini-4-neon-high"}}
-{"event":"step_update","step_update":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","step_index":0,"state":"DONE","step_type":"user_input"}}
-{"event":"result","result":{"conversation_id":"6ac23549-fd9c-4612-88e6-c570a75692b7","status":"ERROR","finished_reason":"RESOURCE_EXHAUSTED","error":{"code":"RESOURCE_EXHAUSTED","message":"Individual quota reached for gemini-4-neon-high."}}}

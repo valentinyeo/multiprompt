@@ -6,10 +6,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import { atomic, winPath, searchMainWindows } from './lib.mjs';
-import { promisify } from 'node:util';
-import { execFile } from 'node:child_process';
-const execute = promisify(execFile);
+import { atomic, winPath } from './lib.mjs';
 import { sessions, transcript, usage } from './demo-workspace.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -50,14 +47,14 @@ const pump = () => {
   }
 };
 const log = () => { try { return fs.readFileSync(path.join(appdata, 'ZigShell/debug.log'), 'utf8'); } catch { return ''; } };
-const window = async () => (await searchMainWindows(execute).catch(() => []))[0] || '';
+const window = () => { try { return execFileSync('xdotool', ['search', '--name', 'multiprompt v'], { encoding: 'utf8' }).trim().split(/\s+/)[0]; } catch { return ''; } };
 let app;
 try {
   atomic(path.join(root, 'launch.cmd'), `@echo off\r\nset "APPDATA=${winPath(appdata)}"\r\n"${winPath(exe)}" --name demo --no-window-restore\r\n`);
   app = spawn('wine', ['C:\\windows\\system32\\cmd.exe', '/c', winPath(path.join(root, 'launch.cmd'))], { env: { ...env, ZIGSHELL_CHAT_FIXTURE_DIR: winPath(mailbox) }, stdio: 'ignore' });
   const deadline = Date.now() + 180_000;
   let id = '';
-  while (!(id = await window()) || !new RegExp(`\\[bench\\] heartbeat seq=\\d+ tabs=${sessions.length} `).test(log())) {
+  while (!(id = window()) || !new RegExp(`\\[bench\\] heartbeat seq=\\d+ tabs=${sessions.length} `).test(log())) {
     if (Date.now() > deadline) throw new Error('App did not start with the demo workspace');
     pump(); await delay(200);
   }

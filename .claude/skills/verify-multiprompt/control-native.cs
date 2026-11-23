@@ -659,18 +659,6 @@ public static class VerifyNative {
         input.data.mouse = new Mouse { data = unchecked((uint)delta), flags = 0x0800 };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Sidebar wheel input failed");
     }
-    public static void WheelClientPoint(IntPtr owner, uint pid, IntPtr target, int x, int y, int delta) {
-        uint actualPid;
-        GetWindowThreadProcessId(owner, out actualPid);
-        if (actualPid != pid || Class(owner) != "ZigShell" || GetAncestor(GetForegroundWindow(), 3) != owner) throw new InvalidOperationException("Wheel owner mismatch");
-        Point point = new Point { X = x, Y = y };
-        if (!ClientToScreen(target, ref point) || WindowFromPoint(point) != target) throw new InvalidOperationException("Wheel target is not in the owned pane");
-        if (delta == 0 || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
-        MouseAt(point.X, point.Y, 0);
-        Input input = new Input(); input.type = 0;
-        input.data.mouse = new Mouse { data = unchecked((uint)delta), flags = 0x0800 };
-        if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Pane wheel input failed");
-    }
     public static void ClickBrowserContent(IntPtr pane, IntPtr owner) {
         Rect rect;
         if (!GetClientRect(pane, out rect)) throw new InvalidOperationException("Browser client rectangle unavailable");
@@ -702,28 +690,6 @@ public static class VerifyNative {
             if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
             Thread.Sleep(35);
         }
-    }
-    public static void DragSelectClient(IntPtr hwnd, int x0, int y0, int x1, int y1) {
-        Point start = new Point { X = x0, Y = y0 };
-        Point end = new Point { X = x1, Y = y1 };
-        if (!ClientToScreen(hwnd, ref start) || !ClientToScreen(hwnd, ref end)) throw new InvalidOperationException("Selection endpoints unavailable");
-        if (WindowFromPoint(start) != hwnd || WindowFromPoint(end) != hwnd) throw new InvalidOperationException("Selection is not in the owned window");
-        MouseAt(start.X, start.Y, 2);
-        try {
-            for (int step = 1; step <= 10; step++) {
-                MouseAt(start.X + (end.X - start.X) * step / 10, start.Y + (end.Y - start.Y) * step / 10, 0);
-                Thread.Sleep(15);
-            }
-        } finally { MouseAt(end.X, end.Y, 4); }
-    }
-    public static void ClickOwnedChildClient(IntPtr child, IntPtr owner, int x, int y) {
-        if (Class(child) != "MultiPromptWorkspaceSwitcher" || GetAncestor(child, 2) != owner) throw new InvalidOperationException("Workspace card is not in the owned window");
-        Point point = new Point { X = x, Y = y };
-        if (!ClientToScreen(child, ref point) || WindowFromPoint(point) != child) throw new InvalidOperationException("Workspace card row is not in the owned window");
-        if (GetAncestor(GetForegroundWindow(), 2) != owner) throw new InvalidOperationException("Owned window must be foreground before a workspace card click");
-        MouseAt(point.X, point.Y, 0);
-        MouseAt(point.X, point.Y, 2);
-        MouseAt(point.X, point.Y, 4);
     }
     public static void RightClickTranscript(IntPtr hwnd, uint pid, IntPtr owner, Point point) {
         uint actualPid;
@@ -977,58 +943,6 @@ public static class VerifyNative {
         info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         return info.Focus;
-    }
-    [DllImport("user32.dll")] static extern uint GetCaretBlinkTime();
-    public static uint CaretBlinkTime() { return GetCaretBlinkTime(); }
-    [StructLayout(LayoutKind.Sequential)] public struct CaretSnapshot { public IntPtr Caret; public Rect CaretRect; }
-    static CaretSnapshot CaretSnapshotForThread(uint thread) {
-        GuiThreadInfo info = new GuiThreadInfo();
-        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
-        if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        return new CaretSnapshot { Caret = info.Caret, CaretRect = info.CaretRect };
-    }
-    public static Rect CaretRect(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)).CaretRect; }
-    public static CaretSnapshot GuiCaretSnapshot(IntPtr hwnd) { return CaretSnapshotForThread(WindowThread(hwnd)); }
-    static int[] SampleRectPixels(int left, int top, int width, int height) {
-        if (width <= 0 || height <= 0) throw new InvalidOperationException("Caret sample rectangle is empty");
-        System.Drawing.Bitmap bitmap = new System.Drawing.Bitmap(width, height);
-        using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap)) {
-            graphics.CopyFromScreen(left, top, 0, 0, bitmap.Size);
-        }
-        int[] colors = new int[width * height];
-        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) colors[y * width + x] = bitmap.GetPixel(x, y).ToArgb();
-        bitmap.Dispose();
-        return colors;
-    }
-    static int PixelDiff(int[] first, int[] second) {
-        if (first.Length != second.Length) return int.MaxValue;
-        int diff = 0;
-        for (int i = 0; i < first.Length; i++) if (first[i] != second[i]) diff++;
-        return diff;
-    }
-    public static int CaretPixelMotionMs(IntPtr hwnd, int budgetMs, int stepMs) {
-        CaretSnapshot snap = GuiCaretSnapshot(hwnd);
-        if (snap.Caret == IntPtr.Zero || snap.CaretRect.Right <= snap.CaretRect.Left || snap.CaretRect.Bottom <= snap.CaretRect.Top)
-            throw new InvalidOperationException("Caret is not visible for pixel sampling");
-        Point origin = new Point { X = snap.CaretRect.Left, Y = snap.CaretRect.Top };
-        if (!ClientToScreen(snap.Caret, ref origin)) throw new InvalidOperationException("Cannot map caret to screen coordinates");
-        int width = snap.CaretRect.Right - snap.CaretRect.Left;
-        int height = snap.CaretRect.Bottom - snap.CaretRect.Top;
-        int[] baseline = SampleRectPixels(origin.X, origin.Y, width, height);
-        int elapsed = 0;
-        while (elapsed < budgetMs) {
-            Thread.Sleep(stepMs);
-            elapsed += stepMs;
-            int[] current = SampleRectPixels(origin.X, origin.Y, width, height);
-            if (PixelDiff(baseline, current) > 0) return elapsed;
-        }
-        return -1;
-    }
-    static uint WindowThread(IntPtr hwnd) {
-        uint pid;
-        uint thread = GetWindowThreadProcessId(hwnd, out pid);
-        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
-        return thread;
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
@@ -1407,7 +1321,7 @@ public static class PaneLayoutProof {
             proof["gapRect"] = new int[] { gapLeft, client.Top, browserLeft, client.Bottom };
             proof["gripPixels"] = gripPixels;
             Require(forbidden == 0 && gapLeft >= right, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
-            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + S(42, dpi, scale);
+            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + 28;
             int rowBottom = rowTop + S(58, dpi, scale);
             var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
             int railPixels = 0;

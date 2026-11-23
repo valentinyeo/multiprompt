@@ -29,7 +29,6 @@ const SW_RESTORE = @import("win32.zig").SW_RESTORE;
 const WM_APP_FOCUS = @import("win32.zig").WM_APP_FOCUS;
 const WM_APP_SHELL_EXITED = @import("win32.zig").WM_APP_SHELL_EXITED;
 const WM_APP_SWITCH_WORKSPACE = @import("win32.zig").WM_APP_SWITCH_WORKSPACE;
-pub const WM_APP_WORKSPACE_MENU_REGISTRY_READY = @import("win32.zig").WM_APP_WORKSPACE_MENU_REGISTRY_READY;
 const WM_COPYDATA = @import("win32.zig").WM_COPYDATA;
 const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
@@ -506,10 +505,7 @@ fn unlockWorkspaceRegistry(mutex: HANDLE) void {
     _ = CloseHandle(mutex);
 }
 
-var registry_revision: u64 = 0;
-
 fn writeWorkspaceRegistryFile() void {
-    registry_revision +%= 1;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
     var path_buf: [512]u8 = undefined;
@@ -1257,104 +1253,6 @@ fn upsertMySlotEntries() void {
         const nm = workspaceDisplayName(ws, &nbuf);
         addOrUpdateWorkspaceHosted(app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], nm, false, me);
     }
-}
-
-var menu_wake: HANDLE = null;
-var menu_reading = std.atomic.Value(bool).init(false);
-var menu_snapshot_ready = std.atomic.Value(bool).init(false);
-var menu_snapshot: [8192]u8 = undefined;
-var menu_snapshot_len: usize = 0;
-var menu_snapshot_revision: u64 = 0;
-
-fn readMenuRegistry() void {
-    const revision = registry_revision;
-    menu_snapshot_len = 0;
-    var path_buf: [512]u8 = undefined;
-    if (getWorkspaceRegistryPath(&path_buf)) |path| {
-        if (lockWorkspaceRegistryWithTimeout(5000)) |mutex| {
-            defer unlockWorkspaceRegistry(mutex);
-            menu_snapshot_len = readWorkspaceRegistryBytes(path, &menu_snapshot) orelse 0;
-        }
-    }
-    menu_snapshot_revision = revision;
-    menu_snapshot_ready.store(true, .release);
-    if (menu_wake) |wake| _ = @import("focus.zig").PostMessageW(wake, WM_APP_WORKSPACE_MENU_REGISTRY_READY, 0, 0);
-}
-
-pub fn prepareMenuEntries() void {
-    syncCurrentWorkspaceToRegistry();
-    upsertMySlotEntries();
-}
-
-pub fn refreshMenuRegistry(wake: HANDLE) void {
-    menu_wake = wake;
-    if (menu_snapshot_ready.load(.acquire) or menu_reading.load(.acquire)) return;
-    menu_reading.store(true, .release);
-    const thread = std.Thread.spawn(.{}, readMenuRegistry, .{}) catch {
-        menu_reading.store(false, .release);
-        return;
-    };
-    thread.detach();
-}
-
-fn menuSnapshotUsable(len: usize, read_revision: u64) bool {
-    return len > 0 and read_revision == registry_revision;
-}
-
-pub fn takeMenuRegistrySnapshot() bool {
-    if (!menu_snapshot_ready.swap(false, .acq_rel)) return false;
-    menu_reading.store(false, .release);
-    if (!menuSnapshotUsable(menu_snapshot_len, menu_snapshot_revision)) return false;
-    app_state.g_workspace_count = 0;
-    parseWorkspaceRegistryJson(menu_snapshot[0..menu_snapshot_len]);
-    syncCurrentWorkspaceToRegistry();
-    upsertMySlotEntries();
-    return true;
-}
-
-fn holdWorkspaceRegistryForTest(started: *std.atomic.Value(bool), stop: *std.atomic.Value(bool)) void {
-    const mutex = lockWorkspaceRegistryWithTimeout(5000);
-    started.store(true, .release);
-    while (!stop.load(.acquire)) std.atomic.spinLoopHint();
-    if (mutex) |held| unlockWorkspaceRegistry(held);
-}
-
-test "SOFT-2374 the workspace menu opens while another window holds the registry" {
-    const old_workspaces = app_state.g_workspaces;
-    const old_count = app_state.g_workspace_count;
-    const old_single = app_state.g_single_window;
-    defer {
-        app_state.g_workspaces = old_workspaces;
-        app_state.g_workspace_count = old_count;
-        app_state.g_single_window = old_single;
-    }
-    app_state.g_workspace_count = 0;
-    app_state.g_single_window = false;
-    var holding = std.atomic.Value(bool).init(false);
-    var stopped = std.atomic.Value(bool).init(false);
-    const holder = std.Thread.spawn(.{}, holdWorkspaceRegistryForTest, .{ &holding, &stopped }) catch return error.SkipZigTest;
-    while (!holding.load(.acquire)) std.atomic.spinLoopHint();
-    const began = GetTickCount64();
-    prepareMenuEntries();
-    refreshMenuRegistry(null);
-    const elapsed = GetTickCount64() - began;
-    stopped.store(true, .release);
-    holder.join();
-    try std.testing.expect(elapsed < 250);
-    const deadline = GetTickCount64() + 5000;
-    while (!menu_snapshot_ready.load(.acquire) and GetTickCount64() < deadline) std.atomic.spinLoopHint();
-    try std.testing.expect(menu_snapshot_ready.load(.acquire));
-    _ = takeMenuRegistrySnapshot();
-}
-
-test "SOFT-2374 a finished read is used only when no local save came after it" {
-    const saved = registry_revision;
-    defer registry_revision = saved;
-    registry_revision = 7;
-    try std.testing.expect(menuSnapshotUsable(24, 7));
-    try std.testing.expect(!menuSnapshotUsable(0, 7));
-    registry_revision = 8;
-    try std.testing.expect(!menuSnapshotUsable(24, 7));
 }
 
 pub fn syncInProcessWorkspacesToRegistry() void {
@@ -3107,49 +3005,6 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     for (starred_layout.tabs, 0..) |tab, ws| try std.testing.expectEqualStrings(starred_layout.workspaces[ws].name, tab.workspace);
 }
 
-pub fn sidebarViewShellVisible(idx: usize) bool {
-    const view = app_state.g_sidebar_view orelse return false;
-    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
-    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |*row| {
-        if (row.sid == app_state.shells[idx].shell_id and row.ws < app_state.g_inbox_ws_count and
-            app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
-            return @import("inbox.zig").rowVisibleInSplit(row, view.split(), now_ms);
-    }
-    return false;
-}
-
-pub fn refreshSidebarView() void {
-    const view = app_state.g_sidebar_view orelse return;
-    @import("inbox.zig").publishInboxStateNow();
-    @import("inbox.zig").loadInboxModel();
-    if (app_state.active_shell < app_state.shell_count and sidebarViewShellVisible(app_state.active_shell)) return;
-    var target: ?u32 = null;
-    var best: app_state.InboxRow = .{};
-    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
-    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
-        if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd != @intFromPtr(app_state.g_main_hwnd)) continue;
-        if (!@import("inbox.zig").rowVisibleInSplit(&row, view.split(), now_ms)) continue;
-        const idx = @import("inbox.zig").findShellById(row.sid) orelse continue;
-        if (target == null or @import("inbox.zig").rowLessForSplit(view.split(), now_ms, row, best)) {
-            target = idx;
-            best = row;
-        }
-    }
-    if (target) |idx| {
-        if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
-    } else {
-        const chat_on = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on else false;
-        @import("chat_composer.zig").closeChatView();
-        if (app_state.active_shell < app_state.shell_count) {
-            app_state.shells[app_state.active_shell].chat_view_on = chat_on;
-            if (app_state.shells[app_state.active_shell].hwnd != null) _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
-        }
-        app_state.active_shell = app_state.shell_count;
-        hideBrowserFloatingChrome();
-        parkStrayBrowserPanes(null);
-    }
-}
-
 pub fn starredShellVisible(idx: usize) bool {
     const shell = &app_state.shells[idx];
     return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
@@ -3196,7 +3051,7 @@ fn rememberWorkspaceFocus(ws: u8, shell_id: u32, input: app_state.WorkspaceFocus
 }
 
 pub fn captureWorkspaceFocus() void {
-    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.g_sidebar_view != null or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
     if (app_state.g_single_window and shell.workspace != app_state.g_active_workspace) return;
     const input: app_state.WorkspaceFocus = if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null and
@@ -3267,32 +3122,14 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
 }
 
 pub fn switchToWorkspace(ws_in: u32) void {
-    if (ws_in >= @intFromEnum(@import("workspace_view.zig").Builtin.all) and ws_in <= @import("workspace_view.zig").starred)
-        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
-    for (@import("workspace_view.zig").builtins) |view| {
-        if (ws_in != @intFromEnum(view)) continue;
-        captureWorkspaceFocus();
-        _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
-        app_state.g_starred_workspace = false;
-        app_state.g_sidebar_view = view;
-        app_state.g_browser_focus_mode = false;
-        app_state.g_inbox_step_context_active = false;
-        app_state.g_sidebar_scroll = 0;
-        refreshSidebarView();
-        focusActiveShell();
-        updateMainWindowTitle();
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-        return;
-    }
     if (!app_state.g_single_window) return;
-    const was_view = app_state.g_sidebar_view != null;
     if (ws_in == @import("workspace_view.zig").starred) {
-        app_state.g_sidebar_view = null;
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
         app_state.g_browser_focus_mode = false;
         app_state.g_starred_workspace = true;
         @import("inbox.zig").loadInboxModel();
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
         app_state.g_inbox_step_context_active = false;
         app_state.g_sidebar_scroll = 0;
         for (0..app_state.shell_count) |i| {
@@ -3314,8 +3151,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
     captureWorkspaceFocus();
     app_state.g_browser_focus_mode = false;
-    const was_starred = app_state.g_starred_workspace or was_view;
-    app_state.g_sidebar_view = null;
+    const was_starred = app_state.g_starred_workspace;
     app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
     if (ws != app_state.g_active_workspace) {
@@ -3839,7 +3675,6 @@ fn leaveSingleWindowMode() bool {
 
     app_state.g_single_window = false;
     app_state.g_starred_workspace = false;
-    app_state.g_sidebar_view = null;
     setWindowDisplayNameUtf8(active_name_buf[0..active_name_len]);
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
@@ -3890,7 +3725,6 @@ pub fn newWorkspace() void {
     captureWorkspaceFocus();
     _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
     app_state.g_starred_workspace = false;
-    app_state.g_sidebar_view = null;
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;
@@ -4880,7 +4714,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         }
         const slot = slot_map[src_ws];
 
-        const tmux_name: ?[]const u8 = if ((tabs[t].kind == .vps or tabs[t].kind == .vps2 or tabs[t].kind == .tmux) and tabs[t].tmux_session_len > 0)
+        const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
             tabs[t].tmux_session[0..tabs[t].tmux_session_len]
         else
             null;

@@ -1,1 +1,0 @@
-Session and typing stay responsive when the connection to your chats is slow.
