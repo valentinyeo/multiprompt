@@ -1,0 +1,7 @@
+SOFT-2476 linked skill folders in the Skills list, run 45127104679
+release v0.28.1881 (contains 7380bab58)
+result.status: passed
+fixture: plain-proof + valentin-mode junction under the isolated USERPROFILE
+linked skill shown in list: /valentin-mode
+plain skill shown in list: /plain-proof
+composer after choosing the linked skill: '/valentin-mode '
