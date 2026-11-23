@@ -410,6 +410,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
+    }
     if ($Feature -eq 'slow-network') {
         $slowState = Join-Path $scratch 'slow-network-state'
         New-Item -ItemType Directory -Force -Path $slowState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -440,7 +441,6 @@ try {
         $script:slowProxy = Start-Process -FilePath $env:MP_VERIFY_PYTHON -ArgumentList @('-u', ('"' + $env:MP_VERIFY_BOUNDARY + '"'), 'proxy') -PassThru -WindowStyle Hidden
         Wait-Until { Test-Path -LiteralPath $env:MP_VERIFY_SLOW_READY } 'slow-network delay proxy listening' 30
         $result.seedBoundary = 'Two saved stand-in tmux tabs on one stand-in SSH host. The stand-in ssh the app spawns connects to a local TCP proxy that holds every chunk 2000 ms in each direction, about 4 s round trip, before reaching the repository boundary. Nothing else is seeded; the app, window, composer, session switches and typing are real.'
-    }
     }
     if ($Feature -eq 'inbox-order') {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
