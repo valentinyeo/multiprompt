@@ -411,7 +411,7 @@ try {
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
         if ($Feature -eq 'release-proof') {
-            $plainShellDocument = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; sessions = $remoteNames }
+            $plainShellDocument = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = $remoteNames }
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $plainShellDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
             $plainTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
             $plainSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $plainTabs } -Depth 6
