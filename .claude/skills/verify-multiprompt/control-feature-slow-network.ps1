@@ -1,0 +1,140 @@
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class SlowNetPump {
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
+    static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
+
+    [DllImport("user32.dll")]
+    static extern bool IsHungAppWindow(IntPtr hwnd);
+
+    public static double Ping(IntPtr hwnd, uint timeoutMs, out bool timedOut) {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        IntPtr result;
+        IntPtr ok = SendMessageTimeoutW(hwnd, 0, IntPtr.Zero, IntPtr.Zero, 2, timeoutMs, out result);
+        watch.Stop();
+        timedOut = ok == IntPtr.Zero;
+        return watch.Elapsed.TotalMilliseconds;
+    }
+
+    public static bool Hung(IntPtr hwnd) {
+        return IsHungAppWindow(hwnd);
+    }
+}
+'@
+
+$slowLimitMs = 500
+$slowLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+$slowComposer = [IntPtr]::Zero
+$result.slowNetwork = @{
+    delayMs = [int]$env:MP_VERIFY_SLOW_MS
+    proxyPort = [int]$env:MP_VERIFY_SLOW_PORT
+    boundary = 'Real app and native window driven through a local TCP delay proxy in front of the repository SSH/tmux stand-in; the delay is real TCP latency, the remote host is synthetic'
+    stallLimitMs = $slowLimitMs
+}
+
+function Measure-PumpWindow([scriptblock]$Action, [int]$WindowMs) {
+    $started = [Diagnostics.Stopwatch]::StartNew()
+    & $Action
+    $longest = 0.0
+    $samples = 0
+    $hung = $false
+    while ($started.ElapsedMilliseconds -lt $WindowMs) {
+        $timedOut = $false
+        $milliseconds = [SlowNetPump]::Ping($script:window, 5000, [ref]$timedOut)
+        $samples++
+        if ($milliseconds -gt $longest) { $longest = $milliseconds }
+        if ($timedOut -or [SlowNetPump]::Hung($script:window)) { $hung = $true }
+        Start-Sleep -Milliseconds 10
+    }
+    @{ startedAt = [DateTime]::UtcNow.ToString('o'); elapsedMs = [int]$started.ElapsedMilliseconds; maxPumpMs = [int][Math]::Ceiling($longest); samples = $samples; hung = $hung }
+}
+
+Write-Host 'Wait: two remote sessions attached through the slow link'
+Wait-Until {
+    $trace = Read-SharedText $slowLog
+    $trace -match "session='verify-one'" -and $trace -match "session='verify-two'"
+} 'two remote session transports attached' 240
+Wait-Until {
+    $state = Read-Inbox
+    $null -ne $state -and @($state.shells).Count -ge 2
+} 'two published remote shells' 120
+$result.slowNetwork.sessions = @('verify-one', 'verify-two')
+
+Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session'
+Wait-Until {
+    $state = Read-Session
+    $null -ne $state -and $state.tabs[$state.active_tab].cv -eq $true
+} 'Chat View enabled on the selected remote session' 60
+Wait-ChatFocus 'Edit' 'slow-network-composer'
+$element = [System.Windows.Automation.AutomationElement]::FocusedElement
+if ($element.Current.ClassName -cne 'Edit' -or [VerifyNative]::GetAncestor([IntPtr]$element.Current.NativeWindowHandle, 2) -ne $script:window) { throw 'Composer Edit is not owned by the app window' }
+$slowComposer = [IntPtr]$element.Current.NativeWindowHandle
+if ([VerifyNative]::EditText($slowComposer) -cne '') { throw 'Expected an empty composer before the slow-network typing proof' }
+Snapshot 'slow-network-chat-view'
+
+$switches = New-Object System.Collections.Generic.List[object]
+for ($index = 0; $index -lt 10; $index++) {
+    $target = if ($index % 2 -eq 0) { 2 } else { 1 }
+    $sample = Measure-PumpWindow { Press @(0x11, 0x30 + $target) "Ctrl+$target session switch while the remote link is slow" } 3000
+    $sample.kind = 'switch'
+    $sample.index = $index
+    $sample.target = if ($target -eq 1) { 'verify-one' } else { 'verify-two' }
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $switched = $false
+    do {
+        $state = Read-Session
+        if ($null -ne $state -and [int]$state.active_tab -eq ($target - 1)) { $switched = $true; break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $switched) { throw "Session switch $index never selected tab $($target - 1) under the slow link" }
+    $switches.Add($sample)
+    if ($index -eq 4) { Snapshot 'slow-network-switch' }
+}
+$result.slowNetwork.switchMaxPumpMs = [int](($switches | Measure-Object -Property maxPumpMs -Maximum).Maximum)
+$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung }).Count -gt 0
+
+Press @(0x11, 0x41) 'Ctrl+A: select any composer draft before the typing proof'
+Press @(0x08) 'Backspace: clear the composer'
+Wait-ChatFocus 'Edit' 'slow-network-typing-focus'
+$typed = 'slowlink'
+$typing = New-Object System.Collections.Generic.List[object]
+foreach ($letter in $typed.ToCharArray()) {
+    $sample = Measure-PumpWindow { Type-Text ([string]$letter) } 800
+    $sample.kind = 'typing'
+    $sample.letter = [string]$letter
+    $expected = $typed.Substring(0, $typing.Count + 1)
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $landed = $false
+    do {
+        if ([VerifyNative]::EditText($slowComposer) -ceq $expected) { $landed = $true; break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $landed) { throw "Composer never showed '$expected' after typing '$letter' under the slow link" }
+    $typing.Add($sample)
+}
+if ([VerifyNative]::EditText($slowComposer) -cne $typed) { throw "Composer text after the slow-network typing proof was '$([VerifyNative]::EditText($slowComposer))'" }
+$result.slowNetwork.typingMaxPumpMs = [int](($typing | Measure-Object -Property maxPumpMs -Maximum).Maximum)
+$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung }).Count -gt 0
+Snapshot 'slow-network-typing'
+
+$actions = @($switches.ToArray()) + @($typing.ToArray())
+$worst = [int](($actions | Measure-Object -Property maxPumpMs -Maximum).Maximum)
+$hungActions = @($actions | Where-Object { $_.hung }).Count
+Save-Json @{
+    limitMs = $slowLimitMs
+    delayMs = [int]$env:MP_VERIFY_SLOW_MS
+    actions = $actions
+    worstMs = $worst
+    hungActions = $hungActions
+    passed = ($worst -le $slowLimitMs -and $hungActions -eq 0)
+} 'slow-network-timings.json'
+$result.slowNetwork.worstMs = $worst
+$result.slowNetwork.hungActions = $hungActions
+$result.checks += @{ name = 'slow-network'; sessions = 2; switches = $switches.Count; typed = $typed.Length; worstMs = $worst; limitMs = $slowLimitMs; hungActions = $hungActions; delayMs = [int]$env:MP_VERIFY_SLOW_MS }
+
+Press @(0x1B) 'Esc: leave the typed slow-network draft in place for the evidence screenshot'
+if ($worst -gt $slowLimitMs) { throw "UI stall ${worst}ms exceeded the ${slowLimitMs}ms limit with a $($env:MP_VERIFY_SLOW_MS)ms one-way slow link" }
+if ($hungActions -ne 0) { throw "Windows reported a not-responding window during $hungActions slow-network actions" }
+Write-Output "SLOW_NETWORK_OK worst=${worst}ms limit=${slowLimitMs}ms delay=$($env:MP_VERIFY_SLOW_MS)ms"

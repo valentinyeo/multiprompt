@@ -149,6 +149,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser switch speed](browser-switch-speed.md) (on demand only): compare 20 Ctrl+Tab switches without panes against 20 with warm docked browsers and five freshly frozen returns in console and Chat View; fail above a 50 ms median gap.
 - [Chat switch speed](chat-switch-speed.md) (on demand only): 20 Ctrl+N switches across five seeded remote Claude sessions in Chat View with the browser pane closed and open; fail above a 150 ms median click-to-chat-shown time or any 100 ms window hang.
+- [Slow network](slow-network.md) (on demand only): ten real Ctrl+1/Ctrl+2 session switches and eight composer keystrokes across two saved remote sessions through a 2 s one-way TCP delay; fail above a 500 ms message-pump wait or any not-responding window.
 - [Own browser profile](browser-own-profile.md): a workspace listed in `browser-own-profile.txt` opens its pane in its own empty Chrome profile and pipe, while other workspaces keep the shared profile untouched, including after restart.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
 - [Chat tab browser shortcut](chat-browser-shortcut.md): Alt+A opens a real browser window from a Chat View tab.
