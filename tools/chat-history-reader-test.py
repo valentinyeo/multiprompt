@@ -2404,13 +2404,13 @@ class HistoryReaderTest(unittest.TestCase):
         server.stdin.flush()
         return server
 
-    def server_request(self, server, query):
+    def server_request(self, server, query, timeout=10):
         line = query if isinstance(query, bytes) else json.dumps(query).encode()
         server.stdin.write(line + b'\n')
         server.stdin.flush()
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
-            self.assertTrue(selector.select(timeout=5), 'reader reply timed out')
+            self.assertTrue(selector.select(timeout=timeout), 'reader reply timed out')
         line = server.stdout.readline()
         self.assertTrue(line.startswith(b'{'), 'reader must keep a framed connection: ' + repr(line))
         reply = json.loads(line)

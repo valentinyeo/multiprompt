@@ -81,6 +81,50 @@ pub fn spanAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
     return markerAt(text, pos) orelse namedAt(text, pos, chats);
 }
 
+pub fn plainNameLinkAt(text: []const u16, pos: usize) ?struct { start: usize, end: usize } {
+    if (pos >= text.len or !boundary(text, pos)) return null;
+    var order: [app.MAX_SHELLS]u16 = undefined;
+    const chats = currentLive(null);
+    const n = @min(chats.len, order.len);
+    for (0..n) |i| order[i] = @intCast(i);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        var best: usize = i;
+        var j = i + 1;
+        while (j < n) : (j += 1) {
+            if (chats[order[j]].name.len > chats[order[best]].name.len) best = j;
+        }
+        if (best != i) {
+            const swap = order[i];
+            order[i] = order[best];
+            order[best] = swap;
+        }
+    }
+    var wide: [192]u16 = undefined;
+    var blocked: usize = 0;
+    for (order[0..n]) |index| {
+        const chat = chats[index];
+        const name_len = std.unicode.utf8ToUtf16Le(&wide, chat.name) catch continue;
+        if (name_len == 0 or pos + name_len > text.len) continue;
+        if (!std.mem.eql(u16, text[pos..][0..name_len], wide[0..name_len])) continue;
+        const next = pos + name_len;
+        if (next < text.len and !space(text[next]) and text[next] != '{' and text[next] != '@') {
+            blocked = @max(blocked, name_len);
+            continue;
+        }
+        if (name_len <= blocked) continue;
+        return .{ .start = pos, .end = next };
+    }
+    return null;
+}
+
+pub fn liveSessionForName(name: []const u16) ?[]const u8 {
+    for (currentLive(null)) |chat| {
+        if (sameName(name, chat.name)) return chat.session;
+    }
+    return null;
+}
+
 fn resolve(name: []const u16, chosen: []const Chat, used: *[16]bool, chats: []const Chat) ?[]const u8 {
     for (chosen, 0..) |chat, i| {
         if (i >= used.len or used[i] or !sameName(name, chat.name)) continue;
@@ -719,6 +763,59 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     try std.testing.expect(mentionDelivered(65, "live-65"));
     try std.testing.expect(mentionDelivered(2, "live-2"));
     mentionForgetDelivered();
+}
+
+test "SOFT-2464 plain session names link longest matches first" {
+    const count = app.shell_count;
+    const Snap = struct { name: [64]u16, name_len: u32, session: [64]u8, session_len: u32, chat_view_on: bool };
+    var prior: [3]Snap = undefined;
+    for (0..3) |i| prior[i] = .{ .name = app.shells[i].name, .name_len = app.shells[i].name_len, .session = app.shells[i].tmux_session, .session_len = app.shells[i].tmux_session_len, .chat_view_on = app.shells[i].chat_view_on };
+    defer {
+        app.shell_count = count;
+        for (0..3) |i| {
+            app.shells[i].name = prior[i].name;
+            app.shells[i].name_len = prior[i].name_len;
+            app.shells[i].tmux_session = prior[i].session;
+            app.shells[i].tmux_session_len = prior[i].session_len;
+            app.shells[i].chat_view_on = prior[i].chat_view_on;
+        }
+    }
+    app.shell_count = 3;
+    const set = struct {
+        fn chat(index: u32, name: []const u8, session: []const u8) void {
+            const shell = &app.shells[index];
+            shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, name) catch 0);
+            @memset(&shell.tmux_session, 0);
+            @memcpy(shell.tmux_session[0..session.len], session);
+            shell.tmux_session_len = @intCast(session.len);
+            shell.chat_view_on = false;
+        }
+    };
+    set.chat(0, "Alpha", "live-a");
+    set.chat(1, "Alpha Lead", "live-al");
+    set.chat(2, "Home", "live-h");
+    const storage = [_][]const u8{
+        "ask Alpha Lead now",
+        "Alpha only",
+        "partial Alpha Leader",
+        "`Alpha Lead`",
+    };
+    var wide: [4][256]u16 = undefined;
+    for (storage, 0..) |text, i| {
+        const n = std.unicode.utf8ToUtf16Le(&wide[i], text) catch unreachable;
+        const slice = wide[i][0..n];
+        if (i == 0) {
+            const hit = plainNameLinkAt(slice, 4).?;
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha Lead"), slice[hit.start..hit.end]);
+        } else if (i == 1) {
+            const hit = plainNameLinkAt(slice, 0).?;
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha"), slice[hit.start..hit.end]);
+        } else if (i == 2) {
+            try std.testing.expect(plainNameLinkAt(slice, 8) == null);
+        } else {
+            try std.testing.expect(plainNameLinkAt(slice, 0) == null);
+        }
+    }
 }
 
 test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" {

@@ -1,0 +1,35 @@
+{
+  "tag": "v0.28.1853",
+  "history": [
+    {
+      "tag": "v0.28.1849",
+      "files": {}
+    }
+  ],
+  "files": {
+    "src/changelog.zig": "pub const CHANGELOG = [_]ChangelogEntry{\n};\n",
+    "changelog.d/SOFT-2883-ctrl-t-folder.md": "The folder list for a new tab keeps your highlight on the folder you chose while the list refreshes.",
+    "changelog.d/SOFT-3055-session-commands.md": "Chats on a server can start, restart and manage other Multibot chats from the command line without a layout key.",
+    "changelog.d/SOFT-3071-chat-exit-report.md": "Server chat exits now record why each chat stopped, so frequent stops can be traced and fixed.\n",
+    "changelog.d/SOFT-3075-pick-repo-layout.md": "Rows in the new-tab folder picker lead with the folder name, so a long path no longer hides which folder you are choosing.\nThe server name stays fully readable and row text no longer runs under the scrollbar.\n",
+    "changelog.d/SOFT-3077-chat-stays-put.md": "The chat no longer hides its last line or shifts when a new message arrives while you are reading.\n"
+  },
+  "commits": [
+    {
+      "sha": "4629193865d76f4f99483934dfc1eb26f1206424",
+      "subject": "SOFT-2883: Keep pick-repo highlight on the chosen folder when the list refreshes (#1121)"
+    },
+    {
+      "sha": "6e8f2046654ee86e905975bfc326b4aee8c2297d",
+      "subject": "SOFT-3071: Report every server chat exit with its cause (#1219)"
+    },
+    {
+      "sha": "0307f2e12d14900485458e9325d825050e76f989",
+      "subject": "SOFT-3077: Keep the chat still when the new-message pill appears (#1220)"
+    },
+    {
+      "sha": "dc367a15825becb68930a808c179525f5875d99a",
+      "subject": "SOFT-3055: feat(sessions): chats start, restart and manage other chats (#1205)"
+    }
+  ]
+}

@@ -303,13 +303,13 @@ def live_chats():
             continue
         if sessions is not None and tmux not in sessions:
             continue
-        alive = pid_alive(state.get("pid"))
+        shown = names.get(tmux)
         started = state.get("started") if isinstance(state.get("started"), (int, float)) else 0
-        if alive:
+        if pid_alive(state.get("pid")):
             row_state = "busy" if state.get("inflight") else "idle"
         else:
             row_state = "stopped"
-        row = dict(name=names.get(tmux), provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state, started=started)
+        row = dict(name=shown, provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state, started=started, link=link_token(shown, tmux))
         if tmux not in best or started >= best[tmux]["started"]:
             best[tmux] = row
     rows = sorted(best.values(), key=lambda row: ((row["name"] or row["tmux"]).casefold(), row["tmux"]))
@@ -400,6 +400,16 @@ def last_answer(reader, chat):
 
 def label(chat):
     return chat["name"] or chat["tmux"]
+
+
+def link_token(name, tmux):
+    text = name.strip() if isinstance(name, str) else ""
+    if not text or "{" in text or "}" in text or "@" in text:
+        text = tmux
+    token = text + "{" + tmux + "}"
+    if " " in text:
+        token = "@" + token
+    return token
 
 
 def squash(text):
@@ -604,7 +614,7 @@ def run_read(argv):
 def table(chats):
     rows = [("NAME", "AI", "STATE", "TMUX", "SID", "FOLDER")]
     for chat in chats:
-        rows.append((chat["name"] or "(no name yet)", chat["provider"], chat["state"], chat["tmux"], chat["sid"], chat["cwd"] or ""))
+        rows.append((chat.get("link") or chat["name"] or "(no name yet)", chat["provider"], chat["state"], chat["tmux"], chat["sid"], chat["cwd"] or ""))
     widths = [max(len(row[i]) for row in rows) for i in range(5)]
     return "\n".join("  ".join(row[i].ljust(widths[i]) for i in range(5)) + "  " + row[5] for row in rows)
 
