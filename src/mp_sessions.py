@@ -282,7 +282,7 @@ def live_catalog_rows(send):
             workspace="",
             group="",
             busy=chat.get("state") == "busy",
-            running=True,
+            running=chat.get("state") != "stopped",
         ))
     return rows
 
