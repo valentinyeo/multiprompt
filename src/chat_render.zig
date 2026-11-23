@@ -448,7 +448,8 @@ test "IGSH-1132 display maps removal seams and UTF-16 boundaries" {
 
 fn chatDisplayForBlock(buf: []const u16, block: ChatBlock, projection: ?*const chat_reaction.Projection) ChatDisplay {
     const range = chatBlockDisplayRange(buf, block);
-    const raw = buf[range.start..][0..range.len];
+    const body = buf[range.start..][0..range.len];
+    const raw = if (block.role == .user) @import("chat_mention.zig").trimWireNote(body) else body;
     const original_ref = if (block.role == .user) chat_reply.reference(raw) else null;
     if (projection) |p| {
         var start: usize = 0;
