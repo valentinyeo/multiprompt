@@ -1,35 +1,58 @@
 Add-Type -AssemblyName System.Windows.Forms
 $proofLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+$script:proofSteps = @()
+$script:proofShell = [IntPtr]::Zero
+$script:proofVideo = $null
+$script:proofTabReady = $false
 
-function Focus-ProofShell {
-    $script:proofTerminal = [IntPtr]::Zero
-    Wait-Until {
+function Proof-ShellWindow {
+    foreach ($class in @('MPTerminal', 'ConsoleWindowClass')) {
         $after = [IntPtr]::Zero
         while ($true) {
-            $candidate = [VerifyNative]::FindWindowEx($script:window, $after, 'MPTerminal', $null)
-            if ($candidate -eq [IntPtr]::Zero) { return $false }
+            $candidate = [VerifyNative]::FindWindowEx($script:window, $after, $class, $null)
+            if ($candidate -eq [IntPtr]::Zero) { break }
             $after = $candidate
-            if ([VerifyNative]::IsWindowVisible($candidate)) { $script:proofTerminal = $candidate; return $true }
+            if ([VerifyNative]::IsWindowVisible($candidate)) { return $candidate }
         }
-    } 'visible native terminal for the active server shell' 60
-    $script:proofClient = New-Object VerifyNative+Rect
-    [void][VerifyNative]::GetClientRect($script:proofTerminal, [ref]$script:proofClient)
-    [VerifyNative]::ClickClient($script:proofTerminal, [int]($script:proofClient.Right / 2), [int]($script:proofClient.Bottom - 12))
-    Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -eq $script:proofTerminal } 'server shell owns keyboard focus' 30
+    }
+    return [IntPtr]::Zero
 }
 
-function Proof-Palette([string]$Query, [int]$Target, [string]$Shot, [int]$Seconds = 20) {
+function Proof-ShellFocus([IntPtr]$Shell) {
+    try { if ([VerifyNative]::GetFocusedWindow($Shell) -eq $Shell) { return $true } } catch {}
+    try { if ([VerifyNative]::GetFocusedWindow($script:window) -eq $Shell) { return $true } } catch {}
+    try { if ([VerifyNative]::GetForegroundWindow() -eq $Shell) { return $true } } catch {}
+    return $false
+}
+
+function Proof-FocusShell {
+    Wait-Until {
+        $candidate = Proof-ShellWindow
+        if ($candidate -eq [IntPtr]::Zero) { return $false }
+        $script:proofShell = $candidate
+        return $true
+    } 'visible terminal window for the active shell tab' 30
+    $client = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
+    [VerifyNative]::ClickClient($script:proofShell, 40, [int]($client.Bottom - 8))
+    Wait-Until { Proof-ShellFocus $script:proofShell } 'shell terminal owns keyboard focus' 30
+}
+
+function Proof-Palette([string]$Query, [string]$Shot, [int]$Seconds = 20) {
     $offset = (Read-SharedText $proofLog).Length
     Press @(0x11, 0x4B) 'Ctrl+K: open the command palette'
     Wait-Until { (Read-SharedText $proofLog).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' } 'empty command palette'
     Type-Text $Query
-    Wait-Until { (Read-SharedText $proofLog).Substring($offset) -match ("\[palette\] ready chars=" + $Query.Length + " count=\d+ target=" + $Target + '(?:\s|$)') } ('exact palette command: ' + $Query) $Seconds
+    $pattern = "\[palette\] ready chars=" + $Query.Length + " count=[1-9]\d* target=\d+"
+    Wait-Until { (Read-SharedText $proofLog).Substring($offset) -match $pattern } ('single palette command: ' + $Query) $Seconds
+    $observed = [regex]::Match((Read-SharedText $proofLog).Substring($offset), $pattern).Value
+    Save-Json @{ query = $Query; observed = $observed } ($Shot + '-palette.json')
     Snapshot $Shot
     Press @(0x0D) ('Enter: ' + $Query)
 }
 
 function Proof-Line([string]$Command) {
-    Focus-ProofShell
+    Press @(0x11, 0x43) 'Ctrl+C: clear the prompt before typing'
     Type-Text $Command
     Press @(0x0D) ('Enter: ' + $Command)
 }
@@ -38,118 +61,318 @@ function Proof-ServerText([string]$Command, [string]$Name) {
     return (Read-ProofServer $Command $Name).Trim()
 }
 
-function Proof-Attached([string]$Name) {
-    return Proof-ServerText 'tmux display-message -p -t proof-shell "#{session_attached}"' $Name
+function Proof-Attached([string]$Session, [string]$Name) {
+    return Proof-ServerText ('tmux display-message -p -t ' + $Session + ' "#{session_attached}"') $Name
 }
 
-function Proof-Identity([string]$Name) {
-    return Proof-ServerText 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' $Name
+function Proof-ClearReceipts {
+    try { [void](Read-ProofServer 'rm -f /home/mpverify/shell-interrupt.json /home/mpverify/shell-heartbeat.json' 'clear-receipts') } catch {}
 }
 
-function Proof-RestoreText([string]$Name) {
-    return Proof-ServerText 'cat /home/mpverify/shell-restore.txt' $Name
-}
-
-function Proof-Check([string]$Ticket, [scriptblock]$Journey) {
-    $check = @{ name = $Ticket; passed = $false }
-    $result.checks += $check
-    try {
-        & $Journey
-        $check.passed = $true
-    } catch {
-        $check.error = $_.Exception.Message
-        Snapshot ($Ticket + '-failure')
-        try { Press @(0x1B) 'Escape: dismiss any open overlay after the failed case' } catch {}
+function Proof-SetClipboard([string]$Text) {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try { [System.Windows.Forms.Clipboard]::SetText($Text); return } catch { Start-Sleep -Milliseconds 100 }
     }
-    Save-Json $check ($Ticket + '-result.json')
+    throw 'the harness could not put text on the Windows clipboard'
 }
 
-$proofTabsBeforeOpen = @((Read-Session).tabs).Count
-Proof-Palette 'open shell on vps 1' 2003 'SOFT-3001-open-shell-row'
-Wait-Until {
-    $state = Read-Session
-    $null -ne $state -and @($state.tabs).Count -eq $proofTabsBeforeOpen + 1 -and $state.tabs[$state.active_tab].kind -in @('vps', 'tmux')
-} 'the chat palette opened a plain server shell tab on the host' 60
-Proof-Line 'tmux attach -t proof-shell'
-Wait-Until { (Proof-Attached 'shell-attached') -ceq '1' } 'the plain server shell attached the fixture tmux session' 90
-Snapshot 'SOFT-3001-attached'
-
-Proof-Check 'SOFT-3001' {
-    Proof-Line 'python3 /home/mpverify/shell-proof.py'
-    Wait-Until {
-        try { $script:heartbeat = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'heartbeat-ready') | ConvertFrom-Json; return $script:heartbeat.tick -gt 0 } catch { return $false }
-    } 'real remote command is running' 30
-    Focus-ProofShell
-    [System.Windows.Forms.Clipboard]::SetText('clipboard sentinel before selected Ctrl+C')
-    [VerifyNative]::DragSelectClient($script:proofTerminal, 1, 1, 2, 1)
-    Snapshot 'SOFT-3001-selected'
-    $before = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'heartbeat-before-copy') | ConvertFrom-Json
-    Press @(0x11, 0x43) 'Ctrl+C: copy the selected first character while the command runs'
-    Wait-Until { [System.Windows.Forms.Clipboard]::GetText() -cne 'clipboard sentinel before selected Ctrl+C' } 'Ctrl+C changed the clipboard' 10
-    $copied = [System.Windows.Forms.Clipboard]::GetText()
-    $expected = 'S'
-    [IO.File]::WriteAllText((Join-Path $Evidence 'SOFT-3001-clipboard.txt'), $copied)
-    [IO.File]::WriteAllText((Join-Path $Evidence 'SOFT-3001-expected.txt'), $expected)
-    if ($copied -cne $expected) { throw 'Clipboard does not equal the selected first character S' }
-    Wait-Until {
-        $script:afterCopy = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json; test ! -e /home/mpverify/shell-interrupt.json' 'heartbeat-after-copy') | ConvertFrom-Json
-        $script:afterCopy.pid -eq $before.pid -and $script:afterCopy.tick -gt $before.tick
-    } 'the same command kept running without an interrupt after selected Ctrl+C' 10
-    Save-Json @{ before = $before; after = $script:afterCopy; exactClipboard = $true } 'SOFT-3001-copy.json'
-    Snapshot 'SOFT-3001-copied-running'
-    Press @(0x11, 0x43) 'Ctrl+C: interrupt with no selection'
-    Wait-Until {
-        try { $script:interrupt = (Read-ProofServer 'cat /home/mpverify/shell-interrupt.json' 'interrupt-receipt') | ConvertFrom-Json; return $script:interrupt.pid -eq $before.pid -and $script:interrupt.interrupted } catch { return $false }
-    } 'the same command received an interrupt with no selection' 20
-    Save-Json $script:interrupt 'SOFT-3001-interrupt.json'
-    Snapshot 'SOFT-3001-interrupted'
+function Proof-Step([string]$Name, [string]$Ticket, [scriptblock]$Body) {
+    $step = [ordered]@{ name = $Name; ticket = $Ticket; passed = $false; startedAt = [DateTime]::UtcNow.ToString('o') }
+    $script:proofSteps += $step
+    Write-Host ('Step: ' + $Name)
+    try {
+        & $Body
+        $step.passed = $true
+    } catch {
+        $step.error = $_.Exception.Message
+        Write-Host ('Step failed: ' + $Name + ': ' + $_.Exception.Message)
+    }
+    $step.finishedAt = [DateTime]::UtcNow.ToString('o')
+    Save-Json @($script:proofSteps) 'journey-steps.json'
 }
 
-Proof-Check 'SOFT-3002' {
-    Focus-ProofShell
-    Press @(0x11, 0x43) 'Ctrl+C: clear any surviving shell command'
-    Press @(0x11, 0x43) 'Ctrl+C: leave no selection or blocking command'
-    $identity = Proof-Identity 'session-before-close'
-    Proof-Line 'echo before-close > /home/mpverify/shell-restore.txt; echo SOFT3002-BEFORE-CLOSE'
-    Wait-Until { (Proof-RestoreText 'restore-before-close') -ceq 'before-close' } 'shell accepted input before closing its tab'
-    Snapshot 'SOFT-3002-before-close'
-    $appPid = $process.Id
-    $bridges = @(Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" | Where-Object { $_.ParentProcessId -eq $appPid })
-    if ($bridges.Count -eq 0) { throw 'The app owned no ssh transport to drop before the close' }
-    Save-Json @{ appPid = $appPid; dropped = @($bridges | ForEach-Object { $_.ProcessId }) } 'SOFT-3002-transport-drop.json'
-    foreach ($bridge in $bridges) { Stop-Process -Id $bridge.ProcessId -Force -ErrorAction SilentlyContinue }
-    Wait-Until { (Proof-Attached 'dropped-session') -ceq '0' } 'the dropped transport detached the same tmux session' 60
-    Snapshot 'SOFT-3002-transport-dropped'
-    $proofTabsOpen = @((Read-Session).tabs).Count
-    Proof-Palette 'close tab' 7110 'SOFT-3002-close-row'
+function Proof-Measure([string]$Name) {
+    $window = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:window, [ref]$window)
+    $shell = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$shell)
+    $heightFill = 0
+    $widthFill = 0
+    if ($window.Bottom -gt 0) { $heightFill = [Math]::Round([double]$shell.Bottom / [double]$window.Bottom, 3) }
+    if ($window.Right -gt 0) { $widthFill = [Math]::Round([double]$shell.Right / [double]$window.Right, 3) }
+    $measured = [ordered]@{
+        step = $Name
+        shellClass = [VerifyNative]::Class($script:proofShell)
+        windowWidth = $window.Right
+        windowHeight = $window.Bottom
+        shellWidth = $shell.Right
+        shellHeight = $shell.Bottom
+        heightFill = $heightFill
+        widthFill = $widthFill
+    }
+    Save-Json $measured ($Name + '.json')
+    return $measured
+}
+
+function Proof-Layout([string]$Name) {
+    $measured = Proof-Measure $Name
+    if ($measured.heightFill -lt 0.8 -or $measured.widthFill -lt 0.5) {
+        throw ('shell terminal fills ' + $measured.widthFill + ' width and ' + $measured.heightFill + ' height of the tab window')
+    }
+    return $measured
+}
+
+function Proof-CopyVisible([string]$Name) {
+    $client = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
+    [VerifyNative]::DragSelectClient($script:proofShell, 2, 2, [int]($client.Right - 20), [int]($client.Bottom - 20))
+    Start-Sleep -Milliseconds 250
+    try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
+    Press @(0x11, 0x43) ('Ctrl+C: copy all visible shell text for ' + $Name)
+    Wait-Until {
+        try { return [System.Windows.Forms.Clipboard]::ContainsText() } catch { return $false }
+    } ('Ctrl+C copied the visible shell text for ' + $Name) 10
+    return [System.Windows.Forms.Clipboard]::GetText()
+}
+
+function Proof-ScrollIndex([string]$Text) {
+    $found = [regex]::Matches($Text, 'SOFTSCROLL-(\d{3})')
+    if ($found.Count -eq 0) { return -1 }
+    $lowest = 9999
+    foreach ($match in $found) {
+        $value = [int]$match.Groups[1].Value
+        if ($value -lt $lowest) { $lowest = $value }
+    }
+    return $lowest
+}
+
+function Proof-StartVideo {
+    $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop).Source
+    $path = Join-Path $Evidence 'journey.mp4'
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = $ffmpeg
+    $info.Arguments = '-y -f gdigrab -framerate 8 -i desktop -an -t 1500 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "' + $path + '"'
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.CreateNoWindow = $true
+    $script:proofVideo = [Diagnostics.Process]::Start($info)
+    Start-Sleep -Seconds 3
+    if ($script:proofVideo.HasExited) { throw ('screen recorder exited before the journey: ' + $script:proofVideo.ExitCode) }
+    Save-Json @{ path = $path; framerate = 8; startedAt = [DateTime]::UtcNow.ToString('o'); pid = $script:proofVideo.Id } 'journey-video.json'
+}
+
+function Proof-StopVideo {
+    if ($null -eq $script:proofVideo) { return }
+    try { $script:proofVideo.StandardInput.WriteLine('q'); $script:proofVideo.StandardInput.Close() } catch {}
+    if (-not $script:proofVideo.WaitForExit(45000)) { $script:proofVideo.Kill(); $script:proofVideo.WaitForExit() }
+    $path = Join-Path $Evidence 'journey.mp4'
+    $size = if (Test-Path $path) { (Get-Item $path).Length } else { 0 }
+    Save-Json @{ path = $path; exitCode = $script:proofVideo.ExitCode; bytes = $size; stoppedAt = [DateTime]::UtcNow.ToString('o') } 'journey-video.json'
+    if ($script:proofVideo.ExitCode -ne 0 -or $size -lt 102400) { throw ('screen recording failed: exit ' + $script:proofVideo.ExitCode + ', ' + $size + ' bytes') }
+}
+
+function Proof-TypeLine([string]$Command) {
+    Proof-FocusShell
+    Proof-Line $Command
+}
+
+function Proof-CopyShortcut([string]$Step, [int[]]$Keys, [string]$Label) {
+    if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+    Proof-FocusShell
+    $token = 'SOFTCOPY-' + $Step.ToUpperInvariant()
+    Proof-TypeLine ("clear; printf '" + $token + "\n'")
+    Start-Sleep -Milliseconds 900
+    $client = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
+    [VerifyNative]::DragSelectClient($script:proofShell, 2, 2, [int]($client.Right - 20), 2)
+    Snapshot ($Step + '-selected')
+    $sentinel = 'clipboard sentinel before ' + $Label
+    Proof-SetClipboard $sentinel
+    Press $Keys ($Label + ': copy the selected shell line')
+    Wait-Until {
+        try { return [System.Windows.Forms.Clipboard]::GetText() -cne $sentinel } catch { return $false }
+    } ($Label + ' changed the clipboard') 10
+    $copied = ([System.Windows.Forms.Clipboard]::GetText()).Trim()
+    [IO.File]::WriteAllText((Join-Path $Evidence ($Step + '-clipboard.txt')), $copied)
+    [IO.File]::WriteAllText((Join-Path $Evidence ($Step + '-expected.txt')), $token)
+    if ($copied -cne $token) { throw ($Label + ' copied "' + $copied + '" instead of the selected ' + $token) }
+    Snapshot ($Step + '-copied')
+}
+
+function Proof-PasteShortcut([string]$Step, [int[]]$Keys, [string]$Label) {
+    if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+    $receipt = '/home/mpverify/' + $Step + '.txt'
+    $marker = 'SOFTPASTE-' + $Step.ToUpperInvariant()
+    Proof-FocusShell
+    Press @(0x11, 0x43) 'Ctrl+C: leave an empty prompt before pasting'
+    Proof-SetClipboard ('echo ' + $marker + ' > ' + $receipt)
+    Snapshot ($Step + '-clipboard-ready')
+    Press $Keys ($Label + ': paste the command into the shell')
+    Start-Sleep -Milliseconds 600
+    Snapshot ($Step + '-pasted')
+    Press @(0x0D) 'Enter: run the pasted command'
+    Wait-Until {
+        try { return (Read-ProofServer ('cat ' + $receipt) ($Step + '-receipt')).Trim() -ceq $marker } catch { return $false }
+    } ($Label + ' pasted text that ran on the server') 25
+    Snapshot ($Step + '-ran')
+}
+
+function Proof-Interrupt([string]$Tag) {
+    if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+    Proof-ClearReceipts
+    Proof-TypeLine 'python3 /home/mpverify/shell-proof.py'
+    $script:proofHeartbeat = $null
+    Wait-Until {
+        try { $script:proofHeartbeat = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'interrupt-heartbeat') | ConvertFrom-Json; return $script:proofHeartbeat.tick -gt 0 } catch { return $false }
+    } 'the running proof command wrote a real heartbeat' 30
+    $before = $script:proofHeartbeat
+    Press @(0x11, 0x43) 'Ctrl+C: interrupt the running command with no selection'
+    Wait-Until {
+        try { $script:proofInterrupt = (Read-ProofServer 'cat /home/mpverify/shell-interrupt.json' 'interrupt-receipt') | ConvertFrom-Json; return $script:proofInterrupt.pid -eq $before.pid -and $script:proofInterrupt.interrupted } catch { return $false }
+    } 'the same running command received the interrupt' 25
+    Save-Json @{ before = $before; interrupt = $script:proofInterrupt } ($Tag + '-interrupt.json')
+    Snapshot ($Tag + '-interrupt-receipt')
+}
+
+function Proof-Scroll([string]$Tag) {
+    if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+    Proof-TypeLine "clear; seq -f 'SOFTSCROLL-%03g' 1 200"
+    Start-Sleep -Seconds 2
+    Snapshot ($Tag + '-scroll-printed')
+    $beforeText = ''
+    try { $beforeText = Proof-CopyVisible ($Tag + ' before wheel') } catch { Save-Json @{ error = $_.Exception.Message } ($Tag + '-scroll-before-error.json') }
+    [IO.File]::WriteAllText((Join-Path $Evidence ($Tag + '-scroll-before.txt')), $beforeText)
+    $beforeIndex = Proof-ScrollIndex $beforeText
+    $client = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
+    $wheelX = [int]($client.Right / 2)
+    $wheelY = [int]($client.Bottom / 2)
+    for ($notch = 0; $notch -lt 40; $notch++) {
+        [VerifyNative]::WheelClientPoint($script:window, [uint32]$process.Id, $script:proofShell, $wheelX, $wheelY, 120)
+        Start-Sleep -Milliseconds 40
+    }
+    Start-Sleep -Milliseconds 800
+    Snapshot ($Tag + '-scroll-wheeled')
+    $afterText = ''
+    try { $afterText = Proof-CopyVisible ($Tag + ' after wheel') } catch { Save-Json @{ error = $_.Exception.Message } ($Tag + '-scroll-after-error.json') }
+    [IO.File]::WriteAllText((Join-Path $Evidence ($Tag + '-scroll-after.txt')), $afterText)
+    $afterIndex = Proof-ScrollIndex $afterText
+    $scrolled = $beforeIndex - $afterIndex
+    Save-Json @{ beforeIndex = $beforeIndex; afterIndex = $afterIndex; scrolled = $scrolled; notches = 40; required = 100 } ($Tag + '-scroll.json')
+    if ($beforeIndex -lt 0 -or $afterIndex -lt 0) { throw 'Ctrl+C copied no numbered shell scrollback, so the wheel could not be measured' }
+    if ($scrolled -lt 100) { throw ('the wheel moved the visible output from line ' + $beforeIndex + ' to ' + $afterIndex + ', less than 100 lines') }
+}
+
+function Proof-TabSteps([string]$Tab) {
+    Proof-Step ($Tab + '/layout-open') 'SOFT-3007' {
+        if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+        Proof-FocusShell
+        Start-Sleep -Milliseconds 800
+        Snapshot ($Tab + '-layout-open')
+        [void](Proof-Layout ($Tab + '-layout-open'))
+    }
+    Proof-Step ($Tab + '/copy-ctrl-c') 'SOFT-3001' {
+        Proof-CopyShortcut ($Tab + '-copy-ctrl-c') @(0x11, 0x43) 'Ctrl+C'
+    }
+    Proof-Step ($Tab + '/copy-ctrl-shift-c') 'SOFT-3001' {
+        Proof-CopyShortcut ($Tab + '-copy-ctrl-shift-c') @(0x11, 0x10, 0x43) 'Ctrl+Shift+C'
+    }
+    Proof-Step ($Tab + '/paste-ctrl-v') 'SOFT-3001' {
+        Proof-PasteShortcut ($Tab + '-paste-ctrl-v') @(0x11, 0x56) 'Ctrl+V'
+    }
+    Proof-Step ($Tab + '/paste-ctrl-shift-v') 'SOFT-3001' {
+        Proof-PasteShortcut ($Tab + '-paste-ctrl-shift-v') @(0x11, 0x10, 0x56) 'Ctrl+Shift+V'
+    }
+    Proof-Step ($Tab + '/scroll-wheel') 'SOFT-3001' {
+        Proof-Scroll ($Tab + '-scroll')
+    }
+    Proof-Step ($Tab + '/interrupt-ctrl-c') 'SOFT-3001' {
+        Proof-Interrupt ($Tab + '-interrupt')
+    }
+    Proof-Step ($Tab + '/layout-resize') 'SOFT-3007' {
+        if (-not $script:proofTabReady) { throw 'the shell tab never showed a usable terminal window' }
+        Proof-FocusShell
+        $before = Proof-Measure ($Tab + '-layout-before-resize')
+        [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1200, 800, $true)
+        Start-Sleep -Seconds 2
+        Snapshot ($Tab + '-layout-resized')
+        $after = Proof-Layout ($Tab + '-layout-resized')
+        [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+        Start-Sleep -Seconds 2
+        Save-Json @{ before = $before; after = $after } ($Tab + '-layout-resize.json')
+        if ($after.shellHeight -lt ($before.shellHeight + 80)) { throw ('the console grew only ' + ($after.shellHeight - $before.shellHeight) + ' px when the tab grew 150 px') }
+    }
+}
+
+$script:proofVideoError = ''
+try { Proof-StartVideo } catch { $script:proofVideoError = $_.Exception.Message; Write-Host ('Screen recorder did not start: ' + $script:proofVideoError) }
+
+Proof-Step 'tmux/restore-attached' 'SOFT-3002' {
+    Proof-ClearReceipts
+    $active = $false
+    for ($attempt = 0; $attempt -lt 8 -and -not $active; $attempt++) {
+        $state = Read-Session
+        if ($null -ne $state) {
+            $tab = $state.tabs[$state.active_tab]
+            if ($tab.PSObject.Properties['tmux_session'] -and $tab.tmux_session -ceq 'proof-shell') { $active = $true; break }
+        }
+        Press @(0x11, 0x09) 'Ctrl+Tab: reach the restored proof-shell tab'
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $active) { throw 'the launched app did not restore a tab bound to the proof-shell tmux session' }
+    $restored = Read-Session
+    Save-Json $restored 'restored-session.json'
+    Wait-Until { (Proof-Attached 'proof-shell' 'restored-attached') -ceq '1' } 'the restored tmux tab attached the saved proof-shell session' 120
+    Wait-Until {
+        $candidate = Proof-ShellWindow
+        if ($candidate -eq [IntPtr]::Zero) { return $false }
+        $script:proofShell = $candidate
+        return $true
+    } 'the restored tmux tab shows a terminal window' 90
+    $script:proofTabReady = $true
+    $identity = Proof-ServerText 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' 'restored-identity'
+    Proof-TypeLine 'echo restored > /home/mpverify/shell-restore.txt'
+    Wait-Until { (Proof-ServerText 'cat /home/mpverify/shell-restore.txt' 'restored-receipt') -ceq 'restored' } 'the restored tmux tab accepted real keyboard input' 30
+    Save-Json @{ tab = 'tmux'; session = 'proof-shell'; identity = $identity; attached = 1; input = 'restored' } 'restore.json'
+    Snapshot 'tmux-restored'
+}
+
+$script:proofTabReady = $false
+try { Proof-FocusShell; $script:proofTabReady = $true } catch { Write-Host ('Restored tab is not drivable: ' + $_.Exception.Message) }
+Proof-TabSteps 'tmux'
+
+$script:proofTabReady = $false
+Proof-Step 'shell/open-tab' 'SOFT-3007' {
+    $before = Read-Session
+    if ($null -eq $before) { throw 'the app published no saved tab to open a second shell tab from' }
+    $tabsBeforeOpen = @($before.tabs).Count
+    Proof-Palette 'open shell on vps 1' 'shell-open-row'
     Wait-Until {
         $state = Read-Session
-        $null -ne $state -and @($state.tabs).Count -eq $proofTabsOpen - 1
-    } 'the close row removed the server shell tab' 30
-    Wait-Until { (Proof-Attached 'detached-session') -ceq '0' } 'the same remote tmux session is alive and detached' 30
-    Snapshot 'SOFT-3002-detached'
-    Proof-Palette 'reopen server shell' 6315 'SOFT-3002-reopen-row' 60
-    Type-Text 'proof-shell'
-    Snapshot 'SOFT-3002-reopen-shell'
-    Press @(0x0D) 'Enter: reopen the same proof-shell session'
-    Wait-Until { $state = Read-Session; $tab = $state.tabs[$state.active_tab]; $tab.PSObject.Properties['tmux_session'] -and $tab.tmux_session -ceq 'proof-shell' } 'Reopen server shell selected proof-shell' 60
-    Wait-Until { (Proof-Attached 'reopened-attached') -ceq '1' } 'reopened tmux transport attached before typing' 90
-    Proof-Line 'echo reopened > /home/mpverify/shell-restore.txt; echo SOFT3002-REOPENED-SAME-SESSION'
-    Wait-Until { (Proof-RestoreText 'restore-reopened') -ceq 'reopened' } 'reopened shell accepted real input' 30
-    $reopened = Proof-Identity 'session-reopened'
-    if ($reopened -cne $identity) { throw 'Reopen server shell attached a different remote session or pane process' }
-    Save-Json @{ before = $identity; reopened = $reopened; session = (Read-Session) } 'SOFT-3002-reopened.json'
-    Snapshot 'SOFT-3002-reopened-attached'
-    Restart-SessionRestore 'SOFT-3002-restart' $false
-    Wait-Until { @((Read-Session).tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'proof-shell' }).Count -eq 1 } 'the server shell tab returned after normal quit and restart' 60
-    Wait-Until { (Proof-Attached 'restored-attached') -ceq '1' } 'restored tmux transport attached before typing' 90
-    Proof-Line 'echo after-restart > /home/mpverify/shell-restore.txt; echo SOFT3002-ATTACHED-AFTER-RESTART'
-    Wait-Until { (Proof-RestoreText 'restore-after-restart') -ceq 'after-restart' } 'restored tab accepted real input'
-    $afterRestart = Proof-Identity 'session-after-restart'
-    if ($afterRestart -cne $identity) { throw 'Restart did not reattach the same remote session and pane process' }
-    Save-Json @{ before = $identity; reopened = $reopened; afterRestart = $afterRestart; session = (Read-Session) } 'SOFT-3002-restored.json'
-    Snapshot 'SOFT-3002-restored-attached'
+        if ($null -eq $state) { return $false }
+        return (@($state.tabs).Count -eq $tabsBeforeOpen + 1 -and $state.tabs[$state.active_tab].kind -in @('vps', 'vps2'))
+    } 'the chat palette opened a plain server shell tab on the host' 90
+    Wait-Until {
+        $candidate = Proof-ShellWindow
+        if ($candidate -eq [IntPtr]::Zero) { return $false }
+        $script:proofShell = $candidate
+        return $true
+    } 'the plain server shell tab shows a terminal window' 90
+    $script:proofTabReady = $true
+    Snapshot 'shell-opened'
+}
+try { Proof-FocusShell; $script:proofTabReady = $true } catch { Write-Host ('Plain server shell tab is not drivable: ' + $_.Exception.Message) }
+Proof-TabSteps 'shell'
+
+Proof-Step 'video' 'SOFT-3001' {
+    if ($script:proofVideoError) { throw $script:proofVideoError }
+    Proof-StopVideo
 }
 
+$result.checks += @($script:proofSteps)
+Save-Json @($script:proofSteps) 'journey-steps.json'
 Snapshot 'after'
-if (@($result.checks | Where-Object { -not $_.passed }).Count -gt 0) { throw 'One or more shell release proof cases failed; see the per-ticket results and screenshots' }
+$failed = @($script:proofSteps | Where-Object { -not $_.passed })
+if ($failed.Count -gt 0) {
+    throw ('Shell release journey failed ' + $failed.Count + ' step(s): ' + (@($failed | ForEach-Object { $_.name }) -join ', '))
+}

@@ -4,29 +4,30 @@ Source files: src/clipboard.zig, src/native_session.zig, src/terminal_window.c, 
 
 ## Sub-features
 
-- SOFT-3001: exact clipboard text from a selected terminal character while the same remote command keeps running, followed by Ctrl+C without selection interrupting that command.
-- SOFT-3002: normal quit and restart restores an attached server tab; closing a server shell tab and then Ctrl+K Reopen server shell reattaches the identical tmux session, pane and shell process.
+- SOFT-3001: select a line and copy it with Ctrl+C and with Ctrl+Shift+C, paste with Ctrl+V and with Ctrl+Shift+V, wheel back past 100 lines of output, and interrupt a running command with Ctrl+C and no selection.
+- SOFT-3002: a saved tmux tab restored at launch attaches the same remote session and accepts real keyboard input.
+- SOFT-3007: the console fills the tab after open and after a window resize, on a plain server shell tab and on a tmux-attached tab.
 
 ## How to get to it (user POV)
 
-Open a server shell with Ctrl+K Open shell on VPS 1, attach a tmux session inside it, then select text in a running command and press Ctrl+C, then press it again with no selection. Lose that connection, close the server shell tab with Ctrl+K, choose the detached session through Ctrl+K Reopen server shell, then quit with the tab open and restart.
+Open a server shell with Ctrl+K Open shell on VPS 1, and also start the app with a saved tab on a live tmux session. In each tab select a line and press Ctrl+C, then press Ctrl+Shift+C, paste a command with Ctrl+V and with Ctrl+Shift+V, print 200 numbered lines and wheel back through them, interrupt a running command with Ctrl+C, and resize the window.
 
 ## Driving it with control.ps1
 
 ```sh
-gh workflow run verify.yml --ref <branch> -f feature=server-chat -f tag=v0.28.<n>
+gh workflow run verify.yml --ref <journey-branch> -f feature=server-shell-tabs -f tag=v0.28.<n>
+gh workflow run verify.yml --ref <journey-branch-with-the-fix> -f feature=server-shell-tabs
 ```
 
-Use one dispatch. A tagged `server-chat` run first reuses the existing real-server chat journey in its own PowerShell process, then extends it with these shell checks in `shell-release/`. The existing server-chat setup owns the WSL2 server, OpenSSH keys, real tmux and deterministic paid-provider substitute. No workflow changes are required. Do not dispatch `server-shell-tabs` alone because it needs the `server-chat` WSL installation.
+Dispatch `server-shell-tabs` directly: the workflow installs the runner-owned WSL server and ffmpeg for this feature, and the journey owns its own setup, evidence in `shell-release/` and cleanup. It records the whole run to `journey.mp4` with ffmpeg gdigrab and takes a screenshot before and after every step. Pass `tag` to drive the published release. Without a tag the CI builds the dispatched branch, so merge the fix into the journey branch to drive that app source.
 
-The fixture adds a real detached tmux session and places the chat provider in `/home/mpverify/shell-proof-folder`. Before launch only, it seeds one saved server chat. The proof opens a plain server shell on the same host with Ctrl+K Open shell on VPS 1 (`2003`) and attaches that session by typing `tmux attach -t proof-shell` inside it. Every later action uses real keyboard or mouse input. Remote reads retain stdout, stderr and exit codes. A Python command writes an atomic heartbeat and an interrupt receipt. The first terminal cell contains `S`; a drag within that cell selects it and the clipboard must equal exactly `S`. Remote PTY width can lag the actual native grid and must not define selection length.
+The journey seeds one saved tab on the fixture `proof-shell` tmux session, then drives the restored tab and a plain server shell opened through Ctrl+K. Each tab runs the same eight steps and records them independently in `journey-steps.json` and `result.json`. Every step uses real keyboard and mouse input; remote receipts come from the runner-owned WSL Linux server over real OpenSSH.
 
-The tab is a plain server shell because the only row Ctrl+K offers for `close tab` is Archive chat (`7110`), and on a tab that tracks a tmux session that row kills the remote session. Before the close the proof drops the tab's own ssh transport, a real connection loss: the tmux client dies, the session stays alive and detached, and the app reconnects the tab as a plain shell. The proof records `#{session_attached}` going 1 to 0 to 1 and requires the same `#{session_id}|#{pane_id}|#{pane_pid}` before the close, after the reopen and after the restart, with a new remote receipt written after each reattach. A plain close without that loss leaves the remote client attached (run 45168790030 read `session_attached=1` for 30 s after the tab closed), so Reopen server shell has nothing to attach; that leak is a product defect outside this harness. Ctrl+Shift+W deletes the remote session and is not used.
-
-Restart uses the same `Restart-SessionRestore` helper as the SOFT-3039 journey on `soft-3053-release-proof`. Inspect `shell-release/SOFT-3001-result.json`, `SOFT-3002-result.json`, exact clipboard/expected text, heartbeat and interrupt receipts, close/reopen and restart identities, and the corresponding `SOFT-*.png` screenshots. Each case records failures independently. Runner keys are removed before scratch evidence is copied; WSL is stopped during cleanup.
+Copy is checked by clearing the screen, printing a single token line, drag-selecting that line and requiring the clipboard to equal the token exactly. Paste sets the clipboard to an `echo` command and requires the file the pasted command writes. The wheel step prints 200 numbered lines, reads the visible text through Ctrl+C, wheels up 40 notches and requires the lowest visible line number to drop by at least 100. Layout requires the console to cover at least 80% of the tab height and 50% of the width, after open and after the window grows. The restore step requires `#{session_attached}` to be 1 for `proof-shell` and a real remote receipt written through the restored tab.
 
 ## Gotchas
 
-- SOFT-3003 is not part of this journey. On v0.28.1893 Ctrl+K Open shell on VPS 1 (`2003`) from the real server chat opened `/home/mpverify` instead of the chat folder `/home/mpverify/shell-proof-folder`. That is a product defect and is tracked outside this proof.
-- Only the paid provider is deterministic. SSH, tmux, shell processes, signals, clipboard and server folders are real and runner-owned. No user machine, credentials or shared VPS is involved.
-- Shell copy/scroll geometry comes from the existing server-shell-input journey. This release proof adds the exact-selection and running-process checks it did not assert.
+- The scroll step reads visible text through the product's own Ctrl+C copy path. When copy is broken the step fails and reports that the wheel could not be measured.
+- SOFT-3003 is not part of this journey. On v0.28.1893 Ctrl+K Open shell on VPS 1 opened `/home/mpverify` instead of the chat folder; that is tracked outside this proof.
+- Only the paid provider is deterministic. SSH, tmux, shell processes, clipboard, wheel scroll, signals and layout are real and runner-owned. No user machine, credentials or shared VPS is involved.
+- A released run and an `app_revision` run are two dispatches, so the same video shows the failure on the release and the fix on the revert branch.

@@ -22,7 +22,7 @@ Preconditions: GitHub `windows-latest`, the branch executable, WSL2 Ubuntu 24.04
 
 `control.ps1 -Feature server-chat` delegates to `tools/verify-server-chat/drive.ps1`. This is a real networking journey, not the fake SSH/tmux boundary used by `chat-delivery` and `chat-slash`. The runner owns both ends of the loopback connection on port 2222. Linux uses a dedicated `mpverify` user, key-only authentication and a real tmux session. The unmodified production host and connectors dispatch to a deterministic stream-json provider instead of making paid Claude calls. The provider writes normal Claude transcript records and independently records its input. Seeding waits for the production host's persisted `host.status=ready` event before submitting its first message; a live socket alone does not mean the provider has initialized.
 
-Tagged release runs also execute the [server shell release proof](server-shell-tabs.md) in `shell-release/`, using the same real WSL/OpenSSH setup and the existing restart helper. Its per-ticket results are independent of the four chat cases.
+Tagged release runs also execute the [server shell release proof](server-shell-tabs.md) in `shell-release/`, using the same real WSL/OpenSSH setup and the existing restart helper. That journey can also be dispatched on its own as `feature=server-shell-tabs`.
 
 The PR verifier can select this map automatically. Do not dispatch another run while its push-triggered checks are running. For a separate authorized manual run, select `feature=server-chat` in `verify.yml`.
 
