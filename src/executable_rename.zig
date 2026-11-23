@@ -32,16 +32,16 @@ pub fn redirect(args: []const []const u8, version: []const u8) bool {
     }
     var target: [550:0]u16 = @splat(0);
     @memcpy(target[0..start], path[0..start]);
-    const name = std.mem.span(L("multibot.exe"));
+    const name: []const u16 = L("multibot.exe");
     @memcpy(target[start..][0..name.len], name);
     const target_len = start + name.len;
     var next: [580:0]u16 = @splat(0);
     @memcpy(next[0..target_len], target[0..target_len]);
-    const next_suffix = std.mem.span(L(".rename-next.exe"));
+    const next_suffix: []const u16 = L(".rename-next.exe");
     @memcpy(next[target_len..][0..next_suffix.len], next_suffix);
     var previous: [580:0]u16 = @splat(0);
     @memcpy(previous[0..target_len], target[0..target_len]);
-    const previous_suffix = std.mem.span(L(".rename-previous.exe"));
+    const previous_suffix: []const u16 = L(".rename-previous.exe");
     @memcpy(previous[target_len..][0..previous_suffix.len], previous_suffix);
 
     const mutex = win.CreateMutexW(null, 0, L("Local\\MultibotExecutableRename")) orelse return false;

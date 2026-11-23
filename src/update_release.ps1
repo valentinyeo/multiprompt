@@ -121,6 +121,8 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
     $bridgeInstalled = $false
     $extension = $null
     $extensionSaved = $false
+    $renameMutex = $null
+    $renameLocked = $false
     try {
         $processes = @(Get-WaitingProcesses $Pids)
         foreach ($process in $processes) {
@@ -130,6 +132,11 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
                 Start-RestoredApp $Target
                 return
             }
+        }
+        if ([IO.Path]::GetFileName($Target) -ieq 'multibot.exe') {
+            $renameMutex = New-Object Threading.Mutex($false, 'Local\MultibotExecutableRename')
+            try { $renameLocked = $renameMutex.WaitOne(60000) } catch [Threading.AbandonedMutexException] { $renameLocked = $true }
+            if (-not $renameLocked) { throw 'Executable migration is still running' }
         }
         $ready = Get-Content -LiteralPath "$dir/ready.txt" -Raw
         if ($ready -notmatch '^MPVERSION=(\d+\.\d+\.\d+);((?:multibot|multiprompt)-(x64|arm64)\.exe)$' -or $Matches[3] -cne $Architecture) { throw 'Invalid staged update' }
@@ -192,6 +199,9 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
             if (Test-Path -LiteralPath $Target) { Start-RestoredApp $Target } elseif (Test-Path -LiteralPath $backup) { Start-RestoredApp $backup }
         }
         throw
+    } finally {
+        if ($renameLocked) { $renameMutex.ReleaseMutex() }
+        if ($renameMutex) { $renameMutex.Dispose() }
     }
 }
 
