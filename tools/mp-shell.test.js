@@ -12,7 +12,7 @@ test('SOFT-3003 zsb shell-open is a workspace command with attach and run flags'
   assert.match(read('src/browser_bridge.zig'), /"shell-open"/);
   assert.match(read('src/browser_bridge.zig'), /fn zsbShellOpen\(/);
   assert.match(read('src/mp_shell.py'), /shell-open/);
-  assert.match(read('src/chat_history_reader.py'), /publish_named_tool\('mp-shell'/);
+  assert.match(read('src/chat_history_reader.py'), /'mp-shell': 'MP_SHELL_SOURCE'/);
   assert.match(read('src/chat_session.zig'), /MP_SHELL_SOURCE = '\{s\}'/);
 });
 
