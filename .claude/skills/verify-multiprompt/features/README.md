@@ -77,6 +77,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Diagnostic verification
 
+- [Chat agent identity](../diagnostics/chat-agent-identity.md): hosted fake-API rename and lifecycle proof, including the current upstream agent-token permission limit. No live API or desktop claim.
+
 - [Room reply grouping](../diagnostics/room-reply-grouping.md): hosted native replay regression; production Rooms and paired Android walkthrough remain required.
 
 - [Remote switch speed](../diagnostics/remote-switch-speed.md): dedicated Windows baseline/candidate workflow, 20 session switches and 20 workspace switches, 2,000 rendered messages, native paint gaps, one-core CPU, and two-second recovery.

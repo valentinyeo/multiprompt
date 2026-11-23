@@ -33,6 +33,8 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+SOFT-2443 adds Hypertask binding fields to the existing config carry list and tests that they survive Switch AI. The six covered reader functions are unchanged. Agent provisioning, name sync and archive permissions sit outside this model. The recorded file hashes were refreshed; hosted native probes, replays and mutations remain required.
+
 Last confirmed source/model sync commit is `175a58efdcea4c990f972df28239d57e830e0101`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 | Source | Covered behavior |
