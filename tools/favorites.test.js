@@ -37,9 +37,9 @@ test('both initializers and every persisted restore/reconnect path retain favori
   assert.match(jsonReader, /"favorite"/);
   assert.match(jsonReader, /@field\(tab, key\) = boolTrue\(obj, key\)/);
   assert.match(between('fn preserveFailedRemoteSavedTab(', 'fn parseSessionTabs('), /shell\.favorite = tab\.favorite/);
-  assert.match(between('fn spawnSavedTab(', 'fn restoreSession('), /shells\[idx\]\.favorite = tabs\[t\]\.favorite/);
+  assert.match(between('fn applySavedTabFields(', 'fn restoreCachedSavedTab('), /shells\[idx\]\.favorite = tab\.favorite/);
   assert.match(between('fn respawnShellInPlace(', 'fn faviconHostForShell('), /\.favorite = saved_favorite/);
-  assert.equal((source.match(/shells\[idx\]\.favorite = tabs\[t\]\.favorite/g) || []).length, 2);
+  assert.equal((source.match(/shells\[idx\]\.favorite = tabs\[t\]\.favorite/g) || []).length, 1);
 });
 
 test('tab moves carry favorites over COPYDATA and new-window adoption', () => {
