@@ -32,6 +32,7 @@ const chat_transcript = struct { const Identity = struct {
     shell_id: u32 = 1, host: u8 = 0, codex: bool = false, pi: bool = false,
     sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), cwd: [192]u8 = @splat(0),
     pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; }
+    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
 }; };
 var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
 var g_chat_full_settle_job: ?*ChatFullSettleJob = null;
@@ -68,9 +69,10 @@ fn testSpawn(options: std.Thread.SpawnConfig, comptime function: anytype, args: 
     starts += 1;
     return .{ .real = try std.Thread.spawn(options, function, args) };
 }
-fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, limit: usize, out: *std.ArrayList(u8), written: ?*bool) bool {
+fn chatHistoryPersistent(identity: @import("session_identity.zig").Session, query: []const u8, limit: usize, out: *std.ArrayList(u8), written: ?*bool) bool {
     std.debug.assert(std.Thread.getCurrentId() != ui_thread);
-    std.debug.assert(host == test_key.host and limit == 4096 and written == null);
+    const id = identity.requestId(query) orelse return false;
+    std.debug.assert(identity.host.index() == test_key.host and limit == 4096 and written == null);
     requests += 1;
     if (fail_request) return false;
     const a = std.heap.page_allocator;
@@ -204,7 +206,7 @@ test "full settle leaves failures and retried or removed entries untouched" {
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-full-settle-'));
   try {
-    copyZig(['chat_echo.zig'], dir);
+    copyZig(['chat_echo.zig', 'session_identity.zig'], dir);
     const functions = ['chatFullSettleStart', 'chatFullSettleThread', 'chatFullSettleFinish', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn'].map(body).join('\n')
       .replaceAll('std.Thread.spawn', 'testSpawn').replaceAll('@import("chat_session.zig").chatHistoryPersistent', 'chatHistoryPersistent');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "full settle')) + String.raw`

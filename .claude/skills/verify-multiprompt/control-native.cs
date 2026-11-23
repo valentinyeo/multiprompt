@@ -1355,7 +1355,7 @@ public static class PaneLayoutProof {
             proof["gapRect"] = new int[] { gapLeft, client.Top, browserLeft, client.Bottom };
             proof["gripPixels"] = gripPixels;
             Require(forbidden == 0 && gapLeft >= right, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
-            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + 28;
+            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + S(42, dpi, scale);
             int rowBottom = rowTop + S(58, dpi, scale);
             var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
             int railPixels = 0;
