@@ -139,7 +139,10 @@ def session_catalog(send, listing):
             row = dict(name=tab.get("title") or names.get(tmux) or tmux, tmux=tmux,
                        host=tab.get("host"), workspace=workspace, group=group,
                        tab_id=tab.get("id"), tab_open=True)
+            if not state:
+                state = {field: tab.get(field) for field in ("visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden") if field in tab}
             row.update(state)
+            row["in_layout"] = True
             rows[(row.get("host"), tmux)] = row
         for state in listing.get("closed_tabs") or []:
             rows.setdefault((state["host"], state["tmux"]), dict(state, tab_open=False))
@@ -167,6 +170,13 @@ def session_catalog(send, listing):
             row["name"] = names.get(tmux) or config.get("spawn_display") or tmux
         rows[(row.get("host"), tmux)] = row
     for row in rows.values():
+        row.setdefault("in_layout", False if listing.get("ok") else None)
+        row.setdefault("visible", False if listing.get("ok") and not row["in_layout"] else None)
+        row.setdefault("hidden_reason", "not in layout" if listing.get("ok") and not row["in_layout"] else "desktop visibility unavailable" if listing.get("ok") else "desktop offline")
+        for flag in ("waiting", "pinned", "archived", "closed", "user_hidden"):
+            row.setdefault(flag, False)
+        row["active_workspace"] = listing.get("active_workspace") or next((workspace.get("name") for workspace in listing.get("workspaces", []) if workspace.get("active")), None)
+        row["sidebar_view"] = listing.get("sidebar_view")
         row.setdefault("tab_open", False)
         row.setdefault("running", False)
         row.setdefault("busy", False)
@@ -304,12 +314,12 @@ def filter_workspace(rows, workspace):
 
 
 def catalog_table(rows):
-    headers = ("NAME", "WORKSPACE", "GROUP", "STATE", "TMUX", "SID")
+    headers = ("NAME", "WORKSPACE", "GROUP", "STATE", "VISIBILITY", "WAITING", "PINNED", "ON SCREEN", "TMUX", "SID")
     body = []
     for row in rows:
         mark = "*" if row.get("self") else " "
         body.append((mark + (row.get("link") or row.get("name") or row["tmux"]), row.get("workspace") or "", row.get("group") or "",
-                     row_state(row), row["tmux"], row.get("sid") or ""))
+                     row_state(row), "visible" if row.get("visible") is True else "hidden: " + str(row.get("hidden_reason")), str(row.get("waiting", False)), str(row.get("pinned", False)), str(row.get("visible")), row["tmux"], row.get("sid") or ""))
     data = [headers] + body
     widths = [max(len(row[i]) for row in data) for i in range(len(headers))]
     return "\n".join("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))) for row in data)

@@ -13,5 +13,5 @@ export function validTabState(state, tab) {
 
 export function projectTabState(tab, position) {
   if (!tab.tab_state) return;
-  tab.tab_state = { ...tab.tab_state, name: tab.name, workspace: tab.workspace, group: tab.group || null, position };
+  tab.tab_state = { ...tab.tab_state, name: tab.name, workspace: tab.workspace, group: tab.group || null, position: tab.tab_state.closed || tab.tab_state.archived ? tab.tab_state.position : position };
 }

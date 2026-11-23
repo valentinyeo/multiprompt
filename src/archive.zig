@@ -1130,6 +1130,7 @@ pub fn archiveTabAt(i: usize) void {
         return;
     }
     closeShell(@intCast(i));
+    @import("tab_state_desktop.zig").markArchived(entry.tmux_host, entry.tmux_session[0..entry.tmux_session_len]);
     publishInboxState();
     saveSession();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -1377,6 +1378,15 @@ fn workspaceSlotForTmuxFamily(host: u8, session: []const u8) ?u8 {
 }
 
 fn archivedEntryWorkspaceSlot(entry: *const ArchivedEntry) u8 {
+    for (app_state.g_tmux_closed.entries.items) |closed| {
+        if (!@import("tmux_identity.zig").same(closed.host, closed.name[0..closed.len], entry.tmux_host, entry.tmux_session[0..entry.tmux_session_len])) continue;
+        const state = closed.tab_state orelse continue;
+        for (0..app_state.g_lws_count) |wi| {
+            var buf: [32]u8 = undefined;
+            if (std.mem.eql(u8, state.workspace, workspaceDisplayName(@intCast(wi), &buf))) return @intCast(wi);
+        }
+    }
+
     const session = entry.tmux_session[0..entry.tmux_session_len];
     if (workspaceSlotForTmuxFamily(entry.tmux_host, session)) |ws| return ws;
     const root = if (entry.claude_cwd_len > 0) remoteRepoRoot(entry.claude_cwd[0..entry.claude_cwd_len]) else "";
@@ -1533,6 +1543,7 @@ pub fn buildSessionOverviewRows() void {
     while (ai < app_state.g_archived_count) : (ai += 1) {
         const e = &app_state.g_archived.items[ai];
         if (e.tmux_session_len == 0) continue;
+        if (findLocalTmuxTab(e.tmux_host, e.tmux_session[0..e.tmux_session_len]) != null) continue;
         const sess = e.tmux_session[0..e.tmux_session_len];
         const name = if (e.name_len > 0) e.name[0..e.name_len] else sess;
         var root: []const u8 = "";

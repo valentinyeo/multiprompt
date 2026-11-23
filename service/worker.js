@@ -11,7 +11,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 const fail = (status, error) => { throw Object.assign(new Error(error), { status }); };
 const layoutFeature = (request, token) => (request.headers.get('X-Layout-Features') || '').split(',').some(feature => feature.trim() === token);
 function layoutResponse(request, value, status = 200) {
-  if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
+  if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.filter(tab => layoutFeature(request, 'tab_state') || !(tab.tab_state?.closed || tab.tab_state?.archived)).map(tab => {
     const visible = { ...tab };
     if (!layoutFeature(request, 'groups')) delete visible.group;
     if (!layoutFeature(request, 'starred_groups')) delete visible.starred_group;
@@ -443,6 +443,12 @@ export default {
         if (removed.length) layout.removed_hosts = removed;
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
+        if (!layoutFeature(req, 'tab_state')) {
+          for (const tab of previousLayout?.tabs || []) {
+            if (!(tab.tab_state?.closed || tab.tab_state?.archived) || device.kind === 'workspace' && tab.workspace !== device.workspace) continue;
+            if (!layout.tabs.some(other => other.tmux_host === tab.tmux_host && other.tmux_session.toLowerCase() === tab.tmux_session.toLowerCase())) layout.tabs.push(tab);
+          }
+        }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {

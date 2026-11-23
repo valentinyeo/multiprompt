@@ -118,6 +118,8 @@ def evaluate_row(send, listing, row, ping):
     folder = row.get("folder")
     reader = send.reader_module()
     reasons = []
+    if row.get("visible") is False and not (row.get("waiting") or row.get("archived") or row.get("closed") or row.get("user_hidden")):
+        reasons.append("hidden: " + str(row.get("hidden_reason") or "not in sidebar layout"))
     tab_note = None
     view_note = None
     if not row.get("running"):
@@ -153,6 +155,7 @@ def evaluate_row(send, listing, row, ping):
             reasons.append(ping_reason)
     status = "OK" if not reasons else "BROKEN " + reasons[0]
     return dict(
+        row,
         name=row.get("name"),
         link=label,
         tmux=tmux,

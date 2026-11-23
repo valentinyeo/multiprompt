@@ -58,6 +58,22 @@ pub fn rememberClose(idx: usize) void {
     }
 }
 
+pub fn markArchived(host: u8, tmux: []const u8) void {
+    for (app.g_tmux_closed.entries.items) |*entry| {
+        if (!@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], host, tmux)) continue;
+        if (entry.tab_state) |*state| {
+            state.closed = false;
+            state.archived = true;
+            state.waiting = false;
+            state.visible = false;
+            const reason = a.dupe(u8, "archived") catch return;
+            if (state.hidden_reason) |old| a.free(old);
+            state.hidden_reason = reason;
+        }
+        return;
+    }
+}
+
 fn liveIndex(alloc: std.mem.Allocator, target: model.State) !?u32 {
     for (0..app.shell_count) |i| {
         const state = try capture(alloc, i);
@@ -196,6 +212,11 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
         if ((next.closed or next.archived) and app.shells[i].pinned_top) return failure(out, "pinned_tab");
     }
     const dest = destination(next) catch |err| return failure(out, @errorName(err));
+    if (dest.host) |host| {
+        var identity: @import("ssh_identity.zig").View = .{};
+        @import("ssh_identity.zig").view(&identity);
+        if (!std.mem.eql(u8, next.user, identity.table[host].user.get())) return failure(out, "user_changed");
+    }
     var title: [64]u16 = undefined;
     const title_len = std.unicode.utf8ToUtf16Le(&title, next.name) catch return failure(out, "invalid_name");
     if (title_len == 0 or title_len > 63) return failure(out, "invalid_name");
@@ -213,7 +234,7 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
     if (idx == null and !next.closed and !next.archived and app.shell_count >= app.MAX_SHELLS) return failure(out, "tab_limit");
     if (next.closed or next.archived) {
         if (idx) |i| {
-            console.closeBackgroundShell(i);
+            if (next.archived and !next.closed and dest.host != null) @import("archive.zig").archiveTabAt(i) else console.closeBackgroundShell(i);
             if ((liveIndex(alloc, next) catch return 0) != null) return failure(out, "close_failed");
         }
         const record = retainedIndex(next) orelse return failure(out, "missing_closed_state");
