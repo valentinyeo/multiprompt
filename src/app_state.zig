@@ -336,7 +336,6 @@ pub const Shell = struct {
     color: ?u8 = null,
     avatar_local_id: [16]u8 = @splat(0),
     last_used: u64 = 0,
-    frozen_use_key: ?u64 = null,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
     console_inflight: bool = false,
