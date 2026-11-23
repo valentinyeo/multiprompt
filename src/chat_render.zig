@@ -640,7 +640,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
                 _ = SetTextColor(hdc, chatCodeTokenColor(if (token) |t| t.kind else .normal));
             }
             if (paint) {
-                if (skill_pills and @import("chat_skill.zig").known(text[word_start..word_end])) {
+                if (skill_pills and (word_start == 0 or text[word_start] != '/') and @import("chat_skill.zig").known(text[word_start..word_end])) {
                     _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatUserBubbleColor()));
                 }
                 if (app_state.g_chat_find_open) {
