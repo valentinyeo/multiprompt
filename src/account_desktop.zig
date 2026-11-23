@@ -1770,8 +1770,8 @@ pub fn applyServerLayout(json: []const u8) !void {
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
     }
     desired.tabs = kept.items;
-    app_state.g_account_applying = true;
     const synced_layout = desired;
+    app_state.g_account_applying = true;
     defer app_state.g_account_applying = false;
     const old_restoring = app_state.g_restoring;
     app_state.g_restoring = true;
