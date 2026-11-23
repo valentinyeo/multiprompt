@@ -78,6 +78,14 @@ Reverting the reader generation stops future cleanup but cannot restore deleted 
 - New live chats have no parking terminal or idle sleep process.
 - Their saved `tmux` field is a routing name, not proof of a terminal.
 - Host config stores the provider, session id, name and working directory.
+- For Claude, config `native_session` identifies the current provider conversation.
+  The host updates it from each Claude `system.init` event, including resumed conversations.
+- Hosted Claude transcript reads resolve config `native_session`, then the latest valid init event's session, then `sid`.
+  A missing current transcript never falls back to a different conversation.
+- Config `sid` remains the stable host routing id and history response id. Do not use it as the current Claude conversation id.
+- Older configs gain `native_session` when the updated host receives its next init event.
+  Existing history and message requests still use the stable `sid`.
+  Android client coordination is tracked in https://app.hypertask.ai/detail/project-2060/2681.
 - `python3 <reader> host list` lists those registered chats.
 - `host connect <name>` reconnects by that registry without creating tmux.
 - Desktop discovery combines the registry with existing terminal sessions.
