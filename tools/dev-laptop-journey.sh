@@ -256,9 +256,9 @@ stress() {
 
     read -r users assistants _ <<<"$(turns "$transcript")"
     focus_dev || true
-    send_keys '^t'   # next tab
+    send_keys '^t'
     sleep 3
-    send_keys '^{t}' # back
+    send_keys '^{t}'
     sleep 2
     if wait_turns "$transcript" $((users)) $((assistants)) 20; then
         case_result case6-tab-switch PASS "chat still loaded after switching tabs"
@@ -269,7 +269,7 @@ stress() {
     fi
 
     focus_dev || true
-    send_keys '%c'   # Alt+C toggles Chat View
+    send_keys '%c'
     sleep 2
     send_keys '%c'
     sleep 2

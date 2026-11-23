@@ -5,7 +5,7 @@
 - Selection happens before requests.
 - Imports never install a runtime.
 - The full-file hash identifies the client artifact.
-- The inner-source hash identifies the selected runtime.
+- The hash of the inner reader, connectors and bundled tool sources identifies the selected runtime.
 
 ## Release updates (SOFT-3037)
 
@@ -26,17 +26,19 @@
 - Each Unix user has a private runtime.
 - Its directory is `~/.multiprompt-runtime`.
 - `active.json` contains `protocol`, `generation`, and `sha256`.
-- Protocol 1 starts at generation 1.
-- Every inner-source edit increments `RUNTIME_GENERATION`.
-- Generations increase monotonically.
+- Protocol 1 and the three existing metadata fields remain unchanged.
+- `RUNTIME_GENERATION` is derived from the bundle hash, not maintained by hand.
+- Its integer uses bit 52 plus 52 hash bits, above legacy counters and within JSON safe-integer range.
+- The full SHA-256 fingerprint, not integer ordering, decides whether a runtime differs.
 - A lock serializes selection.
 - Readers use owner-only permissions.
 - Each reader is stored as `<sha256>.py`.
 - Publishing syncs a temporary file.
 - An atomic rename publishes it.
-- Older launchers select the installed newer reader.
-- Equal generations with a different hash replace the stale selection with this
-  client's own source, so one missing bump cannot wedge every client.
+- Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
+- Fingerprinted launchers replace a different selection with their own bundle.
+- Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
+- Identical bundles keep the existing selection without rewriting its metadata.
 - Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
 
