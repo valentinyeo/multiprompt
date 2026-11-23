@@ -35,6 +35,9 @@ def prepare(runtime):
     runtime['host_write'](runtime['host_paths']('claude', sid)['config'], config)
     with closing(runtime['message_store_db'](tmux)) as db, db:
         db.execute('INSERT OR REPLACE INTO message_locators(provider,sid,tmux) VALUES (?,?,?)', ('claude', sid, tmux))
+        db.execute('INSERT OR REPLACE INTO message_chats(provider,sid) VALUES (?,?)', ('claude', sid))
+        db.execute('INSERT OR REPLACE INTO message_events VALUES (?,?,?,?)', ('claude', sid, 1, json.dumps(dict(
+            v=2, sid=sid, turn='formal', kind='text.done', at=1, payload=dict(text='earlier words')))))
         db.execute("INSERT OR REPLACE INTO shared_messages(id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created)"
                    " VALUES ('formal-queued','claude',?,'still waiting',1,'a1','queued',NULL,NULL,7,1.0)", (sid,))
 
@@ -57,6 +60,7 @@ with tempfile.TemporaryDirectory() as directory:
 with tempfile.TemporaryDirectory() as directory:
     runtime = load(directory)
     prepare(runtime)
+    old = runtime['host_config']('claude', sid)
     reply = switch(runtime, False, 'started')
     new_sid = reply.get('sid')
     results['Switched'] = reply.get('status') == 'switched'
@@ -64,6 +68,16 @@ with tempfile.TemporaryDirectory() as directory:
     with closing(runtime['message_store_db'](tmux)) as db:
         queued = db.execute("SELECT provider,sid FROM shared_messages WHERE id='formal-queued'").fetchone()
     results['CarryQueuedMessages'] = bool(new_sid) and queued == ('pi', new_sid)
+    new = runtime['host_config']('pi', new_sid) if new_sid else None
+    results['CarryIdentity'] = results['Switched'] and isinstance(new, dict) and all(
+        new.get(key) == old.get(key) for key in ('face', 'login', 'tmux', 'cwd', 'permission_mode'))
+    rows = []
+    if new_sid:
+        history = runtime['host_paths']('pi', new_sid)['history']
+        if history.is_file():
+            for line in history.read_text(encoding='utf-8').splitlines():
+                rows.append((json.loads(line).get('row') or {}).get('text') or '')
+    results['CarryHistory'] = results['Switched'] and any('earlier words' in row for row in rows)
 text = (root / 'src/chat_history_reader.py').read_text(encoding='utf-8')
 refuse_busy = 'host_turn_busy' in text and 'dict(status="busy"' in text
 stop_old = 'enabled=False' in text and 'switched_to=' in text
@@ -75,6 +89,8 @@ print('FORMAL ' + json.dumps({
     'StopOldOnCommit': stop_old and results.get('StopOldOnCommit', False),
     'CommitAfterStartFail': commit_after_start_fail and results.get('CommitAfterStartFail', False),
     'CarryQueuedMessages': carry_queued and results.get('CarryQueuedMessages', False),
+    'CarryIdentity': results.get('CarryIdentity', False),
+    'CarryHistory': results.get('CarryHistory', False),
     'SkipLocatorDelete': skip_locator
 }))
 """
