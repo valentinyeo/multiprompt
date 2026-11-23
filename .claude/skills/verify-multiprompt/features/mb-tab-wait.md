@@ -1,6 +1,6 @@
 # Mb tab wait
 
-Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-wait.md, src/sidebar.zig, src/session.zig
+Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-wait.md, src/tab_state.zig, src/sidebar.zig, src/session.zig
 
 ## Sub-features
 
@@ -11,7 +11,7 @@ Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-fea
 
 ## How to get to it (user POV)
 
-- Move the proof tab to Waiting with `mb wait on`.
+- Move the proof tab to Waiting with `mb wait` (prints `wait <title>`).
 
 ## Driving it with control.ps1
 

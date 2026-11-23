@@ -11,7 +11,7 @@ Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprom
 
 ## How to get to it (user POV)
 
-- Move the proof tab to workspace Other with `mb move`.
+- Move the proof tab to workspace Other with `mb move --workspace Other` (prints `move <title>`).
 
 ## Driving it with control.ps1
 

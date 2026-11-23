@@ -31,6 +31,15 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   assert.match(driver, /Join-Path \$Evidence 'result\.json'/);
   assert.match(driver, /Join-Path \$Evidence 'before\.png'/);
   assert.match(driver, /Join-Path \$Evidence 'after\.png'/);
+  assert.match(driver, /function Assert-MbTabVerbLine/);
+  assert.match(driver, /@\('pin', \$MbTabSession, '--host', '0'\)/);
+  assert.match(driver, /@\('unpin', \$MbTabSession, '--host', '0'\)/);
+  assert.match(driver, /@\('wait', \$MbTabSession, '--host', '0'\)/);
+  assert.match(driver, /@\('restore', \$MbTabSession, '--host', '0'\)/);
+  assert.match(driver, /@\('archive', \$MbTabSession, '--host', '0'\)/);
+  assert.doesNotMatch(driver, /'pin', \$MbTabSession, 'on'/);
+  assert.doesNotMatch(driver, /'wait', \$MbTabSession, 'on'/);
+  assert.doesNotMatch(driver, /--no-tmux/);
   const { touchedJourneys } = require('./touched-journeys.cjs');
   const picked = touchedJourneys(['src/session_layout_sync.zig'], path.join(root, skill, 'features'));
   assert.deepEqual(picked.features, ['mb-tab-layout-sync']);
