@@ -65,6 +65,8 @@ SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` ass
 
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
+MUBO-238 reviewed `tools/multibot-feedback-test.py` on top of `f8ceb06f7e826340806abe46b57ba3e63151305d`: it is tracked only as an import dependency of `tools/chat-history-reader-test.py`, and its diff only updates mock ticket numbers from `IGSH-` to `MUBO-` and expected board URLs from `project-2060` to `project-13734`. Every covered delivery source file, function, native probe, bound, decision and property is unchanged; only `tools/multibot-feedback-test.py`'s hash and `sync_commit` move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one echo, with skill tokens allowed to change position. These execute unchanged in native probes. |
