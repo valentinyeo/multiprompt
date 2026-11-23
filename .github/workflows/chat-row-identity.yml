@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: chat-row-identity-${{ github.event.pull_request.number || github.ref }}
+  group: chat-row-identity-${{ github.event.pull_request.number || github.ref }}-${{ inputs.app_revision || 'candidate' }}
   cancel-in-progress: true
 
 jobs:
