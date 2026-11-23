@@ -28,7 +28,7 @@ mp-send list --json
 mp-sessions
 ```
 
-Each row has the name, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. A chat counts as live when its host process runs and its terminal session exists. A chat whose name has not been published yet shows `(no name yet)` and can still be reached by its terminal session.
+Each row has the session link, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. The link looks like `Poteto{live-8bc7bac}`. A name with a space looks like `@Alpha Lead{live-alpha}`. `--json` also has a `link` field with that token. In Chat View the token shows the name, and a click opens that session. A click works when that session is open. An unknown session stays plain text. A chat counts as live when its host process runs and its terminal session exists. A chat whose name has not been published yet uses its terminal session as the name inside the link, and can still be reached by that session.
 
 ## Read the last answer
 
