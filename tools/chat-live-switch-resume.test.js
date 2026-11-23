@@ -21,7 +21,7 @@ function body(source, name) {
 test('leaving a live chat keeps its event cursor so a switch back does not replay its whole history', () => {
   const stop = body(read('chat_session.zig'), 'chatLiveStreamStopLocked');
   assert.doesNotMatch(stop, /chat_live\.zig"\)\.release\(/, 'switching away must not throw away the live chat state and cursor');
-  assert.match(stop, /chat_live\.zig"\)\.park\(stream\.identity\.owner\)/, 'switching away parks the live chat state');
+  assert.match(stop, /chat_live\.zig"\)\.park\(stream\.shell_id\)/, 'switching away parks the live chat state');
 });
 
 test('a switch back restores the parked live chat before it would start a fresh one at seq zero', () => {

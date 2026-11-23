@@ -2773,6 +2773,7 @@ HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
+HOST_IDLE_SECONDS = 1800
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
@@ -2792,13 +2793,12 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
-                      "Helper chats: `mp-helper --help`.\n"
-                      "Chats: `mp-sessions list --workspace mine`, `mp-sessions send`, `mp-sessions --help`.\n"
+                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
                       "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
-                      "Saved locally; without an agent token, the host account files it on the board.")
+                      "Saved locally; an authorized agent token also submits or votes on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
@@ -3301,8 +3301,6 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "switch_ai":
         return host_switch_ai(provider, sid, query.get("to"))
-    if query.get("op") == "set_auto_switch":
-        return host_auto_switch_set(provider, sid, query)
     if query.get("op") == "set_effort" and provider not in ("claude",):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
@@ -3434,9 +3432,6 @@ def host_start(provider, sid, source=None):
     if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
     host_clear_stale(provider, sid)
-    owner = host_owner(provider, sid)
-    if owner and owner.get("owner") == "host":
-        return dict(status="error", reason="owner_busy", pid=owner["pid"])
     child = host_spawn(provider, sid, source)
     if child is None:
         return dict(status="error", reason="host_launch_unavailable")
@@ -4314,20 +4309,6 @@ def host_fresh_start(provider, sid, tmux, session, handover_file=None):
     return dict(status="started")
 
 
-def host_feedback_drain_board():
-    if not os.environ.get("HT_TOKEN", "").strip():
-        return False
-    tool = HOME / HOST_RUNTIME_TOOLS / "multibot-feedback"
-    if not tool.is_file():
-        return False
-    try:
-        result = subprocess.run([str(tool), "--drain"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                timeout=120, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
-
-
 def host_fresh_drain_queued(provider, sid, tmux, session):
     queued = session["state"].pop("fresh_start_queued", None)
     if not isinstance(queued, dict) or host_fresh_busy(session) or session["state"].get("fresh_start"):
@@ -4347,13 +4328,6 @@ def host_fresh_drain_queued(provider, sid, tmux, session):
     return True
 
 
-def host_fresh_reply(texts):
-    if not isinstance(texts, dict):
-        return ""
-    replies = [value.strip() for value in texts.values() if isinstance(value, str) and value.strip()]
-    return max(replies, key=len) if replies else ""
-
-
 def host_fresh_finish(provider, sid, tmux, session, status):
     fresh = session["state"].get("fresh_start")
     if not isinstance(fresh, dict):
@@ -4367,7 +4341,7 @@ def host_fresh_finish(provider, sid, tmux, session, status):
         return
     if fresh["phase"] != "handover":
         return
-    text = host_fresh_reply(fresh.get("text"))
+    text = "\n\n".join(fresh["text"].values()).strip()
     if status != "completed" or not text or len(text.encode("utf-8")) > HOST_EVENT_TEXT_LIMIT:
         host_fresh_error(provider, sid, tmux, session, "The handover did not finish.")
         return
@@ -4433,186 +4407,9 @@ def host_fresh_resume(provider, sid, tmux, session):
 
 HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi")
 HOST_SWITCH_TARGETS = ("claude", "codex", "pi")
-HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
+HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
-HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
-HOST_AUTO_SWITCH_COOLDOWN = 60 * 60
-HOST_AUTO_SWITCH_WAIT = 120
-HOST_AUTO_SWITCH_TRIGGERS = dict(claude=("result",), codex=("error",), pi=("message_end", "agent_settled"),
-                                 antigravity=("result",), cursor=("result",))
-HOST_USAGE_LIMIT_PHRASES = ("usage limit", "usage_limit", "rate limit", "rate_limit", "rate-limit", "quota",
-                            "resource_exhausted", "resource exhausted", "insufficient_quota")
-HOST_USAGE_LIMIT_CODES = ("429", "resource_exhausted", "insufficient_quota")
-HOST_AUTO_SWITCH_STAYS = "No plan left anywhere. This chat stays on "
-
-
-def host_auto_switch_settings(config):
-    saved = config.get("auto_switch") if isinstance(config, dict) else None
-    saved = saved if isinstance(saved, dict) else {}
-    order = [name for name in saved.get("order") or [] if name in HOST_SWITCH_TARGETS]
-    for name in HOST_AUTO_SWITCH_ORDER:
-        if name in HOST_SWITCH_TARGETS and name not in order:
-            order.append(name)
-    empty = saved.get("empty") if isinstance(saved.get("empty"), dict) else {}
-    return dict(on=saved.get("on") is not False, order=order,
-                empty={name: at for name, at in empty.items() if name in HOST_SWITCH_TARGETS and type(at) in (int, float)})
-
-
-def host_auto_switch_save(provider, sid, settings):
-    config = host_read(host_paths(provider, sid)["config"])
-    if not isinstance(config, dict):
-        return None
-    config["auto_switch"] = dict(on=settings["on"], order=settings["order"], empty=settings["empty"])
-    host_write(host_paths(provider, sid)["config"], config)
-    return config
-
-
-def host_auto_switch_mark_empty(provider, sid):
-    config = host_read(host_paths(provider, sid)["config"])
-    if not isinstance(config, dict):
-        return None
-    settings = host_auto_switch_settings(config)
-    settings["empty"][provider] = time.time()
-    return host_auto_switch_save(provider, sid, settings)
-
-
-def host_auto_switch_target(provider, config, now=None):
-    now = time.time() if now is None else now
-    settings = host_auto_switch_settings(config)
-    if not settings["on"]:
-        return None, settings
-    for name in settings["order"]:
-        if name == provider:
-            continue
-        marked = settings["empty"].get(name)
-        if name in settings["empty"] and (type(marked) not in (int, float) or now - marked < HOST_AUTO_SWITCH_COOLDOWN):
-            continue
-        return name, settings
-    return None, settings
-
-
-def host_auto_switch_set(provider, sid, request):
-    lock = host_lock(provider, sid)
-    if lock is None:
-        return dict(status="unavailable", reason="host_starting")
-    try:
-        config = host_read(host_paths(provider, sid)["config"])
-        if not isinstance(config, dict) or config.get("enabled") is not True:
-            return dict(status="refused", reason="host_disabled")
-        settings = host_auto_switch_settings(config)
-        on = request.get("on")
-        settings["on"] = (not settings["on"]) if request.get("toggle") is True else (on if type(on) is bool else settings["on"])
-        if host_auto_switch_save(provider, sid, settings) is None:
-            return dict(status="error", reason="config_write_failed")
-        host_log(provider, sid, "auto_switch_setting", dict(on=settings["on"]))
-        return dict(status="ok", on=settings["on"])
-    finally:
-        host_release(lock)
-
-
-def host_usage_limit_strings(value, depth=0):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict) and depth < 3:
-        for item in value.values():
-            yield from host_usage_limit_strings(item, depth + 1)
-    elif isinstance(value, list) and depth < 3:
-        for item in value:
-            yield from host_usage_limit_strings(item, depth + 1)
-
-
-def host_usage_limit(provider, event):
-    kinds = HOST_AUTO_SWITCH_TRIGGERS.get(provider)
-    kind = event.get("type") or event.get("method") or event.get("event")
-    if not isinstance(kinds, tuple) or kind not in kinds:
-        return None
-    if provider == "claude" and event.get("is_error") is not True and not str(event.get("subtype") or "").startswith("error"):
-        return None
-    if provider in ("antigravity", "cursor"):
-        body = event.get("result") if isinstance(event.get("result"), dict) else {}
-        if body.get("status") == "SUCCESS":
-            return None
-    if provider == "pi" and kind == "message_end":
-        message = event.get("message") if isinstance(event.get("message"), dict) else {}
-        if message.get("stopReason") != "error":
-            return None
-    for text in host_usage_limit_strings(event):
-        lowered = text.casefold()
-        if any(phrase in lowered for phrase in HOST_USAGE_LIMIT_PHRASES) or any(re.search(r"\b" + code + r"\b", lowered) for code in HOST_USAGE_LIMIT_CODES):
-            return host_event_text(text, 200)
-    return None
-
-
-def host_auto_switch_spawn(provider, sid, target, message_id):
-    source = host_reader_source()
-    if not isinstance(source, str) or not source:
-        host_log(provider, sid, "auto_switch_skipped", dict(reason="reader_unavailable"))
-        return False
-    bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
-                 "exec(compile(s,'<auto-switch>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
-    args = [sys.executable, "-u", "-c", bootstrap, "--auto-switch", provider, sid, target, message_id or ""]
-    try:
-        child = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 start_new_session=True)
-        child.stdin.write(base64.b64encode(source.encode("utf-8")) + b"\n")
-        child.stdin.close()
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-def host_auto_switch_trigger(provider, sid, tmux, session, inflight, text, spawn=None):
-    config = host_read(host_paths(provider, sid)["config"])
-    settings = host_auto_switch_settings(config)
-    if not settings["on"]:
-        host_log(provider, sid, "auto_switch_skipped", dict(reason="off", text=text))
-        return False
-    config = host_auto_switch_mark_empty(provider, sid)
-    target, settings = host_auto_switch_target(provider, config or {})
-    if target is None:
-        host_event(provider, sid, tmux, session, "text.done",
-                   dict(text=HOST_AUTO_SWITCH_STAYS + HOST_AI_NAMES[provider] + " until another plan frees up."),
-                   "auto-switch-" + uuid.uuid4().hex)
-        host_log(provider, sid, "auto_switch_skipped", dict(reason="no_plan_left", text=text))
-        return False
-    message_id = inflight.get("id") if isinstance(inflight, dict) else None
-    if not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", message_id) is None:
-        message_id = None
-    host_log(provider, sid, "auto_switch", dict(to=target, message=message_id, text=text))
-    (host_auto_switch_spawn if spawn is None else spawn)(provider, sid, target, message_id)
-    return True
-
-
-def host_auto_switch_redeliver(tmux, message_id, reply):
-    provider, sid = reply.get("provider"), reply.get("sid")
-    if not host_identity(provider, sid) or not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", message_id) is None:
-        return False
-    from contextlib import closing
-    now = time.time()
-    with closing(message_store_db(tmux)) as db, db:
-        db.execute("BEGIN IMMEDIATE")
-        changed = db.execute("UPDATE shared_messages SET provider=?,sid=?,state='queued',attempt=?,epoch=0,deadline=?,receipt=NULL,created=? "
-                             "WHERE id=? AND state IN ('sent','accepted','failed')",
-                             (provider, sid, uuid.uuid4().hex, now + 15, now, message_id)).rowcount
-        if not changed:
-            return False
-        message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (message_id,)).fetchone()))
-    start_message_worker(dict(tmux=tmux, provider=provider, sid=sid), host_reader_source(), only_if_work=True)
-    message_store_request(dict(message_protocol=1, tmux=tmux, provider=provider, sid=sid, op="message_dispatch"))
-    return True
-
-
-def host_auto_switch_run(provider, sid, target, message_id):
-    deadline = time.time() + HOST_AUTO_SWITCH_WAIT
-    while time.time() < deadline and host_turn_busy(provider, sid):
-        time.sleep(0.5)
-    reply = host_switch_ai(provider, sid, target, reason="usage_limit")
-    host_log(provider, sid, "auto_switch", dict(to=target, status=reply.get("status"), reason=reply.get("reason")))
-    if reply.get("status") != "switched":
-        return reply
-    reply["redelivered"] = host_auto_switch_redeliver(reply.get("tmux"), message_id, reply)
-    return reply
 
 
 def host_switched_path():
@@ -4672,7 +4469,7 @@ def host_switch_rows(provider, sid, tmux):
     return rows
 
 
-def host_switch_handover(rows, provider, target, reason=None):
+def host_switch_handover(rows, provider, target):
     lines = []
     for row in rows:
         text = row.get("text")
@@ -4689,20 +4486,12 @@ def host_switch_handover(rows, provider, target, reason=None):
             break
         kept.append(line)
     kept.reverse()
-    head = ("This chat ran on " + HOST_AI_NAMES[provider] + " until now and continues on " + HOST_AI_NAMES[target] + ". " +
-            (HOST_AI_NAMES[provider] + " ran out of plan, so the host moved the chat. " if reason == "usage_limit" else "") +
-            "The recent conversation, oldest first:\n\n")
+    head = ("This chat ran on " + HOST_AI_NAMES[provider] + " until now and continues on " + HOST_AI_NAMES[target] +
+            ". The recent conversation, oldest first:\n\n")
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
-def host_switch_abort(target, new_sid, paths=None):
-    paths = paths if paths is not None else host_paths(target, new_sid)
-    pending = host_read(paths["config"])
-    if isinstance(pending, dict):
-        host_write(paths["config"], dict(pending, enabled=False))
-
-
-def host_switch_ai(provider, sid, target, reason=None):
+def host_switch_ai(provider, sid, target):
     moved = host_switch_follow(sid)
     if moved is not None:
         provider, sid = moved
@@ -4718,18 +4507,18 @@ def host_switch_ai(provider, sid, target, reason=None):
         return dict(status="refused", reason="host_handed_over")
     if host_turn_busy(provider, sid):
         return dict(status="busy", reason="chat_busy")
+    if host_owned(provider, sid):
+        host_stop(provider, sid)
     try:
         rows = host_switch_rows(provider, sid, tmux)
-        text = host_switch_handover(rows, provider, target, reason)
+        text = host_switch_handover(rows, provider, target)
     except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
         return dict(status="error", reason="history_unavailable")
     new_sid = str(uuid.uuid4())
     paths = host_paths(target, new_sid)
     handover = paths["root"] / (paths["key"] + ".handover-" + uuid.uuid4().hex + ".json")
-    label = ("Switched AI automatically: " + HOST_AI_NAMES[provider] + " ran out of plan" if reason == "usage_limit"
-             else "Switched AI: " + HOST_AI_NAMES[provider] + " to " + HOST_AI_NAMES[target])
-    divider = dict(role="assistant", text="---\n" + label + "\n---", id="history-" + uuid.uuid4().hex,
-                   timestamp=datetime.now().isoformat())
+    divider = dict(role="assistant", text="---\nSwitched AI: " + HOST_AI_NAMES[provider] + " to " + HOST_AI_NAMES[target] + "\n---",
+                   id="history-" + uuid.uuid4().hex, timestamp=datetime.now().isoformat())
     try:
         history = "".join(json.dumps(dict(type="multiprompt_history", row=dict(row, id=row.get("id") or "history-" + uuid.uuid4().hex,
                                                                                   timestamp=row.get("timestamp") or datetime.now().isoformat())),
@@ -4742,16 +4531,6 @@ def host_switch_ai(provider, sid, target, reason=None):
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
-    except (OSError, ValueError, sqlite3.Error):
-        return dict(status="error", reason="switch_failed")
-    started = host_start(target, new_sid)
-    if started.get("status") not in ("started", "already"):
-        host_switch_abort(target, new_sid, paths)
-        if host_enabled(provider, sid) and not host_alive(provider, sid):
-            host_start(provider, sid)
-        return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
-                    running=HOST_AI_NAMES[provider], start=started)
-    try:
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -4765,17 +4544,14 @@ def host_switch_ai(provider, sid, target, reason=None):
         host_write(host_switched_path(), moved_map)
         host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
-        host_stop(target, new_sid)
-        host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
-    if host_owned(provider, sid):
-        host_stop(provider, sid)
     host_log(provider, sid, "switched_ai", dict(to=target, sid=new_sid))
+    started = host_start(target, new_sid)
     return dict(status="switched", provider=target, sid=new_sid, tmux=tmux, start=started.get("status"))
 
 
 def host_session_reset(session, agent=None):
-    session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
+    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
                    control_wait={})
@@ -4975,7 +4751,6 @@ def host_bind_uuid(provider, sid, tmux, session, event):
 
 
 def host_turn_started(provider, sid, tmux, session, entry):
-    session.pop("usage_limit", None)
     host_event(provider, sid, tmux, session, "turn.started",
                dict(message_id=entry["id"], text_sha256=entry["sha256"], uuids=list(entry.get("uuid") or [])),
                turn=entry["turn"])
@@ -5317,8 +5092,6 @@ def host_handle_request(provider, sid, tmux, session, request):
                     parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
-        session["exit_cause"] = "stop_requested"
-        host_log(provider, sid, "stop_requested")
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
@@ -5489,15 +5262,8 @@ def host_agent_event(provider, sid, tmux, session, raw):
         event = json.loads(raw)
     except (ValueError, UnicodeError):
         return
-    if not isinstance(event, dict):
-        return
-    limit = host_usage_limit(provider, event)
-    if limit is not None and (session.get("inflight") is not None or session.get("sends")):
-        session["usage_limit"] = limit
-    HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
-    if provider == "codex" and session.get("usage_limit") is not None and (session.get("inflight") is not None or session.get("sends")):
-        host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="usage_limit", usage={}),
-                      dict(subtype="usage_limit"))
+    if isinstance(event, dict):
+        HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
 
 
 def host_cursor_event(provider, sid, tmux, session, event):
@@ -5591,7 +5357,50 @@ def host_cursor_open(provider, sid, tmux, session):
     pass
 
 
+HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
+
+
+def host_skill_file(name, cwd=None):
+    home = Path.home() / ".claude"
+    if ":" in name:
+        plugin, skill = name.split(":", 1)
+        files = [f for r in (home / "plugins" / "cache").glob("*/" + plugin + "/*") for f in (r / "skills" / skill / "SKILL.md", r / "commands" / (skill + ".md"))]
+    else:
+        bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
+        files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
+    return next((f for f in files if host_readable_file(f)), None)
+
+
+def host_readable_file(path):
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def host_skill_user_only(path):
+    try:
+        head = path.read_text(errors="replace")[:4000]
+    except OSError:
+        return False
+    return bool(re.search(r"^disable-model-invocation:\s*true\s*$", head, re.M))
+
+
+def host_claude_lead_skill(text, cwd=None):
+    if not isinstance(text, str) or text.lstrip().startswith("/"):
+        return text
+    found = [(m, f) for m in HOST_SKILL_TOKEN.finditer(text) for f in [host_skill_file(m.group(1), cwd)] if f is not None]
+    if not found:
+        return text
+    match = next((m for m, f in found if host_skill_user_only(f)), found[0][0])
+    rest = (text[:match.start()].rstrip() + " " + text[match.end():].lstrip()).strip()
+    return "/" + match.group(1) + (" " + rest if rest else "")
+
+
 def host_claude_write(provider, sid, session, token, text):
+    config = host_config(provider, sid)
+    if not session.get("state", {}).get("fresh_start"):
+        text = host_claude_lead_skill(text, config.get("cwd") if isinstance(config, dict) else None)
     import uuid
     session["pending_recall_uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "multibot:" + token))
     return host_control_send(session, dict(type="user", uuid=session["pending_recall_uuid"],
@@ -5642,9 +5451,6 @@ def host_claude_send_now(provider, sid, tmux, session, request):
 
 def host_turn_end(provider, sid, tmux, session, payload, detail):
     inflight = session.get("inflight")
-    limit = session.pop("usage_limit", None)
-    if limit is not None:
-        payload = dict(payload, status="failed", reason="usage_limit")
     host_stream_finish(provider, sid, tmux, session)
     host_event(provider, sid, tmux, session, "turn.ended", payload)
     session["state"]["inflight"] = None
@@ -5658,8 +5464,6 @@ def host_turn_end(provider, sid, tmux, session, payload, detail):
     host_fresh_finish(provider, sid, tmux, session, payload.get("status"))
     if session["turn"] is None and not session["sends"] and not session["parked"]:
         host_fresh_drain_queued(provider, sid, tmux, session)
-    if limit is not None:
-        host_auto_switch_trigger(provider, sid, tmux, session, inflight, limit)
 
 
 def host_codex_policy(session):
@@ -6453,28 +6257,32 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
-            if idle and host_feedback_drain_board():
-                continue
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
                     return
+            idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
+            if idle and idle_expired:
+                host_log(provider, sid, "idle_stop")
+                return
             for key, _ in selector.select(host_flush_timeout(session)):
                 if key.data == "agent":
                     try:
                         chunk = agent.stdout.read1(65536)
                     except (OSError, ValueError):
                         chunk = b""
+                    if chunk:
+                        session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
                         owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
                             host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
-                        session["exit_cause"] = "agent_closed"
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
+                    session["idle"] = time.time()
                     host_accept_client(provider, sid, tmux, session, server)
             host_flush(provider, sid, tmux, session)
 
@@ -6547,9 +6355,6 @@ def host_main(provider, sid):
     except (OSError, ValueError) as error:
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
         return 4
-    except Exception as error:
-        host_log(provider, sid, "crash", dict(error=type(error).__name__))
-        raise
     finally:
         host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
@@ -6570,7 +6375,7 @@ def host_main(provider, sid):
         stopped["stopped"] = time.time()
         host_write(paths["state"], stopped)
         host_release(lock)
-        host_log(provider, sid, "stop", dict(cause=session.get("exit_cause") if "session" in locals() else None))
+        host_log(provider, sid, "stop")
 
 
 def host_nightly_day(now=None):
@@ -6658,7 +6463,6 @@ def host_rotate(provider, sid, session, agent):
     host_flush(provider, sid, host_chat_name(provider, sid), session)
     host_agent_stop(agent)
     session["agent"] = None
-    session["exit_cause"] = "host_update"
     host_log(provider, sid, "rotate", dict(runtime=runtime, generation=host_generation()))
     try:
         os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
@@ -6962,7 +6766,6 @@ def host_dispatch_switch(provider, sid):
 def host_dispatch_start(provider, sid):
     if host_backoff(provider, sid) > 0:
         return dict(status="backoff")
-    host_clear_stale(provider, sid)
     if host_owned(provider, sid):
         return dict(status="owned")
     started = host_start(provider, sid)
@@ -8697,7 +8500,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "set_auto_switch", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -8783,12 +8586,8 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
     held_queue_worker(sys.argv[2], sys.argv[3], Path(sys.argv[4]))
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
-elif __name__ == "__main__" and sys.argv[1:2] == ["--auto-switch"]:
-    print(json.dumps(host_auto_switch_run(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]), separators=(",", ":")))
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
-    code = host_main(sys.argv[2], sys.argv[3])
-    host_log(sys.argv[2], sys.argv[3], "exit", dict(code=code))
-    sys.exit(code)
+    sys.exit(host_main(sys.argv[2], sys.argv[3]))
 elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
     print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
@@ -8810,15 +8609,8 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-import hashlib as _runtime_hashlib
-
-_runtime_bundle = {name: value for name, value in sorted(globals().items())
-                   if name.isupper() and name.endswith('_SOURCE') and name != 'READER_SOURCE'}
-_runtime_payload = (''.join(name + ' = ' + repr(value) + '\n' for name, value in _runtime_bundle.items()) +
-                    'CONNECTOR_SOURCES = ' + repr(dict(sorted(globals().get('CONNECTOR_SOURCES', {}).items()))) +
-                    '\n' + READER_SOURCE)
-RUNTIME_GENERATION = (1 << 52) | int(_runtime_hashlib.sha256(_runtime_payload.encode('utf-8')).hexdigest()[:13], 16)
-READER_SOURCE = 'RUNTIME_GENERATION = ' + str(RUNTIME_GENERATION) + '\n' + _runtime_payload
+READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
+RUNTIME_GENERATION = 141
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8973,7 +8765,16 @@ if __name__ == '__main__':
                     installed = read(active['sha256'] + '.py', 4 * 1024 * 1024)
                     if _hashlib.sha256(installed).hexdigest() != active['sha256']:
                         raise ValueError('corrupt runtime')
-                    if active['sha256'] == digest:
+                    if active['generation'] > generation:
+                        publish_tools(installed)
+                        return installed, active
+                    if active['generation'] == generation:
+                        if active['sha256'] != digest:
+                            publish(digest + '.py', source)
+                            active = dict(protocol=1, generation=generation, sha256=digest)
+                            publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
+                            publish_tools(source)
+                            return source, active
                         publish_tools(installed)
                         return installed, active
                 try:

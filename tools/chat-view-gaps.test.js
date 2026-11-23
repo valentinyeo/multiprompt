@@ -147,11 +147,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
-const Identity = struct {
-    shell_id: u32, host: u8 = 0, sid: [40]u8 = @splat(0), tmux: [64]u8 = "term-one".* ++ @as([56]u8, @splat(0)),
-    pub fn provider(_: @This()) []const u8 { return "claude"; }
-    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
-};
+const Identity = struct { shell_id: u32, host: u8 = 0, tmux: [16:0]u8 = @splat(0) };
 const app_state = struct {
     var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
     var shell_count: u32 = 2;
@@ -166,7 +162,7 @@ var invalidations: usize = 0;
 fn chatPermissionChanged() void {}
 fn debugLog(_: []const u8) void {}
 fn chatWorkingIndicatorInvalidate() void { invalidations += 1; }
-fn chatHistoryPersistent(_: @import("session_identity.zig").Session, _: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?usize) bool {
+fn chatHistoryPersistent(_: u8, _: u32, _: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?usize) bool {
     if (!persistent_ok) return false;
     if (reply_ok) wire.appendSlice(allocator, "\tpermission\tok\t") catch return false;
     return true;
@@ -220,7 +216,7 @@ test "failed remote permission is retryable by stable shell id" {
     try std.testing.expectEqual(before, invalidations);
     try std.testing.expectEqual(@as(u32, 0), app_state.g_chat_permission_send_failed.load(.acquire));
 }
-`, ['session_identity.zig']);
+`);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
@@ -369,7 +365,6 @@ fn requestWebView2Focus() void {}
 fn requestNativeBrowserFocus() void {}
 ${body('clickedLinkUrl')}
 ${source.match(/test "IGSH-403 [\s\S]*?\n}/)[0]}
-fn openTmuxLink(_: []const u16) bool { return false; }
 ${body('openClickedLink')}
 test "IGSH-403 click preserves Unicode in a detected transcript link" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("see https://example.test/Kraków");

@@ -1,5 +1,0 @@
-{"at":1795132800,"event":"start","detail":{"tmux":"live-idle-one"}}
-{"at":1795132860,"event":"agent_started","detail":{"pid":1201}}
-{"at":1795132920,"event":"init","detail":{"session":"11111111-1111-4111-8111-111111111111"}}
-{"at":1795134600,"event":"idle_stop","detail":null}
-{"at":1795134606.0,"event":"stop","detail":null}

@@ -1,1 +1,0 @@
-Workspace dropdown freezes the app when opened

@@ -1,1 +1,0 @@
-The chat hides its last line when a new message arrives

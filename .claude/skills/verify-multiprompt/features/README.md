@@ -10,7 +10,6 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Stop a running reply](chat-stop.md).
 - [Send and queue messages](chat-message-sending.md).
 - [Formal chat delivery](chat-delivery-formal.md).
-- [Formal Switch AI](chat-switch-ai-formal.md).
 - [CI repair receipt](ci-repair-receipt.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
@@ -122,7 +121,6 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat send latency](chat-send-latency.md): send 20 messages from Chat View with real keystrokes and require each message to be drawn in the transcript within 100 ms of the send key.
 - [Relaunch saved sessions](relaunch-saved-sessions.md): the relaunch check. A seeded Starred workspace of 14 live sessions and 6 cached copies is launched and quit three times, the last two with every notification port occupied; each session must appear once and the selected chat must stay.
 - [Saved terminal binding](tmux-binding.md): adopted remote identities survive missing status text and five reopens.
-- [Server shell input](server-shell-input.md): VPS native terminal copy, interrupt and wheel scrollback match local shells.
 - [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
@@ -160,7 +158,6 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.
-- [Session caret](session-caret.md): console and Chat View carets blink while typing and return after focus steal.
 - [Composer buttons](composer-buttons.md): one-line and six-line working drafts retain equally round, bottom-aligned attach, microphone and Send controls.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.

@@ -36,7 +36,7 @@ export function verifyRecovery(before, event, after, repeat, observation, writes
   assert.deepEqual(initial.map(row => row.qid), mapping.map(row => row.qid), 'desktop initial identities');
   initial.forEach((row, i) => {
     assert.equal(row.t, texts[i]);
-    assert.equal(row.s, 3);
+    assert.equal(row.s, 3); // Channel acknowledgment, not server consumption.
     assert.equal(row.x, 1);
     assert.equal(row.held, 1);
     assert.ok(row.w > 0 && row.d > row.w);

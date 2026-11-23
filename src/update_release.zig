@@ -204,24 +204,11 @@ fn finishChecker(process: win.HANDLE) void {
     }
 }
 
-fn finishCheckerHandle(process: win.HANDLE) void {
-    _ = win.WaitForSingleObject(process, 5000);
-    _ = win.CloseHandle(process);
-}
-
 fn recoverStuckChecker() void {
     if (checker) |process| {
         _ = win.TerminateProcess(process, 1);
-        if (win.WaitForSingleObject(process, 0) == 0) {
-            _ = win.CloseHandle(process);
-        } else {
-            @import("idle_budget.zig").bump(.thread_spawn);
-            if (std.Thread.spawn(.{}, finishCheckerHandle, .{process})) |thread| {
-                thread.detach();
-            } else |_| {
-                _ = win.CloseHandle(process);
-            }
-        }
+        _ = win.WaitForSingleObject(process, 5000);
+        _ = win.CloseHandle(process);
         checker = null;
         check_started = 0;
         last_check = 0;

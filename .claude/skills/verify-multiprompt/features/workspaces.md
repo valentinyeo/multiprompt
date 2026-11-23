@@ -6,7 +6,6 @@ Read the current workspace name above the sessions. Click the name to open the w
 
 ## Sub-features
 
-- `workspace-views`: select All, Frequent and Favorites above stored workspaces, using the same rows, filters and ordering as Inbox. New sessions leave the view for the last selected real workspace.
 - `workspace-create`: add one in-process workspace with a real CMD session.
 - `workspace-switch`: return to the first stored workspace.
 - `workspace-return`: cycle back to the new workspace and confirm its saved identity and active state.
@@ -15,8 +14,7 @@ Read the current workspace name above the sessions. Click the name to open the w
 ## How to get to it (user POV)
 
 - In single-window mode press Ctrl+N, or use the new-workspace pill (Alt+N).
-- The workspace card starts with All, Frequent and Favorites. Alt+Shift+1, Alt+Shift+2 and Alt+Shift+3 select them. Ctrl+K has a matching `Workspace view` entry for each.
-- Alt+1 selects the existing grouped Starred view; Alt+2 through Alt+9 select the first eight stored workspaces.
+- Alt+1 selects Starred; Alt+2 through Alt+9 select the first eight stored workspaces.
 - Alt+Left / Alt+Right cycle workspaces; Alt+J / Alt+K also cycle outside an Inbox context.
 - Workspace pills are mouse entry points. Ctrl+K `Open Workspace` opens stored workspaces; `Sort Workspaces` orders pills. These are alternative paths, not exercised here.
 - Agents use `zsb workspace-list` to discover workspace, group and host names, then `zsb session-open --workspace <name> --group <name> --host <reported host> --tmux <session> --name <title>` to open a background tmux tab without switching the active workspace or tab. See [Session open](session-open.md) for that separate CLI journey and its SSH boundary.
@@ -32,13 +30,12 @@ Preconditions:
 - **Identity regression.** Before creating another workspace, toggle Single-window mode off and back on through real Ctrl+K commands. Require the home workspace identity to equal the current window identity (`default`). This reproduces IGSH-1774 without writing settings or forging clicks. After creating another workspace, the existing first-workspace click must return to this same-ID home slot and close the menu; Alt+2 and Alt+3 must still switch between both slots.
 - **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
 - **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
-- **Built-in views.** Click All, Frequent and Favorites, then select each with Alt+Shift+1 through Alt+Shift+3. Require `sidebar_view` in the published Inbox state, an unchanged stored workspace count, and a return to the chosen real workspace. Open a new CMD from All and require it in the last real workspace with the view cleared. Inspect `workspace-view-*.png` and the saved Inbox/session evidence. `tools/workspace-views.test.js` executes production filtering and ordering for mixed local/remote sessions, recency, favorites, input activity, and exclusions.
 - **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
 - **Compact geometry.** Require 28px rows, 6px panel insets and a 7px divider gap: height is `19 + rowCount * 28` at the journey’s 100% scale. Zero/unknown counts are blank; current rows use semibold names without ticks.
 - **Keyboard.** Exercise Up/Down and Enter to select the first workspace, then return by mouse. Inspect `workspace-keyboard-selected.png`. Escape is checked in every theme. Scrolling and divider hit boundaries retain executable Zig coverage.
 - **Theme limitation.** Graphite 2 is not shipped. Record it unavailable; Edge Grey screenshots are separately labelled, never substitutes.
 - **New workspace.** Click the card's New workspace row. Require exactly one additional workspace and a closed card.
-- **Archive and restore.** After deleting both deletion fixtures, create a separate real workspace and CMD session. Select it through Ctrl+K Archive workspace, require its saved snapshot and archived registry flag, and require its removal from the stored strip, compact card, normal Open workspace list and published Inbox. Restore it through Archived workspaces and require the original workspace identity, session names and kinds. This uses real local CMD sessions, not a remote provider. Inspect `archive-*.png`, `archive-snapshot.json` and `archive-restored.session.json`.
+- **Archive and restore.** Select a created workspace through Ctrl+K Archive workspace, require its saved snapshot and archived registry flag, and require its removal from the stored strip, compact card, normal Open workspace list and published Inbox. Restore it through Archived workspaces and require the original workspace identity, session names and kinds. This uses real local CMD sessions, not a remote provider. Inspect `archive-*.png`, `archive-snapshot.json` and `archive-restored.session.json`.
 - **Delete.** After the existing create/switch checks, rename two synthetic workspaces to Workspace 9 and CEO Runners. Delete Workspace 9 with two real mouse clicks on its filtered Ctrl+K delete row; delete CEO Runners with two Enter presses. Require both saved workspace identities and registry entries to disappear, their actual CMD process IDs to exit, and each name to be recorded in `removed-workspaces.json` so a stored account layout cannot recreate it. This does not delete any user workspace or prove the user's original registry state.
 - **Refusal.** Select the `default` Main identity in Delete workspace. Require the existing native dialog to remain visible beyond six seconds, then dismiss it explicitly. Inspect `workspace-delete-main-refused.png`, `workspace-delete-main-still-visible.png`, the two named before/after deletion pairs, saved sessions, and the attempt/result debug lines. The isolated base slot may be displayed as Other; the protected `default` identity is unchanged.
 - **Routing regression.** The hosted Zig harness in `tools/workspace-delete.test.js` executes production routing with missing, current and stale registry host labels. A real local slot must close in all three cases; a refused local slot must neither report success nor lose its registry entry. Main, the containing-window identity and another window's hosted slot remain protected. The native journey exercises real process closure and UI input, not stale-host metadata injection.
@@ -59,7 +56,6 @@ This journey covers local CMD and Chat View typing focus, not account sync, agen
 ## Gotchas
 
 - Without single-window mode Ctrl+N opens another app window instead; that is a different journey and is not covered here.
-- All, Frequent and Favorites are temporary views, not stored or synced workspaces. They ignore grouping and pin placement to keep Inbox ordering. Inbox search text does not filter the sidebar views.
 - Starred occupies Alt+1, so Alt+2 is the first stored workspace. It has independent session groups through the existing group actions; [Favorites groups](favorites-groups.md) verifies that grouping there leaves the home group intact.
 - A focused docked browser uses Alt+Right for browser navigation. The baseline deliberately has no browser; do not pretend that a browser back/forward action switched workspaces.
 - Snoozing, waking, remote-session bring-back and workspace sorting need separate real prerequisites and are not verified by create/switch/return.

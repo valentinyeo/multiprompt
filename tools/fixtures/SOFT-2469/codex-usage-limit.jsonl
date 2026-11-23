@@ -1,5 +1,0 @@
-{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"0193c2c8-4e0a-7b8c-9f61-2f2b2a1e7c11"}}}
-{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1","status":"inProgress"}}}
-{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"item-1","delta":"Reading the report now."}}
-{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"You've hit your usage limit. Upgrade to Pro, or try again at 4:32 PM."},"willRetry":false}}
-{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed"}}}

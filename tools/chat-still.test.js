@@ -13,15 +13,11 @@ const read = file => {
 };
 
 test('chat source changes always run the stillness journey without an AI picker', () => {
-  const map = read('.claude/skills/verify-multiprompt/features/chat-still.md');
-  const owned = map.match(/^Source files: (.+)$/m)[1].split(', ');
-  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig']) {
-    assert.ok(owned.includes(file), `${file} must select the stillness journey in the PR verifier`);
-  }
-  assert.match(map, /^Verify on: pull_request$/m, 'the stillness journey must stay selected for chat source pull requests');
   const workflow = read('.github/workflows/chat-still.yml');
-  assert.match(workflow, /^  schedule:\n    - cron: '0 5 \* \* \*'$/m, 'the full stillness drive runs nightly');
-  assert.match(workflow, /^  workflow_dispatch:$/m);
+  const trigger = workflow.slice(workflow.indexOf('  pull_request:'), workflow.indexOf('  workflow_dispatch:'));
+  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig']) {
+    assert.ok(trigger.includes(`- '${file}'`), `${file} must trigger the fixed stillness gate`);
+  }
   const desktop = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  comment-review:'));
   assert.match(desktop, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(desktop, /feature: chat-still/);
@@ -33,21 +29,11 @@ test('stillness checks real pixels on display frames, not only paint logs', () =
   const driver = read('.claude/skills/verify-multiprompt/control-feature-chat-still.ps1');
   assert.match(observer, /CopyFromScreen\(/);
   assert.match(observer, /if \(kind == "display-frame"\) CapturePixels\(/);
-  assert.match(observer, /AssertPixels\(pixelBaseline, pixelCurrent, pixelImage\.Width, pixelRect, overlay\)/);
+  assert.match(observer, /AssertPixels\(pixelBaseline, pixelCurrent\)/);
   assert.match(observer, /sample\["pixels_sha256"\]/);
   assert.match(observer, /sample\["pixel_rect"\]/);
   assert.equal((driver.match(/\.Start\(/g) || []).length, 1, 'one continuous first-frame baseline must cover idle and streaming');
-  assert.match(read('tools/chat-still/observer.test.ps1'), /AssertPixels\(\$pixels, \$changed/);
-});
-
-test('the pixel oracle masks only the floating new-message pill the app declares', () => {
-  const observer = read('tools/chat-still/observer.cs');
-  assert.match(observer, /new messages count=\(\\d\+\) visible=\(\\d\+\) up=\(\\d\+\) rect=/, 'the oracle reads the app\'s own pill rectangle');
-  assert.match(observer, /public static void AssertPixels\(byte\[\] baseline, byte\[\] current, int width, int\[\] crop, int\[\] overlay\)/);
-  assert.match(observer, /if \(x < overlay\[0\] \|\| x >= overlay\[2\] \|\| y < overlay\[1\] \|\| y >= overlay\[3\]\) throw/, 'a change outside the declared pill still fails');
-  const test_driver = read('tools/chat-still/observer.test.ps1');
-  assert.match(test_driver, /declared pill/, 'the observer test proves both sides of the pill mask');
-  assert.match(read('.claude/skills/verify-multiprompt/features/chat-still.md'), /new-message pill/, 'the journey records why the pill is outside the message');
+  assert.match(read('tools/chat-still/observer.test.ps1'), /AssertPixels\(\$pixels, \$changed\)/);
 });
 
 test('comment review rejects an unfinished or merely launched Comment Sicko', t => {

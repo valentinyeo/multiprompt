@@ -1,1 +1,0 @@
-Server chat list shows only one chat

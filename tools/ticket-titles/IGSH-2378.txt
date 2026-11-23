@@ -1,1 +1,0 @@
-Sidebar: a clicked session stays under the mouse

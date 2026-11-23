@@ -1,1 +1,0 @@
-Sessions flicker and feel choppy on 0.28.1732

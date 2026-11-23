@@ -210,7 +210,7 @@ pub fn sidebarNameRect(idx: u32) ?RECT {
 }
 
 pub fn startWindowRename() void {
-    if (app_state.g_starred_workspace or app_state.g_sidebar_view != null) return;
+    if (app_state.g_starred_workspace) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);

@@ -1169,26 +1169,7 @@ fn probeSsh(candidate: []const u8) bool {
     return ok;
 }
 
-var g_ssh_resolve_thread = std.atomic.Value(bool).init(false);
-
-fn resolveSshPathWorker(force: bool) void {
-    defer g_ssh_resolve_thread.store(false, .release);
-    _ = resolveSshPath(force);
-}
-
 pub fn resolveSshPath(force: bool) bool {
-    if (@import("ui_thread.zig").busy()) {
-        if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
-        if (!g_ssh_resolve_thread.swap(true, .acq_rel)) {
-            @import("idle_budget.zig").bump(.thread_spawn);
-            const thread = std.Thread.spawn(.{}, resolveSshPathWorker, .{force}) catch {
-                g_ssh_resolve_thread.store(false, .release);
-                return false;
-            };
-            thread.detach();
-        }
-        return false;
-    }
     while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
     defer app_state.g_ssh_mutex.unlock();
     if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
@@ -1392,23 +1373,10 @@ fn validTunnelId(raw: []const u8) ?[16]u8 {
 }
 
 fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
-    const on_ui = @import("ui_thread.zig").busy();
-    if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
-        const n = @min(app_state.g_tunnel_notify_id_len, out.len);
-        @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
-        return out[0..n];
-    }
     const mutex = CreateMutexW(null, 0, L("Local\\ZigShell-notify-laptop-id")) orelse return null;
     defer _ = CloseHandle(mutex);
-    const wait = WaitForSingleObject(mutex, if (on_ui) 0 else 5000);
-    if (wait != 0 and wait != 0x80) {
-        if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
-            const n = @min(app_state.g_tunnel_notify_id_len, out.len);
-            @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
-            return out[0..n];
-        }
-        return null;
-    }
+    const wait = WaitForSingleObject(mutex, 5000);
+    if (wait != 0 and wait != 0x80) return null;
     defer _ = ReleaseMutex(mutex);
     var dir_buf: [512]u8 = undefined;
     const dir = getSessionDir(&dir_buf) orelse return null;
@@ -1438,12 +1406,7 @@ fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
     }
     var name: [48]u8 = undefined;
     const n = GetEnvironmentVariableA("COMPUTERNAME", &name, name.len);
-    const sock = tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
-    if (sock.len > 0 and sock.len <= app_state.g_tunnel_notify_id.len) {
-        @memcpy(app_state.g_tunnel_notify_id[0..sock.len], sock);
-        app_state.g_tunnel_notify_id_len = sock.len;
-    }
-    return sock;
+    return tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
 }
 
 fn probeTunnelRelay(host: u8) void {
@@ -1798,23 +1761,6 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             }
             if (!appendWideAscii(buf, &pos, "\"")) return null;
         }
-    } else if ((kind == .vps or kind == .vps2) and tmux_session != null) {
-        const host: u8 = if (kind == .vps2) TMUX_HOST_UK else TMUX_HOST_DE;
-        if (!appendSshPrefix(buf, &pos, host, app_state.g_mobile_mode)) return null;
-        if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
-        var attach_buf: [1536]u8 = undefined;
-        const tmux_identity: []const u8 = app_state.g_pending_tmux_identity orelse "";
-        const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
-        for (attach) |c| {
-            if (c == '"') {
-                if (!appendWideAscii(buf, &pos, "\\\"")) return null;
-            } else {
-                if (pos >= buf.len - 1) return null;
-                buf[pos] = c;
-                pos += 1;
-            }
-        }
-        if (!appendWideAscii(buf, &pos, "\"")) return null;
     } else if (startup_cmd) |cmd| {
         const prefix: []const u8 = switch (kind) {
             .pwsh => "pwsh.exe -NoExit -Command \"",
@@ -2022,7 +1968,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         .tmux_host = opened.host,
         .spawn_tick = GetTickCount64(),
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,
@@ -2054,7 +2000,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
-    if ((app_state.shells[idx].chat_view_on or app_state.g_chat_active) and !app_state.g_restoring) {
+    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
         app_state.shells[idx].console_inflight = false;
     } else if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
@@ -2064,62 +2010,6 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         saveSession();
     }
     return true;
-}
-
-pub fn resumeShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
-    if (idx >= app_state.shell_count) return false;
-    const shell_id = app_state.shells[idx].shell_id;
-    if (app_state.shells[idx].process != null or (app_state.shells[idx].native_terminal and @import("native_session.zig").alive(shell_id))) return true;
-    const title_id = if (app_state.shells[idx].title_id != 0) app_state.shells[idx].title_id else app_state.allocateConsoleTitleId() orelse return false;
-    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) {
-        const pending_chat_view = app_state.g_pending_chat_view;
-        return resumeNativeShellAt(idx, kind, tmux_session, shell_id, title_id, pending_chat_view);
-    }
-    return resumeConhostShellAt(idx, kind, tmux_session, cwd, startup_cmd, shell_id, title_id);
-}
-
-fn resumeNativeShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, pending_chat_view: bool) bool {
-    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
-    const native = @import("native_session.zig");
-    const opened = native.open(kind, tmux_session, shell_id, false) orelse return false;
-    app_state.shells[idx].console_inflight = true;
-    app_state.shells[idx].native_terminal = true;
-    app_state.shells[idx].title_id = title_id;
-    app_state.shells[idx].tmux_host = opened.host;
-    app_state.shells[idx].spawn_tick = GetTickCount64();
-    app_state.shells[idx].ssh_reconnect = .{
-        .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
-        .creating_session = creating_session,
-    };
-    if (tmux_session) |session| {
-        const session_len: u32 = @intCast(@min(session.len, app_state.shells[idx].tmux_session.len - 1));
-        if (session_len > 0) {
-            @memcpy(app_state.shells[idx].tmux_session[0..session_len], session[0..session_len]);
-            app_state.shells[idx].tmux_session_len = session_len;
-        }
-    }
-    app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
-    if ((app_state.shells[idx].chat_view_on or app_state.g_chat_active) and !app_state.g_restoring) {
-        app_state.shells[idx].console_inflight = false;
-    } else if (!native.connect(shell_id)) native.ready(shell_id, false);
-    registerShellExitWait(idx);
-    return true;
-}
-
-fn resumeConhostShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8, shell_id: u32, title_id: u32) bool {
-    _ = cwd;
-    _ = startup_cmd;
-    _ = shell_id;
-    app_state.shells[idx].kind = kind;
-    app_state.shells[idx].title_id = title_id;
-  if (tmux_session) |session| {
-        const session_len: u32 = @intCast(@min(session.len, app_state.shells[idx].tmux_session.len - 1));
-        if (session_len > 0) {
-            @memcpy(app_state.shells[idx].tmux_session[0..session_len], session[0..session_len]);
-            app_state.shells[idx].tmux_session_len = session_len;
-        }
-    }
-    return respawnShellInPlace(idx, false);
 }
 
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
@@ -2149,9 +2039,6 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         debugLog("spawnShell refused: no title id");
         return false;
     };
-    if (app_state.g_sidebar_view != null and !app_state.g_restoring and background_workspace == null) {
-        if (app_state.g_single_window) @import("workspaces.zig").switchToWorkspace(app_state.g_active_workspace) else app_state.g_sidebar_view = null;
-    }
     const idx = app_state.shell_count;
     if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
@@ -2328,7 +2215,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .tmux_host = app_state.g_pending_tmux_host,
         .spawn_tick = if (isRemoteShellKind(kind)) GetTickCount64() else 0,
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,
@@ -2928,13 +2815,6 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         saveSession();
         return;
     }
-    if (app_state.g_sidebar_view != null) {
-        if (closing_active) app_state.active_shell = app_state.shell_count;
-        if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
-        @import("workspaces.zig").refreshSidebarView();
-        saveSession();
-        return;
-    }
     if (app_state.g_starred_workspace) {
         if (closing_active) app_state.active_shell = app_state.shell_count;
         if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
@@ -3067,7 +2947,6 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
-    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) app_state.g_sidebar_view = null;
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -3157,7 +3036,7 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_voice_highlight = null;
     }
     if (!defer_browser) ecoqosReevaluateAll();
-    if (!app_state.g_restoring and app_state.g_single_window and app_state.g_sidebar_view == null and idx < app_state.shell_count) {
+    if (!app_state.g_restoring and app_state.g_single_window and idx < app_state.shell_count) {
         app_state.g_active_workspace = app_state.shells[idx].workspace;
         updateMainWindowTitle();
     }

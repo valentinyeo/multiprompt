@@ -1,7 +1,0 @@
-{"at":1795165200,"event":"start","detail":{"tmux":"live-orphan"}}
-{"at":1795165260,"event":"agent_started","detail":{"pid":1208}}
-{"at":1795166400,"event":"turn_done","detail":{"id":null,"subtype":"success"}}
-{"at":1795168800,"event":"start","detail":{"tmux":"live-orphan"}}
-{"at":1795168860,"event":"agent_started","detail":{"pid":1209}}
-{"at":1795170600,"event":"idle_stop","detail":null}
-{"at":1795170606.0,"event":"stop","detail":null}

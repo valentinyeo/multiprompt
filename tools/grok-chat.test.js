@@ -26,7 +26,7 @@ function gate(name, check, file, before, after = 'REMOVED') {
 gate('progress and permission strips reserve no space outside the transcript', s => {
   assert.doesNotMatch(body(s.window_layout, 'paintChatView'), /g_chat_working_applied|workingBarText|[Pp]rogress|paintChatPermission/);
   assert.match(body(s.window_layout, 'chatWorkingIndicatorH'), /return 0;/);
-  requires(body(s.chat_composer, 'chatViewLayout'), 'composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH()');
+  requires(body(s.chat_composer, 'chatViewLayout'), 'composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight()');
 }, 'window_layout', 'pub fn chatWorkingIndicatorH() i32 {\n    return 0;', 'pub fn chatWorkingIndicatorH() i32 {\n    return 22;');
 
 for (const [label, token] of [['Archive', 'chatArchiveButton'], ['Remind me', 'chatRemindButton'], ['Wait', 'chatWaitButton']]) {

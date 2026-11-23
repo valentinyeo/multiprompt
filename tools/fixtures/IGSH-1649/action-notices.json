@@ -157,7 +157,6 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
   ],
   "command_palette.zig": [
-    "showMissingWorkspaceFolder: @import(\"console.zig\").showHeaderNoticeAscii(notice,8000,true)",
     "spawnHostedChatSession: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)",
     "spawnWorkspaceSessionAt: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)"
   ],
@@ -202,7 +201,6 @@
     "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(lp!=0)@import(\"chat_render.zig\").chatFileNotice(lp)elseshowHeaderNoticeAscii(chatAttachErrorText(wp),4000,true)",
-    "wndProc: if(movingandpicked)showHeaderNoticeAscii(\"Workspace server updated; new tabs use that server\",3000,false)",
     "wndProc: if(saving_folderandpicked)showHeaderNoticeAscii(\"Workspace folder saved; new tabs start there\",3000,false)",
     "wndProc: showHeaderNoticeAscii(\"AI usage account login is not installed\",4000,true)",
     "wndProc: showHeaderNoticeAscii(\"Can't snooze your only open workspace\",3500,true)",

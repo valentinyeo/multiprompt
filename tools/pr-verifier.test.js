@@ -19,14 +19,6 @@ function test(name, fn) {
     fn();
   });
 }
-
-function asyncTest(name, fn) {
-  nodeTest(name, async () => {
-    assert.ok(verifier, 'tools/pr-verifier.cjs is part of this change');
-    assert.ok(workflow, '.github/workflows/pr-verifier.yml is part of this change');
-    await fn();
-  });
-}
 const available = ['appearance', 'command-palette', 'palette-order', 'pane-layout', 'chat-view', 'chat-view-everywhere', 'title-bar'];
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -249,9 +241,8 @@ test('the Claude key reaches only the independent judge and never a script', () 
   assert.equal(uses.length, 1);
   for (const [line, index] of uses) {
     assert.match(line, /^          claude_code_oauth_token: /);
-    const action = lines.slice(index - 5, index).join('\n');
+    const action = lines.slice(index - 4, index).join('\n');
     assert.match(action, /uses: anthropics\/claude-code-action@[0-9a-f]{40}/);
-    assert.match(action, /allowed_bots: software-factory-runners,hypertask-runners,cursor/);
   }
   assert.doesNotMatch(workflow, /secrets: inherit/);
   assert.doesNotMatch(workflow, /^\s+secrets:/m);
@@ -314,12 +305,14 @@ test('a pull request with no independent verifier FAILs and names the reason', (
   }
 });
 
-test('the ladder verdict uses the same format and names its lane', () => {
+test('the DeepSeek verdict uses the same format and names its engine', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek', lane: 'opencode-go' });
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek' });
   assert.equal(final, 'PASS');
   assert.match(body, new RegExp(`^pstack-verifier: PASS @ ${head}\\n`));
-  assert.match(body, /^Judge: ladder opencode-go$/m);
+  assert.match(body, new RegExp(`Judge: deepseek ${verifier.DEEPSEEK_MODEL}`));
+  assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-flash');
+  assert.doesNotMatch(verifier.DEEPSEEK_MODEL, /pro/);
 });
 
 test('the OpenAI verdict uses the same format and names its engine', () => {
@@ -340,12 +333,12 @@ test('the OpenAI judge uses the same verdict schema as Claude', () => {
   assert.match(prompt, /material/);
 });
 
-test('the ladder request uses JSON output from the shared judge messages', () => {
-  const body = verifier.ladderRequestBody('evidence');
+test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinking', () => {
+  const body = verifier.deepseekRequestBody(verifier.judgeMessages('evidence'));
+  assert.equal(body.model, 'deepseek-flash');
+  assert.deepEqual(body.thinking, { type: 'disabled' });
   assert.deepEqual(body.response_format, { type: 'json_object' });
   assert.equal(body.temperature, 0);
-  assert.equal(body.max_tokens, 4000);
-  assert.equal('model' in body, false);
   assert.match(body.messages[0].content, /JSON/);
   assert.match(body.messages[0].content, /empty selection\.features.*CI-only plan, not missing journey evidence/);
   assert.match(body.messages[0].content, /FAIL for a regression shown by the patch or checks/);
@@ -367,60 +360,16 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the judge order is ladder-call then Codex then Claude with one ladder-call step', () => {
-  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
-  assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
-  assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
-  assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
-  assert.match(workflow, /build-ladder-request verifier-out/);
-  assert.doesNotMatch(workflow, /ladder_backup/);
-});
-
-test('a ladder answer is turned into the same verdict shape', () => {
-  const answer = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-answer-')), 'answer.json');
-  fs.writeFileSync(answer, JSON.stringify({
-    choices: [{ message: { content: JSON.stringify({ verdict: 'PASS', evidence: ['result.json shows every check passed'] }) } }],
-  }));
-  const prev = process.env.GITHUB_OUTPUT;
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-out-'));
-  process.env.GITHUB_OUTPUT = path.join(output, 'out');
-  try {
-    verifier.parseLadderAnswer({ LADDER_ANSWER_FILE: answer, LADDER_LANE: 'opencode-go' });
-    const lines = Object.fromEntries(fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8').trim().split('\n').map(line => line.split('=')));
-    const verdict = JSON.parse(lines.structured_output);
-    assert.equal(verdict.verdict, 'PASS');
-    assert.match(verdict.evidence.join(' '), /no screenshot was read/);
-    assert.equal(lines.ladder_lane, 'opencode-go');
-    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-    const result = verifier.finalize({ verdict, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'claude', lane: 'opencode-go' });
-    assert.equal(result.final, 'PASS');
-    assert.match(result.body, /^Judge: ladder opencode-go$/m);
-  } finally {
-    process.env.GITHUB_OUTPUT = prev;
-  }
-});
-
-test('build-ladder-request writes judge messages for ladder-call', () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
-  fs.writeFileSync(path.join(out, 'judge-inputs.md'), '### pr.md\n# Pull request 1');
-  verifier.buildLadderRequest(out);
-  const body = JSON.parse(fs.readFileSync(path.join(out, 'ladder-request.json'), 'utf8'));
-  assert.deepEqual(body.response_format, { type: 'json_object' });
-  assert.match(body.messages[0].content, /cannot see screenshots/);
-});
-
-test('selection is deterministic and ladder keys are always available to the first judge', () => {
+test('selection is deterministic and only the independent judge receives the DeepSeek key', () => {
+  const lines = workflow.split('\n');
+  const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
+  assert.equal(uses.length, 1);
   assert.doesNotMatch(workflow, /pr-verifier\.cjs pick-deepseek /);
-  assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-deepseek /);
-  assert.doesNotMatch(workflow, /pr-verifier\.cjs judge-vercel /);
   assert.match(workflow, /SELECTION: '.*Changed-file feature ownership/);
-  assert.match(workflow, /DEEPSEEK_API_KEY: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
-  assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/);
-  assert.doesNotMatch(workflow, /needs\.resolve\.outputs\.engine ==/);
+  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'openai'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'claude'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);

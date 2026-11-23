@@ -1,1 +1,0 @@
-You can move a workspace to another server or open one tab on a different server from Ctrl+K.

@@ -137,9 +137,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
-| Alt+Shift+1 | Workspace view: All sessions by recency |
-| Alt+Shift+2 | Workspace view: Frequent sessions |
-| Alt+Shift+3 | Workspace view: Favorites |
 | Alt+1 | Go to Starred workspace |
 | Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
 | Ctrl+K -&gt; Archive workspace | Hide a workspace without deleting its server sessions |
@@ -229,8 +226,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
-| Ctrl+K -&gt; Move workspace to server | Point this workspace default folder at the same path on another account server |
-| Ctrl+K -&gt; New tab on server | Open one workspace tab on another account server without moving the workspace |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
 | Alt+H | Remind Me: hide local tab, keep tmux running, return when due |
@@ -268,7 +263,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: Resync chat" | Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending |
 | Ctrl+K "Chat View: Fresh start" / right-click tab | Save a handover and start empty context in the same chat; keep its name, picture, address and readable history. Wait for the current reply first |
 | Ctrl+K "Chat View: Switch AI to Claude" (Codex, Pi) / right-click tab | Move this chat to another AI and keep its name, picture, place, address and readable history. The new AI starts from a saved handover. Wait for the current reply first |
-| Ctrl+K "Chat View: Auto-switch AI when a plan runs out" | When this chat's AI runs out of plan, the host moves the chat to the next AI with plan left, on its own. The name, history and unanswered message follow it, and a row says which AI ran out. Off switches that off, and an AI that ran out is skipped for an hour |
 | Ctrl+K "Chat View: Restart this chat on the newest version" | Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends |
 | Ctrl+K "Chat View: Restart every idle live chat" | Restart every running live chat on this server on the newest version; chats that are replying restart when their reply ends. Every live chat also restarts nightly at 04:00 local server time |
 | Ctrl+K "Chat View: More Menu" | Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes |

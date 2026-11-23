@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const state = read('src/app_state.zig');
-const workspaceViews = read('src/workspace_view_ui.zig');
 const palette = read('src/command_palette.zig');
 const sidebar = read('src/sidebar.zig');
 const main = read('src/main.zig');
@@ -25,7 +24,6 @@ function uniqueOffsets(values) {
 }
 
 function comparisons(text, variable, values) {
-  text = text.replace(/\bapp_state\.(SEARCH_\w+_OFFSET)\b/g, '$1');
   const found = new Set();
   const comparison = new RegExp(`\\b${variable}\\s*(?:==|>=|<=|>|<)\\s*(?:app_state\\.)?(SEARCH_\\w+_OFFSET)\\b`, 'g');
   for (const [, name] of text.matchAll(comparison)) found.add(name);
@@ -73,7 +71,7 @@ function painted(text, values) {
 }
 
 function checkRows(paletteText, paintText, confirmText, values) {
-  const rows = new Set([...paletteText.matchAll(/\bg_search_results\[[^\]]+\]\s*=\s*(?:app_state\.)?(SEARCH_\w+_OFFSET)\s*;/g)]
+  const rows = new Set([...paletteText.matchAll(/\bg_search_results\[[^\]]+\]\s*=\s*(SEARCH_\w+_OFFSET)\s*;/g)]
     .map(([, name]) => name));
   assert.ok(rows.size > 0, 'palette rows were found');
   const paint = painted(paintText, values);
@@ -103,7 +101,7 @@ test('IGSH-820 removed lock commands cannot return or reuse the per-tab ID', () 
 });
 
 test('every directly added Ctrl+K row is painted and confirmed', () => {
-  checkRows(palette + workspaceViews, sidebar, confirm + workspaceViews, values);
+  checkRows(palette, sidebar, confirm, values);
 });
 
 test('imports and unused classifiers cannot hide missing paint or confirm branches', () => {
@@ -176,9 +174,7 @@ function topLevelSearchRows(text) {
     assert.notEqual(end, -1, 'submenu block end');
     body = body.slice(0, mode) + body.slice(end + 6);
   }
-  const startViews = workspaceViews.indexOf('pub fn appendSearchResults() void {');
-  body += workspaceViews.slice(startViews, workspaceViews.indexOf('\n}\n', startViews));
-  return new Set([...body.matchAll(/\bg_search_results\[[^\]]+\]\s*=\s*(?:app_state\.)?(SEARCH_\w+_OFFSET)\b/g)].map(([, name]) => name));
+  return new Set([...body.matchAll(/\bg_search_results\[[^\]]+\]\s*=\s*(SEARCH_\w+_OFFSET)\b/g)].map(([, name]) => name));
 }
 
 function groupOfSource(text) {
@@ -195,7 +191,6 @@ test('IGSH-612 every top-level Ctrl+K row belongs to a palette group', () => {
   assert.ok(rows.has('SEARCH_SHELL_DIAG_OFFSET') && rows.has('SEARCH_NEW_CLAUDE_CHAT_OFFSET') && rows.has('SEARCH_NEW_TERMINAL_OFFSET'), 'top-level rows were found');
   assert.ok(!rows.has('SEARCH_SHELLS_MENU_OFFSET') && !rows.has('SEARCH_NEW_CLAUDE_TERMINAL_OFFSET') && !rows.has('SEARCH_OPEN_SESSION_MENU_OFFSET'), 'outdated shell and session menus stay out of Ctrl+K');
   assert.ok(!rows.has('SEARCH_SKILLS_BACK_OFFSET'), 'submenu rows are excluded');
-  assert.ok(rows.has('SEARCH_WORKSPACE_ALL_OFFSET') && rows.has('SEARCH_WORKSPACE_FREQUENT_OFFSET') && rows.has('SEARCH_WORKSPACE_FAVORITES_OFFSET'), 'extracted workspace view rows were found');
   const missing = [...rows].filter(name => !mapped.has(name));
   assert.deepEqual(missing, [], `Ctrl+K rows without a group in paletteGroupOf: ${missing.join(', ')}`);
   const broken = palette.replace(', SEARCH_SHELL_DIAG_OFFSET => 4', ' => 4');

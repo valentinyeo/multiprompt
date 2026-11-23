@@ -1,1 +1,0 @@
-Workspace dropdown: All, Frequent and Favorites views

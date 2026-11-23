@@ -265,7 +265,7 @@ pub const View = struct {
             const buffer = try a.alloc(u16, body.len);
             defer a.free(buffer);
             if (std.mem.indexOf(u16, normalized(body, buffer), needle) == null) continue;
-            if (found != null) break;
+            if (found != null) return null;
             found = target.last;
         }
         return found;
@@ -907,33 +907,6 @@ test "SOFT-2448 a long thumbs-up quote ends on a whole word and both replies mat
     try std.testing.expect(view.hides(2));
     try std.testing.expect(view.hidesPending(1));
     try std.testing.expect(view.hidesPending(2));
-}
-
-test "SOFT-2887 a code-free reaction lands on the first of two same-prefix replies" {
-    const a = std.testing.allocator;
-    const opening = std.unicode.utf8ToUtf16LeStringLiteral("Same first words for this example for this example for this example for this example");
-    const sep = std.unicode.utf8ToUtf16LeStringLiteral("\r\n\r\n");
-    const first_reply = std.unicode.utf8ToUtf16LeStringLiteral("FIRST REPLY");
-    const second_reply = std.unicode.utf8ToUtf16LeStringLiteral("SECOND REPLY");
-    const capture = try std.mem.concat(a, u16, &.{ opening, sep, first_reply, sep, opening, sep, second_reply });
-    defer a.free(capture);
-    const first_start = 0;
-    const first_len = opening.len + sep.len + first_reply.len;
-    const second_start = first_len + sep.len;
-    const second_len = opening.len + sep.len + second_reply.len;
-    const blocks = [_]md.Block{
-        .{ .start = first_start, .len = first_len, .role = .prose, .first = true, .message_id = 1, .reaction_reference = reference("msg_first") },
-        .{ .start = second_start, .len = second_len, .role = .prose, .first = true, .message_id = 2, .reaction_reference = reference("msg_second") },
-    };
-    var line: [256]u16 = undefined;
-    const reaction = spoken(.like, opening, &line).?;
-    var view: View = .{};
-    defer view.deinit(a);
-    _ = try view.build(a, &blocks, capture, &.{.{ .id = 7, .text = reaction }});
-    try std.testing.expect(view.hidesPending(7));
-    try std.testing.expect(view.projectedPending(7) == null);
-    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
-    try std.testing.expectEqual(@as(u8, 0), view.mask(1));
 }
 
 test "SOFT-2441 a code-free reaction anchors on the last paragraph block" {

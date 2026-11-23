@@ -46,8 +46,7 @@ test('Ctrl+Shift+N opens the new room form from anywhere', () => {
   assert.ok(palette, 'palette handles the New room row');
   assert.match(palette[1], /openNewRoom\(hwnd\);/, 'palette row shares the same opener');
 
-  assert.match(main, /const openNewRoom = @import\("room_frontend\.zig"\)\.openNewRoom;/);
-  const opener = body(read('room_frontend.zig'), 'pub fn openNewRoom(hwnd: w.HANDLE) void {');
+  const opener = body(main, 'fn openNewRoom(hwnd: HANDLE) void {');
   assert.match(opener, /app_state\.g_search_active = false;/);
-  assert.match(opener, /openCreate\(\);/);
+  assert.match(opener, /room_frontend\.zig"\)\.openCreate\(\);/);
 });

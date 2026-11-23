@@ -264,9 +264,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
     .{ .a = "F2", .b = "Rename chat title, tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
-    .{ .a = "Alt+Shift+1", .b = "Workspace view: All sessions by recency", .header = false },
-    .{ .a = "Alt+Shift+2", .b = "Workspace view: Frequent sessions", .header = false },
-    .{ .a = "Alt+Shift+3", .b = "Workspace view: Favorites", .header = false },
     .{ .a = "Alt+1", .b = "Go to Starred workspace", .header = false },
     .{ .a = "Alt+1 ... 9", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
     .{ .a = "Ctrl+K -> Archive workspace", .b = "Hide a workspace without deleting its server sessions", .header = false },
@@ -340,8 +337,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
-    .{ .a = "Ctrl+K -> Move workspace to server", .b = "Point this workspace default folder at the same path on another account server", .header = false },
-    .{ .a = "Ctrl+K -> New tab on server", .b = "Open one workspace tab on another account server without moving the workspace", .header = false },
     .{ .a = "Ctrl+K Remind Me", .b = "Snooze active tmux/Claude tab via quick presets (or type a time)", .header = false },
     .{ .a = "Ctrl+H", .b = "Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more", .header = false },
     .{ .a = "Alt+H", .b = "Remind Me: hide local tab, keep tmux running, return when due", .header = false },
@@ -379,7 +374,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Resync chat\"", .b = "Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Fresh start\" / right-click tab", .b = "Save a handover and start empty context in the same chat; keep its name, picture, address and readable history. Wait for the current reply first", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Switch AI to Claude\" (Codex, Pi) / right-click tab", .b = "Move this chat to another AI and keep its name, picture, place, address and readable history. The new AI starts from a saved handover. Wait for the current reply first", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Auto-switch AI when a plan runs out\"", .b = "When this chat's AI runs out of plan, the host moves the chat to the next AI with plan left, on its own. The name, history and unanswered message follow it, and a row says which AI ran out. Off switches that off, and an AI that ran out is skipped for an hour", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Restart this chat on the newest version\"", .b = "Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Restart every idle live chat\"", .b = "Restart every running live chat on this server on the newest version; chats that are replying restart when their reply ends. Every live chat also restarts nightly at 04:00 local server time", .header = false },
     .{ .a = "Ctrl+K \"Chat View: More Menu\"", .b = "Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
@@ -778,15 +772,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
         const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
         const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
-        if (key_down and foregroundIsOurs() and @import("workspace_switcher.zig").isOpen()) {
-            switch (kb.vkCode) {
-                0x1B, 0x26, 0x28, 0x0D, 0x20 => {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_KEYDOWN, kb.vkCode, 0);
-                    return 1;
-                },
-                else => {},
-            }
-        }
         if (key_down and !((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and app_state.g_browser_focus_chord_held) and
             @import("browser_pane.zig").browserHotkeyPasses(kb.vkCode))
         {
@@ -1291,18 +1276,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
             const shift_down = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, if (shift_down) 21 else 20, 0);
-            return 1;
-        }
-        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and
-            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0 and
-            kb.vkCode >= 0x31 and kb.vkCode <= 0x33 and foregroundIsOurs() and
-            !app_state.g_search_active and app_state.g_edit_hwnd == null)
-        {
-            app_state.g_sysmenu_pending = false;
-            keybd_event(0xFF, 0, 0, 0);
-            keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            const view = @import("workspace_view.zig").builtins[kb.vkCode - 0x31];
-            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, @intFromEnum(view), 0);
             return 1;
         }
         if (app_state.g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus()) {
