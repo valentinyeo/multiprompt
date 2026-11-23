@@ -50,6 +50,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader and bundled helper edit changes its runtime fingerprint automatically. | `tools/check-runtime-generation.mjs` runs `tools/runtime-fingerprint.test.py` (test workflow) |
+| Every installed chat tool is executable, and an install leaves no temporary files behind. | `tools/chat-shared-runtime.test.py` (`test_every_installed_chat_tool_runs`, `test_install_removes_leftover_temporary_files`) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js` |

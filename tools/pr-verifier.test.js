@@ -666,3 +666,43 @@ test('inspecting known failed tests can never turn an independent PASS into a gr
   assert.match(workflow, /inspect_failed_tests:[\s\S]*?default: false/);
   assert.match(workflow, /inputs\.inspect_failed_tests && needs\.tests\.outputs\.result == 'FAIL'/);
 });
+
+test('SOFT-3136 uncovered user-facing src files force FAIL, not PASS+NOTES', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['src/mp_sessions.py', 'src/mp_send.py'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /Changed user-facing files have no journey/);
+  assert.match(body, /src\/mp_sessions\.py/);
+  assert.match(body, /src\/mp_send\.py/);
+});
+
+test('SOFT-3136 unmapped exempt paths alone do not fail the verdict from this rule', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['tools/pr-verifier.cjs', 'changelog.d/foo.md', '.github/workflows/test.yml'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+  assert.doesNotMatch(body, /Changed user-facing files have no journey/);
+});
+
+test('SOFT-3136 uncovered extension files force FAIL', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS+NOTES', evidence: [] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['extension/background.js'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+});

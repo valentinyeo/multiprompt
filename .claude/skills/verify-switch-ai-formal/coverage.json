@@ -1,7 +1,7 @@
 {
-  "sync_commit": "e11386929a20a51d87f0d91c429a097324c5571b",
+  "sync_commit": "28135885b5b63344a2b71e2e278d502658fd6ea8",
   "files": {
-    "src/chat_history_reader.py": "f3c193c5139b6c9783d47e2534eaea895cef4018351ebc67ef213f87e13d20e1",
+    "src/chat_history_reader.py": "45830c116ea7e57b5d689e6f7ccf6b77dc34ea2ef79c20795d1d06ebd14d9007",
     "tools/chat-switch-ai.test.js": "3d69cbe05762594b36a52f997bb26f20392789777b242f2f35a3f9f90f766d0e",
     "tools/chat-auto-switch.test.js": "6a47e3322b342e536e3a0d3b1a7ae088a3b1cbdaf3e443a4b66f2c84edb6daf8",
     "tools/fixtures/SOFT-2469/claude-usage-limit.jsonl": "0d2c86c3a7ec942ab5336d7db5d903b85fe10ca89542b897babd50b550cdaa7c",
