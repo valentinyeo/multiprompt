@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-caret', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-caret', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions', 'server-shell-tabs')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -353,6 +353,9 @@ try {
         Save-Json $serverShellSeed 'seed-session.json'
         $result.seedBoundary = 'One saved VPS tab with shared server connection enabled. Only SSH is replaced by the transport boundary, which seeds scrollback, a selectable marker and interrupt receipts for the native terminal child.'
     }
+    if ($Feature -eq 'server-shell-tabs') {
+        . (Join-Path $PSScriptRoot 'server-shell-release-setup.ps1')
+    }
     if ($Feature -in @('chat-switch-speed', 'chat-still', 'chat-options', 'chat-slash')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -489,7 +492,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash', 'chat-browser-autoload', 'chat-not-sent-remove')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash', 'chat-browser-autoload', 'chat-not-sent-remove', 'server-shell-tabs')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -644,6 +647,7 @@ try {
         }
         'tmux-binding' { . (Join-Path $PSScriptRoot 'tmux-binding.ps1') }
         'server-shell-input' { . (Join-Path $PSScriptRoot 'server-shell-input.ps1') }
+        'server-shell-tabs' { . (Join-Path $PSScriptRoot 'control-feature-server-shell-tabs.ps1') }
         'relaunch-saved-sessions' {
             . (Join-Path $PSScriptRoot 'control-feature-relaunch-saved-sessions.ps1')
         }
@@ -776,6 +780,7 @@ try {
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }
+                    if ($Feature -eq 'server-shell-tabs') { . (Join-Path $PSScriptRoot 'server-shell-release-cleanup.ps1') }
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null

@@ -1,0 +1,1 @@
+The server shell release journey fails with a named step and evidence instead of hanging until the workflow times out.
