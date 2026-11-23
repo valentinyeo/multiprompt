@@ -1,0 +1,1 @@
+Skill menu misses the chat folder's own skills

@@ -642,6 +642,12 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test folder skill discovery and cache refresh
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 60 python3 -m unittest discover -s tools/agent-notifications -p test_mp_complete.py -v
+      - name: Test typo-tolerant skill ranking
+        if: ${{ !cancelled() && steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64' }}
+        run: timeout 120 node --test tools/chat-folder-skills.test.js
       - name: Read the pre-change chat row source
         if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

@@ -61,6 +61,62 @@ class Completion(unittest.TestCase):
                         "1\tslash\tclaude\t-\t-\t" + "x" * 201 + "\n"):
                 self.assertIn("\terror\t-\t0\n@@MP_END@@", complete.request(bad))
 
+    def test_chat_folder_skills_survive_a_different_tmux_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            home = Path(tmp)
+            cwd = home / "projects/app"
+            definitions = {
+                home / ".claude/skills/user-skill/SKILL.md": "User skill",
+                cwd / ".claude/skills/verify-multiprompt/SKILL.md": "Verify the app",
+                cwd / ".claude/commands/check/folder.md": "Check the folder",
+                home / "plugin/skills/plugin-skill/SKILL.md": "Plugin skill",
+            }
+            for path, description in definitions.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"---\ndescription: {description}\n---\n", encoding="utf-8")
+            plugins = home / ".claude/plugins/installed_plugins.json"
+            plugins.parent.mkdir(parents=True)
+            plugins.write_text(json.dumps({"plugins": {"test@market": [{"installPath": str(home / "plugin")}]}}), encoding="utf-8")
+            (home / ".claude/settings.json").write_text(json.dumps({"enabledPlugins": {"test@market": True}}), encoding="utf-8")
+            with patch.object(complete.subprocess, "run") as run, \
+                    patch.object(complete, "warm_async"), patch.object(complete, "CACHE", home / "empty-cache.json"):
+                run.return_value.stdout = str(home) + "\n"
+                response = complete.request(f"17\tslash\tclaude\tchat-session\t{cwd}\tverify-mul\n")
+            self.assertIn(f"\t{cwd}\t", response)
+            for row in ("S\tuser-skill\t", "J\tverify-multiprompt\t", "J\tcheck:folder\t", "P\ttest:plugin-skill\t"):
+                self.assertIn(row, response)
+
+    def test_project_scan_cache_refreshes_edits_additions_and_removals(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            home = Path(tmp)
+            cwd = home / "app"
+            skill = cwd / ".claude/skills/verify-app/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("---\ndescription: Before\n---\n", encoding="utf-8")
+            other = home / "other"
+            other.mkdir()
+            first = complete.project_and_plugins(cwd, {})
+            self.assertIn(("J", "verify-app", "", "Before"), first)
+            with patch.object(complete, "frontmatter", side_effect=AssertionError("unchanged skills must not be reread")):
+                self.assertEqual(first, complete.project_and_plugins(cwd, {}))
+            self.assertNotIn("verify-app", [r[1] for r in complete.project_and_plugins(other, {})])
+            skill.write_text("---\ndescription: After editing\n---\n", encoding="utf-8")
+            self.assertIn(("J", "verify-app", "", "After editing"), complete.project_and_plugins(cwd, {}))
+            command = cwd / ".claude/commands/check/nested.md"
+            command.parent.mkdir(parents=True)
+            command.write_text("Run the check", encoding="utf-8")
+            self.assertIn("check:nested", [r[1] for r in complete.project_and_plugins(cwd, {})])
+            added = cwd / ".claude/skills/verify-new/SKILL.md"
+            added.parent.mkdir()
+            added.write_text("New skill", encoding="utf-8")
+            self.assertIn("verify-new", [r[1] for r in complete.project_and_plugins(cwd, {})])
+            self.assertNotIn("verify-new", [r[1] for r in complete.project_and_plugins(cwd, {"skillOverrides": {"verify-new": "off"}})])
+            skill.unlink()
+            command.unlink()
+            names = [r[1] for r in complete.project_and_plugins(cwd, {})]
+            self.assertNotIn("verify-app", names)
+            self.assertNotIn("check:nested", names)
+
     def test_missing_claude_cwd_uses_tmux_then_home(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other, \
                 patch.object(complete, "HOME", Path(tmp)):
