@@ -2458,8 +2458,8 @@ test "MUBO-249 delivery evidence parses each settlement row once, not once per c
     }
     const pending = echo.Pending{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("queued 8"), .anchor = .{ .after_ms = echo.stampMs("2026-10-13T11:00:00Z") } };
     const base = settlement_parses.load(.monotonic);
-    const first = try h.deliveryEvidence(a, pending);
-    try std.testing.expect(first.enqueued);
+    const cold_facts = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(cold_facts.enqueued);
     const cold = settlement_parses.load(.monotonic) - base;
     try std.testing.expectEqual(@as(usize, 200), cold);
     _ = try h.deliveryEvidence(a, pending);
@@ -2497,7 +2497,7 @@ test "MUBO-249 appending positioned rows scans only the new rows, not the whole 
         defer next.deinit(a);
         const bytes = try std.fmt.allocPrint(a, "@mp\t{d}\thistory\tok\tsid\t{d}\t{d}\t9\t0\tclaude\tterm-1\n{{\"role\":\"user\",\"text\":\"new prompt {d}\",\"offset\":{d},\"end\":{d}}}\n@@MP_END@@\n", .{ step + 2, start, start + 100, step, start, start + 100 });
         defer a.free(bytes);
-        try next.apply(a, bytes, step + 2, key);
+        try next.apply(a, bytes, @intCast(step + 2), key);
         const before = source_rows_scanned.load(.monotonic);
         try h.appendParsed(a, &next);
         scanned.* = source_rows_scanned.load(.monotonic) - before;
