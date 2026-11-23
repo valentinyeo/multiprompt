@@ -2082,33 +2082,7 @@ fn zsbUnknownName(out: []u8, code: []const u8, names: []const []const u8) usize 
     return pos;
 }
 
-fn zsbSidebarHiddenReason(i: usize, in_sidebar: bool) ?[]const u8 {
-    const sidebar = @import("sidebar.zig");
-    const shell = &app_state.shells[i];
-    if (app_state.g_hide_sidebar) return "user-hidden";
-    if (in_sidebar) return null;
-    if (shell.inbox_archived and !shell.needs_attention) return "waiting";
-    if (app_state.g_sidebar_view != null) {
-        if (shell.inbox_excluded) return "user-hidden";
-        if (shell.muted) return "filtered: muted";
-        return "filtered: sidebar view";
-    }
-    if (app_state.g_starred_workspace) {
-        if (!@import("workspaces.zig").starredShellVisible(i)) return "filtered: starred";
-    } else {
-        if (app_state.g_single_window and shell.workspace != app_state.g_active_workspace) return "other workspace";
-        if (app_state.g_single_window and app_state.g_ws_snoozed[shell.workspace]) return "workspace snoozed";
-        if (app_state.g_unread_only and !shell.needs_attention and i != app_state.active_shell) return "filtered: unread only";
-    }
-    const group_id = sidebar.tabGroupId(i);
-    if (group_id != 0) {
-        const gi = sidebar.findGroupIdx(group_id) orelse return "not in sidebar layout: missing group";
-        if (app_state.groups[gi].collapsed) return "collapsed group";
-    } else if (!app_state.g_sidebar_collapsed) {
-        if (if (sidebar.effPinnedTop(i)) app_state.g_pinned_section_collapsed else app_state.g_recents_section_collapsed) return "collapsed section";
-    }
-    return "not in sidebar layout";
-}
+const zsbSidebarHiddenReason = @import("tab_state_desktop.zig").hiddenReason;
 
 fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32, sidebar_tabs: []const bool) bool {
     if (!appendAsciiBuf(out, pos, "[")) return false;

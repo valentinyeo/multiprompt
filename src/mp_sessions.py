@@ -758,7 +758,7 @@ def evaluate_row(send, listing, row, ping):
         provider=provider,
         workspace=row.get("workspace"),
         group=row.get("group"),
-        **{field: row.get(field) for field in ("in_layout", "visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
+        **{field: row.get(field) for field in ("host", "user", "position", "kind", "closed", "in_layout", "visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
         status=status,
         reasons=reasons,
         last_reply=last_reply,

@@ -831,7 +831,7 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
-    if (['open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore'].includes(command)) {
+    if (['list', 'open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore'].includes(command)) {
       const sessions = overrides.sessions || ((args) => spawnSync('python3', [mpSessionsScript(env), ...args], {
         encoding: 'utf8', env, timeout: 60000
       }));

@@ -5,6 +5,33 @@ const console = @import("console.zig");
 const sidebar = @import("sidebar.zig");
 const a = std.heap.page_allocator;
 
+pub fn hiddenReason(i: usize, in_sidebar: bool) ?[]const u8 {
+    const shell = &app.shells[i];
+    if (app.g_hide_sidebar) return "user-hidden";
+    if (in_sidebar) return null;
+    if (shell.inbox_archived and !shell.needs_attention) return "waiting";
+    if (app.g_sidebar_view != null) {
+        if (shell.inbox_excluded) return "user-hidden";
+        if (shell.muted) return "filtered: muted";
+        return "filtered: sidebar view";
+    }
+    if (app.g_starred_workspace) {
+        if (!@import("workspaces.zig").starredShellVisible(i)) return "filtered: starred";
+    } else {
+        if (app.g_single_window and shell.workspace != app.g_active_workspace) return "other workspace";
+        if (app.g_single_window and app.g_ws_snoozed[shell.workspace]) return "workspace snoozed";
+        if (app.g_unread_only and !shell.needs_attention and i != app.active_shell) return "filtered: unread only";
+    }
+    const group_id = sidebar.tabGroupId(i);
+    if (group_id != 0) {
+        const gi = sidebar.findGroupIdx(group_id) orelse return "not in sidebar layout: missing group";
+        if (app.groups[gi].collapsed) return "collapsed group";
+    } else if (!app.g_sidebar_collapsed) {
+        if (if (sidebar.effPinnedTop(i)) app.g_pinned_section_collapsed else app.g_recents_section_collapsed) return "collapsed section";
+    }
+    return "not in sidebar layout";
+}
+
 pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
     const shell = &app.shells[idx];
     const host = @import("capacity.zig").remoteHostForShell(shell);
@@ -21,7 +48,7 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
     for (rows[0..row_count]) |row| if (row.kind == .tab and row.shell_idx == idx) {
         shown = true;
     };
-    const hidden: ?[]const u8 = if (shown) null else if (shell.inbox_archived and !shell.needs_attention) "waiting" else if (shell.workspace != app.g_active_workspace or app.g_ws_snoozed[shell.workspace]) "workspace" else if (sidebar.findGroupIdx(shell.group_id)) |gi| (if (app.groups[gi].collapsed) "group" else "filter") else "filter";
+    const hidden = hiddenReason(idx, shown);
     return .{
         .host = try alloc.dupe(u8, if (host) |slot| console.tmuxSshTarget(slot) else "local"),
         .user = try alloc.dupe(u8, if (host) |slot| identity.table[slot].user.get() else ""),
@@ -30,8 +57,8 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
         .position = position,
         .kind = if (shell.chat_view_on) .chat else .shell,
         .sid = if (shell.claude_sid_len > 0) try alloc.dupe(u8, shell.claude_sid[0..shell.claude_sid_len]) else null,
-        .pinned = shell.pinned_top,
-        .waiting = shell.inbox_archived,
+        .pinned = sidebar.effPinnedTop(idx),
+        .waiting = shell.inbox_archived and !shell.needs_attention,
         .visible = hidden == null,
         .hidden_reason = hidden,
         .tmux = if (shell.tmux_session_len > 0) try alloc.dupe(u8, shell.tmux_session[0..shell.tmux_session_len]) else try std.fmt.allocPrint(alloc, "shell-{d}", .{shell.shell_id}),
@@ -260,6 +287,7 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
         shell.workspace = dest.workspace;
         shell.group_id = dest.group;
         shell.pinned_top = next.pinned;
+        shell.starred_pinned_top = next.pinned;
         shell.chat_view_on = next.kind == .chat;
         shell.name = title;
         shell.name_len = @intCast(title_len);
