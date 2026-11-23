@@ -92,8 +92,8 @@ for ($index = 0; $index -lt 10; $index++) {
     $switches.Add($sample)
     if ($index -eq 4) { Snapshot 'slow-network-switch' }
 }
-$result.slowNetwork.switchMaxPumpMs = [int](($switches | Measure-Object -Property maxPumpMs -Maximum).Maximum)
-$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung }).Count -gt 0
+$result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
+$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true }).Count -gt 0
 
 Press @(0x11, 0x41) 'Ctrl+A: select any composer draft before the typing proof'
 Press @(0x08) 'Backspace: clear the composer'
@@ -115,13 +115,13 @@ foreach ($letter in $typed.ToCharArray()) {
     $typing.Add($sample)
 }
 if ([VerifyNative]::EditText($slowComposer) -cne $typed) { throw "Composer text after the slow-network typing proof was '$([VerifyNative]::EditText($slowComposer))'" }
-$result.slowNetwork.typingMaxPumpMs = [int](($typing | Measure-Object -Property maxPumpMs -Maximum).Maximum)
-$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung }).Count -gt 0
+$result.slowNetwork.typingMaxPumpMs = [int](($typing | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
+$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true }).Count -gt 0
 Snapshot 'slow-network-typing'
 
 $actions = @($switches.ToArray()) + @($typing.ToArray())
-$worst = [int](($actions | Measure-Object -Property maxPumpMs -Maximum).Maximum)
-$hungActions = @($actions | Where-Object { $_.hung }).Count
+$worst = [int](($actions | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
+$hungActions = @($actions | Where-Object { $_.hung -eq $true }).Count
 Save-Json @{
     limitMs = $slowLimitMs
     delayMs = [int]$env:MP_VERIFY_SLOW_MS
