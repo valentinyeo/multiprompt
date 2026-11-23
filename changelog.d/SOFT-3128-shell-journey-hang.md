@@ -1,0 +1,1 @@
+The server shell release journey reads pasted commands from the same visible prompt the screenshots show.
