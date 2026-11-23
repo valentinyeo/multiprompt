@@ -4441,27 +4441,43 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         polled = threading.Event()
         self.send.side_effect = lambda *args, **kwargs: (sent.set(), {'status': 'sent'})[1]
         original_poll = reader.message_poll
+        original_select = selectors.DefaultSelector.select
+        original_wake = reader.message_worker_wake
+        wakes = []
+        select_phase = 'startup'
+        idle_select_timeouts = []
 
         def poll(*args):
             original_poll(*args)
             polled.set()
 
+        def wake(lock_path):
+            wakes.append(lock_path)
+            return original_wake(lock_path)
+
+        def select(selector_self, timeout=None):
+            result = original_select(selector_self, timeout)
+            if select_phase == 'waiting' and not sent.is_set():
+                idle_select_timeouts.append('ready' if result else 'timeout')
+            return result
+
         with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 1), \
-                patch.object(reader, 'message_poll', side_effect=poll):
+                patch.object(reader, 'message_poll', side_effect=poll), \
+                patch.object(reader, 'message_worker_wake', side_effect=wake), \
+                patch.object(selectors.DefaultSelector, 'select', select):
             worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
             worker.start()
             self.assertTrue(polled.wait(5), 'the worker never started')
             time.sleep(0.15)
-            started = time.monotonic()
+            select_phase = 'waiting'
             self.submit('message_fixture_0002', 'second prompt')
             reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
-            self.assertTrue(sent.wait(3), 'the second message was never sent')
-            waited = time.monotonic() - started
+            self.assertTrue(sent.wait(5), 'the second message was never sent')
             self.accept('second prompt')
             worker.join(10)
-        print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
         self.assertFalse(worker.is_alive(), 'the worker did not stop')
-        self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
+        self.assertEqual(len(wakes), 1, 'submit must signal the running worker instead of spawning another')
+        self.assertEqual(idle_select_timeouts[:1], ['ready'], idle_select_timeouts)
 
     def test_native_history_continues_after_started(self):
         self.submit()
