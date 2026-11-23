@@ -1,1 +1,0 @@
-Server shell tabs accept input after restart
