@@ -2039,6 +2039,9 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         debugLog("spawnShell refused: no title id");
         return false;
     };
+    if (app_state.g_sidebar_view != null and !app_state.g_restoring and background_workspace == null) {
+        if (app_state.g_single_window) @import("workspaces.zig").switchToWorkspace(app_state.g_active_workspace) else app_state.g_sidebar_view = null;
+    }
     const idx = app_state.shell_count;
     if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
@@ -2815,6 +2818,13 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         saveSession();
         return;
     }
+    if (app_state.g_sidebar_view != null) {
+        if (closing_active) app_state.active_shell = app_state.shell_count;
+        if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
+        @import("workspaces.zig").refreshSidebarView();
+        saveSession();
+        return;
+    }
     if (app_state.g_starred_workspace) {
         if (closing_active) app_state.active_shell = app_state.shell_count;
         if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
@@ -2947,6 +2957,7 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) app_state.g_sidebar_view = null;
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -3036,7 +3047,7 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_voice_highlight = null;
     }
     if (!defer_browser) ecoqosReevaluateAll();
-    if (!app_state.g_restoring and app_state.g_single_window and idx < app_state.shell_count) {
+    if (!app_state.g_restoring and app_state.g_single_window and app_state.g_sidebar_view == null and idx < app_state.shell_count) {
         app_state.g_active_workspace = app_state.shells[idx].workspace;
         updateMainWindowTitle();
     }

@@ -6,6 +6,7 @@ Read the current workspace name above the sessions. Click the name to open the w
 
 ## Sub-features
 
+- `workspace-views`: select All, Frequent and Favorites above stored workspaces, using the same rows, filters and ordering as Inbox. New sessions leave the view for the last selected real workspace.
 - `workspace-create`: add one in-process workspace with a real CMD session.
 - `workspace-switch`: return to the first stored workspace.
 - `workspace-return`: cycle back to the new workspace and confirm its saved identity and active state.
@@ -14,7 +15,8 @@ Read the current workspace name above the sessions. Click the name to open the w
 ## How to get to it (user POV)
 
 - In single-window mode press Ctrl+N, or use the new-workspace pill (Alt+N).
-- Alt+1 selects Starred; Alt+2 through Alt+9 select the first eight stored workspaces.
+- The workspace card starts with All, Frequent and Favorites. Alt+Shift+1, Alt+Shift+2 and Alt+Shift+3 select them. Ctrl+K has a matching `Workspace view` entry for each.
+- Alt+1 selects the existing grouped Starred view; Alt+2 through Alt+9 select the first eight stored workspaces.
 - Alt+Left / Alt+Right cycle workspaces; Alt+J / Alt+K also cycle outside an Inbox context.
 - Workspace pills are mouse entry points. Ctrl+K `Open Workspace` opens stored workspaces; `Sort Workspaces` orders pills. These are alternative paths, not exercised here.
 - Agents use `zsb workspace-list` to discover workspace, group and host names, then `zsb session-open --workspace <name> --group <name> --host <reported host> --tmux <session> --name <title>` to open a background tmux tab without switching the active workspace or tab. See [Session open](session-open.md) for that separate CLI journey and its SSH boundary.
@@ -30,6 +32,7 @@ Preconditions:
 - **Identity regression.** Before creating another workspace, toggle Single-window mode off and back on through real Ctrl+K commands. Require the home workspace identity to equal the current window identity (`default`). This reproduces IGSH-1774 without writing settings or forging clicks. After creating another workspace, the existing first-workspace click must return to this same-ID home slot and close the menu; Alt+2 and Alt+3 must still switch between both slots.
 - **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
 - **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
+- **Built-in views.** Click All, Frequent and Favorites, then select each with Alt+Shift+1 through Alt+Shift+3. Require `sidebar_view` in the published Inbox state, an unchanged stored workspace count, and a return to the chosen real workspace. Open a new CMD from All and require it in the last real workspace with the view cleared. Inspect `workspace-view-*.png` and the saved Inbox/session evidence. `tools/workspace-views.test.js` executes production filtering and ordering for mixed local/remote sessions, recency, favorites, input activity, and exclusions.
 - **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
 - **Compact geometry.** Require 28px rows, 6px panel insets and a 7px divider gap: height is `19 + rowCount * 28` at the journey’s 100% scale. Zero/unknown counts are blank; current rows use semibold names without ticks.
 - **Keyboard.** Exercise Up/Down and Enter to select the first workspace, then return by mouse. Inspect `workspace-keyboard-selected.png`. Escape is checked in every theme. Scrolling and divider hit boundaries retain executable Zig coverage.
@@ -56,6 +59,7 @@ This journey covers local CMD and Chat View typing focus, not account sync, agen
 ## Gotchas
 
 - Without single-window mode Ctrl+N opens another app window instead; that is a different journey and is not covered here.
+- All, Frequent and Favorites are temporary views, not stored or synced workspaces. They ignore grouping and pin placement to keep Inbox ordering. Inbox search text does not filter the sidebar views.
 - Starred occupies Alt+1, so Alt+2 is the first stored workspace. It has independent session groups through the existing group actions; [Favorites groups](favorites-groups.md) verifies that grouping there leaves the home group intact.
 - A focused docked browser uses Alt+Right for browser navigation. The baseline deliberately has no browser; do not pretend that a browser back/forward action switched workspaces.
 - Snoozing, waking, remote-session bring-back and workspace sorting need separate real prerequisites and are not verified by create/switch/return.

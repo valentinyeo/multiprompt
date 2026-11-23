@@ -584,6 +584,9 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
+const SEARCH_WORKSPACE_ALL_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ALL_OFFSET;
+const SEARCH_WORKSPACE_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FREQUENT_OFFSET;
+const SEARCH_WORKSPACE_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FAVORITES_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -4524,7 +4527,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
-            if (wp == 0 and app_state.g_starred_workspace) return 0;
+            if (wp == 0 and (app_state.g_starred_workspace or app_state.g_sidebar_view != null)) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -7203,6 +7206,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_sel = 0;
                     return 0;
                 }
+                if (target == SEARCH_WORKSPACE_ALL_OFFSET or target == SEARCH_WORKSPACE_FREQUENT_OFFSET or target == SEARCH_WORKSPACE_FAVORITES_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    app_state.g_search_from_inbox = false;
+                    if (app_state.g_inbox_active) closeInbox(hwnd);
+                    @import("room_frontend.zig").leaveForOtherFront();
+                    const view: @import("workspace_view.zig").Builtin = if (target == SEARCH_WORKSPACE_ALL_OFFSET) .all else if (target == SEARCH_WORKSPACE_FREQUENT_OFFSET) .frequent else .favorites;
+                    switchToWorkspace(@intFromEnum(view));
+                    return 0;
+                }
                 if (target == SEARCH_STARRED_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -9017,6 +9031,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         const sv = allSessionsVisibleCount();
                         if (app_state.g_all_sessions_sel >= sv) app_state.g_all_sessions_sel = if (sv > 0) sv - 1 else 0;
                     }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (app_state.g_sidebar_view != null and !app_state.g_inbox_active) {
+                    @import("workspaces.zig").refreshSidebarView();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

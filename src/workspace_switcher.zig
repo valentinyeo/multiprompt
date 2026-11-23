@@ -13,6 +13,7 @@ const fillRoundRect = @import("smooth.zig").fillRoundRect;
 const scale = drawing.uiScaled;
 const RGB = startup.RGB;
 const L = startup.L;
+const views = @import("workspace_view.zig").builtins;
 
 var hwnd: w.HANDLE = null;
 var registered = false;
@@ -85,7 +86,7 @@ pub fn paintHeader(dc: w.HANDLE) void {
     _ = w.SetBkMode(dc, w.TRANSPARENT);
     _ = w.SetTextColor(dc, textColor());
     var name_buf: [32]u8 = undefined;
-    const name = if (app_state.g_starred_workspace) "Starred" else if (app_state.g_single_window)
+    const name = if (app_state.g_sidebar_view) |view| view.name() else if (app_state.g_starred_workspace) "Starred" else if (app_state.g_single_window)
         workspaces.workspaceDisplayName(app_state.g_active_workspace, &name_buf)
     else if (app_state.g_window_display_name_u8_len > 0)
         app_state.g_window_display_name_u8[0..app_state.g_window_display_name_u8_len]
@@ -105,11 +106,11 @@ pub fn paintHeader(dc: w.HANDLE) void {
 }
 
 fn rowCount() usize {
-    return entry_count + 2;
+    return entry_count + views.len + 1;
 }
 
 fn rowRect(index: usize) w.RECT {
-    const gap: i32 = if (index == entry_count + 1) scale(7) else 0;
+    const gap: i32 = if (index == entry_count + views.len) scale(7) else 0;
     const top = scale(6) + @as(i32, @intCast(index - first)) * scale(28) + gap;
     return .{ .left = scale(6), .top = top, .right = width - scale(6), .bottom = top + scale(28) };
 }
@@ -128,23 +129,24 @@ fn countLabel(count: ?u32, buf: []u8) []const u8 {
 }
 
 fn current(index: usize) bool {
-    if (index == 0) return app_state.g_starred_workspace;
-    if (index > entry_count or app_state.g_starred_workspace) return false;
-    const entry = &entries[index - 1];
+    if (index < views.len) return app_state.g_sidebar_view == views[index];
+    if (index >= entry_count + views.len or app_state.g_starred_workspace or app_state.g_sidebar_view != null) return false;
+    const entry = &entries[index - views.len];
     const id = entry.id[0..entry.id_len];
     if (app_state.g_single_window) return workspaces.findMyWorkspaceSlot(id) == app_state.g_active_workspace;
     return std.mem.eql(u8, id, startup.getInstanceName());
 }
 
 fn sessionCount(index: usize) ?u32 {
-    if (index == 0) {
+    if (index < views.len) {
         var count: u32 = 0;
-        for (0..app_state.shell_count) |i| {
-            if (workspaces.starredShellVisible(i)) count += 1;
+        const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
+        for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |*row| {
+            if (@import("inbox.zig").rowVisibleInSplit(row, views[index].split(), now_ms)) count += 1;
         }
         return count;
     }
-    const entry = &entries[index - 1];
+    const entry = &entries[index - views.len];
     const id = entry.id[0..entry.id_len];
     const slot = workspaces.findMyWorkspaceSlot(id) orelse return null;
     var count: u32 = 0;
@@ -155,7 +157,7 @@ fn sessionCount(index: usize) ?u32 {
 }
 
 fn emptyHome(index: usize) bool {
-    const entry = &entries[index - 1];
+    const entry = &entries[index - views.len];
     if (!std.mem.eql(u8, entry.id[0..entry.id_len], "default")) return false;
     return !current(index) and (sessionCount(index) orelse 0) == 0;
 }
@@ -166,7 +168,7 @@ fn loadEntries() void {
         if (entry.archived) continue;
         entries[entry_count] = entry;
         entry_count += 1;
-        if (emptyHome(entry_count)) entry_count -= 1;
+        if (emptyHome(entry_count + views.len - 1)) entry_count -= 1;
     }
 }
 
@@ -196,7 +198,7 @@ fn paint(dc: w.HANDLE) void {
     for (first..@min(first + visible, rowCount())) |index| {
         const rc = rowRect(index);
         const is_current = current(index);
-        const is_action = index == entry_count + 1;
+        const is_action = index == entry_count + views.len;
         if (is_action) {
             var line = rc;
             line.top -= scale(4);
@@ -213,7 +215,7 @@ fn paint(dc: w.HANDLE) void {
         label.right -= scale(if (count.len > 0) @as(i32, 44) else 10);
         _ = w.SelectObject(dc, (if (is_current) current_font else row_font) orelse drawing.uiFontSubtitle());
         _ = w.SetTextColor(dc, if (is_action) muted else themes.customColorOr("text", textColor()));
-        const name = if (index == 0) "Starred" else if (is_action) "New workspace" else entries[index - 1].name[0..entries[index - 1].name_len];
+        const name = if (index < views.len) views[index].name() else if (is_action) "New workspace" else entries[index - views.len].name[0..entries[index - views.len].name_len];
         drawName(dc, name, &label, flags);
         if (count.len > 0) {
             var count_rc = rc;
@@ -240,12 +242,17 @@ fn activate(index: usize) void {
     const was_current = current(index);
     @import("room_frontend.zig").leaveForOtherFront();
     app_state.g_shell_focused = true;
-    if (index == 0) {
-        workspaces.switchToWorkspace(@import("workspace_view.zig").starred);
-    } else if (index == entry_count + 1) {
+    if (app_state.g_inbox_active) @import("inbox.zig").closeInbox(app_state.g_main_hwnd);
+    if (index < views.len) {
+        workspaces.switchToWorkspace(@intFromEnum(views[index]));
+    } else if (index == entry_count + views.len) {
         if (app_state.g_single_window) workspaces.newWorkspace() else workspaces.spawnEmptyWorkspace();
-    } else if (index <= entry_count) {
-        const entry = &entries[index - 1];
+    } else if (index < entry_count + views.len) {
+        const entry = &entries[index - views.len];
+        if (!app_state.g_single_window) {
+            app_state.g_sidebar_view = null;
+            @import("rename.zig").showActiveShellAfterOverlay();
+        }
         if (workspaces.findWorkspace(entry.id[0..entry.id_len])) |wi| workspaces.openWorkspaceByIndex(wi);
     }
     if (was_room and was_current) @import("rename.zig").showActiveShellAfterOverlay();
@@ -265,9 +272,11 @@ pub fn headerClick(x: i32, y: i32) bool {
     workspaces.syncInProcessWorkspacesToRegistry();
     workspaces.mergeWorkspaceRegistryFromDisk();
     loadEntries();
+    @import("inbox.zig").publishInboxStateNow();
+    @import("inbox.zig").loadInboxModel();
     selected = 0;
-    for (0..entry_count) |i| {
-        if (current(i + 1)) selected = i + 1;
+    for (0..entry_count + views.len) |i| {
+        if (current(i)) selected = i;
     }
     var client: w.RECT = undefined;
     _ = w.GetClientRect(app_state.g_main_hwnd, &client);
@@ -412,7 +421,7 @@ test "IGSH-1082 workspace menu scroll keeps every row and new workspace reachabl
     visible = 3;
     width = scale(203);
     for (0..rowCount() - 1) |_| step(1);
-    try std.testing.expectEqual(entry_count + 1, selected);
+    try std.testing.expectEqual(entry_count + views.len, selected);
     try std.testing.expectEqual(selected - visible + 1, first);
     const rc = rowRect(selected);
     try std.testing.expectEqual(selected, hit(rc.left, rc.top).?);
@@ -453,8 +462,8 @@ test "IGSH-1687 compact rows share exact paint and hit bounds" {
         try std.testing.expect(hit(rc.right, rc.top) == null);
     }
     try std.testing.expectEqual(scale(6), rowRect(0).top);
-    const action = rowRect(entry_count + 1);
-    try std.testing.expectEqual(scale(7), action.top - rowRect(entry_count).bottom);
+    const action = rowRect(entry_count + views.len);
+    try std.testing.expectEqual(scale(7), action.top - rowRect(entry_count + views.len - 1).bottom);
     try std.testing.expect(hit(action.left, action.top - 1) == null);
     try std.testing.expect(hit(action.left, action.bottom) == null);
     try std.testing.expect(hit(scale(6), scale(5)) == null);
