@@ -28,7 +28,20 @@ mp-send list --json
 mp-sessions
 ```
 
-Each row has the name, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. A chat counts as live when its host process runs and its terminal session exists. A chat whose name has not been published yet shows `(no name yet)` and can still be reached by its terminal session.
+Each row has the session link, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. The link looks like `Poteto{live-8bc7bac}`. A name with a space looks like `@Alpha Lead{live-alpha}`. `--json` also has a `link` field with that token. In Chat View the token shows the name, and a click opens that session. A click works when that session is open. An unknown session stays plain text. A chat counts as live when its host process runs and its terminal session exists. A chat whose name has not been published yet uses its terminal session as the name inside the link, and can still be reached by that session.
+
+## Identify your own chat
+
+```sh
+mp-sessions whoami
+mp-sessions whoami --json
+```
+
+Prints only your chat's current desktop name, session id, linked agent provider and clickable chat link. JSON has `name`, `sid`, `provider`, `tmux` and `link` fields. The caller is resolved from `MULTIPROMPT_TAB`, then `TMUX_PANE`, just like workspace-scoped session commands. Hosted chats use their `MULTIBOT_PROVIDER` and `MULTIBOT_SID` to select their own agent binding. Other callers need one unambiguous binding for their terminal session.
+
+Each invocation reads the desktop's live tab name, so the next call reflects a rename without waiting for the published name cache. If the desktop is unavailable, your tab is missing or your agent binding is ambiguous, the command exits 2 without printing another chat's identity.
+
+This is an agent-only command. It needs no Ctrl+K entry, keyboard shortcut or shortcut-documentation row because its caller is the running agent, not the desktop user.
 
 ## Read the last answer
 

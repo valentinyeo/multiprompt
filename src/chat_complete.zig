@@ -46,6 +46,9 @@ pub fn tokenAtCaret(text: []const u16, caret: usize, agent: Agent) ?Token {
 }
 
 pub fn endsInTriggerToken(text: []const u16, agent: Agent) bool {
+    if (tokenAtCaret(text, text.len, .claude)) |token| {
+        if (token.mode == .slash and token.start != 0) return false;
+    }
     return tokenAtCaret(text, text.len, if (agent == .other) .claude else agent) != null or
         tokenAtCaret(text, text.len, .claude) != null or
         (text.len > 0 and text[text.len - 1] != ' ' and tokenAtCaret(text, text.len, .codex) != null);
@@ -230,6 +233,26 @@ test "selection survives a re-rank with the same query" {
     const refreshed = rank(&entries, "c", &.{"compact"}, &order);
     try std.testing.expectEqual(@as(usize, 0), selectionAfterRank(&entries, order[0..refreshed], 'B', "compact"));
     try std.testing.expectEqual(@as(usize, 0), selectionAfterRank(&entries, order[0..refreshed], 'B', "missing"));
+}
+
+test "SOFT-3086 mid-message slash completion inserts text without changing send whitespace" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const entry = Entry{ .kind = 'S', .name = "review", .hint = "", .desc = "" };
+    var insertion: [64]u8 = undefined;
+    var wide: [64]u16 = undefined;
+    const ins = insertionFor(.claude, .slash, entry, &insertion);
+    const n = try std.unicode.utf8ToUtf16Le(&wide, ins);
+    var output: [128]u16 = undefined;
+    const text = w("why /rev ?");
+    const token = tokenAtCaret(text, 8, .claude).?;
+    const applied = applyAccept(text, token, wide[0..n], &output);
+    try std.testing.expectEqualSlices(u16, w("why /review  ?"), output[0..applied.len]);
+    for ([_]Agent{ .claude, .codex, .other }) |agent| {
+        for ([_][]const u16{ w("why /review ?"), w("why /review"), w(" /review"), w("why\n/review") }) |message| {
+            try std.testing.expect(!endsInTriggerToken(message, agent));
+        }
+        try std.testing.expect(endsInTriggerToken(w("/review"), agent));
+    }
 }
 
 test "oversized response fields are rejected" {
