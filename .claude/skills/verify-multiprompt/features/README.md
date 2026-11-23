@@ -133,6 +133,17 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Server runner group](server-open-group.md): import one account shell tab into a group named Runners, then import that same tab again without adding a tab or a group.
+- [Mb tab open](mb-tab-open.md): `mb open` publishes the proof tab into Multiprompt and the sidebar shows it in `session.json`.
+- [Mb tab close](mb-tab-close.md): `mb close` removes the proof tab from the sidebar state.
+- [Mb tab move](mb-tab-move.md): `mb move` places the proof tab in workspace Other.
+- [Mb tab pin](mb-tab-pin.md): `mb pin on` pins the proof tab to the sidebar top.
+- [Mb tab unpin](mb-tab-unpin.md): `mb pin off` clears the pin on the proof tab.
+- [Mb tab archive](mb-tab-archive.md): `mb archive` archives the proof tab in saved session state.
+- [Mb tab unarchive](mb-tab-unarchive.md): `mb unarchive` brings the proof tab back from archive.
+- [Mb tab wait](mb-tab-wait.md): `mb wait on` moves the proof tab to Waiting in saved state.
+- [Mb tab restore](mb-tab-restore.md): `mb restore` clears Waiting on the proof tab.
+- [Mb tab layout sync](mb-tab-layout-sync.md): a tab closed through `mb` stays closed after an account layout sync bump.
+- [Mb tab idempotent](mb-tab-idempotent.md): running `mb star on` twice leaves the same starred state once.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Servers](servers.md): add a disposable server in the real app, paste its one setup line, test the own-key sign-in, then remove it and require the key to be refused. Manual-only release journey.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
