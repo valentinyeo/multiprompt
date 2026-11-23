@@ -1,0 +1,62 @@
+name: Feedback command
+
+on:
+  pull_request:
+    paths:
+      - 'src/multibot_feedback.py'
+      - 'src/chat_history_reader.py'
+      - 'tools/multibot-feedback-test.py'
+      - 'skills/multi-bot-feedback/**'
+      - '.claude/skills/verify-multiprompt/features/agent-feedback.md'
+      - '.github/workflows/feedback-command.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  feedback-command:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify feedback with a fake board and no real credentials
+        run: |
+          mkdir -p "$RUNNER_TEMP/input"
+          set +e
+          timeout 180s python3 tools/multibot-feedback-test.py -v > "$RUNNER_TEMP/input/head.log" 2>&1
+          echo "head=$?" >> "$GITHUB_ENV"
+          if [ -n "$BASE_SHA" ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA" || exit 1
+            cp tools/multibot-feedback-test.py "$RUNNER_TEMP/base/tools/" || exit 1
+            (cd "$RUNNER_TEMP/base" && timeout 60s python3 tools/multibot-feedback-test.py BoardFeedbackTest.test_report_no_token_redacts_context_then_drains_and_attaches -v) > "$RUNNER_TEMP/input/base.log" 2>&1
+            echo "base=$?" >> "$GITHUB_ENV"
+          fi
+      - name: Write the receipt
+        run: |
+          set +e
+          if [ -n "$BASE_SHA" ]; then
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" feedback "$RUNNER_TEMP/input/head.log" "$head" 'test_report|test_reports|^Ran |^OK|^FAILED' "$RUNNER_TEMP/input/base.log" "$base"
+          else
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" feedback "$RUNNER_TEMP/input/head.log" "$head" 'test_report|test_reports|^Ran |^OK|^FAILED'
+          fi
+          echo "receipt=$?" >> "$GITHUB_ENV"
+          true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: feedback-command
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error
+      - name: Require passing tests and evidence
+        run: test "$head" = 0 && test "$receipt" = 0

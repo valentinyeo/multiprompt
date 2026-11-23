@@ -8758,6 +8758,8 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
+                            context = dict(app_version=globals().get('MULTIBOT_APP_VERSION', ''))
+                            publish_named_tool('feedback-context.json', _json.dumps(context).encode())
                         except (ValueError, OSError, NotImplementedError):
                             pass
                     helper_source = globals().get('MP_HELPER_SOURCE')

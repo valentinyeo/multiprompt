@@ -44,7 +44,7 @@ if args == ['status']:
     human = os.environ.get('FAKE_HUMAN') == '1'
     print(json.dumps(dict(authenticated=True, hasToken=True, identity='user' if human else 'agent', agentId=None if human else os.environ['HT_TOKEN'].replace('credential-', 'agent-'))))
 elif args[:2] == ['labels', 'list']:
-    page('labels', [dict(name='Multiprompt'), dict(name='Agent Feedback')])
+    page('labels', [dict(name=name) for name in (('Multiprompt', 'Agent Feedback') + (('Multi Bot Bugs', 'Multi Bot Features', 'Seamless Session Transitioning', 'Multiprompt Android', 'Android Bugs', 'Android Features') if os.environ.get('FAKE_REPORT_LABELS') else ()))])
 elif args[:2] == ['task', 'list']:
     page('tasks', [task for task in state['tasks'] if task['status'] == option('--status')])
 elif args[:2] == ['task', 'create']:
@@ -57,7 +57,7 @@ elif args[:2] == ['task', 'get']:
     if os.environ.get('FAKE_FAIL_READBACK'): sys.exit(1)
     task = next(task for task in state['tasks'] if task['ticketNumber'] == args[2])
     if os.environ.get('FAKE_FAIL_AFTER_UPLOAD') and task.get('attachments'): sys.exit(1)
-    print(json.dumps(dict(success=True, tasks=[dict(ticketNumber=args[2], attachments=task.get('attachments', []))])))
+    print(json.dumps(dict(success=True, tasks=[dict(task, attachments=task.get('attachments', []))])))
 elif args[:2] == ['task', 'update']:
     if os.environ.get('FAKE_FAIL_UPLOAD'): sys.exit(1)
     task = next(task for task in state['tasks'] if task['ticketNumber'] == args[2])
@@ -75,9 +75,10 @@ elif args[:2] == ['comment', 'add']:
     if os.environ.get('FAKE_FAIL_VOTE'):
         sys.exit(1)
     if '--kind' in args: sys.exit(2)
-    comment = dict(id='activity-id', runId='run-id', type='thought', text='multibot-feedback-vote:v1', agentId=os.environ['HT_TOKEN'].replace('credential-', 'agent-'), agentName='Agent', createdAt=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    comment = dict(id='activity-id', runId='run-id', type='thought', text=option('--text'), agentId=os.environ['HT_TOKEN'].replace('credential-', 'agent-'), agentName='Agent', createdAt=datetime.datetime.now(datetime.timezone.utc).isoformat())
     state['comments'].setdefault(args[2], []).append(comment)
     state_path.write_text(json.dumps(state))
+    if os.environ.get('FAKE_LOST_COMMENT_RESPONSE'): sys.exit(1)
     print(json.dumps(dict(success=True, routedTo='log')))
 else:
     sys.exit(2)
@@ -96,6 +97,9 @@ class BoardFeedbackTest(unittest.TestCase):
         fake = self.bin / 'hypertask'
         fake.write_text(FAKE_CLI)
         fake.chmod(0o700)
+        sessions = self.bin / 'mp-sessions'
+        sessions.write_text('#!/bin/sh\nexit 1\n')
+        sessions.chmod(0o700)
         self.board = self.home / 'board.json'
         self.calls = self.home / 'calls.jsonl'
         self.log = self.home / 'state' / 'multibot' / 'feedback.jsonl'
@@ -108,10 +112,11 @@ class BoardFeedbackTest(unittest.TestCase):
         return json.loads(self.board.read_text())
 
     def run_cli(self, *args, token='credential-one', **extra):
-        env = {key: value for key, value in os.environ.items() if key not in ('HT_TOKEN', 'XDG_STATE_HOME', 'ZSB_SESSION', 'TMUX', 'MULTIBOT_FEEDBACK_LOG')}
+        env = {key: value for key, value in os.environ.items() if key not in ('HT_TOKEN', 'XDG_STATE_HOME', 'ZSB_SESSION', 'TMUX', 'MULTIBOT_FEEDBACK_LOG', 'MULTIBOT_SID')}
         env.update(HOME=str(self.home), XDG_STATE_HOME=str(self.home / 'state'), PATH=str(self.bin) + os.pathsep + env.get('PATH', ''), FAKE_BOARD=str(self.board), FAKE_CALLS=str(self.calls), MULTIBOT_PROVIDER='codex', MULTIBOT_SESSION='private-chat', MULTIBOT_APP_VERSION='1.2.3')
         if token is not None:
             env['HT_TOKEN'] = token
+        env['FAKE_REPORT_LABELS'] = '1' if '--report' in args or '--drain' in args else ''
         env.update(extra)
         return subprocess.run([sys.executable, str(ROOT / 'src/multibot_feedback.py'), *args], cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
 
@@ -129,6 +134,136 @@ class BoardFeedbackTest(unittest.TestCase):
         if size is not None:
             image += chunk(b'tEXt', b'x\x00' + b'a' * (size - len(image) - 26))
         return image + chunk(b'IEND', b'')
+
+    def report_context(self):
+        identity = self.bin / 'mp-sessions'
+        identity.write_text('#!/usr/bin/env python3\nimport json,sys\nassert sys.argv[1:] == ["whoami", "--json"]\nprint(json.dumps(dict(name="QA chat", sid="fixture-session-id", provider="antigravity")))\n')
+        identity.chmod(0o700)
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir(exist_ok=True)
+        (runtime / 'active.json').write_text(json.dumps(dict(protocol=1, generation=123, sha256='a' * 64)))
+        (runtime / 'feedback-context.json').write_text(json.dumps(dict(app_version='2.3.4')))
+
+    def test_report_no_token_redacts_context_then_drains_and_attaches(self):
+        self.report_context()
+        image = self.work / 'private.png'
+        image.write_bytes(self.png())
+        secret = 'fixture-sensitive-value'
+        result = self.run_cli('Chat error', '--report', '--why', 'Send failed for person@example.invalid',
+                              '--expected', 'Message delivered', '--actual', 'Error with password="two words"',
+                              '--step', 'old step', *sum((['--step', f'command {i} {secret} person@example.invalid'] for i in range(7)), []),
+                              '--attach', str(image), token=None, SERVICE_SECRET=secret, MULTIBOT_APP_VERSION='')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('queued, will be filed', result.stdout)
+        self.assertFalse(self.calls.exists())
+        raw = self.log.read_text()
+        for private in (secret, 'person@example.invalid', 'two words', 'old step', str(self.home)):
+            self.assertNotIn(private, raw)
+        row = json.loads(raw)
+        self.assertEqual(row['session'], 'QA chat')
+        self.assertEqual(row['session_id'], 'fixture-session-id')
+        self.assertEqual(row['provider'], 'antigravity')
+        self.assertEqual(row['app_version'], '2.3.4')
+        self.assertEqual(row['runtime_version'], 'a' * 64)
+        self.assertEqual(len(row['steps']), 6)
+        image.unlink()
+        drained = self.run_cli('--drain')
+        self.assertIn('filed https://', drained.stdout, drained.stderr)
+        task = self.read_board()['tasks'][0]
+        for value in ('What happened', 'Expected', 'Actual', 'Chat name', 'Session ID', 'Desktop version',
+                      'Runtime version', 'Recent steps', 'QA chat', 'fixture-session-id', 'antigravity', '2.3.4', 'Message delivered'):
+            self.assertIn(value, task['description'])
+        self.assertIn('Multi Bot Bugs', [label['name'] for label in task['labels']])
+        self.assertEqual(len(task['attachments']), 1)
+        self.assertNotIn('private.png', json.dumps(task))
+        for private in (secret, 'person@example.invalid', 'two words'):
+            self.assertNotIn(private, json.dumps(self.read_board()))
+
+    def test_reports_merge_by_title_or_signature_and_keep_each_occurrence(self):
+        for title, signature in [('Send failed', ''), (' SEND  failed ', ''), ('Different wording', 'send failed')]:
+            result = self.run_cli(title, '--report', '--expected', 'Sent', '--actual', title,
+                                  '--signature', signature)
+            self.assertIn('filed https://', result.stdout, result.stderr)
+        board = self.read_board()
+        self.assertEqual(len(board['tasks']), 1)
+        occurrences = board['comments'][board['tasks'][0]['ticketNumber']]
+        self.assertEqual(len(occurrences), 2)
+        self.assertTrue(all('Expected' in item['text'] and 'Actual' in item['text'] for item in occurrences))
+
+    def test_report_retry_after_upload_failure_does_not_duplicate_occurrence(self):
+        image = self.work / 'image.png'
+        image.write_bytes(self.png())
+        failed = self.run_cli('Retry screenshot', '--report', '--attach', str(image), FAKE_FAIL_UPLOAD='1')
+        self.assertIn('queued, will be filed', failed.stdout)
+        self.assertIn('filed https://', self.run_cli('--drain').stdout)
+        board = self.read_board()
+        self.assertEqual(len(board['tasks']), 1)
+        self.assertEqual(board['comments'], {})
+        self.assertEqual(len(board['tasks'][0]['attachments']), 1)
+
+    def test_reports_route_errors_features_transitions_and_android(self):
+        for title, kind, owner in [('Desktop crash', 'error', 'Multi Bot Bugs'),
+                                   ('Add a new action', 'feature', 'Multi Bot Features'),
+                                   ('Handover failed', 'error', 'Seamless Session Transitioning'),
+                                   ('Android crash', 'error', 'Android Bugs'),
+                                   ('Phone action', 'feature', 'Android Features')]:
+            result = self.run_cli(title, '--report', '--kind', kind)
+            self.assertIn('filed https://', result.stdout, result.stderr)
+            labels = {label['name'] for label in self.read_board()['tasks'][-1]['labels']}
+            self.assertEqual(labels, {'Multiprompt', 'Agent Feedback', owner})
+
+    def test_report_lost_comment_response_retries_without_another_occurrence(self):
+        self.assertIn('filed https://', self.run_cli('Comment retry', '--report').stdout)
+        failed = self.run_cli('Comment retry', '--report', FAKE_LOST_COMMENT_RESPONSE='1')
+        self.assertIn('queued, will be filed', failed.stdout)
+        self.assertIn('filed https://', self.run_cli('--drain').stdout)
+        self.assertEqual(len(self.read_board()['comments']['IGSH-1000']), 1)
+
+    def test_report_accepts_every_chat_provider_without_a_caller_token(self):
+        for provider in ('claude', 'codex', 'pi', 'antigravity'):
+            result = self.run_cli('Problem in ' + provider, '--report', token=None,
+                                  MULTIBOT_PROVIDER=provider, MULTIBOT_SID='fixture-' + provider)
+            self.assertIn('queued, will be filed', result.stdout)
+        self.assertFalse(self.calls.exists())
+        rows = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([row['provider'] for row in rows], ['claude', 'codex', 'pi', 'antigravity'])
+        self.assertTrue(all(row['session_id'] == 'fixture-' + row['provider'] for row in rows))
+
+    def test_command_adapters_share_the_runtime_tool_and_skill(self):
+        folder = ROOT / 'skills/multi-bot-feedback'
+        skill = (folder / 'SKILL.md').read_text()
+        self.assertTrue(skill.startswith('---\nname: multi-bot-feedback\ndescription:'))
+        for adapter in ('SKILL.md', 'codex.md', 'pi.md', 'antigravity.md'):
+            text = (folder / adapter).read_text()
+            self.assertIn('~/.multiprompt-runtime/multibot-feedback', text)
+            self.assertIn('--report', text)
+        self.assertIn('SKILL.md', (folder / 'README.md').read_text())
+
+    def test_report_routes_by_chat_and_ignores_closed_matches(self):
+        self.report_context()
+        whoami = self.bin / 'mp-sessions'
+        whoami.write_text(whoami.read_text().replace('QA chat', 'Android QA'))
+        task = self.task(1, 'Multibot error: crash')
+        task['section'] = 'Done'
+        self.write_board(dict(tasks=[task], comments={}))
+        result = self.run_cli('crash', '--report')
+        self.assertIn('filed https://', result.stdout)
+        board = self.read_board()
+        self.assertEqual(len(board['tasks']), 2)
+        self.assertIn('Android Bugs', [label['name'] for label in board['tasks'][-1]['labels']])
+
+    def test_report_redacts_before_trimming_and_bounds_steps(self):
+        result = self.run_cli('Crash', '--report', '--step', 'x' * 790 + ' ghp_' + 's' * 40,
+                              '--expected', 'safe <output>', '--actual', 'Authorization: Bearer abc123',
+                              '--why', '-----BEGIN PRIVATE KEY-----\nprivate contents\n-----END PRIVATE KEY-----')
+        self.assertIn('filed https://', result.stdout)
+        row = json.loads(self.log.read_text())
+        self.assertLessEqual(len(row['steps'][0]), 800)
+        raw = json.dumps(self.read_board()) + self.log.read_text()
+        for secret in ('s' * 10, 'abc123', 'private contents'):
+            self.assertNotIn(secret, raw)
+        self.assertIn('safe &lt;output&gt;', self.read_board()['tasks'][0]['description'])
+        self.assertNotIn('\n', self.read_board()['tasks'][0]['description'])
 
     def test_distinct_attachments_and_maximum_bounds(self):
         images = []
@@ -226,6 +361,8 @@ class BoardFeedbackTest(unittest.TestCase):
             if include:
                 self.assertEqual(installed.read_bytes(), feedback)
                 self.assertEqual(installed.stat().st_mode & 0o777, 0o700)
+                context = json.loads((installed.parent / 'feedback-context.json').read_text())
+                self.assertEqual(context['app_version'], '1.2.3')
 
     def test_create_repeat_other_agent_and_safe_metadata(self):
         first = self.run_cli('Browser  screenshots', '--why', 'Capture is slow')

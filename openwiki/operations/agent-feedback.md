@@ -1,5 +1,15 @@
 # Multibot agent feedback
 
+## Detailed chat reports
+
+Use `/multi-bot-feedback [summary] [screenshot.png]` in a chat, or invoke the shared skill yourself after a failure. The command gathers expected versus actual behavior and a few recent turns or commands, then calls the existing `multibot-feedback --report` tool. It adds the current name and session ID from `mp-sessions whoami`, desktop version and runtime fingerprint. Text is trimmed and credentials and emails are redacted before local storage. Screenshots must be reviewed PNGs; text redaction cannot inspect their pixels.
+
+Open reports with the same title or signature receive another detailed occurrence instead of another ticket. Errors, feature requests, session transitions and Android reports select their existing owner labels. A caller without a token uses the same private queue described below; `queued` is not confirmation of filing. Missing identity or version data is explicitly marked unavailable.
+
+Vstack Maintainer installs the shared skill and provider command adapters from [skills/multi-bot-feedback](../../skills/multi-bot-feedback/README.md). Codex custom prompts use `/prompts:multi-bot-feedback`. No desktop action is added. The existing wish syntax below remains unchanged.
+
+## Wishes
+
 Fresh hosted Claude, Codex and Pi chats receive Multibot tool guidance. The browser pane uses `zsb`. Computer view is view-only unless the user grants control. Browser commands do not operate Computer.
 
 To describe a missing capability:

@@ -71,6 +71,130 @@ def feedback_row(want, why):
                 app_version=os.environ.get('MULTIBOT_APP_VERSION', ''), cwd=os.path.basename(os.getcwd()))
 
 
+def redact(text):
+    for name, value in sorted(os.environ.items(), key=lambda item: -len(item[1])):
+        if len(value) >= 6 and re.search(r'TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|COOKIE', name, re.I):
+            text = text.replace(value, '[redacted]')
+    text = re.sub(r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)', '[redacted]', text, flags=re.S)
+    text = re.sub(r'(?i)\bbearer\s+\S+|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{12,}', '[redacted]', text)
+    text = re.sub(r"(?i)(?:[\"']?(?:[\w-]*(?:token|secret|password|passwd|api[_-]?key|credential|cookie)[\w-]*)[\"']?\s*[:=]\s*|--(?:token|password|api-key|secret)\s+)(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)", '[redacted]', text)
+    text = re.sub(r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[redacted-email]', text)
+    text = re.sub(r'(?i)(https?://)[^/\s]+@', r'\1[redacted]@', text)
+    for private in (os.getcwd(), str(Path.home())):
+        if private and private != '/':
+            text = text.replace(private, '[local]')
+    return text
+
+
+def report_row(args):
+    row = feedback_row(args.want.strip(), args.why.strip())
+    identity_data = {}
+    tool = Path.home() / '.multiprompt-runtime/mp-sessions'
+    command = [str(tool)] if tool.is_file() else ['mp-sessions']
+    try:
+        result = subprocess.run([*command, 'whoami', '--json'], capture_output=True, text=True, timeout=15, check=False)
+        data = json.loads(result.stdout)
+        if result.returncode == 0 and isinstance(data, dict):
+            identity_data = {name: value for name, value in data.items() if isinstance(value, str)}
+    except (OSError, subprocess.SubprocessError, ValueError, UnicodeError):
+        pass
+    runtime = Path.home() / '.multiprompt-runtime'
+    metadata = {}
+    for name in ('feedback-context.json', 'active.json'):
+        try:
+            data = json.loads((runtime / name).read_text(encoding='utf-8'))
+            if isinstance(data, dict):
+                metadata.update(data)
+        except (OSError, ValueError, UnicodeError):
+            pass
+    row.update(report=True, kind=args.kind,
+               session=identity_data.get('name') or row['session'] or 'unavailable',
+               session_id=identity_data.get('sid') or os.environ.get('MULTIBOT_SID') or 'unavailable',
+               provider=identity_data.get('provider') or row['provider'] or 'unavailable',
+               app_version=row['app_version'] or metadata.get('app_version') or 'unavailable',
+               runtime_version=metadata.get('sha256') or 'unavailable',
+               runtime_generation=str(metadata.get('generation') or 'unavailable'),
+               expected=args.expected or 'Not provided', actual=args.actual or args.why or args.want,
+               steps=[redact(step)[:800] for step in args.step[-6:]])
+    for name, value in row.items():
+        if isinstance(value, str):
+            row[name] = redact(value)[:4000]
+    row['want'] = row['want'][:180]
+    row['signature'] = hashlib.sha256(normalized(redact(args.signature or row['want'])).encode()).hexdigest()
+    return row
+
+
+def report_owner(row, labels):
+    text = normalized(' '.join(str(row.get(key, '')) for key in ('want', 'why', 'actual', 'session')))
+    feature = row['kind'] == 'feature'
+    if re.search(r'\b(android|phone|apk|mobile)\b', text):
+        android = sorted(name for name in labels if 'android' in name.casefold())
+        preferred = [name for name in android if re.search('feature|request' if feature else 'bug|error', name, re.I)]
+        owner = next(iter(preferred), 'Multiprompt Android')
+    elif re.search(r'\b(handover|handoff|transition|reconnect|fresh start|switch ai|session restore)\b', text):
+        owner = 'Seamless Session Transitioning'
+    else:
+        owner = 'Multi Bot Features' if feature else 'Multi Bot Bugs'
+    if not (LABELS | {owner}) <= labels:
+        raise BoardError('feedback owner labels unavailable')
+    return owner
+
+
+def report_description(row):
+    fields = [('What happened', row['why'] or row['want']), ('Expected', row['expected']),
+              ('Actual', row['actual']), ('Chat name', row['session']), ('Session ID', row['session_id']),
+              ('Agent', row['provider']), ('Desktop version', row['app_version']),
+              ('Runtime version', row['runtime_version']), ('Runtime generation', row['runtime_generation']),
+              ('Recent steps', '\n'.join(row['steps']) or 'Not provided')]
+    text = ''.join('<p><strong>' + name + '</strong></p><pre>' + html.escape(value).replace('\r', '').replace('\n', '<br>') + '</pre>' for name, value in fields)
+    return (text + '<p>multibot-feedback-signature:v1:' + row['signature'] + '</p>' +
+            '<p>multibot-feedback-report:v1:' + row['id'] + '</p>')
+
+
+def submit_report(row, snapshots):
+    identity()
+    labels = {item['name'] for item in pages('labels', 'labels', 'list', '--project', PROJECT) if isinstance(item.get('name'), str)}
+    owner = report_owner(row, labels)
+    title = ('Multibot feature: ' if row['kind'] == 'feature' else 'Multibot error: ') + normalized(row['want'])
+    signature = 'multibot-feedback-signature:v1:' + row['signature']
+    marker = 'multibot-feedback-report:v1:' + row['id']
+    with wish_lock('reports:' + PROJECT):
+        matching = []
+        for task in pages('tasks', 'task', 'list', '--project', PROJECT, '--status', 'Normal'):
+            if not isinstance(task.get('title'), str):
+                raise BoardError('invalid task response')
+            section = task.get('section', '')
+            if isinstance(section, dict):
+                section = section.get('name', section.get('section_title', ''))
+            if normalized(str(section)) in ('done', 'closed', 'completed', 'archive', 'deleted'):
+                continue
+            if (normalized(task.get('title', '')) in (normalized(title), normalized(row['want'])) or
+                    signature in str(task.get('description', ''))):
+                if not re.fullmatch(r'(?:IGSH|SOFT)-\d+', task.get('ticketNumber', '')):
+                    raise BoardError('invalid task reference')
+                matching.append(task)
+        description = report_description(row)
+        if matching:
+            task = min(matching, key=lambda task: int(task['ticketNumber'].split('-')[1]))
+            if marker not in str(task.get('description', '')) and not any(marker in str(item.get('text', item.get('commentText', ''))) for item in comments(task)):
+                response = cli('comment', 'add', task['ticketNumber'], '--project', PROJECT, '--text', description)
+                if response.get('success') is not True or response.get('routedTo') != 'log':
+                    raise BoardError('report update not confirmed')
+                if not any(marker in str(item.get('text', item.get('commentText', ''))) for item in comments(task)):
+                    raise BoardError('report update not confirmed')
+        else:
+            response = cli('task', 'create', '--project', PROJECT, '--title', title,
+                           '--description', description, '--labels', ','.join(sorted(LABELS | {owner})))
+            task = response.get('task')
+            if response.get('success') is not True or not isinstance(task, dict) or not re.fullmatch(r'(?:IGSH|SOFT)-\d+', task.get('ticketNumber', '')):
+                raise BoardError('report creation not confirmed')
+            confirmed = cli('task', 'get', task['ticketNumber']).get('tasks', [])
+            if not any(item.get('ticketNumber') == task['ticketNumber'] and marker in str(item.get('description', '')) for item in confirmed):
+                raise BoardError('report creation not confirmed')
+        confirm_attachments(task['ticketNumber'], snapshots)
+        return 'submitted', ticket_url(task)
+
+
 def save(row):
     path = state_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -360,6 +484,8 @@ def ticket_url(task):
 
 
 def submit(row, snapshots):
+    if row.get('report'):
+        return submit_report(row, snapshots)
     agent = identity()
     board_labels()
     title = PREFIX + normalized(row['want'])
@@ -470,15 +596,21 @@ def rank():
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog='multibot-feedback', description='Save a wish locally and file it on the board when a token is available or after drain.')
+    parser = argparse.ArgumentParser(prog='multibot-feedback', description='Save feedback locally and file it through the existing board intake.')
     parser.add_argument('want', nargs='?')
     parser.add_argument('--why', default='')
+    parser.add_argument('--report', action='store_true', help='file a detailed error report instead of a wish')
+    parser.add_argument('--kind', choices=('error', 'feature'), default='error')
+    parser.add_argument('--expected', default='')
+    parser.add_argument('--actual', default='')
+    parser.add_argument('--step', action='append', default=[], help='recent turn or command; keeps the last six, trimmed and redacted')
+    parser.add_argument('--signature', default='', help='stable problem signature for duplicate matching')
     parser.add_argument('--attach', action='append', default=[], metavar='PNG', help='attach a reviewed PNG (up to four)')
     parser.add_argument('--drain', action='store_true', help='file queued wishes with the current agent token')
     parser.add_argument('--rank', '--weekly', action='store_true')
     args = parser.parse_args(argv)
     if args.drain:
-        if args.want or args.why or args.attach or args.rank:
+        if args.want or args.why or args.attach or args.rank or args.report or args.expected or args.actual or args.step or args.signature:
             parser.error('drain does not accept a wish')
         try:
             filed, failures, urls = drain_queue()
@@ -494,7 +626,7 @@ def main(argv):
             print(f'multibot-feedback: {failures} queued wishes still waiting', file=sys.stderr)
         return 0
     if args.rank:
-        if args.want or args.why or args.attach:
+        if args.want or args.why or args.attach or args.report or args.expected or args.actual or args.step or args.signature:
             parser.error('ranking does not accept a wish')
         try:
             rank()
@@ -506,10 +638,12 @@ def main(argv):
     if not want:
         print(EMPTY_WANT, file=sys.stderr)
         return 2
-    if contains_secret(want + '\n' + args.why):
+    if not args.report and (args.expected or args.actual or args.step or args.signature or args.kind != 'error'):
+        parser.error('report fields require --report')
+    if not args.report and contains_secret(want + '\n' + args.why):
         print('multibot-feedback: remove credentials from feedback', file=sys.stderr)
         return 2
-    row = feedback_row(want, args.why.strip())
+    row = report_row(args) if args.report else feedback_row(want, args.why.strip())
     if contains_secret('\n'.join(str(value) for value in row.values())):
         print('multibot-feedback: remove credentials from feedback context', file=sys.stderr)
         return 2
