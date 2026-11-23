@@ -2798,7 +2798,7 @@ HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
-                      "Saved locally; an authorized agent token also submits or votes on the board.")
+                      "Saved locally; without an agent token, the host account files it on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
@@ -4307,6 +4307,20 @@ def host_fresh_start(provider, sid, tmux, session, handover_file=None):
         host_fresh_error(provider, sid, tmux, session, "Could not save the handover.")
         return dict(status="error", reason="handover_write_failed")
     return dict(status="started")
+
+
+def host_feedback_drain_board():
+    if not os.environ.get("HT_TOKEN", "").strip():
+        return False
+    tool = HOME / HOST_RUNTIME_TOOLS / "multibot-feedback"
+    if not tool.is_file():
+        return False
+    try:
+        result = subprocess.run([str(tool), "--drain"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 def host_fresh_drain_queued(provider, sid, tmux, session):
@@ -6259,6 +6273,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
+            if idle and host_feedback_drain_board():
+                continue
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
@@ -8612,7 +8628,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 144
+RUNTIME_GENERATION = 145
 
 if __name__ == '__main__':
     import base64 as _base64
