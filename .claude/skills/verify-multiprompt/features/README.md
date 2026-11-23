@@ -14,6 +14,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [CI repair receipt](ci-repair-receipt.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Chat feedback command](agent-feedback.md).
 
 Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
 

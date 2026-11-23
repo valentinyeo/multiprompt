@@ -65,8 +65,21 @@ test('the service route receipt is path-filtered, runs the base proof and owns i
   for (const file of ['service/worker.js', 'service/test/secrets.test.js']) assert.ok(map.match(/^Source files: (.+)$/m)[1].split(', ').includes(file), file);
 });
 
+test('feedback command checks stay bounded, path-filtered and Linux-only', () => {
+  const source = fs.readFileSync(path.join(root, '.github/workflows/feedback-command.yml'), 'utf8');
+  const map = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/agent-feedback.md'), 'utf8');
+  assert.match(source, /pull_request:\n    paths:/);
+  assert.match(source, /runs-on: ubuntu-latest/);
+  assert.match(source, /timeout-minutes: 5/);
+  assert.match(source, /timeout 180s python3 tools\/multibot-feedback-test\.py/);
+  assert.match(source, /timeout 60s python3 tools\/multibot-feedback-test\.py BoardFeedbackTest\.test_report_no_token/);
+  assert.match(source, /ci-receipt-summary\.mjs/);
+  assert.doesNotMatch(source, /windows-latest|multibot-feedback-proof\.py/);
+  assert.match(map, /^CI workflow: feedback-command\.yml$/m);
+});
+
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'feedback-command.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
