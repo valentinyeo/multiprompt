@@ -21,6 +21,9 @@
 - Each reader is stored as `<sha256>.py`.
 - Publishing syncs a temporary file.
 - An atomic rename publishes it.
+- Every tool listed in the runtime tool table is published executable.
+- Its mode is set on the temporary file before the rename.
+- An install removes leftover temporary files.
 - Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
 - Fingerprinted launchers replace a different selection with their own bundle.
 - Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
