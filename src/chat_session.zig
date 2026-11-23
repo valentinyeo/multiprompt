@@ -634,6 +634,10 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
         entry.quiet = 0;
         entry.next = @min(entry.next, now);
     }
+    if (key.shell_id == live_shell_id and entry.hidden_wait) {
+        entry.hidden_wait = false;
+        entry.next = @min(entry.next, now);
+    }
     if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
     const known = entry.key;
@@ -700,7 +704,8 @@ fn chatQuietBackoff(quiet: u16) u64 {
     if (quiet < 1) return 4000;
     if (quiet < 2) return 8000;
     if (quiet < 3) return 16000;
-    return 30000;
+    if (quiet < 4) return 30000;
+    return 60000;
 }
 
 fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool, quiet: u16) u64 {
@@ -708,6 +713,7 @@ fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, de
     if (more) return 1000;
     if (delivery and !unchanged) return 250;
     if (streaming) return 0;
+    if (background and !delivery and !unchanged) return 4000;
     if (unchanged and background) return if (delivery) 4000 else chatQuietBackoff(quiet);
     return chatFilePollInterval();
 }
@@ -723,10 +729,11 @@ test "an unchanged background chat waits four seconds and a live chat stays fast
     try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true, 0));
     try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 0));
     try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false, 0));
-    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, false, true, 0));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, false, true, 0));
     try std.testing.expectEqual(@as(u64, 8000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 1));
     try std.testing.expectEqual(@as(u64, 16000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 2));
-    try std.testing.expectEqual(@as(u64, 30000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 60000));
+    try std.testing.expectEqual(@as(u64, 30000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 3));
+    try std.testing.expectEqual(@as(u64, 60000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 60000));
     try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true, 9));
 }
 
@@ -1579,7 +1586,9 @@ pub fn chatFileOnReady() void {
             const live_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
             const background = entry.key.shell_id != live_id;
             entry.quiet = if (entry.unchanged and background and !disk) entry.quiet +| 1 else 0;
-            entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
+            const next_delay = chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
+            entry.next = GetTickCount64() + next_delay;
+            entry.hidden_wait = background and !disk and next_delay > 1000;
             if (belongs_to_active) {
                 active_changed = active_changed or !entry.unchanged or history.revision != (app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15));
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;

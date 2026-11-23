@@ -167,7 +167,7 @@ test('SOFT-1973 an empty poll of a hidden chat backs off and a live chat keeps i
   assert.ok(hidden(50) >= 30_000, 'a long quiet spell is read at most twice a minute');
   assert.equal(hidden(50) <= 60_000, true);
   assert.equal(delay({ unchanged: true, background: false, quiet: 50 }), 500);
-  assert.equal(delay({ unchanged: false, background: true, quiet: 50 }), 500);
+  assert.equal(delay({ unchanged: false, background: true, quiet: 50 }), 4000);
 });
 
 test('SOFT-1973 the other delay branches keep their timings', () => {
