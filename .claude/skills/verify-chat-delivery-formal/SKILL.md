@@ -55,6 +55,8 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-2295 adds only account workspace-archive capability fields to `src/app_state.zig` at `92d1f64d158d669347c3b302220f461c39737888`. Removing those two additions reproduces the recorded file hash; `ChatOutboxEntry` and every other covered file are byte-identical. The coverage hash and sync commit move; the model, decisions, bounds and mutation probes do not change. Hosted CI reruns the existing proofs.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
