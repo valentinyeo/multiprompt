@@ -79,6 +79,8 @@ jobs:
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands
         run: node tools/check-journey-commands.mjs
+      - name: Test server-chat journey keyboard mappings
+        run: node --test tools/verify-server-chat/keyboard-driver.test.mjs
       - name: Test the journey evidence guard
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run

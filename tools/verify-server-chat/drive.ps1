@@ -85,6 +85,17 @@ function Submit-Line([string]$Text) {
     Press @(0x0D) 'Enter: send to real server'
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
+function Paste-Line([string]$Text) {
+    $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    [Windows.Forms.Clipboard]::SetText($Text)
+    $actions.Add(@{ input = 'paste'; text = $Text; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
+    Press @(0x11, 0x56) 'Ctrl+V: paste quoted skill message'
+    [void](Wait-For 'exact composer text' { [ChatDeliveryDesktop]::Text($composer) -ceq $Text })
+    Press @(0x1B) 'Escape: dismiss completion without changing the text'
+    Press @(0x0D) 'Enter: send to real server'
+    [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
+}
 function Server-Snapshot([string]$Name) {
     $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
     $snapshot = ($raw -join "`n") | ConvertFrom-Json
@@ -139,7 +150,7 @@ try {
     $skillText = ($skillQuote.compose -join "`n")
     Submit-Line $skillQuote.busyPrime
     $skillLogStart = (Log-Text).Length
-    Submit-Line $skillText
+    Paste-Line $skillText
       [void](Wait-For 'skill quote server receipt' {
         $snapshot = Server-Snapshot 'skill-quote-server'
         @($snapshot.commands | Where-Object { $_.content -match '<command-name>/pstack:correct</command-name>' }).Count -eq 1 -and

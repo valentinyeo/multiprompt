@@ -17,6 +17,9 @@ class ProviderTest(unittest.TestCase):
         available = json.loads(subprocess.check_output(['node', '-e', 'console.log(JSON.stringify(require("./tools/verify-features.cjs").discoverFeatures().available))'], cwd=ROOT, text=True))
         self.assertIn('server-chat', available, 'Windows verification must offer the real SSH server journey')
 
+    def test_skill_quote_journey_keyboard_mapping(self):
+        subprocess.run(['node', '--test', str(ROOT / 'tools/verify-server-chat/keyboard-driver.test.mjs')], cwd=ROOT, check=True)
+
     def test_skill_quote_wraps_command_markup_in_transcripts(self):
         with tempfile.TemporaryDirectory() as home:
             spec = json.loads((ROOT / 'tools/verify-server-chat/skill-quote.json').read_text())
