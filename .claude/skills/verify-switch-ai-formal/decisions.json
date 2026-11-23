@@ -1,0 +1,8 @@
+{
+  "RefuseBusy": true,
+  "StopOldOnCommit": true,
+  "CommitAfterStartFail": false,
+  "CarryQueuedMessages": true,
+  "SkipLocatorDelete": false,
+  "Providers": "{\"claude\",\"codex\",\"pi\"}"
+}
