@@ -1,0 +1,1 @@
+Grey chat messages submit again after you reopen the app and show Not sent when delivery times out.

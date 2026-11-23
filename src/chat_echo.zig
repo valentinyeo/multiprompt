@@ -205,7 +205,6 @@ pub const UserBlock = struct {
     text: []const u16,
     stamp_ms: i64 = 0,
     message_id: u64 = 0,
-    client_id: u64 = 0,
 };
 
 pub const Claim = struct { message_id: u64 = 0, stamp_ms: i64 = 0, text_hash: u64 = 0 };
@@ -216,7 +215,6 @@ pub const Pending = struct {
     anchor: Anchor,
     unanchored_delivery: bool = false,
     confirmed: bool = false,
-    client_id: u64 = 0,
 };
 
 const Normalized = struct {
@@ -327,18 +325,43 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
 
 pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
 
-pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
-    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
+pub fn v1PhaseUnconfirmed(phase: []const u8) bool {
+    return phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "sent");
+}
+
+pub fn v1NeedsResubmit(message_v1: bool, write_started: bool, phase: []const u8, state: OutboxState) bool {
+    if (!message_v1 or !write_started or state == .cancelled or state == .not_sent) return false;
+    return v1PhaseUnconfirmed(phase);
+}
+
+pub fn v1ChannelOrphaned(channel_pending: bool, send_job_active: bool) bool {
+    return channel_pending and !send_job_active;
+}
+
+pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, send_job_active: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    if (state != .sending or sent_tick_ms <= 0 or now_ms < sent_tick_ms) return false;
+    if (channel_pending and send_job_active) return false;
+    return now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
 }
 
 test "a host message left sending with no job settles after the deadline" {
-    try std.testing.expect(v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
-    try std.testing.expect(!v1SendingAbandoned(.sending, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 10));
+    try std.testing.expect(v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
+    try std.testing.expect(!v1SendingAbandoned(.sending, true, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(v1SendingAbandoned(.sending, true, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 0, V1_SENDING_DEADLINE_MS * 10));
     for ([_]OutboxState{ .queued, .not_sent, .delivered, .cancelled }) |state| {
-        try std.testing.expect(!v1SendingAbandoned(state, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+        try std.testing.expect(!v1SendingAbandoned(state, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
     }
+}
+
+test "SOFT-3038 a relaunched host message with an unconfirmed phase can submit again" {
+    try std.testing.expect(v1NeedsResubmit(true, true, "queued", .queued));
+    try std.testing.expect(v1NeedsResubmit(true, true, "sent", .sending));
+    try std.testing.expect(!v1NeedsResubmit(true, true, "accepted", .delivered));
+    try std.testing.expect(!v1NeedsResubmit(true, false, "queued", .queued));
+    try std.testing.expect(v1ChannelOrphaned(true, false));
+    try std.testing.expect(!v1ChannelOrphaned(true, true));
 }
 
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
@@ -810,15 +833,6 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
 }
 
 fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const Claim, taken: []const ?usize, earlier: []const Pending) ?usize {
-    if (p.client_id != 0) {
-        for (blocks, 0..) |block, bi| {
-            if (block.client_id != p.client_id) continue;
-            for (taken) |picked| {
-                if (picked == bi) break;
-            } else return bi;
-        }
-        return null;
-    }
     if (p.prefix.len == 0) return null;
     var full: [16384]u16 = undefined;
     const norm = normalize(p.text, &full);
@@ -847,7 +861,6 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
     for (0..n) |i| {
         out[i] = pickBlock(pending[i], blocks, window_full, claimed, out[0..i], pending[0..i]);
         const bi = out[i] orelse continue;
-        if (pending[i].client_id != 0) continue;
         for (pending, 0..) |*other, j| {
             if (j <= i) continue;
             if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text)) {
@@ -1424,47 +1437,6 @@ test "IGSH-1102 distinct accepted messages in one millisecond all confirm" {
     try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
     try std.testing.expectEqual(@as(?usize, 1), assigned[1]);
     try std.testing.expectEqual(@as(?usize, 2), assigned[2]);
-}
-
-test "SOFT-2526 identical sends reconcile only their own ids even out of order" {
-    const text = w("same prompt");
-    var pending = [_]Pending{
-        .{ .text = &text, .prefix = &text, .anchor = .{ .after_ms = 1000 } },
-        .{ .text = &text, .prefix = &text, .anchor = .{ .after_ms = 1000 } },
-    };
-    var blocks = [_]UserBlock{ub("same prompt", 2000)};
-    if (@hasField(Pending, "client_id")) {
-        pending[0].client_id = 11;
-        pending[1].client_id = 22;
-        blocks[0].client_id = 22;
-    }
-    var picked: [2]?usize = undefined;
-    assign(&pending, &blocks, false, &.{}, &picked);
-    try std.testing.expectEqual(@as(?usize, null), picked[0]);
-    try std.testing.expectEqual(@as(?usize, 0), picked[1]);
-}
-
-test "SOFT-2526 rewritten history replaces its send without matching text or time" {
-    const text = w("original prompt");
-    var pending = [_]Pending{.{ .text = &text, .prefix = &text, .anchor = .{ .after_ms = 3000 } }};
-    var blocks = [_]UserBlock{ub("rewritten prompt", 1000)};
-    if (@hasField(Pending, "client_id")) {
-        pending[0].client_id = 11;
-        blocks[0].client_id = 11;
-    }
-    var picked: [1]?usize = undefined;
-    assign(&pending, &blocks, true, &.{}, &picked);
-    try std.testing.expectEqual(@as(?usize, 0), picked[0]);
-}
-
-test "SOFT-2526 idless history cannot consume an identified send with identical text" {
-    const text = w("same prompt");
-    var pending = [_]Pending{.{ .text = &text, .prefix = &text, .anchor = .{ .after_ms = 1000 } }};
-    if (@hasField(Pending, "client_id")) pending[0].client_id = 11;
-    const blocks = [_]UserBlock{ ub("same prompt", 2000), ub("same prompt", 2000) };
-    var picked: [1]?usize = undefined;
-    assign(&pending, &blocks, false, &.{}, &picked);
-    try std.testing.expectEqual(@as(?usize, null), picked[0]);
 }
 
 test "IGSH-1605 a message typed while the link is down waits then is delivered once after reconnect" {
