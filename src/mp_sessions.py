@@ -215,6 +215,51 @@ def resolve_workspace(send, listing, workspace):
     return workspace, note
 
 
+def expected_chat_tab_kind(send, target):
+    tab_kind = target.get("spawn_tab_kind")
+    if tab_kind not in send.TAB_KINDS and target.get("sid"):
+        tab_kind = "chat"
+    return tab_kind
+
+
+def reopen_placement_available(send, listing, target, workspace):
+    if isinstance(target.get("after_tab"), int):
+        return True
+    if target.get("group"):
+        return True
+    return workspace_anchor(listing, workspace) is not None
+
+
+def reopen_desktop_preflight(send, listing, target, display):
+    if listing.get("ok") is not True:
+        raise ValueError("desktop is offline; open the desktop app and retry")
+    workspace, _note = resolve_workspace(send, listing, target.get("workspace"))
+    host_name(listing, host_slot())
+    tab_kind = expected_chat_tab_kind(send, target)
+    if tab_kind != "chat":
+        raise ValueError("chat tab must reopen as chat, not shell")
+    present = send.find_tab(listing, target["tmux"])[2]
+    if present:
+        if send.listing_tab_kind(present) != "chat":
+            raise ValueError("desktop tab is a shell tab, not chat")
+        return workspace
+    if not reopen_placement_available(send, listing, target, workspace):
+        raise ValueError("no tab placement is available in workspace " + repr(workspace))
+    return workspace
+
+
+def verify_reopened_chat_tab(send, listing, tmux, workspace):
+    if listing.get("ok") is not True:
+        raise ValueError("desktop is offline after reopen")
+    found_ws, _group, tab = send.find_tab(listing, tmux)
+    if tab is None:
+        raise ValueError("chat tab did not appear on the desktop")
+    if send.listing_tab_kind(tab) != "chat":
+        raise ValueError("desktop reopened a shell tab, not chat")
+    if workspace and found_ws != workspace:
+        raise ValueError("chat tab opened in " + repr(found_ws) + ", not " + repr(workspace))
+
+
 def ensure_visible(send, listing, target, display):
     workspace, note = resolve_workspace(send, listing, target.get("workspace"))
     host = target.get("host") or host_name(listing, host_slot())
@@ -540,11 +585,23 @@ def cmd_restart(args):
         return 0
     if target.get("busy"):
         raise ValueError(target.get("name") or tmux + " is busy; wait for its turn to finish")
-    start_host(send, provider, sid, folder, tmux)
     display = target.get("name") or tmux
-    shown = ensure_visible(send, listing, target, display)
+    workspace = reopen_desktop_preflight(send, listing, target, display)
+    host_started = False
+    try:
+        start_host(send, provider, sid, folder, tmux)
+        host_started = True
+        shown = ensure_visible(send, listing, target, display)
+        if shown.get("ok") is not True:
+            raise ValueError(shown.get("error") or "tab reopen failed")
+        listing = placement_listing(send)
+        verify_reopened_chat_tab(send, listing, tmux, workspace)
+    except (OSError, ValueError, KeyError, TypeError):
+        if host_started:
+            send.reader_cli("stop", provider, sid)
+        raise
     result = dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
-                visible=shown.get("ok") is True, tab=shown.get("tab"))
+                visible=True, tab=shown.get("tab"))
     if shown.get("placement_note"):
         result["placement_note"] = shown["placement_note"]
     print(json.dumps(result, separators=(",", ":")))
@@ -605,6 +662,7 @@ def cmd_close(args):
         return 0
     if target.get("busy") and not args.force:
         raise ValueError((target.get("name") or target["tmux"]) + " is busy; pass --force to close anyway")
+    reopen_desktop_preflight(send, listing, target, target.get("name") or target["tmux"])
     persist_close_placement(send, listing, target)
     tab_closed = None
     if target.get("tab_id"):

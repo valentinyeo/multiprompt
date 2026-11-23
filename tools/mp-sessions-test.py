@@ -61,7 +61,11 @@ elif sys.argv[1] == "session-open":
         tab_id = state.get("next_tab", 60)
         state["next_tab"] = tab_id + 1
         entry = dict(id=tab_id, title=title, host=host, tmux=tmux)
-        if tmux.startswith("live-"):
+        if os.environ.get("MP_SESSIONS_TEST_SHELL_TAB") == "1":
+            entry["kind"] = "shell"
+        elif "--kind" in sys.argv:
+            entry["kind"] = sys.argv[sys.argv.index("--kind") + 1]
+        elif tmux.startswith("live-"):
             entry["kind"] = "chat"
         placed = False
         for ws in listing.get("workspaces") or []:
@@ -524,6 +528,56 @@ class MpSessionsTest(unittest.TestCase):
         reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
         self.assertEqual(reopen[reopen.index("--tmux") + 1], started["tmux"])
         self.assertEqual(reopen[reopen.index("--kind") + 1], "chat")
+
+    def test_SOFT_3131_restart_close_refuse_when_no_workspace_is_visible(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Invisible", "--workspace", "Away", "--group", "Ops",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        self.mark_running(started)
+        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config_before = (self.host / (key + ".config.json")).read_text(encoding="utf-8")
+        no_ws = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "no-workspace-listing.json").read_text(encoding="utf-8"))
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["listing"] = no_ws
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        closed = self.run_sessions("close", "Invisible", MP_SESSIONS_TEST_LIST=json.dumps(no_ws))
+        self.assertEqual(closed.returncode, 2, closed.stderr)
+        self.assertIn("no workspace is visible", closed.stderr)
+        self.assertEqual(config_before, (self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual([call for call in self.events("zsb") if call[0] == "session-close"], [])
+        self.log.write_text("", encoding="utf-8")
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["listing"] = json.loads(listing_after)
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        self.parsed(self.run_sessions("close", "Invisible", MP_SESSIONS_TEST_LIST=listing_after))
+        config_before = (self.host / (key + ".config.json")).read_text(encoding="utf-8")
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["listing"] = no_ws
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        restarted = self.run_sessions("restart", "Invisible", MP_SESSIONS_TEST_LIST=json.dumps(no_ws))
+        self.assertEqual(restarted.returncode, 2, restarted.stderr)
+        self.assertIn("no workspace is visible", restarted.stderr)
+        self.assertEqual([call for call in self.events("host") if call[:2] == ["start", "claude"]], [])
+        self.assertEqual(config_before, (self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+
+    def test_SOFT_3131_restart_refuses_a_shell_tab_and_leaves_the_host_stopped(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Shell risk", "--workspace", "Away", "--group", "Ops",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        self.mark_running(started)
+        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
+        self.parsed(self.run_sessions("close", "Shell risk", MP_SESSIONS_TEST_LIST=listing_after))
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude")), encoding="utf-8")
+        restarted = self.run_sessions("restart", "Shell risk", MP_SESSIONS_TEST_LIST=listing_after,
+                                      MP_SESSIONS_TEST_SHELL_TAB="1")
+        self.assertEqual(restarted.returncode, 2, restarted.stderr)
+        self.assertIn("shell tab", restarted.stderr.casefold())
+        host = self.events("host")
+        self.assertIn(["start", "claude", started["sid"]], host)
+        self.assertIn(["stop", "claude", started["sid"]], host)
+        self.assertGreater(host.index(["stop", "claude", started["sid"]]), host.index(["start", "claude", started["sid"]]))
 
     def test_SOFT_3131_restart_uses_the_front_workspace_when_the_saved_one_is_gone(self):
         away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
