@@ -195,7 +195,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
-| Ctrl+Shift+1 ... 5 | New CMD / TMUX / VPS / PowerShell |
+| Ctrl+Shift+1 ... 8 | New CMD / server tmux / VPS / PowerShell / Bash / Git Bash |
+| Ctrl+Shift+4 / 5 | Open shell on VPS 1 / 2 (also Ctrl+K); on the current server, start in this tab's folder |
 | Ctrl+N | New Multi Bot window |
 | Ctrl+Shift+T | Reopen last closed tab |
 | Alt+Space | Window menu (move/size/min/max) |

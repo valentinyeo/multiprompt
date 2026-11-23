@@ -126,6 +126,20 @@ try {
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
+    $offset = (Log-Text).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open a shell from the server chat'
+    [void](Wait-For 'shell palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    Type-Text 'open shell on vps 1'
+    [void](Wait-For 'server shell palette row' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=19 count=\d+ target=2003(?:\s|$)' })
+    Press @(0x0D) 'Enter: open shell in the chat folder'
+    $folder = Wait-For 'real server shell pane in the chat folder' {
+        $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/shell-folder.py") -Evidence $Evidence -Name ('shell-folder-' + [guid]::NewGuid().ToString('N'))
+        $proof = ($raw -join "`n") | ConvertFrom-Json
+        Save $proof "$Evidence/shell-folder.json"
+        if (@($proof.shells | Where-Object { $_.cwd -ceq $proof.expected }).Count -eq 1) { $proof }
+    }
+    Shot 'shell-folder'
+    $result.cases += @{ name = 'shell-folder'; passed = $true; detail = 'Ctrl+K opened a real tmux shell on the chat server in its folder, including spaces and a literal tilde'; expected = $folder.expected }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {

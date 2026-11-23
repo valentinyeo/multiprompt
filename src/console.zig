@@ -1918,6 +1918,28 @@ fn tmuxHostForMenuIndex(kind_idx: usize) ?u8 {
 pub fn spawnShellFromMenuIndex(kind_idx: usize) bool {
     if (kind_idx >= NUM_BUTTONS) return false;
     const k = MENU_KIND_ORDER[kind_idx];
+    if ((k == .vps or k == .vps2) and app_state.active_shell < app_state.shell_count) {
+        const host: u8 = if (k == .vps2) 1 else 0;
+        const shell = &app_state.shells[app_state.active_shell];
+        if (@import("capacity.zig").remoteHostForShell(shell) == host) {
+            const cwd = if (shell.claude_cwd_len > 0)
+                shell.claude_cwd[0..shell.claude_cwd_len]
+            else if (shell.cached_cwd_len > 0)
+                shell.cached_cwd[0..shell.cached_cwd_len]
+            else
+                @import("vps.zig").shellKnownRemotePath(shell, host) orelse return spawnShell(k);
+            var session_buf: [64]u8 = undefined;
+            const session = std.fmt.bufPrint(&session_buf, "shell-{x}", .{GetTickCount64()}) catch return false;
+            const command = @import("tmux_identity.zig").newSessionCommand(&app_state.g_pending_tmux_cmd, session, cwd) catch return false;
+            app_state.g_pending_tmux_cmd_len = @intCast(command.len);
+            app_state.g_pending_tmux_host = host;
+            defer {
+                app_state.g_pending_tmux_cmd_len = 0;
+                app_state.g_pending_tmux_host = 0;
+            }
+            return spawnShellWithSession(.tmux, session, null, null);
+        }
+    }
     if (tmuxHostForMenuIndex(kind_idx)) |host| {
         app_state.g_pending_tmux_host = host;
         defer app_state.g_pending_tmux_host = 0;

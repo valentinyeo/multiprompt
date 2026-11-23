@@ -10,8 +10,10 @@ root = Path(sys.argv[1])
 sid = 'a1b2c3d4-2567-4000-8000-000000002567'
 sources = {name: base64.b64encode((root / f'src/chat_connectors/{name}.py').read_bytes()).decode() for name in ('claude', 'codex')}
 reader = runpy.run_path(str(root / 'src/chat_history_reader.py'), init_globals=dict(CONNECTOR_SOURCES=sources))
+folder = Path.home() / 'shell proof ~folder'
+folder.mkdir(exist_ok=True)
 subprocess.run(['tmux', 'new-session', '-d', '-s', 'live-ci', '-c', str(Path.home())], check=True)
-result = reader['host_cli'](['enable', 'claude', sid, '--tmux', 'live-ci', '--cwd', str(Path.home())])
+result = reader['host_cli'](['enable', 'claude', sid, '--tmux', 'live-ci', '--cwd', str(folder)])
 assert result['status'] == 'enabled', result
 paths = reader['host_paths']('claude', sid)
 config = reader['host_read'](paths['config'])

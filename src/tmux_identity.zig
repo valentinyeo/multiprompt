@@ -40,6 +40,22 @@ fn quote(writer: *std.Io.Writer, value: []const u8) !void {
     try writer.writeByte('\'');
 }
 
+pub fn newSessionCommand(buf: []u8, session: []const u8, cwd: []const u8) ![]const u8 {
+    if (cwd.len == 0) return error.InvalidDirectory;
+    for (cwd) |c| if (c < 32 or c == 127) return error.InvalidDirectory;
+    var writer = std.Io.Writer.fixed(buf);
+    try writer.writeAll("tmux new-session -s ");
+    try quote(&writer, session);
+    try writer.writeAll(" -c ");
+    if (std.mem.eql(u8, cwd, "~")) {
+        try writer.writeByte('~');
+    } else if (std.mem.startsWith(u8, cwd, "~/")) {
+        try writer.writeAll("~/");
+        try quote(&writer, cwd[2..]);
+    } else try quote(&writer, cwd);
+    return writer.buffered();
+}
+
 pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, create: bool) ![]const u8 {
     var writer = std.Io.Writer.fixed(buf);
     if (identity.len == 0 and @import("chat_view.zig").isLive(session)) {
@@ -156,6 +172,15 @@ test "IGSH-985 guarded attach checks generation and addresses immutable session 
     try std.testing.expect(std.mem.indexOf(u8, command, "new-session") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "refusing to attach") != null);
     try std.testing.expectError(error.InvalidIdentity, attachCommand(&buf, "remote", "bad", false));
+}
+
+test "SOFT-3003 shell start directories preserve spaces, tildes and shell metacharacters" {
+    var buf: [2048]u8 = undefined;
+    try std.testing.expectEqualStrings("tmux new-session -s 'shell-test' -c ~/'chat folder'", try newSessionCommand(&buf, "shell-test", "~/chat folder"));
+    try std.testing.expectEqualStrings("tmux new-session -s 'shell-test' -c ~", try newSessionCommand(&buf, "shell-test", "~"));
+    try std.testing.expectEqualStrings("tmux new-session -s 'shell-test' -c '/work/a'\\''b;$HOME/~'", try newSessionCommand(&buf, "shell-test", "/work/a'b;$HOME/~"));
+    try std.testing.expectError(error.InvalidDirectory, newSessionCommand(&buf, "shell-test", ""));
+    try std.testing.expectError(error.InvalidDirectory, newSessionCommand(&buf, "shell-test", "/work/\nfolder"));
 }
 
 test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
