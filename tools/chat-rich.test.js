@@ -67,7 +67,7 @@ test('pure parser tests are wired and existing Alt+C discovers automatic formatt
 test('copy has button, keyboard, native-control fallback, palette label/results/draw/click and documentation', () => {
   assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362/);
   assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block/);
-  assert.match(src, /g_search_results\[g_search_result_count\] = SEARCH_CHAT_COPY_CODE_OFFSET/);
+  assert.match(src, /(?:g_search_results\[g_search_result_count\] = SEARCH_CHAT_COPY_CODE_OFFSET|chatPaletteRow\(SEARCH_CHAT_COPY_CODE_OFFSET)/);
   assert.match(src, /else if \(is_chat_copy\)/);
   assert.match(src, /if \(target == SEARCH_CHAT_COPY_CODE_OFFSET\)/);
   assert.match(src, /\.a = "Ctrl\+Shift\+D in Chat View"/);

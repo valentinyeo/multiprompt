@@ -110,7 +110,7 @@ test('status todo toggle and whole-conversation find keep distinct palette route
   const sidebar = fs.readFileSync('src/sidebar.zig', 'utf8');
   for (const [name, action] of [['TODO', 'chatToggleTodos'], ['FIND', 'open']]) {
     assert.match(main, new RegExp(`if \\(target == SEARCH_CHAT_${name}_OFFSET\\) \\{[^]*?\\.${action}\\(\\);[^]*?return 0;\\n                \\}`));
-    assert.ok(palette.includes(`= SEARCH_CHAT_${name}_OFFSET;`));
+    assert.ok(palette.includes(`= SEARCH_CHAT_${name}_OFFSET;`) || palette.includes(`chatPaletteRow(SEARCH_CHAT_${name}_OFFSET,`), `${name} palette route`);
     assert.ok(sidebar.includes(`result_idx == SEARCH_CHAT_${name}_OFFSET`));
   }
 });

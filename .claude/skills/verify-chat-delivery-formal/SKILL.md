@@ -57,7 +57,9 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
-SOFT-2295 merges master `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, including SOFT-3038's send recovery and native-probe changes, and retains only the account workspace-archive capability fields in `src/app_state.zig`. Removing those two additions reproduces master's bytes; `ChatOutboxEntry` and every other covered file are byte-identical to master. Coverage was regenerated from the reviewed merged sources, not conflict-merged. This PR adds no change to master's model, decisions, bounds or mutation probes. Hosted CI reruns the merged proofs.
+SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
+
+SOFT-2295 merges master `2035b6a987d9d477c1e5d815f8f8e5df45e89c15`, including its send recovery, native-probe and automatic AI fallback changes. Removing this PR's two account workspace-archive capability additions from `src/app_state.zig` reproduces master's bytes; `ChatOutboxEntry` and every other covered file are byte-identical to master. Coverage was regenerated from the reviewed merged sources, not conflict-merged. This PR adds no change to master's model, decisions, bounds or mutation probes. Hosted CI reruns the merged proofs.
 
 | Source | Covered behavior |
 | --- | --- |
