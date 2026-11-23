@@ -127,9 +127,9 @@ $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $script:zsbPort = 0
 Wait-Until {
     if (-not (Test-Path $log)) { return $false }
-    $listener = [regex]::Match(((Get-Content $log -Raw) -join ''), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
-    if (-not $listener.Success) { return $false }
-    $script:zsbPort = [int]$listener.Groups[1].Value
+    $listeners = [regex]::Matches(((Get-Content $log -Raw) -join ''), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+    if ($listeners.Count -eq 0) { return $false }
+    $script:zsbPort = [int]$listeners[$listeners.Count - 1].Groups[1].Value
     @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
 } 'app-owned loopback tunnel-inbound listener after the restart' 60
 $listed = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list'
