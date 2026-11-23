@@ -716,7 +716,6 @@ const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_RE
 const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
-const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -5396,16 +5395,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_search_from_inbox = false;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = @import("command_palette.zig").startAutoSwitchToggle(app_state.active_shell);
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
                 if (target == SEARCH_CHAT_TODO_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -5506,13 +5495,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                if (target == SEARCH_CHAT_RESYNC_OFFSET or target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    @import("chat_session.zig").chatResync();
+                    clearSearchBackdrop(); showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) _ = @import("chat_auto_switch.zig").startToggle(app_state.active_shell) else @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
