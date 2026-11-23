@@ -1,0 +1,1 @@
+The rest of the app stays responsive when your connection is slow.

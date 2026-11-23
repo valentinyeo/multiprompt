@@ -27,7 +27,7 @@ export function evaluate(directory) {
     const actual = measure(image, rect, capture.theme === 'dark' ? [110, 175, 245] : [30, 90, 170]);
     return { ...capture, rect, ...actual, passed: capture.expected ? actual.pill : actual.ink === 0 && actual.fill === 0 };
   });
-  const required = ['dark', 'light'].flatMap(theme => ['unknown-draft', 'plain-draft', 'plain-sent', 'skill-draft', 'skill-sent'].map(stage => `${theme}-${stage}`));
+  const required = ['dark', 'light'].flatMap(theme => ['unknown-draft', 'plain-draft', 'plain-sent', 'mid-skill-draft', 'mid-skill-sent', 'end-skill-draft', 'end-skill-sent', 'skill-draft', 'skill-sent'].map(stage => `${theme}-${stage}`));
   const passed = required.length === checks.length && required.every(name => checks.some(check => check.name === name)) && checks.every(check => check.passed);
   const summary = { passed, checks };
   fs.writeFileSync(path.join(directory, 'skill-pill-summary.json'), JSON.stringify(summary, null, 2));

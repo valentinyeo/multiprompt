@@ -1,0 +1,1 @@
+The folder list for a new tab keeps your highlight on the folder you chose while the list refreshes.

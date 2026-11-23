@@ -1,0 +1,1 @@
+Clicking a session name in a chat opens that session.
