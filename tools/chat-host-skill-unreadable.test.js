@@ -12,8 +12,9 @@ test('a message with a /word in a folder the host cannot open is sent as typed',
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-unreadable-'));
   try {
     const program = String.raw`
-import sys
+import io, json, sys
 from pathlib import Path
+from types import SimpleNamespace
 outer = {}
 exec(compile(sys.stdin.read(), 'reader', 'exec'), outer)
 r = {'__name__': 'probe'}
@@ -26,7 +27,11 @@ def is_file(self):
     return real(self)
 Path.is_file = is_file
 text = 'on vstack copy the skills /do and /deep-work and /responsive-mode pls'
-got = r['host_claude_lead_skill'](text, locked)
+r['host_config'] = lambda *args: dict(cwd=locked)
+stream = io.BytesIO()
+session = dict(state={}, agent=SimpleNamespace(stdin=stream))
+assert r['host_claude_write']('claude', 'fixture', session, 'message-token', text)
+got = json.loads(stream.getvalue())['message']['content'][0]['text']
 assert got == text, got
 print('sent as typed')
 `;
