@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'skill-menu-links', 'sidebar-click-row', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -177,6 +177,42 @@ try {
         $skillRoot = Join-Path $env:USERPROFILE '.claude/skills/pill-proof'
         New-Item -ItemType Directory -Force $skillRoot | Out-Null
         [IO.File]::WriteAllText((Join-Path $skillRoot 'SKILL.md'), "---`nname: pill-proof`ndescription: isolated skill color proof`n---`nReply with the given text.")
+    }
+    if ($Feature -eq 'skill-menu-links') {
+        $skillHome = Join-Path $env:USERPROFILE '.claude/skills'
+        $linkedSkill = Join-Path $env:USERPROFILE 'linked-skills/valentin-mode'
+        New-Item -ItemType Directory -Force -Path $skillHome, $linkedSkill, (Join-Path $skillHome 'plain-proof') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $linkedSkill 'SKILL.md'), "---`nname: valentin-mode`ndescription: linked skill folder proof`n---`nProve a linked skill folder reaches the Chat View skill menu.")
+        [IO.File]::WriteAllText((Join-Path $skillHome 'plain-proof/SKILL.md'), "---`nname: plain-proof`ndescription: plain skill folder proof`n---`nProve a plain skill folder reaches the Chat View skill menu.")
+        New-Item -ItemType Junction -Path (Join-Path $skillHome 'valentin-mode') -Target $linkedSkill | Out-Null
+        $result.skillFixture = 'A plain skill folder and a real folder link (junction) named valentin-mode under the isolated USERPROFILE .claude/skills.'
+    }
+    if ($Feature -eq 'sidebar-click-row') {
+        $remoteState = Join-Path $scratch 'remote-state'
+        New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $remoteNames = @('verify-row-quiet', 'verify-row-loud')
+        $remotePanes = [ordered]@{}
+        $remoteSids = [ordered]@{}
+        for ($i = 0; $i -lt $remoteNames.Count; $i++) {
+            $remotePanes[$remoteNames[$i]] = 4400 + $i
+            $remoteSids[$remoteNames[$i]] = ('b2c3d4e5-0927-4000-8000-0000000009{0:D2}' -f $i)
+        }
+        $remoteDocument = [ordered]@{ name = 'sidebar-click-row'; fake = $true; mode = 'idle'; suggestion = ''; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
+        [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
+        $env:MP_VERIFY_STATE = $remoteState
+        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 1
+        if ($LASTEXITCODE -ne 0) { throw 'Sidebar row transcript seeding failed' }
+        $quietTab = @{ kind = 'tmux'; name = 'Quiet chat'; manual = $true; tmux_host = 0; tmux_session = $remoteNames[0]; cv = $false; pid = 0; la = [DateTime]::UtcNow.AddMinutes(-30).ToFileTimeUtc() }
+        $loudTab = @{ kind = 'tmux'; name = 'Loud chat'; manual = $true; tmux_host = 0; tmux_session = $remoteNames[1]; cv = $false; pid = 0; la = [DateTime]::UtcNow.AddMinutes(-10).ToFileTimeUtc() }
+        $remoteSeed = @{ active_tab = 1; single_window = $true; tabs = @($quietTab, $loudTab) }
+        $remoteSeedJson = ConvertTo-Json -InputObject $remoteSeed -Depth 6
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
+        $result.seedBoundary = 'Two stand-in tmux tabs saved once before launch, with distinct manual names and activity times, and the newer one selected. Only SSH is replaced; the sidebar rows, the real mouse click and the chat reopen run in the real app.'
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
         $extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }
@@ -644,6 +680,8 @@ try {
         }
         'tmux-binding' { . (Join-Path $PSScriptRoot 'tmux-binding.ps1') }
         'server-shell-input' { . (Join-Path $PSScriptRoot 'server-shell-input.ps1') }
+        'skill-menu-links' { . (Join-Path $PSScriptRoot 'skill-menu-links.ps1') }
+        'sidebar-click-row' { . (Join-Path $PSScriptRoot 'sidebar-click-row.ps1') }
         'relaunch-saved-sessions' {
             . (Join-Path $PSScriptRoot 'control-feature-relaunch-saved-sessions.ps1')
         }
