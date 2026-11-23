@@ -163,3 +163,7 @@ test('SOFT-2526 normalized idless rows keep their place when source offsets chan
 test('SOFT-2526 a narrow replay cannot move a repeated prompt into the older prompt slot', () => {
   runZigTest('SOFT-2526 a narrow replay cannot move a repeated prompt into the older prompt slot');
 });
+
+test('IGSH-934 partial history retains earlier fragments of the same streamed message', () => {
+  runZigTest('IGSH-934 a partial tail retains earlier streamed fragments of the same message');
+});

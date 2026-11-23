@@ -575,13 +575,12 @@ pub const History = struct {
         const Context = struct {
             pub fn hash(_: @This(), key: RowIdentity) u64 {
                 var h = std.hash.Wyhash.init(key.segment);
-                inline for (.{ "role", "id" }) |field| {
+                inline for (.{ "role", "id", "timestamp" }) |field| {
                     const bytes = @field(key, field);
                     std.hash.autoHash(&h, bytes.len);
                     h.update(bytes);
                 }
                 if (key.id.len == 0) {
-                    h.update(key.timestamp);
                     h.update(std.mem.sliceAsBytes(key.text));
                     std.hash.autoHash(&h, key.offset);
                     std.hash.autoHash(&h, key.end);
@@ -598,7 +597,7 @@ pub const History = struct {
 
             pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
                 if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
-                inline for (.{ "role", "id" }) |field| {
+                inline for (.{ "role", "id", "timestamp" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
                 if (lhs.id.len == 0 and (lhs.offset != rhs.offset or lhs.end != rhs.end or

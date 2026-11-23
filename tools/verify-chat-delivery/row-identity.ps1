@@ -23,7 +23,7 @@ function Refresh-IdentityRows {
     [void](Wait-For 'identity menu palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
     $query = 'more menu'
     foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For 'identity more menu selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6466') })
+    [void](Wait-For 'identity more menu selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6466(?:\s|$)') })
     Press @(0x0D) 'Enter: open chat menu'
     $rect = Wait-For 'painted refresh row' {
         $rows = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] menu resync rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
