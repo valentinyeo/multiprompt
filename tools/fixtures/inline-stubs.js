@@ -110,7 +110,16 @@ pub fn providerName(_: u8) []const u8 {
 pub fn revealChatNames(_: []u16, len: usize) usize {
     return len;
 }
-pub fn mentionNote(_: []const u8, _: []const u8, _: []const u8, _: []const u16, _: []u16) ?[]const u16 {
+pub fn mentionNote(_: []const u8, _: []const u16, _: []const u8, _: []u16) ?[]const u16 {
+    return null;
+}
+pub fn composeWireText(_: []const u8, _: []const Chat, text: []const u16, _: []u16) []const u16 {
+    return text;
+}
+pub fn trimWireNote(text: []const u16) []const u16 {
+    return text;
+}
+pub fn mentionContextTail(_: anytype, _: []const u16, _: bool, _: []u8) ?[]const u8 {
     return null;
 }
 pub fn mentionDelivered(_: u64, _: []const u8) bool {
