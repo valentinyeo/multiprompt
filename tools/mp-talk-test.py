@@ -133,10 +133,11 @@ class ChatsTalkTest(unittest.TestCase):
         self.assertEqual(done.returncode, 2)
         self.assertEqual(self.rows(), [])
 
-    def test_IGSH_1865_old_send_form_still_works(self):
+    def test_SOFT_3085_old_send_form_refuses_an_unverified_host(self):
         done = self.run_tool(MP_SEND, "claude", ALPHA, "plain", "--tmux", "live-alpha")
-        self.assertEqual(done.returncode, 3, done.stderr)
-        self.assertEqual(self.rows(), [("claude", ALPHA, "plain")])
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("no live host or pane agent", done.stderr)
+        self.assertEqual(self.rows(), [])
 
     def write_lines(self, path, lines):
         path.parent.mkdir(parents=True, exist_ok=True)
