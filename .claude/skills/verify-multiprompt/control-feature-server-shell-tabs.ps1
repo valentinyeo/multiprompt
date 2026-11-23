@@ -113,6 +113,13 @@ Proof-Check 'SOFT-3002' {
     Proof-Line 'echo before-close > /home/mpverify/shell-restore.txt; echo SOFT3002-BEFORE-CLOSE'
     Wait-Until { (Proof-RestoreText 'restore-before-close') -ceq 'before-close' } 'shell accepted input before closing its tab'
     Snapshot 'SOFT-3002-before-close'
+    $appPid = $process.Id
+    $bridges = @(Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" | Where-Object { $_.ParentProcessId -eq $appPid })
+    if ($bridges.Count -eq 0) { throw 'The app owned no ssh transport to drop before the close' }
+    Save-Json @{ appPid = $appPid; dropped = @($bridges | ForEach-Object { $_.ProcessId }) } 'SOFT-3002-transport-drop.json'
+    foreach ($bridge in $bridges) { Stop-Process -Id $bridge.ProcessId -Force -ErrorAction SilentlyContinue }
+    Wait-Until { (Proof-Attached 'dropped-session') -ceq '0' } 'the dropped transport detached the same tmux session' 60
+    Snapshot 'SOFT-3002-transport-dropped'
     $proofTabsOpen = @((Read-Session).tabs).Count
     Proof-Palette 'close tab' 7110 'SOFT-3002-close-row'
     Wait-Until {
