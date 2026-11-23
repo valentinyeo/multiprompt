@@ -33,11 +33,13 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `2035b6a987d9d477c1e5d815f8f8e5df45e89c15`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `9e1f24d457b173f350f94b38881d3ef57a1e516f`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-3092 makes the host's atomic publish retry a Windows share violation and answers a failed fresh start with its own reason. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow` and `host_dispatch_switch` are byte-identical to the previous sync commit; `host_write` now publishes through `host_publish`, which performs exactly one `os.replace` off Windows and retries a `PermissionError` only on Windows. Write failure stays outside the switch bound, so only the reader's file hash moved and the sync commit names that fix.
 
-SOFT-3092's merge of `2035b6a98` retains master's automatic AI fallback and the Windows publish retry. All six covered reader functions match that master tip exactly. The coverage hashes were regenerated from the merged files; bounds, decisions, probes and properties are unchanged.
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, outside the six covered switch functions, so bounds, decisions, probes and properties are unchanged.
+
+SOFT-3092's merge of `9e1f24d4` retains master's handover dedupe, automatic AI fallback and the Windows publish retry. All six covered reader functions match that master tip exactly. The coverage hashes were regenerated from the merged files; bounds, decisions, probes and properties are unchanged.
 
 | Source | Covered behavior |
 | --- | --- |
