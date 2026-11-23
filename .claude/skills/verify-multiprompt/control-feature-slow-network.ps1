@@ -166,6 +166,7 @@ $result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true -o
 Snapshot 'slow-network-typing'
 
 Save-SlowTimings
+Snapshot 'after'
 $worst = $result.slowNetwork.worstMs
 $hungActions = $result.slowNetwork.hungActions
 $result.checks += @{ name = 'slow-network'; sessions = 2; switches = $switches.Count; typed = $typed.Length; worstMs = $worst; limitMs = $slowLimitMs; hungActions = $hungActions; delayMs = [int]$env:MP_VERIFY_SLOW_MS }
