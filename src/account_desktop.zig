@@ -194,7 +194,11 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
         if (ws >= workspaces.items.len) return error.InvalidLayout;
         const name = try std.unicode.utf16LeToUtf8Alloc(a, shell.name[0..shell.name_len]);
         var state = try @import("tab_state_desktop.zig").capture(a, shell_index);
-        if (!include_local) state.chat_id = 0;
+        if (!include_local) {
+            state.chat_id = 0;
+            state.visible = false;
+            state.hidden_reason = null;
+        }
         try tabs.append(a, .{
             .tab_state = state,
             .kind = if (remote) "tmux" else @tagName(shell.kind),
@@ -224,6 +228,8 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
         if (!known_workspace) continue;
         var portable = try state.dupe(a);
         portable.chat_id = 0;
+        portable.visible = false;
+        portable.hidden_reason = null;
         try tabs.append(a, .{ .tab_state = portable, .name = try a.dupe(u8, state.name), .manual = true, .group = if (state.group) |group| try a.dupe(u8, group) else "", .tmux_session = try a.dupe(u8, state.tmux), .tmux_host = entry.host, .workspace = try a.dupe(u8, state.workspace) });
     };
     const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);

@@ -23,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `a011234bc0990a39aa0e0b2c1f7d2fb5b47d7792`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `9f5b49611a0a1a361479af4ad0ee76b40c08062b`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
 
 SOFT-3140 restores the original single-file helper bundle in `src/chat_session.zig`, keeping health inside `mp_sessions.py`. All six covered functions and both types retain their canonical hashes after regeneration; no scroll expressions, callers, replay boundaries or model assumptions change.
 

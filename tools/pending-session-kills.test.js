@@ -77,8 +77,8 @@ fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: i32) i32 { return 1; }
 ${end}
 var sync_closed = false;
 fn staleLayout(a: std.mem.Allocator) ![]session_layout.Tab {
-    const state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .tmux = "SESSION-ONE", .name = "Draft", .closed = true };
-    var desired = struct { tabs: []const session_layout.Tab }{ .tabs = &.{ .{ .tmux_host = 0, .tmux_session = "SESSION-ONE", .tab_state = if (sync_closed) state else null }, .{ .tmux_host = 1, .tmux_session = "session-one" } } };
+    const closed_state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .tmux = "SESSION-ONE", .name = "Draft", .closed = true };
+    var desired = struct { tabs: []const session_layout.Tab }{ .tabs = &.{ .{ .tmux_host = 0, .tmux_session = "SESSION-ONE", .tab_state = if (sync_closed) closed_state else null }, .{ .tmux_host = 1, .tmux_session = "session-one" } } };
 ${filter}
     return kept.items;
 }

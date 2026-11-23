@@ -271,7 +271,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
                     for (array(field(root, "groups"))) |group| {
                         if (std.mem.eql(u8, name, string(field(group, "name")) orelse "")) tab.group_id = @truncate(uint(group, "id"));
                     }
-                } else tab.group_id = 0;
+                }
             }
         }
 
@@ -391,6 +391,16 @@ test "visits cache distinguishes unknown and empty and rejects invalid arrays" {
     const empty = try parse(std.testing.allocator, "{\"visits\":[]}");
     defer empty.deinit();
     try std.testing.expectEqual(@as(u8, 1), visits(empty.value).known);
+}
+
+test "SOFT-3141 unnamed retained groups keep local ids until normalization" {
+    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Retained\",\"group_id\":17,\"tab_state\":{\"group\":null}},{\"kind\":\"cmd\",\"name\":\"Ungrouped\",\"group_id\":0,\"tab_state\":{\"group\":null}},{\"kind\":\"cmd\",\"name\":\"Named\",\"group_id\":17,\"tab_state\":{\"group\":\"Research\"}}],\"groups\":[{\"id\":29,\"name\":\"Research\"}]}");
+    defer parsed.deinit();
+    var tabs: [3]@import("app_state.zig").SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 3), sessionTabs(parsed.value, &tabs, 9));
+    try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
+    try std.testing.expectEqual(@as(u32, 0), tabs[1].group_id);
+    try std.testing.expectEqual(@as(u32, 29), tabs[2].group_id);
 }
 
 test "IGSH-1533 saved colors distinguish white missing and invalid" {
