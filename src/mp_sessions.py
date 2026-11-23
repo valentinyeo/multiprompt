@@ -90,12 +90,26 @@ def enable_args(provider, sid, folder, tmux):
     return command
 
 
+def desktop_host(listing):
+    hosts = listing.get("hosts") or []
+    slot = host_slot()
+    return hosts[slot] if slot < len(hosts) else None
+
+
+def desktop_tabs(send, listing):
+    host = desktop_host(listing)
+    for workspace, group, tab in send.iter_tabs(listing):
+        if host is None or tab.get("host") == host:
+            yield workspace, group, tab
+
+
 def desktop_state(listing, tab=None, tmux=None):
     online = listing.get("ok") is True
     active = listing.get("active_workspace")
     if active is None and online:
         active = next((ws.get("name") for ws in listing.get("workspaces", []) if ws.get("active")), None)
-    archived = online and tab is None and any(entry.get("tmux") == tmux for entry in listing.get("archived_sessions", []))
+    archived = online and tab is None and any(entry.get("tmux") == tmux and entry.get("host") == desktop_host(listing)
+                                             for entry in listing.get("archived_sessions", []))
     if not online:
         visible, reason = None, "desktop offline"
     elif archived:
@@ -118,7 +132,7 @@ def session_catalog(send, listing):
     names = send.published_names()
     rows = {}
     if listing.get("ok"):
-        for workspace, group, tab in send.iter_tabs(listing):
+        for workspace, group, tab in desktop_tabs(send, listing):
             tmux = tab.get("tmux")
             if not isinstance(tmux, str):
                 continue
@@ -305,8 +319,9 @@ def session_message(send, target, text, sender=None):
 
 def live_catalog_rows(send, listing):
     rows = []
+    tabs = {tab.get("tmux"): (workspace, group, tab) for workspace, group, tab in desktop_tabs(send, listing)} if listing.get("ok") is True else {}
     for chat in send.live_chats():
-        workspace, group, tab = send.find_tab(listing, chat["tmux"]) if listing.get("ok") is True else (None, None, None)
+        workspace, group, tab = tabs.get(chat["tmux"], (None, None, None))
         row = dict(chat, workspace=workspace, group=group,
                    busy=chat.get("state") == "busy", running=chat.get("state") != "stopped",
                    **desktop_state(listing, tab, chat["tmux"]))
@@ -597,7 +612,7 @@ def _last_reply_time(reader, send, provider, sid, folder, tmux):
 def _desktop_tab(send, listing, tmux):
     if listing.get("ok") is not True:
         return None, "UNKNOWN desktop offline"
-    tab = send.find_tab(listing, tmux)[2]
+    tab = next((tab for workspace, group, tab in desktop_tabs(send, listing) if tab.get("tmux") == tmux), None)
     if tab is None:
         return None, None
     cv = tab.get("cv")
