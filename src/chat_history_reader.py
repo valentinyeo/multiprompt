@@ -2792,7 +2792,8 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
-                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
+                      "Helper chats: `mp-helper --help`.\n"
+                      "Chats: `mp-sessions list --workspace mine`, `mp-sessions send`, `mp-sessions --help`.\n"
                       "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
@@ -3431,6 +3432,9 @@ def host_start(provider, sid, source=None):
     if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
     host_clear_stale(provider, sid)
+    owner = host_owner(provider, sid)
+    if owner and owner.get("owner") == "host":
+        return dict(status="error", reason="owner_busy", pid=owner["pid"])
     child = host_spawn(provider, sid, source)
     if child is None:
         return dict(status="error", reason="host_launch_unavailable")
@@ -4490,6 +4494,13 @@ def host_switch_handover(rows, provider, target):
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
+def host_switch_abort(target, new_sid, paths=None):
+    paths = paths if paths is not None else host_paths(target, new_sid)
+    pending = host_read(paths["config"])
+    if isinstance(pending, dict):
+        host_write(paths["config"], dict(pending, enabled=False))
+
+
 def host_switch_ai(provider, sid, target):
     moved = host_switch_follow(sid)
     if moved is not None:
@@ -4506,8 +4517,6 @@ def host_switch_ai(provider, sid, target):
         return dict(status="refused", reason="host_handed_over")
     if host_turn_busy(provider, sid):
         return dict(status="busy", reason="chat_busy")
-    if host_owned(provider, sid):
-        host_stop(provider, sid)
     try:
         rows = host_switch_rows(provider, sid, tmux)
         text = host_switch_handover(rows, provider, target)
@@ -4530,6 +4539,16 @@ def host_switch_ai(provider, sid, target):
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
+    except (OSError, ValueError, sqlite3.Error):
+        return dict(status="error", reason="switch_failed")
+    started = host_start(target, new_sid)
+    if started.get("status") not in ("started", "already"):
+        host_switch_abort(target, new_sid, paths)
+        if host_enabled(provider, sid) and not host_alive(provider, sid):
+            host_start(provider, sid)
+        return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
+                    running=HOST_AI_NAMES[provider], start=started)
+    try:
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -4543,9 +4562,12 @@ def host_switch_ai(provider, sid, target):
         host_write(host_switched_path(), moved_map)
         host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        host_stop(target, new_sid)
+        host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
+    if host_owned(provider, sid):
+        host_stop(provider, sid)
     host_log(provider, sid, "switched_ai", dict(to=target, sid=new_sid))
-    started = host_start(target, new_sid)
     return dict(status="switched", provider=target, sid=new_sid, tmux=tmux, start=started.get("status"))
 
 
@@ -5358,50 +5380,7 @@ def host_cursor_open(provider, sid, tmux, session):
     pass
 
 
-HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
-
-
-def host_skill_file(name, cwd=None):
-    home = Path.home() / ".claude"
-    if ":" in name:
-        plugin, skill = name.split(":", 1)
-        files = [f for r in (home / "plugins" / "cache").glob("*/" + plugin + "/*") for f in (r / "skills" / skill / "SKILL.md", r / "commands" / (skill + ".md"))]
-    else:
-        bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
-        files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
-    return next((f for f in files if host_readable_file(f)), None)
-
-
-def host_readable_file(path):
-    try:
-        return path.is_file()
-    except OSError:
-        return False
-
-
-def host_skill_user_only(path):
-    try:
-        head = path.read_text(errors="replace")[:4000]
-    except OSError:
-        return False
-    return bool(re.search(r"^disable-model-invocation:\s*true\s*$", head, re.M))
-
-
-def host_claude_lead_skill(text, cwd=None):
-    if not isinstance(text, str) or text.lstrip().startswith("/"):
-        return text
-    found = [(m, f) for m in HOST_SKILL_TOKEN.finditer(text) for f in [host_skill_file(m.group(1), cwd)] if f is not None]
-    if not found:
-        return text
-    match = next((m for m, f in found if host_skill_user_only(f)), found[0][0])
-    rest = (text[:match.start()].rstrip() + " " + text[match.end():].lstrip()).strip()
-    return "/" + match.group(1) + (" " + rest if rest else "")
-
-
 def host_claude_write(provider, sid, session, token, text):
-    config = host_config(provider, sid)
-    if not session.get("state", {}).get("fresh_start"):
-        text = host_claude_lead_skill(text, config.get("cwd") if isinstance(config, dict) else None)
     import uuid
     session["pending_recall_uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "multibot:" + token))
     return host_control_send(session, dict(type="user", uuid=session["pending_recall_uuid"],
@@ -6765,6 +6744,7 @@ def host_dispatch_switch(provider, sid):
 def host_dispatch_start(provider, sid):
     if host_backoff(provider, sid) > 0:
         return dict(status="backoff")
+    host_clear_stale(provider, sid)
     if host_owned(provider, sid):
         return dict(status="owned")
     started = host_start(provider, sid)
@@ -8610,7 +8590,7 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-RUNTIME_GENERATION = 144
+RUNTIME_GENERATION = 150
 READER_SOURCE = ('RUNTIME_GENERATION = ' + str(RUNTIME_GENERATION) + '\nCONNECTOR_SOURCES = ' +
                  repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE)
 
