@@ -746,7 +746,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }) catch "new-chat key entry log overflow");
         }
     }
-    if (app_state.g_account_locked or @import("bot_picture.zig").ownsForeground()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+    if (app_state.g_account_locked) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+    if (@import("bot_picture.zig").ownsForeground()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
     app_state.g_last_kb_hook_tick = GetTickCount64();
     if (nCode == HC_ACTION) {
         if (app_state.g_power_deep_idle and app_state.g_main_hwnd != null) {

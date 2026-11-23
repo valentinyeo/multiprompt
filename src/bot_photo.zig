@@ -161,7 +161,7 @@ pub const Preview = struct {
         _ = GdipDisposeImage(self.image);
     }
 
-    pub fn draw(self: Preview, dc: H, rc: w.RECT) void {
+    pub fn paint(self: Preview, dc: H, rc: w.RECT) void {
         var graphics: H = null;
         if (GdipCreateFromHDC(dc, &graphics) != 0 or graphics == null) return;
         defer _ = GdipDeleteGraphics(graphics);

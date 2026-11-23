@@ -46,3 +46,11 @@ test('SOFT-1425 the desktop uses its existing server channel and only Keep impor
   assert.match(source, /ownsForeground\(\) bool/);
   assert.match(read('src/shortcuts.zig'), /bot_picture\.zig"\)\.ownsForeground\(\)/);
 });
+
+test('CI selects the retired client identity field, not an unrelated has_client_id parameter', () => {
+  const workflow = read('.github/workflows/test.yml');
+  assert.ok(workflow.includes("grep -Eq '^[[:space:]]*client_id[[:space:]]*:' .chat-row-base/src/chat_echo.zig"));
+  const field = /^\s*client_id\s*:/m;
+  assert.ok(field.test('    client_id: u64 = 0,'));
+  assert.ok(!field.test('pub fn requeueOnReconnect(state: OutboxState, has_client_id: bool) bool {\n    return has_client_id;\n}'));
+});

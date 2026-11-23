@@ -206,7 +206,7 @@ fn paint(s: *State, dc: w.HANDLE) void {
     var bounds: w.RECT = undefined;
     _ = w.GetClientRect(s.hwnd, &bounds);
     _ = w.FillRect(dc, &bounds, s.brush);
-    if (s.image) |image| image.draw(dc, .{ .left = s.px(120), .top = s.px(112), .right = s.px(312), .bottom = s.px(304) });
+    if (s.image) |image| image.paint(dc, .{ .left = s.px(120), .top = s.px(112), .right = s.px(312), .bottom = s.px(304) });
     if (s.phase == .busy) {
         const tick = w.GetTickCount64() / 240 % 3;
         for (0..3) |i| {

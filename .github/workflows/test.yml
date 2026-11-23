@@ -657,7 +657,7 @@ jobs:
         env:
           CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
         run: |
-          if ! grep -q 'client_id' .chat-row-base/src/chat_echo.zig; then
+          if ! grep -Eq '^[[:space:]]*client_id[[:space:]]*:' .chat-row-base/src/chat_echo.zig; then
             echo 'Base no longer uses identity-only matching'
             exit 0
           fi
