@@ -406,7 +406,7 @@ pub fn build(b: *std.Build) void {
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = stable_optimize,
         }),
-        .filters = &.{"IGSH-991"},
+        .filters = &.{ "IGSH-991", "SOFT-3146" },
     });
     const run_chat_echo_budget_tests = std.Build.Step.Run.create(b, "run chat echo CPU budgets");
     run_chat_echo_budget_tests.addArtifactArg(chat_echo_budget_tests);
