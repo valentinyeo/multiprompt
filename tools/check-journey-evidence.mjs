@@ -6,9 +6,10 @@ export const root = fileURLToPath(new URL('..', import.meta.url));
 export const workflowsDirectory = path.join(root, '.github/workflows');
 
 const evidencePath = /evidence|screenshots?|\.(?:png|bmp|jpe?g|webp)(?:$|['"\s,*])/i;
-const evidenceRoot = /^(?:[a-z0-9_.-]*evidence|screenshots?)$/i;
-const removal = /(?:^|[\s;&|]|-)(?:Remove-Item|rm|rmdir|rd|del)\s+((?:-\w+\s+)*[^\r\n;&|]+)/i;
-const conditionalAlways = /always\s*\(\s*\)/;
+const screenshotName = /\.(?:png|bmp|jpe?g|webp)$/i;
+const screenshotToken = /\.(?:png|bmp|jpe?g|webp)(?:$|[*?'"\s,])/i;
+const removal = /(?:^|[\s;&|]|-)(?:Remove-Item|rm|rmdir|rd|del)\s+([^\r\n;&|]+)/i;
+const fileSuffix = /\.(?:json|log|txt|md|ya?ml)$/i;
 
 export function parseWorkflow(source) {
   const jobs = [];
@@ -57,17 +58,20 @@ function stepPaths(step) {
   return values;
 }
 
-export function evidenceRoots(paths) {
-  const roots = new Set();
+export function evidenceScope(paths) {
+  const directories = new Set();
+  let screenshots = false;
   for (const value of paths) {
     for (const token of value.split(/[\s'",]+/)) {
-      for (const segment of token.split('/')) {
-        const clean = segment.replace(/^\$\{\{[^}]*\}\}/, '').replace(/^['"]|['"]$/g, '');
-        if (clean && evidenceRoot.test(clean)) roots.add(clean);
-      }
+      if (!token) continue;
+      if (screenshotToken.test(token)) screenshots = true;
+      const segments = token.split('/').filter(segment => segment && !/^\$\{\{.*\}\}$/.test(segment));
+      const last = segments[segments.length - 1] || '';
+      if (/[*?]/.test(last) || screenshotName.test(last) || fileSuffix.test(last)) segments.pop();
+      for (const segment of segments) directories.add(segment.toLowerCase());
     }
   }
-  return [...roots];
+  return { directories: [...directories], screenshots };
 }
 
 function removalTargets(step) {
@@ -82,8 +86,10 @@ function removalTargets(step) {
   return targets;
 }
 
-function mentions(target, roots) {
-  return target.split(/[/\\]/).some(segment => roots.includes(segment));
+function removesEvidence(target, scope) {
+  const segments = target.split(/[/\\]/).filter(Boolean).map(segment => segment.toLowerCase());
+  if (scope.directories.some(directory => segments.includes(directory))) return true;
+  return scope.screenshots && screenshotName.test(target);
 }
 
 export function checkJourneyEvidence(files) {
@@ -96,14 +102,16 @@ export function checkJourneyEvidence(files) {
         if (/upload-artifact/.test(step.text.join('\n')) && paths.length) uploads.push({ index, step, paths });
       }
       for (const upload of uploads) {
-        const condition = stepCondition(upload.step);
         const where = `${file}:${upload.step.line} (job ${job.name}, ${upload.paths.join(' ')})`;
-        if (!conditionalAlways.test(condition)) {
+        const condition = stepCondition(upload.step);
+        if (!/always\s*\(\s*\)/.test(condition)) {
           problems.push(`${where}: uploads journey evidence without if: always(), so a failed or cancelled run loses it`);
+        } else if (/(?:success|failure|cancelled)\s*\(\s*\)/.test(condition)) {
+          problems.push(`${where}: uploads journey evidence with ${condition}, which skips the upload when the run fails or is cancelled`);
         }
-        const roots = evidenceRoots(upload.paths);
+        const scope = evidenceScope(upload.paths);
         for (const step of job.steps.slice(0, upload.index)) {
-          const targets = removalTargets(step).filter(target => mentions(target, roots));
+          const targets = removalTargets(step).filter(target => removesEvidence(target, scope));
           if (targets.length) {
             problems.push(`${where}: ${file}:${step.line} removes ${targets.join(' ')} before the upload`);
           }

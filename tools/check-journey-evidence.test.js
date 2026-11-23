@@ -36,6 +36,37 @@ test('removing evidence before its upload fails', () => {
   assert.match(problems[0], /removes evidence before the upload/);
 });
 
+test('an evidence upload that also requires success() fails', () => {
+  for (const condition of ['always() && success()', 'always() && !cancelled()']) {
+    const broken = verify().replace(durableUpload, durableUpload.replace('if: always()', `if: ${condition}`));
+    assert.notEqual(broken, verify(), 'the durable evidence upload moved; update this control');
+    const problems = checkJourneyEvidence({ '.github/workflows/verify.yml': broken });
+    assert.equal(problems.length, 1, problems.join('\n'));
+    assert.match(problems[0], /skips the upload when the run fails or is cancelled/);
+  }
+});
+
+test('removing a screenshot named by a plain path before its upload fails', () => {
+  const source = [
+    'jobs:',
+    '  journey:',
+    '    steps:',
+    '      - name: Drive',
+    '        run: ./drive.ps1',
+    '      - name: Tidy',
+    '        run: Remove-Item output/proof.png -Force',
+    '      - if: always()',
+    '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    '        with:',
+    '          name: proof',
+    '          path: output/proof.png',
+    '',
+  ].join('\n');
+  const problems = checkJourneyEvidence({ '.github/workflows/journey.yml': source });
+  assert.equal(problems.length, 1, problems.join('\n'));
+  assert.match(problems[0], /removes output\/proof\.png before the upload/);
+});
+
 test('removing an evidence subdirectory before its upload fails', () => {
   const removal = '      - name: Drop old screenshots\n        run: rm -rf evidence/negative\n';
   const broken = verify().replace('      - name: Upload durable verification evidence', `${removal}      - name: Upload durable verification evidence`);
