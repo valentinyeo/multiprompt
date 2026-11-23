@@ -3638,6 +3638,11 @@ class SharedQueueDraftTest(unittest.TestCase):
             self.assertEqual(reader.box_draft_text(shown), expected, repr(shown))
         self.assertIsNone(reader.box_draft_text('no prompt here\n'))
 
+    def test_SOFT_2459_box_draft_strips_terminal_reply_codes(self):
+        rule = '─' * 20
+        shown = '❯ \x1b[?1;2creal line\n' + rule + '\n'
+        self.assertEqual(reader.box_draft_text(shown), 'real line')
+
     def test_IGSH_682_box_draft_asks_tmux_for_escapes_without_wrapping(self):
         calls = []
 
