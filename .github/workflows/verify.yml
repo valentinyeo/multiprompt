@@ -501,7 +501,7 @@ jobs:
           if-no-files-found: error
       - name: Check verification contracts
         continue-on-error: true
-        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
+        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/session-caret.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle
         continue-on-error: true
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
@@ -675,7 +675,7 @@ jobs:
           $embeddedRevision = ''
           if ($env:CANDIDATE_ARTIFACT) {
             if ($env:RELEASE_TAG -or $env:VERIFY_APP_REVISION) { throw 'Candidate proof cannot use a published or comparison build' }
-            Copy-Item candidate-bin/multiprompt-x64.exe verify-bin/multibot.exe
+            Copy-Item candidate-bin/multiprompt-x64.exe verify-bin/multiprompt.exe
             Copy-Item candidate-bin/zigshell-bridge-x64.exe verify-bin/zigshell-bridge.exe
             $version = $env:CANDIDATE_VERSION -replace '^v', ''
             $embeddedRevision = $revision
@@ -687,7 +687,7 @@ jobs:
               if ($checks.Count -ne 1) { throw "Expected exactly one x64 checksum for $asset" }
               $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
               if ((Get-FileHash "verify-bin/$asset-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Release checksum mismatch for $asset" }
-              Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$(if ($asset -eq 'multiprompt') { 'multibot' } else { $asset }).exe"
+              Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$asset.exe"
             }
             if ($env:CHAT_SHAPE_PROOF -eq '1') {
               $archive = Join-Path $env:RUNNER_TEMP 'shape-release-extension.zip'
@@ -699,21 +699,21 @@ jobs:
             }
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
-            Copy-Item zig-out/bin/multibot.exe verify-bin/multibot.exe
+            Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
             if ($env:FEATURE -eq 'chat-still') {
               $probe = Get-Content zig-out/bin/chat-still-instrumentation.json -Raw | ConvertFrom-Json
               if ($probe.probe_sha256 -ne (Get-FileHash tools/chat-still/paint.zig -Algorithm SHA256).Hash.ToLower()) { throw 'Chat measurement probe does not match this harness' }
               Copy-Item zig-out/bin/chat-still-instrumentation.json evidence/chat-still-instrumentation.json
             }
-            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multibot.pdb)) { Copy-Item zig-out/bin/multibot.pdb verify-bin/multibot.pdb }
+            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
             $embeddedRevision = $env:VERIFY_REVISION
           }
-          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multibot.exe"))
+          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multiprompt.exe"))
           if (-not $env:RELEASE_TAG -and ($embeddedRevision -cne $revision -or -not $binary.Contains("MPREVISION=$revision;"))) { throw 'Executable source revision mismatch' }
           if (-not $binary.Contains("MPVERSION=$version;")) { throw 'Executable version mismatch' }
-          $hash = (Get-FileHash verify-bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:RELEASE_TAG -eq 'v0.28.946' -and $hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Released946 baseline hash changed' }
           $optimization = if ($env:CHAT_SHAPE_PROOF -eq '1' -and -not $env:RELEASE_TAG) { 'ReleaseSmall' } else { 'published-or-default' }
           "VERIFY_OPTIMIZATION=$optimization" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -1028,21 +1028,21 @@ jobs:
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
           if ($env:VERIFY_CANDIDATE_ARTIFACT) {
-            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } elseif ($mapped.ContainsKey($env:FEATURE)) {
-            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
             foreach ($mode in @('sample', 'above', 'below')) {
               $env:VERIFY_USAGE_PACE_FILE = if ($mode -eq 'sample') { "$pwd/verify-bin/usage-pace-source.json" } else { "$pwd/tools/fixtures/IGSH-997/$mode.json" }
               $directory = "$pwd/evidence/pace-$mode"
               New-Item -ItemType Directory -Force $directory | Out-Null
               Copy-Item evidence/build.json "$directory/build.json"
-              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
+              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
@@ -1107,7 +1107,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Footer test-key build failed' }
             & tools/update-release-fixtures.ps1 -Root $fixture
             if ($LASTEXITCODE -ne 0) { throw 'Footer signed fixtures failed' }
-            $testExe = (Resolve-Path zig-out/bin/multibot.exe).Path
+            $testExe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
             Copy-Item "$env:GITHUB_WORKSPACE/verify-bin/usage-ssh.exe" (Split-Path $testExe)
             $testHash = (Get-FileHash $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($testHash -eq $env:VERIFY_SHA256) { throw 'Test-key executable unexpectedly matches published executable' }
@@ -1153,7 +1153,7 @@ jobs:
         shell: powershell
         run: |
           $driver = if ($env:VERIFY_CANDIDATE_ARTIFACT) { '.claude/skills/verify-multiprompt/drive.ps1' } else { '.claude/skills/verify-multiprompt/control.ps1' }
-          & $driver -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & $driver -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |

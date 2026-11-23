@@ -1464,14 +1464,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
 fn browserFocusHotkey() void {
     const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
@@ -2389,12 +2382,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             var leave_client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &leave_client);
             const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
-            const rearm_sidebar_hover = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
+            const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
                 @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
-            if (rearm_sidebar_hover) {
-                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
-                _ = TrackMouseEvent(&tracking);
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            if (!pointer_in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {
@@ -4488,7 +4478,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
-            if (wp == 0 and app_state.g_starred_workspace) return 0;
+            if (wp == 0 and (app_state.g_starred_workspace or app_state.g_sidebar_view != null)) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -5498,13 +5488,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                if (target == SEARCH_CHAT_RESYNC_OFFSET or target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    @import("chat_session.zig").chatResync();
+                    clearSearchBackdrop(); showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) _ = @import("chat_auto_switch.zig").startToggle(app_state.active_shell) else @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7167,6 +7156,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_sel = 0;
                     return 0;
                 }
+                if (@import("workspace_view_ui.zig").activatePalette(hwnd, target)) return 0;
                 if (target == SEARCH_STARRED_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -8296,6 +8286,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     armBrowserEdgeMaskRaise();
                 }
                 if (focusGuardComposerRepairAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
+                @import("session_caret.zig").repairActiveSessionCaret();
             }
             if (activePaneBorderOn() or chatViewOwnsInput()) {
                 _ = InvalidateRect(hwnd, null, 0);
@@ -8908,6 +8899,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         retry_delay = 100;
                     } else if (landed) {
                         app_state.g_refocus_remaining = 0;
+                        @import("session_caret.zig").repairActiveSessionCaret();
                     } else if (app_state.g_refocus_remaining > 0) {
                         app_state.g_refocus_remaining -= 1;
                         retry = true;
@@ -8984,6 +8976,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (@import("workspace_view_ui.zig").refreshSidebar(hwnd)) return 0;
                 if (app_state.g_starred_workspace and !app_state.g_inbox_active) {
                     loadInboxModel();
                     @import("workspaces.zig").refreshStarredWorkspace();
