@@ -14,7 +14,7 @@
     ">",
     "> quoted line five",
     ">",
-    "> … own question @Builder ?"
+    "> ... own question @Builder ?"
   ],
   "requiredTranscriptTags": [
     "<command-message>pstack:correct</command-message>",
