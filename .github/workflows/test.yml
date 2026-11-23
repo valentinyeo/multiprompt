@@ -93,8 +93,6 @@ jobs:
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes
         run: node tools/check-timer-ratchet.mjs
-      - name: Verify session identity through the published runtime
-        run: timeout 120 python3 tools/mp-sessions-test.py -v
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup

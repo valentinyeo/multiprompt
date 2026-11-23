@@ -213,7 +213,7 @@ class MpSessionsTest(unittest.TestCase):
                         "whoami", "--json", MULTIPROMPT_TAB="live-caller",
                         MP_SESSIONS_TEST_LIST=json.dumps(listing)))
                     self.assertEqual(identity, dict(name=name, sid="caller-session", provider="claude",
-                                                    tmux="live-caller", link="@" + name + "{live-caller}"))
+                                                    tmux="live-caller", link=("@" if " " in name else "") + name + "{live-caller}"))
 
     def test_SOFT_2451_whoami_through_content_addressed_runtime_symlinks(self):
         self.identity_chat()
