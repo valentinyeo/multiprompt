@@ -13,6 +13,7 @@ pub const State = struct {
     sid: ?[]const u8 = null,
     shell: Shell = .tmux,
     agent: u8 = 0,
+    chat_id: u64 = 0,
     cwd: ?[]const u8 = null,
     pinned: bool = false,
     archived: bool = false,
@@ -77,7 +78,7 @@ fn text(value: []const u8, max: usize) bool {
 
 pub fn validate(state: State) !void {
     if (!text(state.host, 255) or !text(state.workspace, 31) or !text(state.name, 255) or state.position >= 256) return error.InvalidState;
-    if (state.user.len > 32 or state.agent > 7) return error.InvalidState;
+    if (state.user.len > 32 or state.agent > 7 or state.chat_id > (1 << 53) - 1) return error.InvalidState;
     if (state.cwd) |cwd| if (!text(cwd, 511)) return error.InvalidState;
     if (state.group) |group| if (!text(group, 255)) return error.InvalidState;
     if (state.sid) |sid| if (!text(sid, 39)) return error.InvalidState;
@@ -126,7 +127,7 @@ pub fn transition(current: ?State, request: Request) !State {
 }
 
 test "SOFT-3141 every verb is idempotent and only open or restore clears closed" {
-    const original = State{ .host = "remote-1", .user = "agent", .workspace = "Research", .position = 1, .kind = .chat, .sid = "session-id", .tmux = "live-fixture", .name = "Fixture", .closed = true };
+    const original = State{ .host = "remote-1", .user = "agent", .workspace = "Research", .position = 1, .kind = .chat, .sid = "session-id", .tmux = "live-fixture", .name = "Fixture", .chat_id = 101, .closed = true };
     inline for (std.meta.tags(Verb)) |verb| {
         var desired = original;
         switch (verb) {
@@ -145,6 +146,7 @@ test "SOFT-3141 every verb is idempotent and only open or restore clears closed"
         try std.testing.expectEqual(verb != .open and verb != .restore, next.closed);
         try std.testing.expectEqualStrings(original.host, next.host);
         try std.testing.expectEqualStrings(original.sid.?, next.sid.?);
+        try std.testing.expectEqual(original.chat_id, next.chat_id);
     }
 }
 

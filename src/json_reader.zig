@@ -254,6 +254,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         if (tab_state == .object) {
             if (string(field(tab_state, "name")) != null) tab.name_len = copyWide(tab_state, "name", &tab.name);
             if (string(field(tab_state, "shell"))) |shell| tab.kind = std.meta.stringToEnum(@TypeOf(tab.kind), shell) orelse tab.kind;
+            if (tab_state.object.contains("chat_id")) tab.chat_id = uint(tab_state, "chat_id");
             const saved_agent = uintDefault(tab_state, "agent", tab.ai_agent);
             if (saved_agent <= 7) tab.ai_agent = @intCast(saved_agent);
             if (string(field(tab_state, "cwd")) != null) {

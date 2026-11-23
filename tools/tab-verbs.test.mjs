@@ -63,4 +63,6 @@ test('account layouts accept the same model and reject divergent identity', () =
   assert.equal(validTabState(state, tab), true);
   assert.equal(validTabState({ ...state, tmux: 'another' }, tab), false);
   assert.equal(validTabState({ ...state, waiting: true, archived: true }, tab), false);
+  assert.equal(validTabState({ ...state, chat_id: 101 }, tab), true);
+  assert.equal(validTabState({ ...state, chat_id: Number.MAX_SAFE_INTEGER + 1 }, tab), false);
 });

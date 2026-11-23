@@ -18,7 +18,7 @@ def pc_state(send):
 
 
 def same_tab_state(left, right):
-    return all(left.get(field) == right.get(field) for field in (*TAB_FIELDS, "shell", "agent"))
+    return all(left.get(field) == right.get(field) for field in (*TAB_FIELDS, "shell", "agent", "chat_id"))
 
 
 def tab_target(view, name, host=None):
@@ -60,7 +60,7 @@ def tab_command(send, args):
         provider = getattr(args, "provider", None)
         agent = TAB_AGENTS.get(provider, 1 if kind == "chat" else 0)
         shell = "tmux" if not tmux.startswith("@shell-") else "cmd" if view["hosts"][slot] == "local" else "vps" if slot == 0 else "vps2"
-        target = dict(shell=shell, agent=agent, cwd=getattr(args, "folder", None), host=view["hosts"][slot], user=(view.get("users") or [""] * 3)[slot],
+        target = dict(shell=shell, agent=agent, chat_id=0, cwd=getattr(args, "folder", None), host=view["hosts"][slot], user=(view.get("users") or [""] * 3)[slot],
                       workspace=workspace, group=getattr(args, "group", None),
                       position=getattr(args, "position", None) or 0, kind=kind,
                       sid=getattr(args, "sid", None), pinned=False, archived=False, waiting=False,

@@ -63,6 +63,7 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
         .sid = if (shell.claude_sid_len > 0) try alloc.dupe(u8, shell.claude_sid[0..shell.claude_sid_len]) else null,
         .shell = std.meta.stringToEnum(model.Shell, @tagName(shell.kind)).?,
         .agent = if (shell.ai_agent == 0 and shell.claude_sid_len > 0) 1 else shell.ai_agent,
+        .chat_id = shell.chat_id,
         .cwd = if (shell.claude_cwd_len > 0) try alloc.dupe(u8, shell.claude_cwd[0..shell.claude_cwd_len]) else if (shell.cached_cwd_len > 0) try alloc.dupe(u8, shell.cached_cwd[0..shell.cached_cwd_len]) else null,
         .pinned = sidebar.effPinnedTop(idx),
         .waiting = shell.inbox_archived and !shell.needs_attention,
@@ -317,16 +318,19 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
         if (live == null) {
             const kind = std.meta.stringToEnum(app.ShellKind, @tagName(next.shell)).?;
             const old_chat_view = app.g_pending_chat_view;
+            const old_chat_id = app.g_pending_chat_id;
             const old_spawn_len = app.g_pending_spawn_cmd_len;
             const old_tmux_len = app.g_pending_tmux_cmd_len;
             const old_resurrect_len = app.g_pending_resurrect_len;
             defer {
                 app.g_pending_chat_view = old_chat_view;
+                app.g_pending_chat_id = old_chat_id;
                 app.g_pending_spawn_cmd_len = old_spawn_len;
                 app.g_pending_tmux_cmd_len = old_tmux_len;
                 app.g_pending_resurrect_len = old_resurrect_len;
             }
             app.g_pending_chat_view = next.kind == .chat;
+            app.g_pending_chat_id = next.chat_id;
             app.g_pending_spawn_cmd_len = 0;
             app.g_pending_tmux_cmd_len = 0;
             app.g_pending_resurrect_len = 0;

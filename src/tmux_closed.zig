@@ -134,6 +134,28 @@ test "IGSH-1043 saved close intent restores without erasing newer local closes" 
     try std.testing.expectEqual(@as(usize, 2), restored.entries.items.len);
 }
 
+test "SOFT-3141 closed canonical records retain draft and runtime identity on disk" {
+    const a = std.testing.allocator;
+    var closed = Closed{};
+    defer closed.entries.deinit(a);
+    try closed.close(a, 0, "live-draft");
+    const state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .agent = 5, .chat_id = 101, .cwd = "/work/draft", .tmux = "live-draft", .name = "Draft", .closed = true };
+    closed.entries.items[0].tab_state = try state.dupe(std.heap.page_allocator);
+    defer closed.reopen(0, "live-draft");
+    const encoded = try std.json.Stringify.valueAlloc(a, closed.entries.items, .{});
+    defer a.free(encoded);
+    var parsed = try json_reader.parse(a, encoded);
+    defer parsed.deinit();
+    var restored = Closed{};
+    defer restored.entries.deinit(a);
+    try restored.restore(a, parsed.value);
+    defer restored.reopen(0, "live-draft");
+    const actual = restored.entries.items[0].tab_state.?;
+    try std.testing.expectEqual(@as(u64, 101), actual.chat_id);
+    try std.testing.expectEqual(@as(u8, 5), actual.agent);
+    try std.testing.expectEqualStrings("/work/draft", actual.cwd.?);
+}
+
 test "IGSH-1043 restored close intent validates host and native session names" {
     const a = std.testing.allocator;
     var closed = Closed{};
