@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Source/model mapping was reviewed at `5c092b7b9f46b9029f1286647a182611776d3124` for the slash-skill fix. The covered rendering and reader functions are unchanged from the previous sync; slash-pill painting and agent-input rewriting are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
+Source/model mapping was reviewed at `975806f28ab4c1863e1b31795ed7164ab675e446` for the slash-skill fix. The covered rendering and reader functions are unchanged from the previous sync; slash-pill painting and agent-input rewriting are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |
