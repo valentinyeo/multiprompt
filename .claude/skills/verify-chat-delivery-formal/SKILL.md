@@ -45,6 +45,8 @@ Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` 
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
+SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one exact-text echo. These execute unchanged in native probes. |

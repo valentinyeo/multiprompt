@@ -1234,10 +1234,30 @@ pub fn applyPendingGroup() void {
     saveSession();
 }
 
+const FrozenPlace = struct {
+    shell_id: u32,
+    place: u64,
+};
+
+var g_frozen_places: [MAX_SHELLS]FrozenPlace = undefined;
+var g_frozen_places_len: usize = 0;
+var g_freeze_rows: [MAX_ROWS]Row = undefined;
+
+inline fn frozenPlaceOf(shell_id: u32) u64 {
+    var lo: usize = 0;
+    var hi: usize = g_frozen_places_len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const frozen = g_frozen_places[mid];
+        if (frozen.shell_id == shell_id) return frozen.place;
+        if (frozen.shell_id < shell_id) lo = mid + 1 else hi = mid;
+    }
+    return 0;
+}
+
 inline fn sidebarUseKey(i: usize) u64 {
-    if (!app_state.g_sidebar_order_frozen) return sidebarLiveUseKey(i);
-    if (app_state.shells[i].frozen_use_key == null) app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
-    return app_state.shells[i].frozen_use_key.?;
+    if (!app_state.g_sidebar_order_frozen or g_frozen_places_len == 0) return sidebarLiveUseKey(i);
+    return frozenPlaceOf(app_state.shells[i].shell_id);
 }
 
 inline fn sidebarLiveUseKey(i: usize) u64 {
@@ -1245,16 +1265,31 @@ inline fn sidebarLiveUseKey(i: usize) u64 {
     return @max(viewed_ms, app_state.shells[i].last_used);
 }
 
+fn frozenPlaceBefore(_: void, a: FrozenPlace, b: FrozenPlace) bool {
+    return a.shell_id < b.shell_id;
+}
+
 pub fn freezeSidebarOrder() void {
     if (app_state.g_sidebar_order_frozen) return;
+    const row_count = layoutRows(&g_freeze_rows);
+    g_frozen_places_len = 0;
+    for (g_freeze_rows[0..row_count]) |row| {
+        if (row.kind != .tab or row.shell_idx >= app_state.shell_count) continue;
+        if (g_frozen_places_len >= MAX_SHELLS) break;
+        g_frozen_places[g_frozen_places_len] = .{
+            .shell_id = app_state.shells[row.shell_idx].shell_id,
+            .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+        };
+        g_frozen_places_len += 1;
+    }
+    std.mem.sort(FrozenPlace, g_frozen_places[0..g_frozen_places_len], {}, frozenPlaceBefore);
     app_state.g_sidebar_order_frozen = true;
-    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
 }
 
 pub fn thawSidebarOrder() bool {
     if (!app_state.g_sidebar_order_frozen) return false;
     app_state.g_sidebar_order_frozen = false;
-    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = null;
+    g_frozen_places_len = 0;
     return true;
 }
 
@@ -5702,6 +5737,73 @@ test "IGSH-2282 a click under the pointer does not move its row until the pointe
     try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
     try std.testing.expectEqual(@as(u32, 2), rows[4].shell_idx);
     try std.testing.expectEqual(@as(u32, 3), rows[5].shell_idx);
+}
+
+test "SOFT-2378 a clicked chat that is rebuilt keeps its row under the pointer" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        _ = thawSidebarOrder();
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_ws_snoozed = saved_snoozed;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 3;
+    app_state.group_count = 0;
+    for (0..3) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4500 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].last_used = 10;
+    app_state.shells[1].last_used = 20;
+    app_state.shells[2].last_used = 30;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
+
+    freezeSidebarOrder();
+    app_state.shells[1] = app_state.empty_shell;
+    app_state.shells[1].shell_id = 4501;
+    app_state.shells[1].favorite = true;
+    app_state.shells[1].workspace = app_state.g_active_workspace;
+    app_state.shells[1].last_used = 9_000_000_000;
+
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
+
+    try std.testing.expect(thawSidebarOrder());
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

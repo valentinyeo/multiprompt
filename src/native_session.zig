@@ -561,6 +561,11 @@ pub fn restyle(shell_id: u32) void {
     mp_terminal_window_report(slot.hwnd.?);
 }
 
+pub fn interrupt(shell_id: u32) void {
+    const slot = find(shell_id) orelse return;
+    emitInput(slot, "\x03");
+}
+
 pub fn copy(hwnd: w.HANDLE) bool {
     return hwnd != null and mp_terminal_window_copy(hwnd) != 0;
 }
