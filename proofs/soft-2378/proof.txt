@@ -1,0 +1,10 @@
+SOFT-2378 sidebar click row, run 45124212860
+release v0.28.1876 (contains ee20a7eb8)
+result.status: passed
+active tab before click: 0, after click: 1
+pointer before click (screen): [95, 188]
+pointer after click (screen): [95, 188]
+pointer at second screenshot (screen): [95, 188]
+clicked row band (client y): 174..183
+row glyph ink overlap under the pointer: 100%
+chat reopen log lines: 8
