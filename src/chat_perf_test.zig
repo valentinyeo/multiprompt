@@ -203,43 +203,22 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
 
-const EchoCpuBudget = struct {
-    const ref_blocks: usize = 6100;
+test "IGSH-991 SOFT-3146 echo assign budget credits per-block scan alongside character volume" {
     const ref_block_chars: usize = 1200;
-    const slack_ratio: f64 = 1.35;
-    const absolute_floor_ms: i64 = 50;
-
-    fn workUnits(blocks: usize, block_chars: usize) u64 {
-        const b = @as(u64, @intCast(blocks));
-        const c = @as(u64, @intCast(block_chars));
-        return b * (c + @as(u64, @intCast(ref_block_chars)));
-    }
-
-    const ref_work_units: u64 = workUnits(ref_blocks, ref_block_chars);
-    const heaviest_work_units: u64 = workUnits(12200, 600);
-
-    fn budgetMs(reference_per_call_ms: f64, units: u64) f64 {
-        const ratio = @as(f64, @floatFromInt(units)) / @as(f64, @floatFromInt(ref_work_units));
-        const scaled = reference_per_call_ms * ratio * slack_ratio;
-        return @max(@as(f64, @floatFromInt(absolute_floor_ms)), scaled);
-    }
-};
-
-test "SOFT-3146 echo assign budget credits per-block scan alongside character volume" {
-    const heavy = EchoCpuBudget.workUnits(12200, 600);
-    const budget = EchoCpuBudget.budgetMs(32, heavy);
+    const ref_work_units: u64 = 6100 * (ref_block_chars + ref_block_chars);
+    const heavy_units: u64 = 12200 * (600 + ref_block_chars);
+    const ratio = @as(f64, @floatFromInt(heavy_units)) / @as(f64, @floatFromInt(ref_work_units));
+    const budget = @max(@as(f64, 50), 32 * ratio * 1.35);
     try std.testing.expect(62 <= budget);
     try std.testing.expect(124 > budget);
 }
 
 test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled budget on long histories" {
     const Bench = struct {
-        const ref_blocks: usize = EchoCpuBudget.ref_blocks;
-        const ref_block_chars: usize = EchoCpuBudget.ref_block_chars;
-        const ref_work_units: u64 = EchoCpuBudget.ref_work_units;
-        const heaviest_work_units: u64 = EchoCpuBudget.heaviest_work_units;
-        const slack_ratio: f64 = EchoCpuBudget.slack_ratio;
-        const absolute_floor_ms: i64 = EchoCpuBudget.absolute_floor_ms;
+        const ref_blocks: usize = 6100;
+        const ref_block_chars: usize = 1200;
+        const slack_ratio: f64 = 1.35;
+        const absolute_floor_ms: i64 = 50;
         const tick_ms: f64 = 15.625;
         const min_batch_ms: i64 = 100;
         const ref_trials: usize = 5;
@@ -248,11 +227,18 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
 
         const Measured = struct { per_call_ms: f64, batch_ms: i64, wall_ms: i64, picked: ?usize, reps: usize };
 
+        const ref_work_units: u64 = workUnits(ref_blocks, ref_block_chars);
+        const heaviest_work_units: u64 = workUnits(12200, 600);
+
         fn workUnits(blocks: usize, block_chars: usize) u64 {
-            return EchoCpuBudget.workUnits(blocks, block_chars);
+            const b = @as(u64, @intCast(blocks));
+            const c = @as(u64, @intCast(block_chars));
+            return b * (c + @as(u64, @intCast(ref_block_chars)));
         }
         fn budgetMs(reference_per_call_ms: f64, units: u64) f64 {
-            return EchoCpuBudget.budgetMs(reference_per_call_ms, units);
+            const ratio = @as(f64, @floatFromInt(units)) / @as(f64, @floatFromInt(ref_work_units));
+            const scaled = reference_per_call_ms * ratio * slack_ratio;
+            return @max(@as(f64, @floatFromInt(absolute_floor_ms)), scaled);
         }
         fn repsFor(reference_per_call_ms: f64, units: u64) usize {
             const ratio = @as(f64, @floatFromInt(units)) / @as(f64, @floatFromInt(ref_work_units));

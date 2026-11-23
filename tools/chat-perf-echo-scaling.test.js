@@ -57,8 +57,9 @@ test('CPU991 measures a same-volume reference before enforcing scaled budgets', 
   assert.match(source, /reference_per_call_ms/);
   assert.match(source, /ref_blocks: usize = 6100/);
   assert.match(source, /ref_block_chars: usize = 1200/);
-  assert.match(source, /const heaviest_work_units: u64 = workUnits\(12200, 600\)/);
+  assert.match(source, /heaviest_work_units: u64 = workUnits\(12200, 600\)/);
   assert.match(source, /return b \* \(c \+ @as\(u64, @intCast\(ref_block_chars\)\)\)/);
+  assert.match(source, /IGSH-991 SOFT-3146 echo assign budget credits per-block scan alongside character volume/);
   assert.match(source, /slack_ratio: f64 = 1\.35/);
   assert.match(source, /absolute_floor_ms: i64 = 50/);
   assert.match(source, /CPU960 reference_per_call_ms=\{d:\.3\}/);
