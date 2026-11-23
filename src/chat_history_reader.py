@@ -8646,6 +8646,50 @@ def ensure_runtime_tools():
         os.close(directory)
 
 
+def generate_bot_picture(description, *, endpoint="https://api.openai.com/v1/images/generations"):
+    import urllib.error
+    import urllib.request
+    if not isinstance(description, str) or not description.strip() or len(description) > 2000:
+        return dict(error="Describe the picture in 2000 characters or fewer")
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not key:
+        return dict(error="picture service not set up")
+    payload = dict(model="gpt-image-1-mini", prompt=description.strip(), n=1,
+                   size="1024x1024", quality="low", output_format="png")
+    request = urllib.request.Request(endpoint, data=json.dumps(payload).encode(),
+                                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+    limit = 12 * 1024 * 1024
+    try:
+        with urllib.request.urlopen(request, timeout=18) as response:
+            raw = response.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("oversized picture")
+        data = json.loads(raw).get("data")
+        if not isinstance(data, list) or len(data) != 1:
+            raise ValueError("invalid result count")
+        encoded = data[0]["b64_json"]
+        png = base64.b64decode(encoded, validate=True)
+        if len(png) > 8 * 1024 * 1024 or not png.startswith(b"\x89PNG\r\n\x1a\n") or not png.endswith(b"\x00\x00\x00\x00IEND\xaeB\x60\x82"):
+            raise ValueError("invalid png")
+        return dict(png=encoded)
+    except urllib.error.HTTPError as failure:
+        if failure.code in (401, 403):
+            return dict(error="picture service not set up")
+        if failure.code == 429:
+            return dict(error="Picture service is busy. Try again")
+        if failure.code == 400:
+            return dict(error="Could not make that picture. Try another description")
+        return dict(error="Could not make the picture. Try again")
+    except TimeoutError:
+        return dict(error="Picture service took too long. Try again")
+    except urllib.error.URLError:
+        return dict(error="Could not reach the picture service. Try again")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return dict(error="Picture service returned an invalid picture")
+    except OSError:
+        return dict(error="Could not make the picture. Try again")
+
+
 def serve_request(line, source, subscriptions, lock):
     query = None
     rid = 0
@@ -8665,6 +8709,9 @@ def serve_request(line, source, subscriptions, lock):
             if asked in HOST_PROVIDERS:
                 query["_asked_provider"] = asked
             query["provider"], query["sid"] = moved
+        if query.get("op") == "bot_picture":
+            serve_print(dict(id=rid, result=generate_bot_picture(query.get("description"))))
+            return
         if query.get("op") == "engine_info":
             serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1], room_message_protocols=[ROOM_MESSAGE_PROTOCOL]))
             return

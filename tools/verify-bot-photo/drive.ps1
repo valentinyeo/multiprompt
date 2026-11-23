@@ -427,6 +427,12 @@ try {
     $nativeStopped = $nativeJob.Stop()
     Check 'standalone-native-control-cleaned' ($nativeStopped.ActiveProcesses -eq 0)
     $nativeJob.Dispose(); $nativeJob = $null
+    $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+    $env:MP_VERIFY_BOUNDARY = Join-Path $PSScriptRoot 'picture-boundary.py'
+    $env:MP_PICTURE_FIXTURE = Join-Path $profile 'picture-fixture'
+    New-Item -ItemType Directory -Force $env:MP_PICTURE_FIXTURE | Out-Null
+    [IO.File]::WriteAllText((Join-Path $env:MP_PICTURE_FIXTURE 'mode'), 'success')
+    [IO.File]::WriteAllText((Join-Path $settings 'ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
     Start-App
     Shot 'before'
     Look 'bot face' 'tall one eye' 7145
@@ -554,6 +560,7 @@ try {
     $saved = @((State).tabs | Where-Object { $_.name -eq 'Renamed Alpha' })[0]
     Check 'local-appearance-survives-restart' ($saved.face -eq 6 -and $saved.color -eq 0)
     Shot 'reset-restart'
+    . "$PSScriptRoot/generate.ps1"
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message

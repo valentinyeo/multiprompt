@@ -305,6 +305,7 @@ pub const WM_APP_NATIVE_READY: u32 = WM_APP + 219;
 pub const WM_APP_FOOTPRINT_READY: u32 = WM_APP + 220;
 pub const WM_APP_WORKSPACE_MENU_REGISTRY_READY: u32 = WM_APP + 226;
 pub const WM_APP_NEW_ROOM: u32 = WM_APP + 223;
+pub const WM_APP_BOT_PICTURE_READY: u32 = WM_APP + 227;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;

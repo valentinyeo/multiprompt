@@ -95,6 +95,8 @@ jobs:
         run: node tools/check-timer-ratchet.mjs
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
+      - name: Test bot picture generation against a fake endpoint
+        run: timeout 120 python3 tools/bot-picture.test.py -v
       - name: Verify shared reader engine startup
         run: python3 tools/chat-shared-runtime.test.py -v
       - name: Track each message by its id

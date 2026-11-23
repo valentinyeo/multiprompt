@@ -150,6 +150,26 @@ fn decode(path: [*:0]const u16) ?H {
     return image;
 }
 
+pub const Preview = struct {
+    image: H,
+
+    pub fn open(path: [*:0]const u16) ?Preview {
+        return .{ .image = decode(path) orelse return null };
+    }
+
+    pub fn deinit(self: Preview) void {
+        _ = GdipDisposeImage(self.image);
+    }
+
+    pub fn draw(self: Preview, dc: H, rc: w.RECT) void {
+        var graphics: H = null;
+        if (GdipCreateFromHDC(dc, &graphics) != 0 or graphics == null) return;
+        defer _ = GdipDeleteGraphics(graphics);
+        _ = GdipSetInterpolationMode(graphics, 7);
+        _ = GdipDrawImageRectI(graphics, self.image, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+    }
+};
+
 fn lock(digest: [32]u8) H {
     const hex = std.fmt.bytesToHex(digest, .lower);
     var name: [128]u16 = undefined;

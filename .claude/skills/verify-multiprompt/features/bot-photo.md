@@ -1,6 +1,6 @@
 # Bot photos
 
-Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
+Source files: src/bot_picture.zig, src/bot_photo*.zig, tools/verify-bot-photo/*, src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
 
 ## Sub-features
 
@@ -8,7 +8,7 @@ Bot face offers an image and Reset. Images use a centered circle. Reset keeps th
 
 ## How to get to it (user POV)
 
-Open Ctrl+K, choose Bot face, then Upload image or Reset.
+Open Ctrl+K, choose Bot face, then Upload image, Generate or Reset. Generate opens a description and picture preview. Enter makes one picture; Keep saves it, Try again makes one replacement, and Escape discards the preview. No dedicated shortcut is assigned.
 
 ## Driving it with control.ps1
 
@@ -22,6 +22,12 @@ Before launching Multiprompt, an independent legacy Windows file picker must pas
 
 The upload and Cancel paths each Alt+Tab away to a separate, job-owned blank window and back three times with the native picker open. Real keyboard input must return to the same visible, enabled picker owned by the main app window, without focus repair. Each cycle records before/away/return screenshots and independently read native ownership, foreground and enabled state. Upload then proves persisted image pixels; Cancel proves the dialog is destroyed, the main window is enabled and Ctrl+K accepts another query. Both owned jobs must clean up to zero processes.
 IGSH-1894 adds an edge check to every photo crop. The top-left quarter, two pixels in from the crop border, must hold at least max(4, size/8) pixels blended between the photo and the background behind it. An aliased circle has none. Each crop is also saved 8x enlarged as `<name>-zoom.png`, and `result.json` records the blend count per crop under `edges`. Dispatching with `feature=bot-photo` runs at 96 and 144 DPI through the same real monitor scaling as the title-bar journey, and the expanded avatar must measure 36 px times the DPI scale.
+
+### Generate from a description
+
+The same journey also types "orange fox with glasses", checks the three ticking dots in two distinct frames, cancels one preview, tries again on another, and keeps the replacement. It checks that neither preview changes the saved picture, then verifies the kept picture on the sidebar, Starred, title, Inbox and palette and after restart. A helper with no environment key must show exactly "picture service not set up" without contacting the image endpoint. Reset must restore the chosen drawn face.
+
+`generate.ps1` drives real native controls with keyboard and mouse input. `picture-boundary.py` replaces SSH and runtime selection on the hosted Windows runner, unwraps the actual bundled helper, and calls its production image function against a loopback HTTP endpoint with a dummy credential only in that child process. The endpoint is held by an event while the driver captures the busy dots. `picture-fake-calls.jsonl` retains each synthetic request. This proves the desktop flow and image call without paid calls; it does not prove live OpenAI latency or SSH/runtime selection. Existing runtime and server-chat checks cover those boundaries separately.
 
 ### Recorded desktop proof
 

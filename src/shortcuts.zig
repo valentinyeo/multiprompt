@@ -357,6 +357,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+K / right-click tab → Bot face / Bot color", .b = "Remote faces, colors and pictures sync.", .header = false },
+    .{ .a = "Ctrl+K -> Bot face -> Generate", .b = "Describe a bot picture, then Keep or Try again. Reset restores the drawn face.", .header = false },
     .{ .a = "Ctrl+K -> Workspace color", .b = "Choose a workspace default color or Auto. Manual bot colors stay unchanged.", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "Shift+G twice / End / Ctrl+K \"Jump to newest message\"", .b = "Chat View: jump to the newest message; capital GG works only from an empty message box with two Shift+G presses within 600 ms and leaves the box empty; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
@@ -745,7 +746,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }) catch "new-chat key entry log overflow");
         }
     }
-    if (app_state.g_account_locked) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+    if (app_state.g_account_locked or @import("bot_picture.zig").ownsForeground()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
     app_state.g_last_kb_hook_tick = GetTickCount64();
     if (nCode == HC_ACTION) {
         if (app_state.g_power_deep_idle and app_state.g_main_hwnd != null) {

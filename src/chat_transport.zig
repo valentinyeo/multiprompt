@@ -341,6 +341,13 @@ pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Chan
     return channel;
 }
 
+pub fn notifyWindow(channel: *Channel, hwnd: w.HANDLE, message: u32) void {
+    lock(channel.host);
+    defer channel.host.mutex.unlock();
+    channel.notify_hwnd = hwnd;
+    channel.notify_message = message;
+}
+
 fn notify(channel: *const Channel) void {
     if (channel.notify_hwnd != null and channel.notify_message != 0) _ = w.PostMessageW(channel.notify_hwnd, channel.notify_message, channel.user, 0);
 }

@@ -1,4 +1,5 @@
 export const screenOnly = {
+  "picture": "picture previews with Keep or Try again",
   "window": "this window's look and size",
   "chat": "the chat open on this screen",
   "pane": "the browser or computer pane on this screen",
@@ -53,6 +54,7 @@ export const verbs = {
 };
 
 export const screen = {
+  "SEARCH_BOT_PHOTO_GENERATE": "picture",
   "SEARCH_ADDFAVICON_OFFSET": "local",
   "SEARCH_AI_USAGE_OFFSET": "account",
   "SEARCH_APPROVE_DEVICES_OFFSET": "account",

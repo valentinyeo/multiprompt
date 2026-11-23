@@ -1736,6 +1736,7 @@ pub const SEARCH_TABCTX_BOT_COLOR: usize = 7188;
 pub const SEARCH_TABCTX_PIN_PAGE: usize = 7189;
 pub const SEARCH_TABCTX_UNPIN_PAGE: usize = 7190;
 pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = 7191;
+pub const SEARCH_BOT_PHOTO_GENERATE: usize = 7170;
 pub const SEARCH_BOT_PHOTO_UPLOAD: usize = 7193;
 pub const SEARCH_BOT_PHOTO_RESET: usize = 7194;
 pub const SEARCH_TABCTX_UNREAD: usize = 7195;

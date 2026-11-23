@@ -1,2 +1,3 @@
 tools/chat-history-reader-test.py:igsh402-fixture-ids:2027-12-31
 tools/verify-skill-eval.mjs:verify-skill-eval-harness:2027-12-31
+tools/bot-picture.test.py:SOFT-1425-loopback-only-image-fixture-no-paid-calls:2027-12-31

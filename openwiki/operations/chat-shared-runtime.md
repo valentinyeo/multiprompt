@@ -225,3 +225,9 @@ Questions to the user and plan proposals still reach the chat.
 - Old and new process ordering is not promised.
 - Android must migrate its embedded canonical file.
 - Verify both clients before closing paired work.
+
+## Bot picture generation
+
+Desktop sends an optional `bot_picture` operation with `description` over the existing SSH reader channel. The selected server helper reads `OPENAI_API_KEY` from its environment and requests one low-quality 1024-pixel PNG from `gpt-image-1-mini`. It never returns the credential or provider error details. Without a key, it returns `picture service not set up`. There is no fallback model or automatic retry.
+
+The desktop shows a temporary preview. Keep imports it through the same storage and account sync as an uploaded picture. Try again makes one new request; Cancel discards the preview. Reset uses the existing drawn-face reset. Protocol 1, existing operations, account photo data and Android rendering are unchanged. Older helpers reject the unknown operation without making a paid call. Tests use a loopback fake image endpoint, never a paid provider.

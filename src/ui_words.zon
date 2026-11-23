@@ -248,6 +248,7 @@
     .changelog_close = "close",
     .bot_face = "Bot face",
     .bot_color = "Bot color",
+    .bot_photo_generate = "Generate",
     .bot_photo_upload = "Upload image",
     .bot_photo_reset = "Reset to show your chosen face",
     .workspace_color = "Workspace color",
