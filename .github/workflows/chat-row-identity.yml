@@ -1,7 +1,13 @@
 name: Hosted chat row identity
+run-name: Hosted chat row identity ${{ inputs.app_revision || github.head_ref || github.ref_name }}
 
 on:
   workflow_dispatch:
+    inputs:
+      app_revision:
+        description: Optional application commit for the identical-harness negative control
+        required: false
+        type: string
   push:
     branches:
       - soft-2526-reland
@@ -31,6 +37,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-delivery
+      app_revision: ${{ inputs.app_revision || '' }}
       chat_row_identity_proof: true
   regressions:
     runs-on: ubuntu-latest

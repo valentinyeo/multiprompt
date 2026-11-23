@@ -432,7 +432,7 @@ jobs:
     runs-on: windows-latest
     name: ${{ matrix.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || matrix.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
-    continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) || inputs.app_revision != '' }}
+    continue-on-error: ${{ !inputs.chat_row_identity_proof && (contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) || inputs.app_revision != '') }}
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -519,8 +519,11 @@ jobs:
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
         run: node --test tools/chat-working-live-proof.test.mjs
+      - name: Check hosted row identity oracle
+        if: env.CHAT_ROW_IDENTITY_PROOF == '1'
+        run: node --test tools/chat-row-identity-proof.test.js
       - name: Check handed recall evidence contract
-        if: env.CHAT_RECALL_PROOF == '1'
+        if: env.CHAT_RECALL_PROOF == '1' && env.CHAT_ROW_IDENTITY_PROOF != '1'
         run: node --test tools/chat-recall-proof.test.js
       - name: Check unread divider contracts
         continue-on-error: true
