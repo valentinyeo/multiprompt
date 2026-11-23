@@ -18,9 +18,10 @@ path.
 
 The waiting copy matches its transcript line through the shared text
 normalization: a live mention marker (`@Name{live-xxxx}`) the user did not type,
-a slash command wrapped in `<command-message>`/`<command-args>` tags and a long
-paste collapsed to `[Pasted text #N +M lines]` all still match. A row that is
-already drawn also retires the copy, so the message is shown exactly once.
+a slash command wrapped in `<command-message>`/`<command-args>` tags, the
+mention wire note inside `<command-args>`, and a long paste collapsed to
+`[Pasted text #N +M lines]` all still match. A row that is already drawn also
+retires the copy, so the message is shown exactly once.
 
 The persisted send time survives restart. Missing times are recovered from the
 server's message creation time. Startup removes old confirmed echoes, including
@@ -28,9 +29,9 @@ legacy confirmed entries without a usable send time. Resync clears only confirme
 echoes for its chat; it does not reset the server or erase drafts. Receipt
 identities prevent stale message snapshots from recreating retired echoes.
 
-Skill-token reordering can match a receipt-confirmed transcript row. Ordinary
-words must remain in order, and skill multiplicity must match. Without a receipt,
-the original strict text matching remains unchanged. No new controls are added.
+Skill-token reordering matches a transcript row at any outbox state, so a message
+sent into a busy chat reconciles while it is still queued. Ordinary words must
+remain in order, and skill multiplicity must match. No new controls are added.
 
 ## Terminal delivery
 

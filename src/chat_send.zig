@@ -1803,7 +1803,6 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
-            .confirmed = e.message_v1 and chat_echo.phaseTaken(std.mem.sliceTo(&e.message_phase, 0)),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };

@@ -66,7 +66,7 @@ test('the service route receipt is path-filtered, runs the base proof and owns i
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'chat-delivery-formal.yml', 'chat-row-identity.yml', 'chat-switch-ai-formal.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'chat-delivery-formal.yml', 'chat-row-identity.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
