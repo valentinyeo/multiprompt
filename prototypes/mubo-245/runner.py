@@ -52,13 +52,6 @@ def find_claude_cmd():
     if local_root:
         root_path = Path(local_root)
         pkg_dirs.append(root_path / "node_modules" / "@anthropic-ai" / "claude-code")
-        for exe_name in ("claude.exe", "claude"):
-            direct = root_path / "node_modules" / ".bin" / exe_name
-            if direct.is_file():
-                return [str(direct)]
-        for native_hit in (root_path / "node_modules").rglob("claude.exe"):
-            if native_hit.is_file():
-                return [str(native_hit)]
     npm = shutil.which("npm")
     if npm:
         try:
@@ -76,9 +69,18 @@ def find_claude_cmd():
             if cand.is_file():
                 return [node, str(cand)] if cand.suffix.lower() in (".js", ".mjs") and node else [str(cand)]
     if local_root:
-        cmd_shim = Path(local_root) / "node_modules" / ".bin" / "claude.cmd"
-        if cmd_shim.is_file():
-            return [str(cmd_shim)]
+        root_path = Path(local_root)
+        for native_hit in (root_path / "node_modules").rglob("claude.exe"):
+            if native_hit.is_file():
+                return [str(native_hit)]
+        if os.name == "nt":
+            cmd_shim = root_path / "node_modules" / ".bin" / "claude.cmd"
+            if cmd_shim.is_file():
+                return [str(cmd_shim)]
+        else:
+            posix_shim = root_path / "node_modules" / ".bin" / "claude"
+            if posix_shim.is_file():
+                return [str(posix_shim)]
     claude_bin = shutil.which("claude")
     if claude_bin:
         return [claude_bin]

@@ -167,7 +167,16 @@ jobs:
           foreach ($view in @('a', 'b', 'c', 'compare')) {
             $shotName = if ($view -eq 'compare') { 'comparison.png' } else { "option-$view.png" }
             $shotPath = Join-Path (Resolve-Path 'evidence/report').Path $shotName
-            & $edge --headless=new --disable-gpu --hide-scrollbars --window-size=1440,940 --virtual-time-budget=3000 "--screenshot=$shotPath" "${htmlUri}?view=$view"
+            $edgeArgs = @(
+              '--headless=new',
+              '--disable-gpu',
+              '--hide-scrollbars',
+              '--window-size=1440,940',
+              '--virtual-time-budget=3000',
+              "--screenshot=$shotPath",
+              "${htmlUri}?view=$view"
+            )
+            Start-Process -FilePath $edge -ArgumentList $edgeArgs -Wait -NoNewWindow
             if (-not (Test-Path $shotPath)) { throw "Screenshot missing: $shotPath" }
           }
           Get-Content 'evidence/report/summary.md'
