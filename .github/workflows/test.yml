@@ -254,7 +254,9 @@ jobs:
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
+        run: |
+          node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
+          node --test tools/internet-responsive.test.js
       - name: Test the test laptop release check
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/laptop-check/run.test.js

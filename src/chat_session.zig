@@ -39,6 +39,7 @@ const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
 const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
+const GetCurrentThreadId = @import("win32.zig").GetCurrentThreadId;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetEnvironmentVariableW = @import("win32.zig").GetEnvironmentVariableW;
 const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
@@ -1138,7 +1139,13 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
+fn uiThreadBusy() bool {
+    const main = app_state.g_main_hwnd orelse return false;
+    return GetCurrentThreadId() == GetWindowThreadProcessId(main, null);
+}
+
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
+    if (uiThreadBusy()) return false;
     if (host >= app_state.g_chat_history_channels.len) return false;
     const lock_deadline = GetTickCount64() + 15_000;
     while (!app_state.g_chat_history_channel_mutex.tryLock()) {
