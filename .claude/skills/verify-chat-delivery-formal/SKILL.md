@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2525 restores Pi login's one-argument live-reply guard by carrying the checked session and bytes together. Compared with `cc067da0c3d9b2c22b9db957ee1c0c9daff113ab`, all nine covered send functions, the extracted timeout branch and restore guard are byte-identical, and every other recorded file hash is unchanged. Only the send file hash and sync commit move; bounds, decisions, probes and properties remain unchanged.
+
 SOFT-2525's merge of `bb75c5de0` preserves the checked-identity send code and imports only the tunnel notification cache fields into `src/app_state.zig`. `ChatOutboxEntry` and every covered decision are unchanged. The merged file hashes match the coverage record; the sync commit now names that master tip. Bounds, probes and properties remain unchanged.
 
 SOFT-2525 reviewed the identity refactor at `6c15433e833a8c962ccc1c8020720c22aef111e0`. All nine covered send functions, the extracted timeout branch and the restore guard are byte-identical to sync commit `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. Only the send file's hash changes. The new request identity checks sit outside the model's fixed-session boundary. Bounds, decisions, properties and mutation checks remain unchanged. Hosted CI reruns the native probes, counterexample replays and both planted breaks.

@@ -4726,8 +4726,11 @@ pub fn chatPiLogin(provider_id: []const u8) bool {
         showHeaderNoticeAscii("This Pi chat is still starting", 4000, true);
         return false;
     }
-    const line = @import("chat_live.zig").loginLine(std.heap.page_allocator, key.shell_id, std.mem.sliceTo(&key.sid, 0), provider_id) catch return false;
-    if (!chatLiveReply(identity, line)) {
+    const line: ChatLiveReply = .{
+        .identity = identity,
+        .bytes = @import("chat_live.zig").loginLine(std.heap.page_allocator, key.shell_id, std.mem.sliceTo(&key.sid, 0), provider_id) catch return false,
+    };
+    if (!chatLiveReply(line)) {
         showHeaderNoticeAscii("Could not start Pi login; try again", 4000, true);
         return false;
     }
@@ -4735,9 +4738,14 @@ pub fn chatPiLogin(provider_id: []const u8) bool {
     return true;
 }
 
-fn chatLiveReply(identity: @import("session_identity.zig").Session, line: []u8) bool {
-    defer std.heap.page_allocator.free(line);
-    if (@import("chat_session.zig").chatLiveWrite(identity, line)) return true;
+const ChatLiveReply = struct {
+    identity: @import("session_identity.zig").Session,
+    bytes: []u8,
+};
+
+fn chatLiveReply(line: ChatLiveReply) bool {
+    defer std.heap.page_allocator.free(line.bytes);
+    if (@import("chat_session.zig").chatLiveWrite(line.identity, line.bytes)) return true;
     debugLog("[chat] live reply failed");
     return false;
 }
@@ -4771,7 +4779,7 @@ pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {
     const identity = key.checked() orelse return false;
     const live = @import("chat_live.zig");
     const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, key.provider(), std.mem.sliceTo(&key.sid, 0), setting) catch return false;
-    return chatLiveReply(identity, line);
+    return chatLiveReply(.{ .identity = identity, .bytes = line });
 }
 
 fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
@@ -4783,7 +4791,7 @@ fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig
     const key = chatFileIdentityForShell(shell_index);
     const identity = key.checked() orelse return false;
     const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0), request[0..len], live.decisionFor(action)) catch return false;
-    if (!chatLiveReply(identity, line)) return false;
+    if (!chatLiveReply(.{ .identity = identity, .bytes = line })) return false;
     app_state.shells[shell_index].permission_answered = true;
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     var log: [96]u8 = undefined;
@@ -4799,7 +4807,7 @@ fn chatLiveInterrupt(shell_index: u32) bool {
     const key = chatFileIdentityForShell(shell_index);
     const identity = key.checked() orelse return false;
     const line = live.interruptLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0)) catch return false;
-    if (!chatLiveReply(identity, line)) return false;
+    if (!chatLiveReply(.{ .identity = identity, .bytes = line })) return false;
     var log: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] interrupt sent shell={d}", .{shell_id}) catch "");
     return true;
@@ -4814,7 +4822,7 @@ pub fn chatLiveCancelApproval(shell_index: u32) bool {
     const key = chatFileIdentityForShell(shell_index);
     const identity = key.checked() orelse return false;
     const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0), request[0..len], .cancel) catch return false;
-    if (!chatLiveReply(identity, line)) return false;
+    if (!chatLiveReply(.{ .identity = identity, .bytes = line })) return false;
     app_state.shells[shell_index].permission_answered = true;
     app_state.shells[shell_index].permission_presentation.state = .absent;
     @import("chat_render.zig").chatPermissionChanged();
@@ -4904,7 +4912,7 @@ fn chatLiveQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_h
     const len = chatLiveAnswerLabels(group, digit, selected, &buffer) orelse return false;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
     if (live.questionAnswerLine(shell_id, std.heap.page_allocator, chatFileIdentityForShell(shell_index).provider())) |line| {
-        if (!chatLiveReply(identity, line)) return false;
+        if (!chatLiveReply(.{ .identity = identity, .bytes = line })) return false;
     }
     debugLog("[chat] question answered live");
     return true;
@@ -4932,7 +4940,7 @@ fn chatLiveQuestionText(text: []const u16) bool {
     const index = app_state.shells[shell_index].chat_question_index;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
     chatQuestionAdvance(shell_index, index);
-    if (live.questionAnswerLine(shell_id, std.heap.page_allocator, chatFileIdentityForShell(shell_index).provider())) |line| _ = chatLiveReply(identity, line);
+    if (live.questionAnswerLine(shell_id, std.heap.page_allocator, chatFileIdentityForShell(shell_index).provider())) |line| _ = chatLiveReply(.{ .identity = identity, .bytes = line });
     app_state.shells[shell_index].chat_question_other = false;
     app_state.shells[shell_index].chat_question_other_sent = false;
     return true;
@@ -4955,7 +4963,7 @@ fn chatLivePlanReply(text: []const u16) bool {
         live.planReplyLine(std.heap.page_allocator, shell_id, key.provider(), sid, request[0..len], .implement, null) catch return false
     else
         live.planReplyLine(std.heap.page_allocator, shell_id, key.provider(), sid, request[0..len], .feedback, value) catch return false;
-    if (!chatLiveReply(identity, line)) return false;
+    if (!chatLiveReply(.{ .identity = identity, .bytes = line })) return false;
     live.closeRequest(shell_id);
     if (app_state.g_chat_composer_hwnd != null) _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
     app_state.g_chat_draft_dirty = true;
