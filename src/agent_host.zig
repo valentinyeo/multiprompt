@@ -132,7 +132,11 @@ pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid:
 
 pub const MoveTarget = enum { terminal, chat };
 
-pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8) ?[]const u8 {
+pub fn moveRequest(out: []u8, target: MoveTarget, identity: @import("session_identity.zig").Session, cwd: []const u8) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    const tmux = std.mem.sliceTo(&identity.tmux, 0);
     if (!safeSessionId(sid) or !safeName(tmux) or !safePath(cwd)) return null;
     const op = switch (target) {
         .terminal => "host_terminal",
@@ -152,12 +156,19 @@ fn safeProvider(value: []const u8) bool {
     return false;
 }
 
-pub fn restartRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, tmux: []const u8) ?[]const u8 {
+pub fn restartRequest(out: []u8, identity: @import("session_identity.zig").Session) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const provider = identity.provider();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    const tmux = std.mem.sliceTo(&identity.tmux, 0);
     if (!safeSessionId(sid) or !safeName(tmux) or !safeProvider(provider)) return null;
     return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"tmux\":\"{s}\"}}", .{ id, host, provider, sid, tmux }) catch null;
 }
 
-pub fn restartAllRequest(out: []u8, id: u32, host: u8) ?[]const u8 {
+pub fn restartAllRequest(out: []u8, identity: @import("session_identity.zig").Session) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
     return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"all\":true}}", .{ id, host }) catch null;
 }
 
@@ -193,15 +204,20 @@ pub fn restartAllNothing(body: []const u8) bool {
 test "IGSH-1921 a restart asks the reader for one chat or for every idle chat" {
     var out: [512]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":7,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
-        restartRequest(&out, 7, 1, "claude", sid, "live-abc") orelse return error.TestUnexpectedResult);
-    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"cursor\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
-        restartRequest(&out, 9, 0, "cursor", sid, "live-abc") orelse return error.TestUnexpectedResult);
-    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"all\":true}",
-        restartAllRequest(&out, 9, 0) orelse return error.TestUnexpectedResult);
-    try std.testing.expect(restartRequest(&out, 9, 0, "claude", "short", "live-abc") == null);
-    try std.testing.expect(restartRequest(&out, 9, 0, "claude", sid, "live-a;b") == null);
-    try std.testing.expect(restartRequest(&out, 9, 0, "bash", sid, "live-abc") == null);
+    var key = @import("chat_transcript.zig").Identity.init(7, 1, false, sid, "");
+    @memcpy(key.tmux[0..8], "live-abc");
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":7,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}", restartRequest(&out, key.checked().?) orelse return error.TestUnexpectedResult);
+    key.shell_id = 9;
+    key.host = 0;
+    key.agent = 7;
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"cursor\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}", restartRequest(&out, key.checked().?) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"all\":true}", restartAllRequest(&out, key.checked().?) orelse return error.TestUnexpectedResult);
+    key.sid = @splat(0);
+    @memcpy(key.sid[0..5], "short");
+    try std.testing.expect(restartRequest(&out, key.checked().?) == null);
+    @memcpy(key.sid[0..sid.len], sid);
+    @memcpy(key.tmux[0..8], "live-a;b");
+    try std.testing.expect(restartRequest(&out, key.checked().?) == null);
 }
 
 test "IGSH-1921 a restart counts as done once the reader says the host changed" {
@@ -254,13 +270,19 @@ test "IGSH-1653 synced named live chats restore their identity and chat view" {
 test "IGSH-1266 moving a chat asks the reader for the side it should run on" {
     var out: [512]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    try std.testing.expectEqualStrings("{\"op\":\"host_terminal\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}",
-        moveRequest(&out, .terminal, 7, 0, sid, "term-abc", "/home/x/proj") orelse return error.TestUnexpectedResult);
-    try std.testing.expectEqualStrings("{\"op\":\"host_resume\",\"id\":9,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}",
-        moveRequest(&out, .chat, 9, 1, sid, "term-abc", "/home/x/proj") orelse return error.TestUnexpectedResult);
-    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, "short", "term-abc", "/home/x/proj") == null);
-    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, sid, "term-a;b", "/home/x/proj") == null);
-    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, sid, "term-abc", "/home/x proj") == null);
+    var key = @import("chat_transcript.zig").Identity.init(7, 0, false, sid, "");
+    @memcpy(key.tmux[0..8], "term-abc");
+    try std.testing.expectEqualStrings("{\"op\":\"host_terminal\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", moveRequest(&out, .terminal, key.checked().?, "/home/x/proj") orelse return error.TestUnexpectedResult);
+    key.shell_id = 9;
+    key.host = 1;
+    try std.testing.expectEqualStrings("{\"op\":\"host_resume\",\"id\":9,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", moveRequest(&out, .chat, key.checked().?, "/home/x/proj") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(moveRequest(&out, .terminal, key.checked().?, "/home/x proj") == null);
+    key.sid = @splat(0);
+    @memcpy(key.sid[0..5], "short");
+    try std.testing.expect(moveRequest(&out, .terminal, key.checked().?, "/home/x/proj") == null);
+    @memcpy(key.sid[0..sid.len], sid);
+    @memcpy(key.tmux[0..8], "term-a;b");
+    try std.testing.expect(moveRequest(&out, .terminal, key.checked().?, "/home/x/proj") == null);
 }
 
 test "IGSH-1266 a move counts as done once the chat runs in the place that was asked for" {

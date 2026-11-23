@@ -137,6 +137,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
+| Alt+Shift+1 | Workspace view: All sessions by recency |
+| Alt+Shift+2 | Workspace view: Frequent sessions |
+| Alt+Shift+3 | Workspace view: Favorites |
 | Alt+1 | Go to Starred workspace |
 | Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
 | Ctrl+K -&gt; Archive workspace | Hide a workspace without deleting its server sessions |
