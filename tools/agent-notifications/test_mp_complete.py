@@ -120,6 +120,14 @@ class Completion(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 complete.main()
 
+    def test_cross_owner_chat_errors_when_delegate_fails(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            with patch.object(complete, "owner_for_cwd", return_value="inne"), \
+                    patch.object(complete, "owner_response", return_value=None):
+                result = complete.request("11\tslash\tclaude\t-\t/home/inne/projects/app\t\n")
+            self.assertIn("@mp\t11\tslash\terror\t", result)
+            self.assertNotIn("@@MP_END@@\n", result.split("\n")[1:2])
+
     def test_only_current_enabled_plugin_is_scanned(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
             home = Path(tmp)
