@@ -912,3 +912,50 @@ test "SOFT-3084 mention framing separates typing chat from recipients" {
     try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "note @Alpha{live-alpha}"), "live-alpha", &chats, &targets).len);
     try std.testing.expect(std.mem.eql(u16, composeWireText("live-alpha", &chats, w(&storage, &slot, "note @Alpha{live-alpha}"), &wire_buf), w(&storage, &slot, "note @Alpha{live-alpha}")));
 }
+
+test "MUBO-247 real mention shapes separate addressing, reference, fyi and unsure" {
+    const FixtureCase = struct {
+        id: []const u8,
+        kind: []const u8,
+        text: []const u8,
+        address: []const []const u8,
+        fyi: []const []const u8,
+        has_wire_note: bool,
+    };
+    const chats = [_]Chat{
+        .{ .name = "Current", .session = "live-current", .index = 0 },
+        .{ .name = "Builder", .session = "live-builder", .index = 1 },
+        .{ .name = "Reviewer", .session = "live-reviewer", .index = 2 },
+        .{ .name = "Maintainer", .session = "live-maintainer", .index = 3 },
+        .{ .name = "Cleaner", .session = "live-cleaner", .index = 4 },
+        .{ .name = "Reconciler", .session = "live-reconciler", .index = 5 },
+        .{ .name = "Router", .session = "live-router", .index = 6 },
+        .{ .name = "Ops", .session = "live-ops", .index = 7 },
+        .{ .name = "Verifier", .session = "live-verifier", .index = 8 },
+        .{ .name = "Mobile", .session = "live-mobile", .index = 9 },
+    };
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "tools/fixtures/MUBO-247/cases.json", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice([]const FixtureCase, std.testing.allocator, bytes, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.len >= 20);
+    var wide_buf: [1024]u16 = undefined;
+    var wire_buf: [2048]u16 = undefined;
+    var targets_buf: [16]Chat = undefined;
+    for (parsed.value) |case| {
+        try std.testing.expect(case.id.len > 0 and case.kind.len > 0);
+        const wide = utf16(case.text, &wide_buf);
+        const addr = mentionTargets(wide, "live-current", &chats, &targets_buf);
+        try std.testing.expectEqual(case.address.len, addr.len);
+        for (case.address, 0..) |want, i| {
+            try std.testing.expectEqualStrings(want, addr[i].session);
+        }
+        const wire = composeWireText("live-current", &chats, wide, &wire_buf);
+        try std.testing.expectEqual(case.has_wire_note, wire.len > wide.len);
+        if (case.has_wire_note) {
+            try std.testing.expectEqualSlices(u16, wide, trimWireNote(wire));
+        } else {
+            try std.testing.expectEqualSlices(u16, wide, wire);
+        }
+    }
+}
