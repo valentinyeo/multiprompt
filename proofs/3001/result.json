@@ -1,5 +1,5 @@
-﻿{
-    "error":  "Clipboard does not equal the selected terminal row, including its trailing spaces",
-    "name":  "SOFT-3001",
-    "passed":  false
+{
+  "error": "Clipboard does not equal the selected terminal row, including its trailing spaces",
+  "name": "SOFT-3001",
+  "passed": false
 }
