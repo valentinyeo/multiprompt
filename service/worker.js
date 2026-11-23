@@ -446,7 +446,10 @@ export default {
         if (!layoutFeature(req, 'tab_state')) {
           for (const tab of previousLayout?.tabs || []) {
             if (!(tab.tab_state?.closed || tab.tab_state?.archived) || device.kind === 'workspace' && tab.workspace !== device.workspace) continue;
-            if (!layout.tabs.some(other => other.tmux_host === tab.tmux_host && other.tmux_session.toLowerCase() === tab.tmux_session.toLowerCase())) layout.tabs.push(tab);
+            if (!layout.tabs.some(other => other.tmux_host === tab.tmux_host && other.tmux_session.toLowerCase() === tab.tmux_session.toLowerCase())) {
+              if (!layout.workspaces.some(workspace => workspace.name === tab.workspace)) layout.workspaces.push(previousLayout.workspaces.find(workspace => workspace.name === tab.workspace));
+              layout.tabs.push(tab);
+            }
           }
         }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
@@ -457,7 +460,6 @@ export default {
             if (previous?.tab_state) tab.tab_state = previous.tab_state;
             else delete tab.tab_state;
           }
-          projectTabState(tab, layout.tabs.filter(other => other.workspace === tab.workspace).indexOf(tab));
           if (!layoutFeature(req, 'groups')) {
             if (previous?.group !== undefined) tab.group = previous.group;
             else delete tab.group;
@@ -498,7 +500,9 @@ export default {
           } else if (previous?.visits !== undefined || tab.visits !== undefined) {
             tab.visits = [...new Set([...(previous?.visits ?? []), ...(tab.visits ?? [])])].sort((a, b) => a - b).slice(-8);
           }
+          projectTabState(tab, layout.tabs.filter(other => other.workspace === tab.workspace && !(other.tab_state?.closed || other.tab_state?.archived)).indexOf(tab));
         }
+        validateLayout(layout);
         layout.revision = b.base_revision + 1;
         const alive = device.keyHash ? ['EXISTS (SELECT 1 FROM service_keys WHERE hash=? AND revoked=0)', [device.keyHash]] : ['EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)', [device.id, device.account]];
         const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND ' + alive[0]).bind(JSON.stringify(layout), device.account, b.base_revision, ...alive[1]).run();
