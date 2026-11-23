@@ -74,8 +74,42 @@ function Proof-ServerText([string]$Command, [string]$Name) {
     }
 }
 
-function Proof-VisibleContains([string]$Needle) {
-    try { return (Proof-CopyVisible 'visible-contains').Contains($Needle) } catch { return $false }
+function Proof-ConsoleDocumentText([IntPtr]$Shell) {
+    try {
+        $element = [System.Windows.Automation.AutomationElement]::FromHandle($Shell)
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+        $document = $element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -eq $document) { return $null }
+        $pattern = $document.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        return $pattern.DocumentRange.GetText(-1)
+    } catch { return $null }
+}
+
+function Proof-ShellReadableText([ValidateSet('prompt', 'scrollback')][string]$Region = 'scrollback') {
+    if ($script:proofShell -eq [IntPtr]::Zero) { throw 'shell terminal is not set' }
+    if ([VerifyNative]::Class($script:proofShell) -ceq 'ConsoleWindowClass') {
+        $document = Proof-ConsoleDocumentText $script:proofShell
+        if ($null -ne $document) { return $document }
+    }
+    $client = New-Object VerifyNative+Rect
+    [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
+    if ($Region -eq 'prompt') {
+        $y = [int]($client.Bottom - 8)
+        if ($y -lt 2) { $y = 2 }
+        [VerifyNative]::DragSelectClient($script:proofShell, 2, $y, [int]($client.Right - 20), $y)
+    } else {
+        [VerifyNative]::DragSelectClient($script:proofShell, 2, 2, [int]($client.Right - 20), [int]($client.Bottom - 20))
+    }
+    try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
+    Press @(0x11, 0x43) ('Ctrl+C: copy ' + $Region + ' shell text for visibility read')
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        try { if ([System.Windows.Forms.Clipboard]::ContainsText()) { return [System.Windows.Forms.Clipboard]::GetText() } } catch {}
+    }
+    throw ('Ctrl+C did not copy ' + $Region + ' shell text for visibility read')
+}
+
+function Proof-VisibleContains([string]$Needle, [ValidateSet('prompt', 'scrollback')][string]$Region = 'scrollback') {
+    try { return (Proof-ShellReadableText $Region).Contains($Needle) } catch { return $false }
 }
 
 function Proof-Attached([string]$Session, [string]$Name) {
@@ -227,7 +261,7 @@ function Proof-PasteShortcut([string]$Step, [int[]]$Keys, [string]$Label) {
     Proof-SetClipboard ('echo ' + $marker + ' > ' + $receipt)
     Snapshot ($Step + '-clipboard-ready')
     Press $Keys ($Label + ': paste the command into the shell')
-    Wait-Until { Proof-VisibleContains $marker } ($Label + ' pasted the command onto the shell prompt') 15
+    Wait-Until { Proof-VisibleContains $marker 'prompt' } ($Label + ' pasted the command onto the shell prompt') 15
     Snapshot ($Step + '-pasted')
     Proof-FocusShell
     Press @(0x0D) 'Enter: run the pasted command'
@@ -335,6 +369,13 @@ $script:proofVideoError = ''
 try { Proof-StartVideo } catch { $script:proofVideoError = $_.Exception.Message; Write-Host ('Screen recorder did not start: ' + $script:proofVideoError) }
 
 try {
+Proof-SyncKnownHosts
+Wait-Until {
+    $state = Read-Session
+    return $null -ne $state -and $state.shared_server_connection -eq $true
+} 'the launched app published a shared server connection' 90
+Proof-SyncKnownHosts
+
 Proof-Step 'tmux/restore-attached' 'SOFT-3002' {
     Proof-SyncKnownHosts
     Proof-ClearReceipts

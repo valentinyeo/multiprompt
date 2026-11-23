@@ -1,0 +1,16 @@
+﻿[
+    {
+        "handle":  197178,
+        "type":  "ControlType.Window",
+        "pid":  2476,
+        "name":  "Multi Bot",
+        "class":  "ZigShell"
+    },
+    {
+        "handle":  197242,
+        "type":  "ControlType.Pane",
+        "pid":  2476,
+        "name":  "",
+        "class":  "MPTerminal"
+    }
+]
