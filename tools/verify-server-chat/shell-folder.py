@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-expected = Path.home() / 'shell proof ~folder'
+expected = Path.home() / 'shell-proof-~folder'
 if sys.argv[1:] == ['--expected']:
     print(expected)
     raise SystemExit(0)

@@ -11,7 +11,7 @@ Verify on: push, pull_request
 - Type `/clear`, dismiss autocomplete, and send it. The production composer terminates bare trigger tokens with one space, so require exactly one provider receipt of `/clear ` and its rendered reply, then send another message successfully.
 - Authenticate with a new ed25519 key for this job. The private directory and file allow only the Windows runner SID, with inheritance removed.
 - Open Ctrl+K “Open shell on VPS 1” from the chat and independently read the new tmux pane’s cwd. The seeded chat carries its saved folder while its tmux parking pane stays in the login home, so the pane path alone cannot pass.
-- Require the new pane’s cwd to equal the chat folder, including spaces and a literal `~`.
+- Require the new pane’s cwd to equal the chat folder, including a literal `~`. The reader refuses chat folders with spaces, so spaces are covered by the unit regression instead.
 - Retain an actual desktop recording and evidence even when the journey fails.
 
 ## How to get to it (user POV)

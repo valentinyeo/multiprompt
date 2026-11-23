@@ -10,7 +10,7 @@ const result = json('result.json');
 assert.equal(result.status, 'passed');
 assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true], ['shell-folder', true]]);
 const folder = json('shell-folder.json');
-assert.ok(folder.expected.endsWith('/shell proof ~folder'));
+assert.ok(folder.expected.endsWith('/shell-proof-~folder'));
 assert.equal(folder.shells.length, 1);
 assert.equal(folder.shells[0].cwd, folder.expected);
 assert.ok(fs.statSync(path.join(root, 'shell-folder.png')).size > 1000);

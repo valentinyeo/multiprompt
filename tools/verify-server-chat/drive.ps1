@@ -95,7 +95,7 @@ try {
     $env:IGSH_246 = '0'
     $env:PATH = (Split-Path $ssh) + ';' + $env:PATH
     $chatFolder = ((Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/shell-folder.py --expected") -Evidence $Evidence -Name 'chat-folder') -join "`n").Trim()
-    if (-not $chatFolder.EndsWith('/shell proof ~folder')) { throw "Unexpected chat folder: $chatFolder" }
+    if (-not $chatFolder.EndsWith('/shell-proof-~folder')) { throw "Unexpected chat folder: $chatFolder" }
     Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; ccwd = $chatFolder; cv = $false; pid = 0 }) } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
@@ -141,7 +141,7 @@ try {
         if (@($proof.shells | Where-Object { $_.cwd -ceq $proof.expected }).Count -eq 1) { $proof }
     }
     Shot 'shell-folder'
-    $result.cases += @{ name = 'shell-folder'; passed = $true; detail = 'Ctrl+K opened a real tmux shell on the chat server in its folder, including spaces and a literal tilde'; expected = $folder.expected }
+    $result.cases += @{ name = 'shell-folder'; passed = $true; detail = 'Ctrl+K opened a real tmux shell on the chat server in its folder, including a literal tilde'; expected = $folder.expected }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
