@@ -2,7 +2,7 @@
   "sync_commit": "9e1f24d457b173f350f94b38881d3ef57a1e516f",
   "files": {
     "src/chat_echo.zig": "5f7c542aa3569aee9e2897f1c9ce0b4c26132e1148c1b6f99288e6d57ffa3328",
-    "src/chat_send.zig": "5adfa37d502f6a9e32129e62781e717c602c80b88c62669fb4f3a3c4e711ea09",
+    "src/chat_send.zig": "ee4d2c92b948df5aabb51c92f70b6594ca1c0cfb2dd183ce42d3157a8d40071b",
     "src/chat_render.zig": "1492e46382856c4b949e8f4a4c1b94ba40ad348b9e8c8c0a17dfa7068c18bd24",
     "src/chat_history_reader.py": "f3c193c5139b6c9783d47e2534eaea895cef4018351ebc67ef213f87e13d20e1",
     "src/app_state.zig": "91c494e26bdbb25085752449c18d3a5ff9d8767b97a5443695f6e23fd7924e70",
@@ -20,6 +20,7 @@
     "src/chat_send.zig": [
       "chatEchoEnqueueForShell",
       "chatOutboxTrySendEntry",
+      "chatOutboxFirstSendableIndexIn",
       "chatEchoWaitsOnTranscript",
       "chatMessageReduce",
       "chatEchoSendAgain",

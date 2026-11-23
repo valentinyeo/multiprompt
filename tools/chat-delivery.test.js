@@ -1855,6 +1855,31 @@ fn admissionEntry() !void {
     entry.message_wire_id = @splat(0);
     @memcpy(entry.message_wire_id[0..5], "id-01");
 }
+test "delivery: SOFT-3125 a restored possible send recovers its original wire and anchor" {
+    clear();
+    defer clear();
+    defer { shells[0].kind = .cmd; shells[0].ai_agent = 0; }
+    shells[0].kind = .tmux;
+    shells[0].ai_agent = 1;
+    channel_enabled = true;
+    try admissionEntry();
+    g_chat_outbox.items[0].write_started = true;
+    const wire = g_chat_outbox.items[0].message_wire_id;
+    const anchor = g_chat_outbox.items[0].anchor;
+    try std.testing.expect(saveChatOutbox());
+    try reload();
+    persist_ok = false;
+    chatOutboxTick();
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts);
+    persist_ok = true;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqualStrings(std.mem.sliceTo(&wire, 0), std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
+    try std.testing.expectEqualDeep(anchor, g_chat_outbox.items[0].anchor);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+}
 test "delivery: IGSH-1640 restored intent waits for final tabs before taking a send reservation" {
     clear();
     defer clear();

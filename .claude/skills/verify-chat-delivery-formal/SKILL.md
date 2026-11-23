@@ -7,7 +7,7 @@ description: Check desktop chat sends, outbox recovery, echo reconciliation and 
 
 Each sent message must have exactly one visible copy and must never show **Not sent** after the agent accepted it. Duplicate copies invite duplicate sends. A false failure tells the user to repeat work the agent already received.
 
-SOFT-3125 fixes the three recorded production counterexamples. Timeout now leaves uncertain host sends queued, and v1 restore preserves a possible write while requeuing unconfirmed phases. The native table reads the complete extracted restore guard for both nonempty and empty phases. It also includes the existing same-wire resubmit path, rather than treating a write reservation as an absolute send prohibition. No invariant is weakened.
+SOFT-3125 fixes the three recorded production counterexamples. Timeout now leaves uncertain host sends queued, and v1 restore preserves a possible write while requeuing unconfirmed phases. The native table reads the complete extracted restore guard for both nonempty and empty phases. It also includes the existing same-wire resubmit path, rather than treating a write reservation as an absolute send prohibition. No invariant is weakened. The queue selector and send reservation guard now both honor same-wire v1 recovery. A resubmit keeps the original transcript anchor, and a local save or launch failure cannot turn that uncertain send into a new failure or clear its reservation. Hosted native regressions execute these complete source functions, including a failed save followed by same-wire recovery.
 
 ## Run
 

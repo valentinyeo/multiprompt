@@ -23,7 +23,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const Entry = struct {
-    state: enum { queued, sending, delivered, not_sent } = .queued,
+    state: enum { queued, sending, delivered, not_sent, cancelled } = .queued,
     write_started: bool = false,
     anchor: struct { sent_ms: i64 = 0 } = .{},
     expires_ms: i64 = 0,
@@ -68,7 +68,11 @@ var direct = true;
 var paste_ok = true;
 var enter_ok = true;
 var notices: usize = 0;
-const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
+const chat_echo = struct {
+    const OutboxState = @TypeOf(storage[0].state);
+    ${['v1PhaseUnconfirmed', 'v1NeedsResubmit'].map(name => fs.readFileSync(path.join(__dirname, '../src/chat_echo.zig'), 'utf8').match(new RegExp(`pub fn ${name}\\([\\s\\S]*?^}`, 'm'))[0]).join('\n')}
+    fn fileTimeToUnixMs(_: u64) i64 { return 12345; }
+};
 const ChatTmuxSendJob = struct {
     key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
     queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
@@ -218,8 +222,12 @@ test "a host message stays reserved when the worker cannot start and never types
     try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
     try std.testing.expect(storage[0].write_started);
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
-    try std.testing.expectEqual(@as(usize, 1), starts);
+    try std.testing.expectEqual(@as(usize, 2), starts);
     try std.testing.expectEqual(@as(usize, 0), pastes);
+    save_ok = false;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expect(storage[0].write_started);
+    try std.testing.expectEqual(@as(usize, 2), starts);
     reset(); save_ok = false;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), starts + pastes);

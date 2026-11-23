@@ -1019,7 +1019,7 @@ fn chatOutboxFirstSendableIndexIn(list: *const std.ArrayList(ChatOutboxEntry), k
     for (list.items, 0..) |e, i| {
         if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
         if (e.state == .sending or (e.state == .delivered and !claude_buffer)) return null;
-        if (chat_echo.mayType(e.state, e.write_started, false, false)) return i;
+        if (chat_echo.mayType(e.state, e.write_started, false, false) or chat_echo.v1NeedsResubmit(e.message_v1, e.write_started, std.mem.sliceTo(&e.message_phase, 0), e.state)) return i;
     }
     return null;
 }
@@ -2859,6 +2859,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     const identity = chatFileIdentityForShell(shell_index);
     const terminal = shell.kind == .tmux and shell.ai_agent == 0 and identity.tmux[0] != 0 and !std.mem.startsWith(u8, std.mem.sliceTo(&identity.tmux, 0), "live-");
     const route = if (terminal) ChatSendRoute.terminal_send else chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
+    var was_written = false;
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
         chatLogSendPath(shell_index, entry, route, "enter");
@@ -2882,23 +2883,25 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
             chatLogSendPath(shell_index, entry, route, "legacy");
         }
         if (!entry.message_v1 and shell.kind == .tmux and shell.ai_agent >= 2) return .write_failed;
-        if (entry.write_started) return .write_failed;
+        was_written = entry.write_started;
+        const resubmit = route == .host_message and chat_echo.v1NeedsResubmit(entry.message_v1, was_written, std.mem.sliceTo(&entry.message_phase, 0), entry.state);
+        if (was_written and !resubmit) return .write_failed;
         entry.state = .sending;
-        entry.anchor = chatEchoAnchorNow(shell_index);
+        if (!resubmit) entry.anchor = chatEchoAnchorNow(shell_index);
         if (entry.expires_ms == 0) {
             entry.expires_ms = entry.anchor.sent_ms +| 600_000;
             entry.sent_tick_ms = @intCast(GetTickCount64());
         }
         entry.write_started = true;
         if (!saveChatOutbox()) {
-            entry.write_started = false;
+            entry.write_started = was_written;
             entry.state = .queued;
             return .write_failed;
         }
     }
     if (chatTmuxSendEligible(shell_index) and app_state.g_chat_tmux_send_job != null) {
         if (chatOutboxIndexById(echo_id)) |ei| {
-            app_state.g_chat_outbox.items[ei].write_started = false;
+            app_state.g_chat_outbox.items[ei].write_started = was_written;
             app_state.g_chat_outbox.items[ei].state = .queued;
             _ = saveChatOutbox();
         }
@@ -3018,7 +3021,8 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     switch (sendTextToShellVerifiedAt(shell_index, app_state.g_chat_outbox.items[e].text, echo_id)) {
         .ok => {},
         .write_failed, .enter_failed => {
-            app_state.g_chat_outbox.items[e].state = if (app_state.g_chat_outbox.items[e].write_started) .not_sent else .queued;
+            const entry = &app_state.g_chat_outbox.items[e];
+            entry.state = if (entry.message_v1 and chat_echo.v1PhaseUnconfirmed(std.mem.sliceTo(&entry.message_phase, 0))) .queued else if (entry.write_started) .not_sent else .queued;
             _ = saveChatOutbox();
             if (app_state.g_chat_active) chatOutboxChanged();
             return false;
@@ -3628,7 +3632,9 @@ test "IGSH-1289 interrupted host submit reloads with its original identity" {
     chatOutboxParseJson(&list, allocator, "{\"version\":2,\"queues\":[{\"key\":\"tmux:0:test\",\"messages\":[{\"t\":\"first\",\"s\":1,\"x\":1,\"v1\":1,\"wire_id\":\"desktop-original\"},{\"t\":\"second\",\"s\":0,\"v1\":1}]}]}");
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqual(ChatEchoState.queued, list.items[0].state);
-    try std.testing.expect(!list.items[0].write_started);
+    try std.testing.expect(list.items[0].write_started);
+    try std.testing.expect(!list.items[1].write_started);
+    try std.testing.expect(chat_echo.v1NeedsResubmit(true, list.items[0].write_started, "", list.items[0].state));
     try std.testing.expectEqualStrings("desktop-original", std.mem.sliceTo(&list.items[0].message_wire_id, 0));
     try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, "tmux:0:test", true));
 }

@@ -65,6 +65,8 @@ jobs:
           echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Replay production delivery and same-wire recovery regressions
+        run: timeout 240s node --test tools/chat-delivery.test.js tools/chat-tmux-send.test.js tools/chat-correctness.test.js tools/outbox-stuck-send.test.mjs
       - name: Check delivery, replay findings and catch planted production breaks
         run: timeout 360s python3 .claude/skills/verify-chat-delivery-formal/check.py --self-test --output "$RUNNER_TEMP/delivery-formal"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
