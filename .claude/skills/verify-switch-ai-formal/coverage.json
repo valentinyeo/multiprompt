@@ -1,12 +1,13 @@
 {
-  "sync_commit": "d676860794a9d0571334cec49e38d16d21923b29",
+  "sync_commit": "dccfffcfff2b87949b51d5e9deaecf5120a8ce1a",
   "files": {
-    "src/chat_history_reader.py": "b9e8de820c8681c209a63e8537f1374514a8700470e7808994e006b9137ebc2c",
-    "tools/chat-switch-ai.test.js": "c74bbe32e825ad4f6dcf44ec4562afa59807dc0bb775e1837ca18f4bc85d511b"
+    "src/chat_history_reader.py": "f8ef3a4d151196c2b4e096f538b4fb96f1d2a42792a0b7b7562898d888ea473e",
+    "tools/chat-switch-ai.test.js": "3d69cbe05762594b36a52f997bb26f20392789777b242f2f35a3f9f90f766d0e"
   },
   "coverage": {
     "src/chat_history_reader.py": [
       "host_switch_ai",
+      "host_switch_abort",
       "host_switch_handover",
       "host_switch_rows",
       "host_switch_follow",
@@ -15,7 +16,8 @@
     "tools/chat-switch-ai.test.js": [
       "switch identity and locator tests",
       "busy refusal",
-      "round-trip switch chain"
+      "round-trip switch chain",
+      "failed start keeps the old AI enabled"
     ]
   }
 }

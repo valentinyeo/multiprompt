@@ -25,24 +25,24 @@ Read **every result with pstack /statechart** using `current/Switch.tla`, the ge
 
 ## Why TLA+
 
-Switch AI interleaves host disable, locator moves, handover history, message-store updates and agent start. TLA+ explores busy switches, restarts, round-trips and concurrent requests within a small bound without live tmux or paid providers. Python runs the real `host_switch_ai` decisions in native probes and replays each counterexample through isolated homes and SQLite stores.
+Switch AI interleaves host start, locator moves, handover history, message-store updates and stopping the old agent. TLA+ explores busy switches, failed starts, restarts, round-trips and concurrent requests within a small bound without live tmux or paid providers. Python runs the real `host_switch_ai` decisions in native probes and replays each counterexample through isolated homes and SQLite stores.
 
 ## Bounds and assumptions
 
-One logical chat address, at most two pending switch requests, five successful switches per run and one start failure. Busy refusal, locator deletion, old-config disable and success-shaped replies even when start fails are modeled as native decisions. Restart clears an in-flight switch but not completed identity. Message loss and duplicate rendering are out of scope for this bound. Antigravity is listed in `providers.json` but excluded from TLC constants until `HOST_SWITCH_TARGETS` includes it.
+One logical chat address, at most two pending switch requests, five successful switches per run and one start failure. Busy refusal, start failure, the old agent's stop, queued-message adoption and locator deletion are modeled as native decisions. Agent processes may overlap for the moment between the new start and the old stop; `liveCount` counts chats on the address, so a missing old-agent stop shows up as two. Doubling is a second locator for the same address, because the reader resolves one locator per address. Duplicate rendering and unreadable history beyond a failed handover are out of scope for this bound. Antigravity is listed in `providers.json` but excluded from TLC constants until `HOST_SWITCH_TARGETS` includes it.
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `d676860794a9d0571334cec49e38d16d21923b29`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 | Source | Covered behavior |
 | --- | --- |
-| `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, locator and config moves, follow chain and dispatch eligibility |
-| `tools/chat-switch-ai.test.js` | Isolated switch identity, round trip and history serving |
+| `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |
+| `tools/chat-switch-ai.test.js` | Isolated switch identity, round trip, failed start and history serving |
 
 ## Prove the checker can fail
 
-`--self-test` first checks a reliable control with start failure and restart disabled. It then replaces the locator delete with a no-op in real source; `OneLiveChat` must fail while `SkipLocatorDelete` flips true in the native table. Both must replay through production `host_switch_ai`. Restoring the checkout must return to the starting findings, including `FailedSwitchKeepsOld`.
+`--self-test` first checks a reliable control. It then plants two breaks in real source: replacing the locator delete with a no-op must fail `OneLiveChat` with `SkipLocatorDelete` true, and replacing the queued-message adoption with a no-op must fail `NoLostOrDuplicate` with `CarryQueuedMessages` false. Both must replay through production `host_switch_ai`. Restoring the checkout must return to the starting findings.
 
 ## Read current findings
 

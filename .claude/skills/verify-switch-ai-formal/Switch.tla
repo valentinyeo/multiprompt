@@ -1,12 +1,12 @@
 ---------------------------- MODULE Switch ----------------------------
 EXTENDS Naturals, FiniteSets, Sequences
-CONSTANTS RefuseBusy, DisableOldBeforeStart, OldStaysDisabledWhenStartFails,
-          ReportSwitchedWhenStartFails, SkipLocatorDelete, Providers, Scenario
+CONSTANTS RefuseBusy, StopOldOnCommit, CommitAfterStartFail,
+          CarryQueuedMessages, SkipLocatorDelete, Providers, Scenario
 VARIABLES phase, provider, liveCount, identityOk, historyOk, lost, duplicate,
-          oldRunning, busy, pendingSwitch, switching, restarted, startOk, sentDuring,
+          aiRunning, busy, pendingSwitch, switching, restarted, startOk, sentDuring,
           currentSid, dualLocator
 vars == <<phase, provider, liveCount, identityOk, historyOk, lost, duplicate,
-          oldRunning, busy, pendingSwitch, switching, restarted, startOk, sentDuring,
+          aiRunning, busy, pendingSwitch, switching, restarted, startOk, sentDuring,
           currentSid, dualLocator>>
 Init == /\ phase = "idle"
         /\ provider = "claude"
@@ -15,7 +15,7 @@ Init == /\ phase = "idle"
         /\ historyOk = TRUE
         /\ lost = FALSE
         /\ duplicate = FALSE
-        /\ oldRunning = TRUE
+        /\ aiRunning = TRUE
         /\ busy = FALSE
         /\ pendingSwitch = 0
         /\ switching = FALSE
@@ -28,71 +28,77 @@ SetBusy == /\ ~switching
             /\ busy' = TRUE
             /\ phase' = "busy"
             /\ UNCHANGED <<provider, liveCount, identityOk, historyOk, lost, duplicate,
-                            oldRunning, pendingSwitch, switching, restarted, startOk,
+                            aiRunning, pendingSwitch, switching, restarted, startOk,
                             sentDuring, currentSid, dualLocator>>
 ClearBusy == /\ busy
               /\ busy' = FALSE
               /\ phase' = "idle"
               /\ UNCHANGED <<provider, liveCount, identityOk, historyOk, lost, duplicate,
-                              oldRunning, pendingSwitch, switching, restarted, startOk,
+                              aiRunning, pendingSwitch, switching, restarted, startOk,
                               sentDuring, currentSid, dualLocator>>
 RequestSwitch == /\ ~switching
                   /\ pendingSwitch < 2
                   /\ IF busy /\ RefuseBusy
                         THEN /\ pendingSwitch' = pendingSwitch + 1
                              /\ UNCHANGED <<phase, provider, liveCount, identityOk, historyOk,
-                                            lost, duplicate, oldRunning, busy, switching,
+                                            lost, duplicate, aiRunning, busy, switching,
                                             restarted, startOk, sentDuring, currentSid, dualLocator>>
                         ELSE /\ switching' = TRUE
                              /\ phase' = "switching"
                              /\ pendingSwitch' = pendingSwitch + 1
                              /\ UNCHANGED <<provider, liveCount, identityOk, historyOk, lost,
-                                            duplicate, oldRunning, busy, restarted, startOk,
+                                            duplicate, aiRunning, busy, restarted, startOk,
                                             sentDuring, currentSid, dualLocator>>
 SendDuringSwitch == /\ switching
                      /\ sentDuring' = TRUE
                      /\ UNCHANGED <<phase, provider, liveCount, identityOk, historyOk, lost,
-                                    duplicate, oldRunning, busy, pendingSwitch, switching,
+                                    duplicate, aiRunning, busy, pendingSwitch, switching,
                                     restarted, startOk, currentSid, dualLocator>>
-Complete == /\ switching
-             /\ switching' = FALSE
-             /\ phase' = "idle"
-             /\ currentSid' = currentSid + 1
-             /\ identityOk' = TRUE
-             /\ historyOk' = TRUE
-             /\ liveCount' = 1
-             /\ pendingSwitch' = 0
-             /\ busy' = FALSE
-             /\ UNCHANGED <<lost, duplicate, restarted, startOk, sentDuring>>
-CommitToCodex == /\ Complete /\ provider = "claude" /\ provider' = "codex"
-                 /\ dualLocator' = (IF SkipLocatorDelete THEN TRUE ELSE FALSE)
-                 /\ oldRunning' = (IF DisableOldBeforeStart THEN FALSE ELSE oldRunning)
-CommitToPi == /\ Complete /\ provider = "codex" /\ provider' = "pi"
-              /\ dualLocator' = (IF SkipLocatorDelete THEN TRUE ELSE FALSE)
-              /\ oldRunning' = (IF DisableOldBeforeStart THEN FALSE ELSE oldRunning)
-CommitToClaude == /\ Complete /\ provider = "pi" /\ provider' = "claude"
-                   /\ dualLocator' = (IF SkipLocatorDelete THEN TRUE ELSE FALSE)
-                   /\ oldRunning' = (IF DisableOldBeforeStart THEN FALSE ELSE oldRunning)
-CommitSwitch == CommitToCodex \/ CommitToPi \/ CommitToClaude
 MarkStartFail == /\ Scenario /= "reliable"
-                  /\ ~switching
+                  /\ switching
                   /\ startOk' = FALSE
                   /\ UNCHANGED <<phase, provider, liveCount, identityOk, historyOk, lost,
-                                  duplicate, oldRunning, busy, pendingSwitch, switching,
+                                  duplicate, aiRunning, busy, pendingSwitch, switching,
                                   restarted, sentDuring, currentSid, dualLocator>>
+AbortSwitch == /\ switching
+                /\ ~startOk
+                /\ switching' = FALSE
+                /\ phase' = "idle"
+                /\ pendingSwitch' = 0
+                /\ startOk' = TRUE
+                /\ UNCHANGED <<provider, liveCount, identityOk, historyOk, lost, duplicate,
+                                aiRunning, busy, restarted, sentDuring, currentSid, dualLocator>>
+CommitSwitch == /\ switching
+                /\ (startOk \/ CommitAfterStartFail)
+                /\ switching' = FALSE
+                /\ phase' = "idle"
+                /\ currentSid' = currentSid + 1
+                /\ identityOk' = TRUE
+                /\ historyOk' = TRUE
+                /\ liveCount' = (IF StopOldOnCommit THEN 1 ELSE 2)
+                /\ pendingSwitch' = 0
+                /\ busy' = FALSE
+                /\ dualLocator' = SkipLocatorDelete
+                /\ duplicate' = dualLocator'
+                /\ aiRunning' = startOk
+                /\ lost' = (lost \/ (sentDuring /\ ~CarryQueuedMessages))
+                /\ provider' = (IF provider = "claude" THEN "codex"
+                                ELSE IF provider = "codex" THEN "pi" ELSE "claude")
+                /\ UNCHANGED <<restarted, startOk, sentDuring>>
 Restart == /\ Scenario /= "reliable"
             /\ restarted' = TRUE
             /\ switching' = FALSE
             /\ pendingSwitch' = 0
+            /\ startOk' = TRUE
             /\ UNCHANGED <<phase, provider, liveCount, identityOk, historyOk, lost, duplicate,
-                            oldRunning, busy, startOk, sentDuring, currentSid, dualLocator>>
-Next == SetBusy \/ ClearBusy \/ RequestSwitch \/ SendDuringSwitch \/ CommitSwitch \/
-        MarkStartFail \/ Restart
+                            aiRunning, busy, sentDuring, currentSid, dualLocator>>
+Next == SetBusy \/ ClearBusy \/ RequestSwitch \/ SendDuringSwitch \/ MarkStartFail \/
+        AbortSwitch \/ CommitSwitch \/ Restart
 Spec == Init /\ [][Next]_vars
 Bounded == pendingSwitch <= 2 /\ currentSid <= 5
 OneLiveChat == liveCount <= 1 /\ ~dualLocator
 IdentityStable == identityOk
 NoLostOrDuplicate == ~lost /\ ~duplicate
 HistoryReadable == switching \/ historyOk
-FailedSwitchKeepsOld == startOk \/ oldRunning
+FailedSwitchKeepsOld == startOk \/ aiRunning
 =============================================================================

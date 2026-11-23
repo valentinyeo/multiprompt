@@ -5,7 +5,7 @@ const decisions = JSON.parse(fs.readFileSync(new URL('./decisions.json', import.
 export const title = 'Switch AI keeps one live chat';
 export function state(v) {
   if (v.switching) return 'Switch in progress';
-  if (!v.startOk && !v.oldRunning) return 'Old AI off, new AI failed to start';
+  if (!v.startOk && !v.aiRunning) return 'Old AI off, new AI failed to start';
   if (v.liveCount > 1) return 'Two live chats on the same address';
   if (v.duplicate) return 'Message shown twice';
   if (v.lost) return 'Marker message lost';
@@ -19,9 +19,9 @@ export const step = a => ({
   ClearBusy: 'The turn finishes',
   RequestSwitch: decisions.RefuseBusy ? 'You ask to switch AI' : 'You ask to switch AI while busy',
   SendDuringSwitch: 'You send while the switch runs',
-  CommitSwitch: 'The host moves the chat to the new AI',
   MarkStartFail: 'The new AI fails to start',
-  FailStart: 'The host leaves the old AI stopped',
+  AbortSwitch: 'The host abandons the switch and keeps the old AI',
+  CommitSwitch: 'The host moves the chat to the new AI and stops the old one',
   Restart: 'The app or host restarts',
   LoseMessage: 'A marker message disappears',
   ShowTwice: 'The marker appears twice',

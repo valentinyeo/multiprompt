@@ -1,8 +1,8 @@
 {
   "RefuseBusy": true,
-  "DisableOldBeforeStart": true,
-  "OldStaysDisabledWhenStartFails": true,
-  "ReportSwitchedWhenStartFails": true,
+  "StopOldOnCommit": true,
+  "CommitAfterStartFail": false,
+  "CarryQueuedMessages": true,
   "SkipLocatorDelete": false,
   "Providers": "{\"claude\",\"codex\",\"pi\"}"
 }

@@ -122,6 +122,11 @@ def self_test(root, output):
             '            db.execute("DELETE FROM message_locators WHERE provider=? AND sid=?", (provider, sid))',
             '            pass',
         ),
+        "NoLostOrDuplicate": (
+            "src/chat_history_reader.py",
+            '            db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state=\'queued\'",\n                       (target, new_sid, provider, sid))',
+            '            pass',
+        ),
     }
     caught = []
     for rule, (file, before, after) in mutations.items():
