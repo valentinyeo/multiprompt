@@ -449,14 +449,18 @@ pub const History = struct {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
+        var line_arena = std.heap.ArenaAllocator.init(a);
+        defer line_arena.deinit();
         var incoming = std.HashMap(RowIdentity, struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }, RowIdentity.Context, 80).init(scratch);
         var order: std.ArrayList(RowIdentity) = .empty;
         var previous_matches: std.ArrayList(?usize) = .empty;
-        var previous_keys: std.ArrayList(RowIdentity) = .empty;
+        var incoming_idless = false;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try self.rowIdentity(scratch, line, order.items.len);
+            _ = line_arena.reset(.retain_capacity);
+            const key = try self.rowIdentity(scratch, line_arena.allocator(), line, order.items.len, true);
+            if (key.id.len == 0) incoming_idless = true;
             const slot = try incoming.getOrPut(key);
             if (!slot.found_existing) {
                 slot.value_ptr.* = .{ .index = order.items.len };
@@ -466,30 +470,40 @@ pub const History = struct {
             try slot.value_ptr.rows.append(scratch, '\n');
         }
         var shared = false;
+        var previous_idless = false;
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
+            _ = line_arena.reset(.retain_capacity);
+            const key = try previous.rowIdentity(line_arena.allocator(), line_arena.allocator(), line, previous_matches.items.len, false);
             var matched = incoming.getPtr(key);
             if (matched != null and key.id.len == 0 and matched.?.known) matched = null;
-            try previous_keys.append(scratch, key);
+            if (matched == null and key.id.len == 0) previous_idless = true;
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
             if (matched) |entry| {
                 entry.known = true;
                 shared = true;
             }
         }
-        for (0..2) |pass| {
-            for (previous_keys.items, 0..) |key, index| {
-                if (previous_matches.items[index] != null) continue;
-                for (order.items) |candidate| {
-                    const entry = incoming.getPtr(candidate).?;
-                    if (entry.known or !key.matchesLegacy(candidate)) continue;
-                    if (pass == 0 and !std.mem.eql(u8, key.timestamp, candidate.timestamp)) continue;
-                    previous_matches.items[index] = entry.index;
-                    entry.known = true;
-                    shared = true;
-                    break;
+        if (incoming_idless or previous_idless) {
+            for (0..2) |pass| {
+                var index: usize = 0;
+                lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
+                while (lines.next()) |line| {
+                    if (line.len == 0) continue;
+                    defer index += 1;
+                    if (previous_matches.items[index] != null) continue;
+                    _ = line_arena.reset(.retain_capacity);
+                    const key = try previous.rowIdentity(line_arena.allocator(), line_arena.allocator(), line, index, true);
+                    for (order.items) |candidate| {
+                        const entry = incoming.getPtr(candidate).?;
+                        if (entry.known or !key.matchesLegacy(candidate)) continue;
+                        if (pass == 0 and !std.mem.eql(u8, key.timestamp, candidate.timestamp)) continue;
+                        previous_matches.items[index] = entry.index;
+                        entry.known = true;
+                        shared = true;
+                        break;
+                    }
                 }
             }
         }
@@ -499,6 +513,7 @@ pub const History = struct {
         }
         var rows: std.ArrayList(u8) = .empty;
         errdefer rows.deinit(a);
+        try rows.ensureTotalCapacity(a, previous.rows.items.len + self.rows.items.len);
         var cursor_index: usize = 0;
         var previous_index: usize = 0;
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
@@ -611,11 +626,16 @@ pub const History = struct {
         };
     };
 
-    fn rowIdentity(_: History, a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
+    fn rowIdentity(_: History, a: std.mem.Allocator, tmp: std.mem.Allocator, line: []const u8, ordinal: usize, include_text: bool) !RowIdentity {
         const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
-        const text = try std.unicode.utf8ToUtf16LeAlloc(a, m.text);
-        const normalized = try a.alloc(u16, text.len);
-        return .{ .role = m.role, .id = m.read_id orelse m.id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .text = @import("chat_echo.zig").normalize(text, normalized), .ordinal = ordinal, .settlement = m.settlement };
+        const id = m.read_id orelse m.id;
+        var norm: []const u16 = &.{};
+        if (id.len == 0 or include_text) {
+            const text = try std.unicode.utf8ToUtf16LeAlloc(tmp, m.text);
+            const normalized = try a.alloc(u16, text.len);
+            norm = @import("chat_echo.zig").normalize(text, normalized);
+        }
+        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .text = norm, .ordinal = ordinal, .settlement = m.settlement };
     }
 
     pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {
@@ -682,15 +702,21 @@ pub const History = struct {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
+        var line_arena = std.heap.ArenaAllocator.init(a);
+        defer line_arena.deinit();
         const Item = struct { line: []const u8, key: RowIdentity };
         var merged: std.ArrayList(Item) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
-            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try self.rowIdentity(scratch, line, merged.items.len) });
+            if (line.len != 0) {
+                _ = line_arena.reset(.retain_capacity);
+                try merged.append(scratch, .{ .line = line, .key = try self.rowIdentity(scratch, line_arena.allocator(), line, merged.items.len, false) });
+            }
         }
         var changed = false;
         for (rows) |row_bytes| {
-            const key = try self.rowIdentity(scratch, row_bytes, 0);
+            _ = line_arena.reset(.retain_capacity);
+            const key = try self.rowIdentity(scratch, line_arena.allocator(), row_bytes, 0, false);
             if (key.end <= key.offset) return error.InvalidHistory;
             if (key.end <= self.start) continue;
             var index: usize = from;
