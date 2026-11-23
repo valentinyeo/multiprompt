@@ -17,6 +17,9 @@ class ProviderTest(unittest.TestCase):
         available = json.loads(subprocess.check_output(['node', '-e', 'console.log(JSON.stringify(require("./tools/verify-features.cjs").discoverFeatures().available))'], cwd=ROOT, text=True))
         self.assertIn('server-chat', available, 'Windows verification must offer the real SSH server journey')
 
+    def test_skill_quote_journey_keyboard_mapping(self):
+        subprocess.run(['node', '--test', str(ROOT / 'tools/verify-server-chat/keyboard-driver.test.mjs')], cwd=ROOT, check=True)
+
     def test_skill_quote_wraps_command_markup_in_transcripts(self):
         with tempfile.TemporaryDirectory() as home:
             spec = json.loads((ROOT / 'tools/verify-server-chat/skill-quote.json').read_text())
@@ -26,7 +29,9 @@ class ProviderTest(unittest.TestCase):
             request = dict(type='user', uuid='skill-quote', message=dict(content=[dict(type='text', text=text)]))
             subprocess.run([sys.executable, '-c', script, str(program), home, '--session-id', 'a1b2c3d4-2567-4000-8000-000000002567'], input=json.dumps(request) + '\n', text=True, capture_output=True, check=True, cwd=home)
             saved = json.loads(next(path for path in (Path(home) / '.claude/projects').glob('*/*.jsonl')).read_text().splitlines()[0])
-            content = saved['message']['content'][0]['text']
+            content = saved['message']['content']
+            if isinstance(content, list):
+                content = content[0]['text']
             self.assertIn('<command-name>/pstack:correct</command-name>', content)
             self.assertIn(spec['marker'], content)
 

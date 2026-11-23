@@ -58,8 +58,9 @@ for line in sys.stdin:
     wire = stored_content(content)
     reply = 'Server received: ' + text
     message = dict(role='assistant', id='reply-' + uuid.uuid4().hex, content=[dict(type='text', text=reply)])
+    transcript_user = wire if isinstance(wire, str) else plain_text(wire)
     with transcript.open('a') as out:
-        out.write(json.dumps(dict(type='user', sessionId=sid, uuid=request.get('uuid', str(uuid.uuid4())), message=dict(role='user', content=wire))) + '\n')
+        out.write(json.dumps(dict(type='user', sessionId=sid, uuid=request.get('uuid', str(uuid.uuid4())), message=dict(role='user', content=transcript_user))) + '\n')
         out.write(json.dumps(dict(type='assistant', sessionId=sid, uuid=str(uuid.uuid4()), message=message)) + '\n')
     with (root / 'provider-input.jsonl').open('a') as out:
         out.write(json.dumps(dict(sid=sid, text=text, pid=os.getpid())) + '\n')
