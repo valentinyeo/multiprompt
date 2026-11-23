@@ -1,5 +1,25 @@
 {
   "title": "SOFT-3097: Revert per-message client identity so chat rows dedupe again",
   "body": "Executable native regressions in tools/chat-row-identity.test.js without a captured fixture.",
-  "base": "605610d5a212a93fd251721680eb049e89b9226e"
+  "base": "605610d5a212a93fd251721680eb049e89b9226e",
+  "files": [
+    ".claude/skills/verify-chat-delivery-formal/SKILL.md",
+    ".claude/skills/verify-chat-delivery-formal/coverage.json",
+    ".claude/skills/verify-chat-delivery-formal/native.py",
+    ".claude/skills/verify-chat-delivery-formal/replay.py",
+    ".claude/skills/verify-switch-ai-formal/coverage.json",
+    ".github/workflows/test.yml",
+    "changelog.d/SOFT-2526-message-identity.md",
+    "changelog.d/SOFT-3097-revert-row-identity.md",
+    "src/chat_echo.zig",
+    "src/chat_history.zig",
+    "src/chat_history_reader.py",
+    "src/chat_markdown.zig",
+    "src/chat_send.zig",
+    "tools/chat-delivery.test.js",
+    "tools/chat-row-identity.test.js",
+    "tools/message-id-delivery-test.py",
+    "tools/ticket-titles/IGSH-2526.txt",
+    "tools/ticket-titles/IGSH-3097.txt"
+  ]
 }

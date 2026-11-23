@@ -2,7 +2,6 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const { checkBugFixtureErrors } = require('./regression-fixture.cjs');
 
 const root = path.join(__dirname, '..');
@@ -17,8 +16,8 @@ test('SOFT-3144 requires the bug-fix fixture gate on head', () => {
     return;
   }
   assert.equal(gate, true);
-  const files = execFileSync('git', ['diff', '--name-only', `${sample.base}...b6adfc98f84b964fd9bb39c48091967180c14d7b`], { cwd: root, encoding: 'utf8' })
-    .split(/\r?\n/).filter(Boolean);
+  assert.ok(Array.isArray(sample.files) && sample.files.length, 'fixture must ship the captured PR file list');
+  const files = sample.files;
   const errors = checkBugFixtureErrors({
     base: sample.base,
     root,

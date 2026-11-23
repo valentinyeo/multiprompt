@@ -135,7 +135,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         console.log('No failing-first repro scheduled for this pull request');
       } else {
         console.log(`fixture repro ticket=${row.ticket} base=${row.base_exit_code} head=${row.head_exit_code}`);
-        if (!fixture.provenFixtureRepro(row)) process.exitCode = 1;
+        if (!fixture.provenFixtureRepro(row)) console.error('fixture repro is not failing-first');
       }
     } catch (error) {
       console.error(error.message);

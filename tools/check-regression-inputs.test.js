@@ -96,12 +96,13 @@ test('CLI checks committed additions via merge-base, not unchanged legacy or bas
   const result = checkRegressionInputs(base, dir, null);
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /^tools\/nested\/new.test.js:1 loads cb15de6:src\/main.zig/);
-  const cli = spawnSync(process.execPath, [join(__dirname, 'check-regression-inputs.mjs'), base, '--root', dir], { encoding: 'utf8' });
+  const cliEnv = { ...process.env, GITHUB_EVENT_PATH: '' };
+  const cli = spawnSync(process.execPath, [join(__dirname, 'check-regression-inputs.mjs'), base, '--root', dir], { encoding: 'utf8', env: cliEnv });
   assert.equal(cli.status, 1);
   assert.match(cli.stderr, /tools\/fixtures/);
   write('tools/nested/new.test.js', "fs.readFileSync('tools/fixtures/IGSH-543/main.zig');\n");
   commit();
-  const green = spawnSync(process.execPath, [join(__dirname, 'check-regression-inputs.mjs'), base, '--root', dir], { encoding: 'utf8' });
+  const green = spawnSync(process.execPath, [join(__dirname, 'check-regression-inputs.mjs'), base, '--root', dir], { encoding: 'utf8', env: cliEnv });
   assert.equal(green.status, 0, green.stderr);
   assert.match(green.stdout, /Regression inputs OK/);
 });
