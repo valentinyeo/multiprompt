@@ -105,7 +105,7 @@ pub fn paintSidebarFooter(dc: w.HANDLE) void {
     if (segments > 0) canvas.strokePolyline(points[0 .. segments + 1], statusColor(used), @floatFromInt(px(4)));
     smooth.fillEllipse(dc, .{ .left = rect.left + px(16), .top = rect.top + px(20), .right = rect.left + px(20), .bottom = rect.top + px(24) }, if (known or statusColor(used) != RGB(242, 242, 242)) statusColor(used) else RGB(100, 100, 100));
     if (versionLabelRect(rect, @import("browser_pane.zig").SIDEBAR_W())) |label| {
-        const old_font = w.SelectObject(dc, footerFont(5, 11, 400));
+        const old_font = w.SelectObject(dc, footerFont(3, 12, 400));
         defer _ = w.SelectObject(dc, old_font);
         const color = @import("themes.zig").customColorOr("muted", if (state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138));
         text(dc, version_label, label, color, 0);
