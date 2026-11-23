@@ -2379,6 +2379,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
                 return 0;
             }
+            if (msg == WM_MOUSEWHEEL and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].native_terminal) {
+                const target = app_state.shells[app_state.active_shell].hwnd;
+                if (target != null and pt.x >= SIDEBAR_W()) {
+                    _ = SendMessageW(target, msg, wp, lp);
+                    return 0;
+                }
+            }
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SETCURSOR => {

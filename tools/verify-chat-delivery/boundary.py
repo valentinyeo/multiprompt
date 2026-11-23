@@ -1343,6 +1343,9 @@ def run_message_worker():
 
 def terminal_session(command):
     value = state()
+    if value.get("name") == "server-shell-input" and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="server-shell")
+        return "server-shell", None
     if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
         record("invocations.jsonl", kind="login", session="workspace")
         return "workspace", None
@@ -1384,6 +1387,7 @@ def terminal_frame(session, size):
 
 def terminal_reader():
     import base64
+    import binascii
     import threading
 
     box = dict(size=[24, 80], opening=None, closed=False)
@@ -1407,6 +1411,14 @@ def terminal_reader():
                 elif isinstance(value.get("size"), list):
                     box["size"] = value["size"]
                     changed.set()
+                elif isinstance(value.get("input"), str) and state().get("name") == "server-shell-input":
+                    try:
+                        data = base64.b64decode(value["input"], validate=True)
+                    except (ValueError, binascii.Error):
+                        continue
+                    if b"\x03" in data:
+                        (ROOT / "interrupt.json").write_text(json.dumps(dict(bytes=len(data))), encoding="utf-8")
+                        changed.set()
         except (OSError, ValueError):
             pass
         finally:
@@ -1432,13 +1444,18 @@ def terminal_reader():
     if (ROOT / "console-detached").exists():
         return 0
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    transcript = ""
+    if state().get("name") == "server-shell-input":
+        marker = "SOFT3048SCROLL-42"
+        transcript = "".join(f"scroll-{index:03d}\r\n" for index in range(200)) + marker + "\r\nINTERRUPTIBLE\r\n"
+        (ROOT / "scroll-ready.json").write_text(json.dumps(dict(marker=marker, lines=200)), encoding="utf-8")
     previous = None
     while not box["closed"]:
         if (ROOT / "console-detached").exists():
             return 0
         key, shown, text, grey, row = terminal_frame(session, box["size"])
         if key != previous:
-            send(text.encode("utf-8"))
+            send((text + "\r\n" + transcript).encode("utf-8") if transcript else text.encode("utf-8"))
             rows = [line.rstrip() for line in shown.splitlines()]
             record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=8 if grey else 7, promptRow=row, greySuggestion=grey)
             (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")

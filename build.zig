@@ -328,6 +328,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js", "tools/account-bot-photos.test.js", "tools/account-picture-proof.test.js" }).step);
+    const workspace_dropdown_tests = b.addSystemCommand(&.{ "node", "--test", "tools/workspace-dropdown-open.test.js", "tools/workspace-dropdown-hover.test.js" });
+    test_step.dependOn(&workspace_dropdown_tests.step);
     const live_resume_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-switch-resume.test.js" });
     const composer_paint_bound_tests = b.addSystemCommand(&.{ "node", "--test", "tools/composer-paint-bound.test.js" });
     test_step.dependOn(&composer_paint_bound_tests.step);
@@ -428,6 +430,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_last_batch_time_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-last-batch-time.test.js" });
     test_step.dependOn(&chat_last_batch_time_tests.step);
+    const chat_live_redraw_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-redraw.test.js" });
+    test_step.dependOn(&chat_live_redraw_tests.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
     test_step.dependOn(&chat_backfill_fairness_tests.step);
     vps_test_step.dependOn(&chat_backfill_fairness_tests.step);
@@ -845,6 +849,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
     const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
     test_step.dependOn(&native_session_tests.step);
+    const server_shell_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/server-shell-input.test.js" });
+    test_step.dependOn(&server_shell_input_tests.step);
     vps_test_step.dependOn(&native_session_tests.step);
     const harness_alt_tap_tests = b.addSystemCommand(&.{ "node", "--test", "tools/harness-alt-tap.test.js" });
     test_step.dependOn(&harness_alt_tap_tests.step);
