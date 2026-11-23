@@ -25,7 +25,7 @@
 - Temporary symlinks are renamed over their destinations; no live link is unlinked first.
 - A bundle contains every tool, its reader link, `build.json`, and `active.json`.
 - The manifests are written last; the bundle directory is fsynced and renamed before selection.
-- Stable command links resolve through `current/entry.py`. This executable selects one immutable directory and execs the requested tool there, so Python's `__file__` cannot drift across cutover.
+- Stable command links resolve through `current/entry-<tool>.py`. These links exist inside a bundle only for included tools. The executable selects one immutable directory and execs the requested tool there, so Python's `__file__` cannot drift across cutover.
 - Reader, manifest and `.mjs` module links resolve through `current/<name>`.
 - One atomic `current` link replacement selects the complete set, including its manifests.
 - The parent directory is fsynced after each link replacement and bundle rename.

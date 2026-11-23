@@ -224,7 +224,7 @@ class BoardFeedbackTest(unittest.TestCase):
             installed = home / '.multiprompt-runtime' / 'multibot-feedback'
             self.assertEqual(installed.exists(), include)
             if include:
-                self.assertEqual(installed.read_bytes(), feedback)
+                self.assertEqual((installed.parent / 'current/multibot-feedback').read_bytes(), feedback)
                 self.assertEqual(installed.stat().st_mode & 0o777, 0o700)
 
     def test_create_repeat_other_agent_and_safe_metadata(self):

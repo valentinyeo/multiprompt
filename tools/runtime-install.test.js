@@ -108,6 +108,21 @@ assert len(seen) == 2
 assert pair() == (b"'new'", b"'new'")
 `));
 
+test('omitted tools never expose an executable entry from another set', () => run(String.raw`
+install(old)
+assert not (runtime / 'multibot-feedback').exists()
+assert not (runtime / 'mp-fresh').exists()
+empty = dict(__name__='runtime_install_test', MULTIBOT_APP_VERSION='1.0.11')
+exec(compile(source, '<empty-bundle>', 'exec'), empty)
+exec(loader, empty)
+install(empty)
+assert not (runtime / 'mp-send').exists()
+assert not (runtime / 'mp-sessions').exists()
+install(bundle('restored', '1.0.12'))
+assert (runtime / 'mp-send').is_file()
+assert pair() == (b"'restored'", b"'restored'")
+`));
+
 test('an older or unstamped client keeps the newer set and logs the refused downgrade', () => run(String.raw`
 expected = install(new)
 before = selected()

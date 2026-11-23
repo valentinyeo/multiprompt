@@ -8749,15 +8749,16 @@ if __name__ == '__main__':
                                  b'folder = os.path.dirname(os.path.realpath(__file__))\n'
                                  b'target = os.path.join(folder, os.path.basename(sys.argv[0]))\n'
                                  b'os.execv(target, [target, *sys.argv[1:]])\n')
-                        stem = _hashlib.sha256(entry).hexdigest() + '-entry.py'
-                        publish(folder, stem, entry, 0o700)
-                        relink(folder, 'entry.py', stem)
+                        entry_stem = _hashlib.sha256(entry).hexdigest() + '-entry.py'
+                        publish(folder, entry_stem, entry, 0o700)
                         for name, payload in payloads.items():
                             stem = _hashlib.sha256(payload).hexdigest() + '-' + name
                             publish(folder, stem, payload, 0o700)
                             relink(folder, name, stem)
+                            relink(folder, 'entry-' + name + '.py', entry_stem)
                         if 'mp-layout.mjs' in payloads:
                             relink(folder, 'mp-layout', 'mp-layout.mjs')
+                            relink(folder, 'entry-mp-layout.py', entry_stem)
                         relink(folder, 'reader.py', '../' + active['sha256'] + '.py')
                         publish(folder, 'build.json', _json.dumps(dict(version=version, migrating=migrating)).encode())
                         publish(folder, 'active.json', _json.dumps(active, separators=(',', ':')).encode())
@@ -8775,7 +8776,7 @@ if __name__ == '__main__':
                          'mp-helper': 'MP_HELPER_SOURCE', 'mp-shell': 'MP_SHELL_SOURCE',
                          'mp-sessions': 'MP_SESSIONS_SOURCE', 'mp-layout.mjs': 'MP_LAYOUT_SOURCE',
                          'mp-fresh': 'MP_FRESH_SOURCE', 'mp-zsb': 'ZSB_SOURCE'}
-                aliases = {name: 'current/entry.py' for name in (*tools, 'mp-layout')}
+                aliases = {name: 'current/entry-' + name + '.py' for name in (*tools, 'mp-layout')}
                 aliases.update({name: 'current/' + name for name in ('mp-layout.mjs', 'reader.py', 'active.json')})
                 version_text = globals().get('MULTIBOT_APP_VERSION', '0.0.0')
                 parts = version_text.split('.') if isinstance(version_text, str) else []
