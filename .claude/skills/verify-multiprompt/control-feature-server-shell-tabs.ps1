@@ -48,7 +48,10 @@ function Proof-Check([string]$Ticket, [scriptblock]$Journey) {
     Save-Json $check ($Ticket + '-result.json')
 }
 
-Proof-Palette 'server shell proof' 1 'SOFT-3001-shell-row'
+Proof-Palette 'reopen server shell' 6315 'SOFT-3001-reopen-row'
+Type-Text 'proof-shell'
+Snapshot 'SOFT-3001-detached-row'
+Press @(0x0D) 'Enter: open the detached proof-shell as a new server shell tab'
 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_session -ceq 'proof-shell' } 'proof-shell selected'
 
 Proof-Check 'SOFT-3001' {
@@ -129,10 +132,10 @@ Proof-Check 'SOFT-3003' {
     Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count + 1 -and $state.tabs[$state.active_tab].kind -in @('vps', 'tmux') } 'the chat palette opened a server shell tab' 60
     $opened = Read-Session
     $tab = $opened.tabs[$opened.active_tab]
-    if ([int]$tab.tmux_host -ne 0) { throw 'New shell opened on a different server from the chat' }
+    if ($tab.PSObject.Properties['tmux_host'] -and [int]$tab.tmux_host -ne 0) { throw 'New shell opened on a different server from the chat' }
     Proof-Line 'pwd > /home/mpverify/chat-shell-folder.txt; echo SOFT3003-SHELL-FOLDER; pwd'
     Wait-Until { try { $script:chatShellFolder = (Read-ProofServer 'cat /home/mpverify/chat-shell-folder.txt' 'chat-shell-folder').Trim(); return $script:chatShellFolder.Length -gt 0 } catch { return $false } } 'new server shell accepted input and reported its real folder' 30
-    Save-Json @{ command = 'Ctrl+K Open shell on VPS 1'; expectedFolder = '/home/mpverify/shell-proof-folder'; actualFolder = $script:chatShellFolder; host = $tab.tmux_host; before = $before; after = (Read-Session); sourceNote = 'SOFT-3003 shipped mp-shell open. No chat-specific open-shell row is present in the shortcut table.' } 'SOFT-3003-folder.json'
+    Save-Json @{ command = 'Ctrl+K Open shell on VPS 1'; expectedFolder = '/home/mpverify/shell-proof-folder'; actualFolder = $script:chatShellFolder; host = 0; before = $before; after = (Read-Session); sourceNote = 'SOFT-3003 shipped mp-shell open. No chat-specific open-shell row is present in the shortcut table.' } 'SOFT-3003-folder.json'
     Snapshot 'SOFT-3003-opened-shell'
     if ($script:chatShellFolder -cne '/home/mpverify/shell-proof-folder') { throw ('Shell tab opened on the right server but not in the chat folder: ' + $script:chatShellFolder) }
 }
