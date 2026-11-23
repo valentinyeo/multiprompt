@@ -1671,6 +1671,25 @@ def pin_hosted_claude(q, agent, as_owner=False):
     return q
 
 
+def host_claude_transcript(sid, cwd):
+    state = host_session_state("claude", sid)
+    candidates = []
+    for key in ("native_session", "context_session"):
+        value = state.get(key)
+        if isinstance(value, str) and SESSION_ID.fullmatch(value):
+            candidates.append(value)
+    if sid not in candidates:
+        candidates.append(sid)
+    for candidate in candidates:
+        try:
+            path = conversation_path("claude", candidate, cwd)
+        except PermissionError:
+            path = None
+        if path is not None:
+            return path
+    return None
+
+
 def resolve_response_path(q, source=None, as_owner=False):
     rid = q["id"]
     agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
@@ -1713,15 +1732,10 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             hosted = None
         return (agent, sid, hosted, None) if hosted is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
-    if agent == "claude" and path is not None and sid and not as_owner and host_dispatch_switch(agent, sid):
-        native = host_session_state(agent, sid).get("native_session")
-        if isinstance(native, str) and SESSION_ID.fullmatch(native) and native != sid:
-            try:
-                cleared = conversation_path(agent, native, cwd)
-            except PermissionError:
-                cleared = None
-            if cleared is not None:
-                path = cleared
+    if agent == "claude" and sid and not as_owner and host_dispatch_switch(agent, sid):
+        hosted = host_claude_transcript(sid, cwd)
+        if hosted is not None:
+            path = hosted
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
         delegated = owner_response(dict(q, sid=""), owner, source)
@@ -1738,11 +1752,8 @@ def resolve_response_path(q, source=None, as_owner=False):
                     return agent, sid, None, delegated
 
     if path is None and not denied and agent == "claude" and sid and host_dispatch_switch(agent, sid):
-        try:
-            existing = conversation_path(agent, sid, cwd)
-        except PermissionError:
-            existing = None
-        if existing is None:
+        path = host_claude_transcript(sid, cwd)
+        if path is None:
             return agent, sid, None, empty_history_response(q, sid, tmux)
     if path is None and tmux:
         try:
@@ -1974,8 +1985,11 @@ def recall_tail(path, source, info, q, agent, fill):
     rows = [json.loads(line) for line in hit["wires"]]
     if hit["size"] == info.st_size and hit["mtime"] == info.st_mtime_ns:
         return hit["base"], hit["end"], b"", hit["oldest"], rows, "exact", hit["end"]
+    gap = info.st_size - hit["end"]
+    if gap > TAIL_BYTES:
+        return None
     source.seek(hit["end"])
-    extra = source.read(info.st_size - hit["end"])
+    extra = source.read(gap)
     complete = extra.rfind(b"\n") + 1
     extra = extra[:complete]
     return hit["base"], hit["end"] + len(extra), extra, hit["oldest"], rows, "append", hit["end"]

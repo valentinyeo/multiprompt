@@ -1,0 +1,1 @@
+Hosted chats with very large logs show their latest messages again instead of saying the chat is unavailable.

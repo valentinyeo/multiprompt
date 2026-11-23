@@ -8704,6 +8704,130 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class SOFT_3132_HostedLargeTranscriptTest(unittest.TestCase):
+    host_sid = '11111111-2222-4333-8444-555555555555'
+    context_sid = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+    tmux = 'live-stream'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.cwd = str(self.home / 'work')
+        Path(self.cwd).mkdir()
+        self.folder = self.home / '.claude/projects' / reader.claude_project_folder(self.cwd)
+        self.folder.mkdir(parents=True)
+        paths = reader.host_paths('claude', self.host_sid)
+        reader.host_write(paths['config'], dict(enabled=True, tmux=self.tmux, cwd=self.cwd))
+        self.query = dict(id=7, codex=False, provider='claude', sid=self.host_sid, tmux=self.tmux, cwd=self.cwd,
+                          follow=True, cached_sid='', inode=0, offset=0, start=0)
+
+    def write_sparse(self, path, label, size):
+        row = (json.dumps(dict(type='progress', padding='x' * 256)) + '\n').encode()
+        with path.open('wb') as output:
+            while output.tell() < size - len(row) - 512:
+                output.write(row)
+            output.write((json.dumps(dict(type='assistant',
+                                         message=dict(role='assistant', content=[dict(type='text', text=label)]))) + '\n').encode())
+
+    def install_fixture(self, public_label='PUBLIC', context_label='CONTEXT', public_size=125 * 1024 * 1024,
+                        context_size=9 * 1024 * 1024, native_session=None, context_session=None):
+        self.write_sparse(self.folder / (self.host_sid + '.jsonl'), public_label, public_size)
+        self.write_sparse(self.folder / (self.context_sid + '.jsonl'), context_label, context_size)
+        state = dict(provider='claude', sid=self.host_sid)
+        if native_session is not None:
+            state['native_session'] = native_session
+        if context_session is not None:
+            state['context_session'] = context_session
+        reader.host_write(reader.host_paths('claude', self.host_sid)['state'], state)
+
+    def bounded_response(self, query=None):
+        query = dict(self.query if query is None else query)
+        original_open = Path.open
+        read_bytes = 0
+
+        class Counted:
+            def __init__(self, source):
+                self.source = source
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.source.__exit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.source, name)
+
+            def read(self, *args):
+                nonlocal read_bytes
+                data = self.source.read(*args)
+                read_bytes += len(data)
+                return data
+
+            def readline(self, *args):
+                nonlocal read_bytes
+                data = self.source.readline(*args)
+                read_bytes += len(data)
+                return data
+
+        def counted_open(path, *args, **kwargs):
+            source = original_open(path, *args, **kwargs)
+            if args == ('rb',) and path.suffix == '.jsonl':
+                return Counted(source)
+            return source
+
+        start = time.monotonic()
+        with patch.object(Path, 'open', counted_open):
+            wire = reader.response(query, reader.READER_SOURCE)
+        return wire, read_bytes, time.monotonic() - start
+
+    def test_hosted_chat_prefers_context_session_over_a_hundred_megabyte_public_log(self):
+        self.install_fixture(context_session=self.context_sid)
+        wire, read_bytes, elapsed = self.bounded_response()
+        self.assertNotIn('history\tmissing', wire)
+        self.assertIn('CONTEXT', wire)
+        self.assertNotIn('PUBLIC', wire)
+        self.assertLessEqual(read_bytes, reader.QUESTION_SCAN_BYTES + 128)
+        self.assertLess(elapsed, 2.0)
+
+    def test_hosted_live_stream_returns_newest_messages_without_missing(self):
+        self.install_fixture(native_session=self.context_sid)
+        wire, read_bytes, elapsed = self.bounded_response()
+        self.assertNotIn('history\tmissing', wire)
+        self.assertIn('CONTEXT', wire)
+        self.assertLessEqual(read_bytes, reader.QUESTION_SCAN_BYTES + 128)
+        self.assertLess(elapsed, 2.0)
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--watch'],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  env=dict(os.environ, HOME=str(self.home)))
+
+        def close_server():
+            server.stdin.close()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+            server.stdout.close()
+            server.stderr.close()
+
+        self.addCleanup(close_server)
+        server.stdin.write(base64.b64encode((ROOT / 'src/chat_history_reader.py').read_bytes()) + b'\n')
+        server.stdin.flush()
+        server.stdin.write(json.dumps(self.query).encode() + b'\n')
+        server.stdin.flush()
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=10), 'watch stream did not answer')
+        frame = json.loads(server.stdout.readline())
+        self.assertIn('CONTEXT', frame['wire'])
+        self.assertNotIn('history\tmissing', frame['wire'])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
