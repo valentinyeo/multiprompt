@@ -79,6 +79,10 @@ jobs:
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands
         run: node tools/check-journey-commands.mjs
+      - name: Test the journey evidence guard
+        run: node --test tools/check-journey-evidence.test.js
+      - name: Require journey evidence to survive every run
+        run: node tools/check-journey-evidence.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
       - name: Test the source file-size ratchet
