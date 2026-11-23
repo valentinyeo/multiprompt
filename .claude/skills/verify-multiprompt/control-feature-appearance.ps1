@@ -1,6 +1,8 @@
 
+            . (Join-Path $PSScriptRoot 'version-label.ps1')
             Select-Theme 'dark' 'baseline-dark-action'
             Snapshot 'before'
+            Assert-VersionLabel 'version-dark'
             Select-Theme 'light' 'action'
             Snapshot 'after'
             $dark = Sidebar-Luminance 'before'
@@ -12,4 +14,8 @@
             }
             $result.checks += @{ name = 'IGSH-1016-reader-sidebar'; sidebarRgb = "$($reader.r),$($reader.g),$($reader.b)"; expected = '16,16,16' }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
+            Assert-VersionLabel 'version-light'
+            [void][VerifyNative]::MoveWindow($script:window, 10, 10, 560, 650, $true)
+            Assert-VersionLabel 'version-narrow'
+            [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
         

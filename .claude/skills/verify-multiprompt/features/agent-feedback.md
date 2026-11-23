@@ -1,7 +1,7 @@
 # Chat feedback command
 
-Source files: src/multibot_feedback.py, tools/multibot-feedback-test.py, skills/multi-bot-feedback/*, .github/workflows/feedback-command.yml
-CI workflow: feedback-command.yml
+Source files: src/multibot_feedback.py, tools/multibot-feedback-test.py, skills/multi-bot-feedback/*, .github/workflows/test.yml
+CI workflow: test.yml
 
 ## Sub-features
 
@@ -13,7 +13,7 @@ Invoke the installed chat skill with `/multi-bot-feedback [summary] [screenshot.
 
 ## Driving it with GitHub CI
 
-The `feedback-command.yml` workflow runs `tools/multibot-feedback-test.py` on the exact PR head against a fake board and fake `mp-sessions whoami`. It checks token-free queue intake, report fields, redaction before saving and trimming, duplicate occurrences, retry convergence, label selection and screenshot attachment after queueing. The reader-bundle case checks runtime tool publication and desktop-version metadata. It also runs the new token-free report case against the base source to demonstrate that the old CLI rejects the new command options. Artifact `feedback-command` retains the receipt and raw logs.
+The `reader-tests` job in `test.yml` runs `tools/multibot-feedback-test.py` on the exact PR head against a fake board and fake `mp-sessions whoami`. It checks token-free queue intake, report fields, redaction before saving and trimming, duplicate occurrences, retry convergence, label selection and screenshot attachment after queueing. The reader-bundle case checks runtime tool publication and desktop-version metadata. It also runs the new token-free report case against the base source to demonstrate that the old CLI rejects the new command options. Artifact `feedback-command` retains the receipt and raw logs.
 
 ## Gotchas
 
