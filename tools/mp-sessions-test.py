@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MP_SESSIONS = ROOT / "tools" / "mp-sessions"
 
 FAKE_READER = r'''
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 LOG = Path(os.environ["MP_SESSIONS_TEST_LOG"])
 
@@ -22,8 +22,21 @@ def note(kind, value):
 
 if __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     note("host", sys.argv[2:])
-    status = dict(enable="enabled", start="started", stop="stopped").get(sys.argv[2], "error")
-    print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
+    command = sys.argv[2]
+    if command == "restart":
+        key = sys.argv[3:5]
+        root = Path(os.environ["HOME"]) / ".local/state/multiprompt/agent-host"
+        digest = __import__("hashlib").sha256((key[0] + ":" + key[1]).encode()).hexdigest()[:32]
+        marker = root / (digest + ".restart.json")
+        if marker.is_file():
+            print(json.dumps(dict(status="already", reason="restart_pending")))
+        else:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(json.dumps(dict(at=time.time())), encoding="utf-8")
+            print(json.dumps(dict(status="restarted", sid=key[1])))
+    else:
+        status = dict(enable="enabled", start="started", stop="stopped").get(command, "error")
+        print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
 '''
 
 FAKE_ZSB = r'''#!/usr/bin/env python3
@@ -377,6 +390,25 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(restarted["sid"], started["sid"])
         self.assertEqual(restarted["status"], "restarted")
         self.assertIn(["start", "claude", started["sid"]], self.events("host"))
+
+    def test_SOFT_3130_restart_running_chat_keeps_sid_and_tab(self):
+        fixture = ROOT / "tools" / "fixtures" / "SOFT-3130" / "listing.json"
+        listing = json.loads(fixture.read_text(encoding="utf-8"))
+        self.identity_chat(name="Pinned chat", tmux="live-caller")
+        self.mark_running(dict(sid="caller-session"))
+        tabs_before = json.loads(self.state_file.read_text(encoding="utf-8"))["tabs"]
+        first = self.parsed(self.run_sessions("restart", "Pinned chat", MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+        self.assertEqual(first["sid"], "caller-session")
+        self.assertEqual(first["status"], "resumed")
+        self.assertEqual([call for call in self.events("host") if call[:2] == ["restart", "claude"]], [["restart", "claude", "caller-session"]])
+        opened = [call for call in self.events("zsb") if call and call[0] == "session-open"]
+        self.assertEqual(opened, [])
+        tabs_after = json.loads(self.state_file.read_text(encoding="utf-8"))["tabs"]
+        self.assertEqual(tabs_before, tabs_after)
+        second = self.parsed(self.run_sessions("restart", "Pinned chat", MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+        self.assertEqual(second["sid"], first["sid"])
+        self.assertEqual(second["status"], "already")
+        self.assertEqual(len([call for call in self.events("host") if call[:2] == ["restart", "claude"]]), 1)
 
     def test_SOFT_3055_close_refuses_a_busy_chat(self):
         started = self.parsed(self.run_sessions("start", "--name", "Busy"))
