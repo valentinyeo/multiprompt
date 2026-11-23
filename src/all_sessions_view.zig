@@ -15,7 +15,7 @@ pub var server_filter: ?u8 = null;
 var today: u64 = 0;
 var tab_first: usize = 0;
 const Hit = struct { rect: RECT, action: union(enum) { server: u8, state: ?model.RunState, tab: u32, search } };
-var hits: [app.MAX_LWS + 270]Hit = undefined;
+var hits: [@as(usize, app.MAX_LWS) + 270]Hit = undefined;
 var hit_count: usize = 0;
 
 pub fn selection() model.Selection {

@@ -1933,7 +1933,6 @@ pub fn archiveOverviewRow(row: SessionOverviewRow) void {
         entry.claude_cwd_len = copyAsciiField(&entry.claude_cwd, cached.path[0..cached.path_len]);
     } else if (row.kind == .reminder) {
         const reminder = &app_state.g_reminders[row.ref_idx];
-        entry.ai_agent = reminder.ai_agent;
         entry.claude_cwd_len = copyAsciiField(&entry.claude_cwd, reminder.claude_cwd[0..reminder.claude_cwd_len]);
         entry.claude_sid_len = copyAsciiField(&entry.claude_sid, reminder.claude_sid[0..reminder.claude_sid_len]);
     }
