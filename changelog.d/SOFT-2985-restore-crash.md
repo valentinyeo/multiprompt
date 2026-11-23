@@ -1,0 +1,1 @@
+Multiprompt starts again after a normal close without losing your saved sessions.

@@ -1,6 +1,6 @@
 # Browser emulation
 
-Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/browser-emulation.mjs
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-emulation.ps1
 
 ## Sub-features
 
