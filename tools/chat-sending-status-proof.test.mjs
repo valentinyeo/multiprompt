@@ -38,3 +38,21 @@ test('bottom-pinned bubble can end at the viewport edge', () => {
   image.pixels.copy(image.pixels, 30 * image.width * 4, 0, 210 * image.width * 4);
   assert.equal(measureStatus(image, { ...rect, height: 120 }).statusInk, 0);
 });
+
+test('reader dark theme gradient bubble passes without status and still fails on status ink', () => {
+  const makeReader = status => {
+    const image = { width: 400, height: 240, pixels: Buffer.alloc(400 * 240 * 4) };
+    const paint = (x, y, color) => image.pixels.writeUIntLE(color, (y * 400 + x) * 4, 3);
+    for (let y = 0; y < 240; y++) for (let x = 0; x < 400; x++) paint(x, y, 0x101010);
+    for (let y = 30; y < 90; y++) {
+      const shade = 0x42 - Math.floor(((y - 30) * 8) / 59);
+      const fill = shade | (shade << 8) | (shade << 16);
+      for (let x = 180; x < 376; x++) paint(x, y, fill);
+    }
+    for (let y = 58; y < 72; y++) for (let x = 200; x < 350; x += 3) paint(x, y, 0xf2f2f2);
+    if (status) for (let x = 280; x < 370; x++) paint(x, 100, 0xaaaaaa);
+    return image;
+  };
+  assert.equal(measureStatus(makeReader(false), rect).statusInk, 0);
+  assert.throws(() => measureStatus(makeReader(true), rect), /IGSH-931 ordinary message status/);
+});

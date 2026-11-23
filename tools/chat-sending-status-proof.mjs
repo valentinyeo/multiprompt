@@ -4,6 +4,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBmp } from './chat-code-font-proof.mjs';
 
+function userBubbleFills(background, dimmed) {
+  const channel = (color, shift) => (color >> shift) & 255;
+  const base = background === 0x101010
+    ? 0x3a3a3a
+    : [0, 8, 16].reduce((color, shift) => color | Math.min(255, channel(background, shift) + 53) << shift, 0);
+  const fills = new Set();
+  for (let delta = 0; delta <= 8; delta++) {
+    const fill = [0, 8, 16].reduce((color, shift) => color | Math.min(255, channel(base, shift) + delta) << shift, 0);
+    if (!dimmed) fills.add(fill);
+    else {
+      for (const rounding of [0, 1]) {
+        fills.add([0, 8, 16].reduce((color, shift) => color | Math.min(255, Math.floor((channel(fill, shift) + channel(background, shift)) / 2) + rounding) << shift, 0));
+      }
+    }
+  }
+  return fills;
+}
+
 export function measureStatus(image, rect, dimmed = false) {
   const { left, top, width, height } = rect;
   assert.ok([left, top, width, height].every(Number.isSafeInteger));
@@ -17,12 +35,12 @@ export function measureStatus(image, rect, dimmed = false) {
   }
   const background = [...counts].sort((a, b) => b[1] - a[1])[0][0];
   assert.ok([0, 8, 16].every(shift => ((background >> shift) & 255) < 128), 'dark fixture background');
-  const fills = (dimmed ? [26, 27] : [53]).map(delta => [0, 8, 16].reduce((color, shift) => color | Math.min(255, ((background >> shift) & 255) + delta) << shift, 0));
+  const fills = userBubbleFills(background, dimmed);
   let bottom = -1, right = 0, lo = width, ink = 0;
   for (let y = 0; y < height; y++) {
     let start = -1;
     for (let x = 0; x <= width; x++) {
-      if (x < width && fills.includes(pixel(x, y))) { if (start < 0) start = x; }
+      if (x < width && fills.has(pixel(x, y))) { if (start < 0) start = x; }
       else if (start >= 0) {
         if (x - start > 40) { bottom = y; right = Math.max(right, x); lo = Math.min(lo, start); ink += x - start; }
         start = -1;
@@ -32,7 +50,7 @@ export function measureStatus(image, rect, dimmed = false) {
   assert.ok(ink > 500 && bottom > 20, 'outgoing bubble must be visibly painted');
   let bodyInk = 0;
   for (let y = Math.max(0, bottom - 35); y < bottom - 5; y++) for (let x = lo + 12; x < right - 12; x++) {
-    if (!fills.includes(pixel(x, y)) && pixel(x, y) !== background) bodyInk++;
+    if (!fills.has(pixel(x, y)) && pixel(x, y) !== background) bodyInk++;
   }
   assert.ok(bodyInk > 20, 'outgoing bubble contains message text');
   let statusInk = 0;
