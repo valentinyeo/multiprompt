@@ -394,7 +394,7 @@ pub fn chatWorkingIndicatorInvalidate() void {
 }
 
 pub fn chatWorkingIndicatorSync() void {
-    @import("chat_render.zig").chatWorkingSync();
+    @import("chat_working_dots.zig").sync();
     var formatted: [128]u16 = undefined;
     const visible = chatWorkingBarVisible();
     if (app_state.ISSUE_265_WORKING_BAR) {

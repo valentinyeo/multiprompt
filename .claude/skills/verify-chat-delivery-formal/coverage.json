@@ -3,9 +3,9 @@
   "files": {
     "src/chat_echo.zig": "6d8fc3863e13023dc2d1c5e83911151a33efe0bce746cbb20e5ec305dd30eb37",
     "src/chat_send.zig": "88b744e3c71acb9024193918b6bcf35b93590a4b38985fe406e2af08403d0297",
-    "src/chat_render.zig": "6f496cae1e79fdcd3e1942acc899e19b91bf7d8421fec9fc964ba53e98edfff9",
+    "src/chat_render.zig": "1a8eec88be99b3ee117ebd43f8c95a45d2cc0d195adb2997b43f161117d74d1d",
     "src/chat_history_reader.py": "5f37472b5fa47c9af818e88637d0bd31f88a8cbb79fd2d2e074e567db7d2b990",
-    "src/app_state.zig": "682957e70cd61433479a9b04ef93b08c365313c807b62ce5e84880c76ce8868f",
+    "src/app_state.zig": "ed748571f275af0bbc759771070da43f166db6cf731b5e9d41fda5f649bd2895",
     "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",
     "tools/chat-history-reader-test.py": "a91eb196b8bc4642ed7e74e317be59278c8420cabbbd9e0d9700c0136d5502ea",
     "tools/multibot-feedback-test.py": "1b7581c2ca4898aed9ec19a9903d83c8cc92ed8d40289ef99a5e18614f2a67d0"

@@ -3,16 +3,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
+const dots = fs.readFileSync(path.join(__dirname, '../src/chat_working_dots.zig'), 'utf8');
+const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
 
-function sliceFn(name) {
+function sliceFn(source, name) {
   const start = source.search(new RegExp(`\\n(?:pub )?fn ${name}\\(`));
-  assert.ok(start >= 0, `${name} must exist in the chat render path`);
+  assert.ok(start >= 0, `${name} must exist in the working-dots render path`);
   return source.slice(start + 1, source.indexOf('\n}', start) + 2);
 }
 
 function repaintRegion() {
-  const body = sliceFn('chatWorkingRepaintRegion');
+  const body = sliceFn(dots, 'repaintRegion');
   const js = body.slice(body.indexOf('{') + 1, body.lastIndexOf('}'))
     .replace('const a = painted orelse return current;', 'if (painted == null) return current; const a = painted;')
     .replace('const b = current orelse return a;', 'if (current == null) return a; const b = current;')
@@ -57,23 +58,25 @@ test('SOFT-2642 an empty session keeps one row of working dots while the layout 
 });
 
 test('SOFT-2642 the working dots repaint uses one rect for the paint and the invalidation', () => {
-  const sync = sliceFn('chatWorkingSync');
-  assert.match(sync, /chatWorkingScreenRect\(g_working_rect, app_state\.g_chat_scroll_y\)/);
-  assert.match(sync, /chatWorkingRepaintRegion\(g_working_painted, current\)/);
-  assert.match(sync, /g_working_painted = current;/);
+  const sync = sliceFn(dots, 'sync');
+  assert.match(sync, /screenRect\(layout_rect, app_state\.g_chat_scroll_y\)/);
+  assert.match(sync, /repaintRegion\(painted_rect, current\)/);
+  assert.match(sync, /painted_rect = current;/);
 
-  const paint = sliceFn('chatPaintWorking');
-  assert.equal(paint.match(/chatPaintWorkingDots\(/g).length, 1, 'one paint call per frame');
-  assert.match(paint, /chatWorkingScreenRect\(g_working_rect, app_state\.g_chat_scroll_y\)/);
-  assert.match(paint, /g_working_painted = chatWorkingRepaintRegion\(g_working_painted, rc\);/);
-  assert.match(paint, /if \(!chatWorkingDotsVisible\(\) or !chatRectOverlaps\(rc, paint\)\) return;/);
+  const paint = sliceFn(dots, 'paint');
+  assert.equal(paint.match(/paintDots\(/g).length, 1, 'one paint call per frame');
+  assert.match(paint, /screenRect\(layout_rect, app_state\.g_chat_scroll_y\)/);
+  assert.match(paint, /painted_rect = repaintRegion\(painted_rect, rc\);/);
+  assert.match(paint, /if \(!visible\(\) or !overlaps\(rc, paint_rect\)\) return;/);
 
-  const dots = sliceFn('chatPaintWorkingDots');
-  assert.match(dots, /for \(0\.\.3\) \|i\|/, 'the indicator is exactly three dots');
-  assert.equal((source.match(/chatPaintWorkingDots\(/g) || []).length, 3);
+  const painted = sliceFn(dots, 'paintDots');
+  assert.match(painted, /for \(0\.\.3\) \|i\|/, 'the indicator is exactly three dots');
+  assert.equal(sync.match(/InvalidateRect\(hwnd, null, 0\)/g).length, 1);
+  assert.equal((dots.match(/paintDots\(/g) || []).length, 2);
 });
 
 test('SOFT-2642 the working row follows the content when the top pad changes', () => {
-  const topPad = sliceFn('chatSetTopPad');
-  assert.match(topPad, /if \(g_working_rect\) \|\*rect\| \{\n\s+rect\.top \+= delta;\n\s+rect\.bottom \+= delta;/);
+  assert.match(sliceFn(dots, 'shiftLayout'), /rect\.top \+= delta;\n\s+rect\.bottom \+= delta;/);
+  assert.match(sliceFn(render, 'chatSetTopPad'), /chat_dots\.shiftLayout\(delta\);/);
+  assert.match(render, /const chat_dots = @import\("chat_working_dots\.zig"\);/, 'the dots rect has one owner');
 });
