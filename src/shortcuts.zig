@@ -300,7 +300,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
     .{ .a = "Ctrl+K -> Reopen server shell", .b = "List the detached sessions on this tab's server and attach the one you pick", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
-    .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
+    .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, Shift+A = Archived, u = No window)", .header = false },
+    .{ .a = "A / S in All Sessions", .b = "Archive or star the selected session", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
     .{ .a = "Space in All Sessions", .b = "Mark or unmark the selected unattached session", .header = false },
     .{ .a = "x in All Sessions", .b = "Close the marked unattached sessions, or the selected one, after a confirmation", .header = false },
@@ -1566,6 +1567,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 1;
                 }
                 if (app_state.g_all_sessions_filter_active) {
+                    if (kb.vkCode == 0x09) {
+                        app_state.g_all_sessions_filter_active = false;
+                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, if (shift) 7 else 6, 0);
+                        return 1;
+                    }
                     if (kb.vkCode == 0x1B) {
                         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_FILTER_CLOSE, 0, 0);
                         return 1;
@@ -1690,8 +1696,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 35, 0);
                     return 1;
                 }
+                if (!ctrl and kb.vkCode == 0x53) {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 38, 0);
+                    return 1;
+                }
                 if (!ctrl and kb.vkCode == 0x41) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 36, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, if (shift) 36 else 37, 0);
                     return 1;
                 }
                 return 1;

@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2445 moves the All Sessions row model out of `src/app_state.zig` and exposes the existing three-dot painter without changing its body. `ChatOutboxEntry`, `chatRelayout` and `chatEchoNotSent` are byte-identical to the task base. Only the two whole-file hashes change; modeled decisions, bounds and replay stay unchanged.
+
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 
 SOFT-3097 reverts `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6` on top of `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, so pending rows reconcile by exact text again and id-less history rows key on their text. `pickBlock`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch and the restore guard are unchanged from the pre-identity source, and the native probes and replay supply only the text block. The recorded decision table still matches, because it models one exact-text echo. The reader's `client_id` metadata and alias persistence are gone; the covered reader functions are otherwise unchanged. Only the echo, send and reader hashes move, and the sync commit names the base it was reviewed on. Bounds, decisions, mutations and properties remain unchanged.

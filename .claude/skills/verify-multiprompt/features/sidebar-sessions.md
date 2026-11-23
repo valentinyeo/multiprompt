@@ -116,6 +116,8 @@ Observable proof: The list, counts and copied chat IDs match Part B's host inven
 
 UNREACHABLE until Part B supplies multiple live, waiting, archived and unattached identities and a native All Sessions filter/mark/confirm recipe. session-open only proves bridge requests and failed SSH, not this list.
 
+SOFT-2445 uses one card with server buttons and counted All, Running, No window and Archived filters. Tabs are All, Frequent, Favorites, Waiting, each workspace, Other and Archived. Waiting means needs your reply, not hidden. Rows group Waiting on you, Today and Earlier; known last messages and times show beside the bot picture. Unknown message previews stay explicit. Memory appears only from 400 MB. Ctrl+F or clicking search enters text; Tab returns to tab navigation, preserving the query; Escape clears search. A archives, S stars, Shift+A selects Archived. Space and x retain unattached-session marking and confirmed close. Snapshot reminders must be woken before individual archive.
+
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
 | `SEARCH_ARCHIVED_OFFSET` | UNREACHABLE since SOFT-2444: Ctrl+K lists active sessions only and nothing appends these rows. Use `SEARCH_ARCHIVED_VIEW_OFFSET` and the All Sessions Archived tab instead. |

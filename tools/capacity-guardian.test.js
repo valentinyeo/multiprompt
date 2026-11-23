@@ -83,7 +83,7 @@ test("capacity policy and decisions are durable and diagnosable", () => {
   assert.match(source, /recovery_samples < 4/);
 });
 
-test("All Sessions exposes per-session RAM and deduplicated workspace totals", () => {
+test("All Sessions keeps RAM accounting but shows only high per-session memory", () => {
   const rows = functionBody("buildSessionOverviewRows", "sessionOverviewHostLabel");
   assert.match(rows, /row\.ram_mb = tmuxSessionRamMb\(host, sess, shells\[i\]\.ram_mb\)/);
   assert.match(rows, /row\.ram_mb = tmuxSessionRamMb\(e\.tmux_host, reminder_session, 0\)/);
@@ -93,10 +93,10 @@ test("All Sessions exposes per-session RAM and deduplicated workspace totals", (
   assert.match(totals, /row\.kind == \.archived/);
   assert.match(totals, /duplicate = true/);
 
-  const paint = functionBody("paintAllSessions", "openAllSessions");
-  assert.match(paint, /allSessionsTabRamMb\(tabid\)/);
+  const paint = fs.readFileSync(path.join(__dirname, '../src/all_sessions_view.zig'), 'utf8');
+  assert.match(paint, /model\.highMemory\(row\)/);
   assert.match(paint, /"\{d\} MB"/);
-  assert.match(paint, /row\.kind == \.archived[\s\S]*"0 MB"/);
+  assert.doesNotMatch(paint, /"0 MB"|"\? MB"/);
 });
 
 test("sidebar VPS card explains pressure as percentages with explicit Critical boundaries", () => {

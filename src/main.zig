@@ -1956,42 +1956,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
 
             if (app_state.g_all_sessions_active) {
-                app_state.g_all_sessions_ctx = false;
-                if (!app_state.g_all_sessions_close_running) app_state.g_all_sessions_confirm = false;
-                const list_top = allSessionsListTop();
-                const tab_strip_bot: i32 = 54;
-                if (my >= 0 and my < tab_strip_bot) {
-                    var tab_hit: ?u32 = null;
-                    for (0..app_state.g_all_sessions_split_tab_count) |ti| {
-                        if (mx >= app_state.g_all_sessions_split_xs[ti] and mx < app_state.g_all_sessions_split_xe[ti]) {
-                            tab_hit = app_state.g_all_sessions_split_ids[ti];
-                            break;
-                        }
-                    }
-                    if (tab_hit) |new_tab| {
-                        if (allSessionsSplitVisible(new_tab)) {
-                            app_state.g_all_sessions_tab = new_tab;
-                            app_state.g_all_sessions_sel = 0;
-                            _ = InvalidateRect(hwnd, null, 0);
-                        }
-                    }
-                } else if (my >= list_top) {
-                    var client_rc2: RECT = std.mem.zeroes(RECT);
-                    _ = GetClientRect(hwnd, &client_rc2);
-                    const row_h: i32 = uiScaled(32);
-                    const footer_h: i32 = 30;
-                    const avail = client_rc2.bottom - list_top - footer_h;
-                    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
-                    const vis = allSessionsVisibleCount();
-                    var scroll_row: u32 = 0;
-                    if (app_state.g_all_sessions_sel >= max_rows) scroll_row = app_state.g_all_sessions_sel - max_rows + 1;
-                    const clicked_vrow: u32 = @intCast(@divFloor(my - list_top, row_h));
-                    const target_vrow = scroll_row + clicked_vrow;
-                    if (target_vrow < vis) {
-                        app_state.g_all_sessions_sel = target_vrow;
-                        allSessionsJump(hwnd);
-                    }
-                }
+                @import("all_sessions_view.zig").click(hwnd, mx, my);
                 return 0;
             }
 

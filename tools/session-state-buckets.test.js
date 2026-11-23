@@ -28,11 +28,11 @@ function functionBody(name, nextName) {
   return source.slice(start, end);
 }
 
-test("Waiting and Archived are permanent, disjoint All Sessions destinations", () => {
+test("Waiting and Archived remain permanent All Sessions destinations", () => {
   assert.match(source, /const AS_TAB_WAITING: u32 = 202;/);
   assert.match(source, /const AS_TAB_ARCHIVED: u32 = 203;/);
   const membership = functionBody("allSessionsRowInTab", "sessionOverviewRowsRamMb");
-  assert.match(membership, /AS_TAB_WAITING\) return row\.kind == \.hidden/);
+  assert.match(membership, /AS_TAB_WAITING\) return row\.attention and row\.kind != \.archived/);
   assert.match(membership, /AS_TAB_ARCHIVED\) return row\.kind == \.archived/);
   const visibility = functionBody("allSessionsSplitVisible", "allSessionsKindColor");
   assert.match(visibility, /AS_TAB_WAITING/);
@@ -43,7 +43,7 @@ test("Waiting and Archived are permanent, disjoint All Sessions destinations", (
 test("All Sessions exposes direct Waiting and Archived keyboard routes", () => {
   const hook = functionBody("keyboardHookProc", "pointOverActiveShell");
   assert.match(hook, /kb\.vkCode == 0x57[\s\S]*WM_APP_ALL_SESSIONS_KEY, 35/);
-  assert.match(hook, /kb\.vkCode == 0x41[\s\S]*WM_APP_ALL_SESSIONS_KEY, 36/);
+  assert.match(hook, /kb\.vkCode == 0x41[\s\S]*WM_APP_ALL_SESSIONS_KEY, if \(shift\) 36 else 37/);
   const handler = functionBody("handleAllSessionsKey", "finishUnarchiveUnattachedQueue");
   assert.match(handler, /35 =>[\s\S]*AS_TAB_WAITING/);
   assert.match(handler, /36 =>[\s\S]*AS_TAB_ARCHIVED/);
@@ -53,7 +53,7 @@ test("Current UI names Alt+E Waiting and Alt+X Archive", () => {
   assert.match(source, /L\("Archive Session"\)/);
   assert.match(source, /L\("Restore Workspace Waiting Sessions"\)/);
   assert.match(source, /"Press Alt\+X again to archive"/);
-  assert.match(source, /w waiting   a archived/);
+  assert.match(source, /w waiting   Shift+A archived/);
   assert.doesNotMatch(functionBody("sessionOverviewKindLabel", "sessionOverviewKindMatches"), /"hidden"|"dissolved"/);
 });
 

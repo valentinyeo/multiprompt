@@ -429,6 +429,11 @@ fn removeReminderAt(idx: u32) void {
     app_state.g_reminder_count -= 1;
 }
 
+pub fn discardReminder(idx: u32) void {
+    removeReminderAt(idx);
+    _ = saveReminders();
+}
+
 pub fn copyAsciiField(dst: []u8, src: []const u8) u32 {
     const n = @min(src.len, dst.len);
     if (n > 0) @memcpy(dst[0..n], src[0..n]);

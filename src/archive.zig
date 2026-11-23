@@ -1,4 +1,6 @@
 const app_state = @import("app_state.zig");
+const overview = @import("all_sessions_model.zig");
+const overview_view = @import("all_sessions_view.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const session_end = @import("session_end.zig");
@@ -1306,6 +1308,8 @@ pub fn sessionOverviewRowMatches(row: *const SessionOverviewRow, query: []const 
     if (asciiContainsQueryInsensitive(row.name[0..row.name_len], query)) return true;
     if (asciiContainsQueryInsensitive(row.session[0..row.session_len], query)) return true;
     if (asciiContainsQueryInsensitive(row.context[0..row.context_len], query)) return true;
+    if (asciiContainsQueryInsensitive(row.preview[0..row.preview_len], query)) return true;
+    if (asciiContainsQueryInsensitive(overview.stateLabel(overview.runState(row.*)), query)) return true;
     if (sessionOverviewKindMatches(row.kind, query)) return true;
     if (row.stale_candidate and asciiContainsQueryInsensitive("stale cleanup candidate detached idle 72 hours", query)) return true;
     return tmuxHostMatchesQuery(row.host, query);
@@ -1547,8 +1551,41 @@ pub fn buildSessionOverviewRows() void {
             if (bstart < root.len) ctx_slice = root[bstart..];
         }
         const aws = archivedEntryWorkspaceSlot(e);
-        _ = sessionOverviewAdd(.archived, 0, 0, e.tmux_host, name, sess, ctx_slice, 0, 0, false, aws);
+        _ = sessionOverviewAdd(.archived, 0, @intCast(ai), e.tmux_host, name, sess, ctx_slice, 0, 0, false, aws);
     }
+
+    const frequent = @import("frequent.zig");
+    const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+    app_state.g_session_overview_rows.items.len = overview.deduplicate(app_state.g_session_overview_rows.items);
+    for (app_state.g_session_overview_rows.items) |*row| {
+        if (row.kind == .open or row.kind == .hidden) {
+            const shell = &app_state.shells[row.ref_idx];
+            row.preview_len = copyAsciiField(&row.preview, shell.preview[0..shell.preview_len]);
+            row.favorite = shell.favorite;
+            row.frequent = frequent.inFrequent(shell.visits.optional() orelse &.{}, now_ms, if (shell.input != 0) shell.input else null);
+        } else {
+            row.favorite = @import("all_sessions_metadata.zig").get(row.host, row.session[0..row.session_len]) orelse row.snapshot_favorite;
+            if (row.kind == .vps_only) row.last_active *= 10_000;
+            if (row.kind == .archived) row.agent = app_state.g_archived.items[row.ref_idx].ai_agent;
+            if (row.kind == .reminder and row.snapshot_order == null) {
+                const reminder = &app_state.g_reminders[row.ref_idx];
+                row.favorite = @import("all_sessions_metadata.zig").get(row.host, row.session[0..row.session_len]) orelse reminder.favorite;
+                row.frequent = frequent.inFrequent(reminder.visits.optional() orelse &.{}, now_ms, if (reminder.input != 0) reminder.input else null);
+            }
+        }
+        @import("all_sessions_metadata.zig").restore(row);
+        for (app_state.g_chat_histories.items) |cached| {
+            if (cached.retired or cached.key.host != row.host) continue;
+            const same_shell = row.shell_id != 0 and cached.key.shell_id == row.shell_id;
+            const same_session = row.session_len != 0 and std.ascii.eqlIgnoreCase(std.mem.sliceTo(&cached.key.tmux, 0), row.session[0..row.session_len]);
+            if (!same_shell and !same_session) continue;
+            const empty: @import("chat_transcript.zig").Status = .{};
+            const preview = @import("agent_second_line.zig").select(&empty, &cached.history, false, null, &.{}, false);
+            if (preview.len > 0) row.preview_len = copyAsciiField(&row.preview, preview.text[0..preview.len]);
+        }
+    }
+    app_state.g_session_overview_count = @intCast(app_state.g_session_overview_rows.items.len);
+    std.mem.sort(SessionOverviewRow, app_state.g_session_overview_rows.items, overview_view.dayStart(), overview.less);
 
     if (verboseLoggingEnabled()) {
         var oc: u32 = 0;
@@ -1591,9 +1628,9 @@ fn allSessionsRowTab(row: *const SessionOverviewRow) u32 {
 
 fn allSessionsRowInTab(row: *const SessionOverviewRow, tab: u32) bool {
     if (tab == AS_TAB_ALL) return true;
-    if (tab == AS_TAB_WAITING) return row.kind == .hidden;
+    if (tab == AS_TAB_WAITING) return row.attention and row.kind != .archived;
     if (tab == AS_TAB_ARCHIVED) return row.kind == .archived;
-    return allSessionsRowTab(row) == tab;
+    return overview.inTab(row.*, tab);
 }
 
 fn sessionOverviewRowsRamMb(rows: []const SessionOverviewRow, tab: u32) u64 {
@@ -1628,7 +1665,7 @@ test "All Sessions RAM totals deduplicate live tmux sessions and exclude dissolv
         .{ .kind = .reminder, .host = 1, .workspace = 0, .ram_mb = 256 },
         .{ .kind = .archived, .host = 1, .workspace = 0, .ram_mb = 999 },
         .{ .kind = .open, .host = 1, .workspace = 1, .ram_mb = 2048 },
-        .{ .kind = .hidden, .host = 0, .workspace = AS_ROW_OTHER, .ram_mb = 128 },
+        .{ .kind = .hidden, .host = 0, .workspace = AS_ROW_OTHER, .ram_mb = 128, .attention = true },
     };
     const sessions = [_][]const u8{ "same", "same", "reminder", "dissolved", "other-workspace", "unassigned" };
     for (&rows, sessions) |*row, session| {
@@ -1643,8 +1680,10 @@ test "All Sessions RAM totals deduplicate live tmux sessions and exclude dissolv
     try std.testing.expectEqual(@as(u64, 0), sessionOverviewRowsRamMb(&rows, AS_TAB_ARCHIVED));
 }
 
-fn allSessionsTabLabel(tab: u32, buf: *[32]u8) []const u8 {
+pub fn allSessionsTabLabel(tab: u32, buf: *[32]u8) []const u8 {
     if (tab == AS_TAB_ALL) return "All";
+    if (tab == app_state.AS_TAB_FREQUENT) return "Frequent";
+    if (tab == app_state.AS_TAB_FAVORITES) return "Favorites";
     if (tab == AS_TAB_WAITING) return "Waiting";
     if (tab == AS_TAB_ARCHIVED) return "Archived";
     if (tab == AS_TAB_OTHER) return "Other";
@@ -1652,7 +1691,7 @@ fn allSessionsTabLabel(tab: u32, buf: *[32]u8) []const u8 {
 }
 
 fn allSessionsFilterMatches(row: *const SessionOverviewRow) bool {
-    if (!app_state.g_all_sessions_filter_active or app_state.g_all_sessions_filter_len == 0) return true;
+    if (app_state.g_all_sessions_filter_len == 0) return true;
     const query = app_state.g_all_sessions_filter_buf[0..app_state.g_all_sessions_filter_len];
     if (sessionOverviewRowMatches(row, query)) return true;
     var ws_buf: [32]u8 = undefined;
@@ -1660,16 +1699,12 @@ fn allSessionsFilterMatches(row: *const SessionOverviewRow) bool {
 }
 
 pub fn allSessionsRowVisible(row: *const SessionOverviewRow) bool {
-    const state_destination = app_state.g_all_sessions_tab == AS_TAB_WAITING or app_state.g_all_sessions_tab == AS_TAB_ARCHIVED;
-    const g_all_sessions_killed_only = app_state.g_all_sessions_tab == AS_TAB_ARCHIVED;
-    if (g_all_sessions_killed_only and row.kind != .archived) return false;
-    if (!state_destination and app_state.g_all_sessions_unattached_only and row.kind != .vps_only) return false;
-    if (!allSessionsRowInTab(row, app_state.g_all_sessions_tab)) return false;
+    if (!overview.matches(row.*, overview_view.selection())) return false;
     return allSessionsFilterMatches(row);
 }
 
 pub fn allSessionsListTop() i32 {
-    return if (app_state.g_all_sessions_filter_active) 90 else 54;
+    return uiScaled(224);
 }
 
 pub fn allSessionsVisibleCount() u32 {
@@ -1691,19 +1726,14 @@ pub fn allSessionsNthVisible(want: u32) ?u32 {
     return null;
 }
 
-fn allSessionsClusterCount(tab: u32) u32 {
-    var c: u32 = 0;
-    for (0..app_state.g_session_overview_count) |i| {
-        const row = &app_state.g_session_overview_rows.items[i];
-        const state_destination = tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED;
-        if (!state_destination and app_state.g_all_sessions_unattached_only and row.kind != .vps_only) continue;
-        if (allSessionsRowInTab(row, tab)) c += 1;
-    }
-    return c;
+pub fn allSessionsClusterCount(tab: u32) u32 {
+    var selected = overview_view.selection();
+    selected.tab = tab;
+    return overview.count(app_state.g_session_overview_rows.items, selected);
 }
 
 pub fn allSessionsSplitVisible(tab: u32) bool {
-    if (tab == AS_TAB_ALL or tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED) return true;
+    if (tab == AS_TAB_ALL or tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED or tab == app_state.AS_TAB_FREQUENT or tab == app_state.AS_TAB_FAVORITES) return true;
     return allSessionsClusterCount(tab) > 0;
 }
 
@@ -1789,221 +1819,25 @@ fn drawAllSessionsCloseConfirm(hdc: HANDLE, w: i32, h: i32, font_title: HANDLE, 
 
 pub fn paintAllSessions(hdc: HANDLE) void {
     buildSessionOverviewRows();
-    var rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &rc);
-    const w = rc.right;
-    const h = rc.bottom;
+    overview_view.paint(hdc);
+}
 
-    const bg_br = CreateSolidBrush(themeConsoleBg());
-    _ = FillRect(hdc, &rc, bg_br);
-    _ = DeleteObject(bg_br);
-
-    const font_title = uiFontInboxTitle();
-    const font_subtitle = uiFontInboxSub();
-    const old_font = SelectObject(hdc, font_title);
-    _ = SetBkMode(hdc, TRANSPARENT);
-
-    const fg_dim: DWORD = if (app_state.g_light_theme) RGB(110, 110, 110) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(150, 150, 150);
-    const fg_bright: DWORD = if (app_state.g_light_theme) RGB(20, 20, 20) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(235, 235, 235);
-    const blue: DWORD = customColorOr("attention", RGB(60, 120, 220));
-    const green: DWORD = RGB(46, 204, 113);
-
-    var tx: i32 = 44;
-    const tab_y: i32 = 14;
-    app_state.g_all_sessions_split_tab_count = 0;
-    const purple: DWORD = if (app_state.g_light_theme) RGB(110, 90, 180) else RGB(167, 139, 250);
-    const lws_u: u32 = app_state.g_lws_count;
-    var cand_i: u32 = 0;
-    while (cand_i < lws_u + 4) : (cand_i += 1) {
-        const tabid: u32 = if (cand_i == 0)
-            AS_TAB_ALL
-        else if (cand_i == 1)
-            AS_TAB_WAITING
-        else if (cand_i == 2)
-            AS_TAB_ARCHIVED
-        else if (cand_i <= lws_u + 2)
-            cand_i - 3
-        else
-            AS_TAB_OTHER;
-        if (!allSessionsSplitVisible(tabid)) continue;
-        const tx_before = tx;
-        const count = allSessionsClusterCount(tabid);
-        const tab_dot: DWORD = if (tabid == AS_TAB_ARCHIVED or tabid == AS_TAB_OTHER) purple else if (count > 0) blue else fg_dim;
-        var lbuf: [32]u8 = undefined;
-        drawInboxTab(hdc, &tx, tab_y, allSessionsTabLabel(tabid, &lbuf), count, allSessionsTabRamMb(tabid), app_state.g_all_sessions_tab == tabid, fg_bright, fg_dim, true, tab_dot, 8, blue);
-        if (app_state.g_all_sessions_split_tab_count < ALL_SESSIONS_TAB_COUNT) {
-            const si = app_state.g_all_sessions_split_tab_count;
-            app_state.g_all_sessions_split_xs[si] = tx_before;
-            app_state.g_all_sessions_split_xe[si] = tx;
-            app_state.g_all_sessions_split_ids[si] = tabid;
-            app_state.g_all_sessions_split_tab_count += 1;
-        }
-    }
-    var div_rc = RECT{ .left = 16, .top = tab_y + 28, .right = w - 16, .bottom = tab_y + 29 };
-    const div_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(52, 52, 52));
-    _ = FillRect(hdc, &div_rc, div_br);
-    _ = DeleteObject(div_br);
-
-    if (app_state.g_all_sessions_filter_active) {
-        var search_rc = RECT{ .left = 22, .top = 50, .right = w - 22, .bottom = 82 };
-        const search_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(242, 246, 252) else RGB(28, 34, 44));
-        _ = FillRect(hdc, &search_rc, search_br);
-        _ = DeleteObject(search_br);
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, blue);
-        var find_rc = RECT{ .left = 32, .top = 50, .right = 132, .bottom = 82 };
-        _ = DrawTextW(hdc, L("Find sessions"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        var query_rc = RECT{ .left = 142, .top = 50, .right = w - 34, .bottom = 82 };
-        if (app_state.g_all_sessions_filter_len > 0) {
-            _ = SetTextColor(hdc, fg_bright);
-            _ = DrawTextW(hdc, @ptrCast(&app_state.g_all_sessions_filter_buf), @intCast(app_state.g_all_sessions_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        } else {
-            _ = SetTextColor(hdc, fg_dim);
-            _ = DrawTextW(hdc, L("Type a name, tmux session, workspace, host, or status..."), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-    }
-
-    const row_h: i32 = uiScaled(32);
-    const list_top = allSessionsListTop();
-    const footer_h: i32 = 30;
-    const avail = h - list_top - footer_h;
-    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
-    const vis = allSessionsVisibleCount();
-    if (app_state.g_all_sessions_sel >= vis and vis > 0) app_state.g_all_sessions_sel = vis - 1;
-    var scroll_row: u32 = 0;
-    if (app_state.g_all_sessions_sel >= max_rows) scroll_row = app_state.g_all_sessions_sel - max_rows + 1;
-
-    if (!app_state.g_session_overview_repo_ok) {
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, fg_dim);
-        var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, L("No workspace repo detected."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
-    } else if (vis == 0) {
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, fg_dim);
-        var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) L("No sessions match this search.") else L("No sessions in this cluster."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
-    }
-
-    const name_right: i32 = @max(@as(i32, 160), @min(@as(i32, 420), w - 520));
-    const kind_left: i32 = name_right + 14;
-    const kind_right: i32 = kind_left + 110;
-    const ctx_left: i32 = kind_right + 14;
-    const ctx_right: i32 = ctx_left + 150;
-    const host_left: i32 = ctx_right + 14;
-    const host_right: i32 = host_left + 100;
-    const sess_left: i32 = host_right + 14;
-    const ram_left: i32 = w - 184;
-    const ram_right: i32 = w - 100;
-
-    var y: i32 = list_top;
-    var vrow: u32 = 0;
-    var drawn: u32 = 0;
-    for (0..app_state.g_session_overview_count) |i| {
-        const row = &app_state.g_session_overview_rows.items[i];
-        if (!allSessionsRowVisible(row)) continue;
-        const this_vrow = vrow;
-        vrow += 1;
-        if (this_vrow < scroll_row) continue;
-        if (drawn >= max_rows) break;
-
-        const selected = this_vrow == app_state.g_all_sessions_sel;
-        const kind_color = allSessionsKindColor(row.kind, blue, green);
-        if (selected) {
-            var sel_rc = RECT{ .left = 12, .top = y, .right = w - 12, .bottom = y + row_h };
-            const sel_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(225, 235, 250) else RGB(34, 44, 60));
-            _ = FillRect(hdc, &sel_rc, sel_br);
-            _ = DeleteObject(sel_br);
-            var bar_rc = RECT{ .left = 12, .top = y, .right = if (app_state.g_all_sessions_ctx) 18 else 15, .bottom = y + row_h };
-            const bar_br = CreateSolidBrush(if (app_state.g_all_sessions_ctx) RGB(240, 180, 90) else kind_color);
-            _ = FillRect(hdc, &bar_rc, bar_br);
-            _ = DeleteObject(bar_br);
-        }
-
-        const marked = allSessionsRowMarked(row);
-        if (marked) {
-            var mark_rc = RECT{ .left = 12, .top = y, .right = 19, .bottom = y + row_h };
-            const mark_br = CreateSolidBrush(RGB(240, 130, 70));
-            _ = FillRect(hdc, &mark_rc, mark_br);
-            _ = DeleteObject(mark_br);
-        }
-        const cy = y + @divTrunc(row_h, 2);
-        drawAttentionDot(hdc, 28, cy, 4, if (row.attention) blue else kind_color);
-
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, if (selected or row.attention) fg_bright else fg_dim);
-        var name_rc = RECT{ .left = 44, .top = y, .right = name_right, .bottom = y + row_h };
-        const label = if (row.name_len > 0) row.name[0..row.name_len] else row.session[0..row.session_len];
-        drawAscii(hdc, label, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (marked) RGB(240, 130, 70) else if (row.stale_candidate) RGB(230, 150, 55) else kind_color);
-        var kind_rc = RECT{ .left = kind_left, .top = y, .right = kind_right, .bottom = y + row_h };
-        drawAscii(hdc, if (marked) "marked" else if (row.stale_candidate) "stale?" else sessionOverviewKindLabel(row.kind), &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        _ = SetTextColor(hdc, fg_dim);
-        var ctx_rc = RECT{ .left = ctx_left, .top = y, .right = ctx_right, .bottom = y + row_h };
-        drawAscii(hdc, row.context[0..row.context_len], &ctx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        var host_rc = RECT{ .left = host_left, .top = y, .right = host_right, .bottom = y + row_h };
-        drawAscii(hdc, sessionOverviewHostLabel(row.host), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        if (sess_left < ram_left - 24) {
-            var sess_rc = RECT{ .left = sess_left, .top = y, .right = ram_left - 12, .bottom = y + row_h };
-            drawAscii(hdc, row.session[0..row.session_len], &sess_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-
-        var ram_buf: [24]u8 = undefined;
-        const ram_label = if (row.ram_mb > 0)
-            std.fmt.bufPrint(&ram_buf, "{d} MB", .{row.ram_mb}) catch "? MB"
-        else if (row.kind == .archived)
-            "0 MB"
-        else
-            "? MB";
-        _ = SetTextColor(hdc, if (selected) fg_bright else fg_dim);
-        var ram_rc = RECT{ .left = ram_left, .top = y, .right = ram_right, .bottom = y + row_h };
-        drawAscii(hdc, ram_label, &ram_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
-
-        if (row.last_active != 0) {
-            var tbuf: [24]u16 = undefined;
-            const tl = inboxRelTime(row.last_active, &tbuf);
-            var time_rc = RECT{ .left = w - 84, .top = y, .right = w - 16, .bottom = y + row_h };
-            _ = DrawTextW(hdc, @ptrCast(&tbuf), @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
-        }
-
-        y += row_h;
-        drawn += 1;
-    }
-
-    if (app_state.g_all_sessions_confirm) drawAllSessionsCloseConfirm(hdc, w, h, font_title, font_subtitle, fg_bright, fg_dim);
-
-    _ = SelectObject(hdc, font_subtitle);
-    var ft_rc = RECT{ .left = 22, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
+pub fn paintAllSessionsActions(hdc: HANDLE, w: i32, h: i32) void {
+    const bright = if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(235, 235, 235);
+    const dim = if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
+    if (app_state.g_all_sessions_confirm) drawAllSessionsCloseConfirm(hdc, w, h, uiFontInboxTitle(), uiFontInboxSub(), bright, dim);
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    _ = SetTextColor(hdc, dim);
+    var footer = RECT{ .left = overview_view.cardLeft(w) + uiScaled(16), .top = h - uiScaled(52), .right = w - overview_view.cardLeft(w) - uiScaled(16), .bottom = h - uiScaled(24) };
     if (app_state.g_all_sessions_close_running) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        var cl_buf: [64]u8 = undefined;
-        const cl_msg = std.fmt.bufPrint(&cl_buf, "Closing sessions {d} of {d}...", .{ @min(app_state.g_all_sessions_close_next, app_state.g_all_sessions_close_count), app_state.g_all_sessions_close_count }) catch "Closing sessions...";
-        drawAscii(hdc, cl_msg, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        @import("chat_render.zig").chatPaintWorkingDots(hdc, footer, GetTickCount64());
     } else if (app_state.g_all_sessions_confirm) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        _ = DrawTextW(hdc, L("Close sessions:     Enter / y  Close        Esc / n  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        _ = DrawTextW(hdc, L("Enter / y  Close sessions     Esc / n  Cancel"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else if (app_state.g_all_sessions_ctx) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        _ = DrawTextW(hdc, L("Session actions:     Enter / a  Attach        k  KILL remote tmux session        q / Esc  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else if (app_state.g_all_sessions_filter_active) {
-        _ = SetTextColor(hdc, fg_dim);
-        _ = DrawTextW(hdc, L("Type to reduce   Backspace edit   Up/Down move   Enter open   Esc clear search"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        _ = DrawTextW(hdc, L("Enter / a  Attach     k  Kill remote session     Esc  Cancel"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else {
-        _ = SetTextColor(hdc, fg_dim);
-        _ = DrawTextW(hdc, L("Ctrl+F search   Ctrl+K actions   h/l tabs   j/k move   Space mark   x close unattached   w waiting   a archived   u unattached   Enter open   q/Esc close"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        if (app_state.g_all_sessions_unattached_only) {
-            _ = SetTextColor(hdc, blue);
-            var uo_rc = RECT{ .left = w - 230, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-            _ = DrawTextW(hdc, L("UNATTACHED ONLY"), -1, &uo_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-        }
+        _ = DrawTextW(hdc, L("Arrows move   Enter open   Tab tabs   Space mark   A archive   S star   x close   Ctrl+F search   w waiting   Shift+A archived   u no window   Esc close"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
-
-    _ = SelectObject(hdc, old_font);
 }
 
 pub fn openAllSessions(hwnd: HANDLE) void {
@@ -2028,6 +1862,7 @@ pub fn openAllSessions(hwnd: HANDLE) void {
     app_state.g_all_sessions_confirm = false;
     app_state.g_all_sessions_close_running = false;
     app_state.g_all_sessions_mark_count = 0;
+    overview_view.reset();
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
     app_state.g_all_sessions_sel = 0;
@@ -2075,6 +1910,48 @@ pub fn closeAllSessionsFilter(hwnd: HANDLE) void {
     _ = InvalidateRect(hwnd, null, 0);
 }
 
+pub fn archiveOverviewRow(row: SessionOverviewRow) void {
+    if (row.kind == .archived) return;
+    if (!@import("all_sessions_metadata.zig").remember(row)) {
+        showHeaderNoticeAscii("Could not save session details", 3000, true);
+        return;
+    }
+    if (row.shell_id != 0) {
+        if (findShellById(row.shell_id)) |idx| archiveTabAt(idx);
+        return;
+    }
+    if (row.kind == .reminder and row.snapshot_order != null) {
+        showHeaderNoticeAscii("Wake this workspace before archiving its sessions", 3000, false);
+        return;
+    }
+    var entry = ArchivedEntry{ .tmux_host = row.host, .ai_agent = if (row.agent != 0) row.agent else 1 };
+    entry.name_len = copyAsciiField(&entry.name, row.name[0..row.name_len]);
+    entry.tmux_session_len = copyAsciiField(&entry.tmux_session, row.session[0..row.session_len]);
+    if (row.kind == .vps_only) {
+        const cached = &app_state.g_tmux_cache[row.ref_idx];
+        entry.claude_cwd_len = copyAsciiField(&entry.claude_cwd, cached.path[0..cached.path_len]);
+    } else if (row.kind == .reminder) {
+        const reminder = &app_state.g_reminders[row.ref_idx];
+        entry.ai_agent = reminder.ai_agent;
+        entry.claude_cwd_len = copyAsciiField(&entry.claude_cwd, reminder.claude_cwd[0..reminder.claude_cwd_len]);
+        entry.claude_sid_len = copyAsciiField(&entry.claude_sid, reminder.claude_sid[0..reminder.claude_sid_len]);
+    }
+    loadArchiveFromDisk(true);
+    if (!upsertArchivedEntry(entry) or !saveArchive()) {
+        loadArchiveFromDisk(true);
+        showHeaderNoticeAscii("Could not save archived session", 3000, true);
+        return;
+    }
+    const identity = SessionIdentity.remote(row.host, row.session[0..row.session_len], "", entry.ai_agent) orelse return;
+    if (killRemoteTmuxSession(identity, null) != .gone) {
+        showHeaderNoticeAscii("Could not archive remote session", 3000, true);
+        return;
+    }
+    removeTmuxCacheEntry(row.host, row.session[0..row.session_len]);
+    if (row.kind == .reminder) @import("reminders.zig").discardReminder(row.ref_idx);
+    app_state.g_tmux_fetch_tick = 0;
+}
+
 pub fn allSessionsJump(hwnd: HANDLE) void {
     const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse {
         if (app_state.g_all_sessions_filter_active) return;
@@ -2082,7 +1959,14 @@ pub fn allSessionsJump(hwnd: HANDLE) void {
         focusActiveShell();
         return;
     };
-    _ = activateSessionOverviewRow(ri, hwnd);
+    const row = app_state.g_session_overview_rows.items[ri];
+    if (activateSessionOverviewRow(ri, hwnd)) {
+        if (@import("all_sessions_metadata.zig").get(row.host, row.session[0..row.session_len])) |starred| {
+            if (findLocalTmuxTab(row.host, row.session[0..row.session_len])) |idx| {
+                if (app_state.shells[idx].favorite != starred) @import("inbox.zig").toggleFavorite(idx);
+            }
+        }
+    }
 }
 
 fn removeTmuxCacheEntry(host: u8, session: []const u8) void {
@@ -2271,6 +2155,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     }
                 }
                 app_state.g_all_sessions_tab = app_state.g_all_sessions_split_ids[(cur + n - 1) % n];
+                if (app_state.g_all_sessions_tab == AS_TAB_ARCHIVED) overview_view.state_filter = null;
                 app_state.g_all_sessions_sel = 0;
             }
         },
@@ -2285,6 +2170,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     }
                 }
                 app_state.g_all_sessions_tab = app_state.g_all_sessions_split_ids[(cur + 1) % n];
+                if (app_state.g_all_sessions_tab == AS_TAB_ARCHIVED) overview_view.state_filter = null;
                 app_state.g_all_sessions_sel = 0;
             }
         },
@@ -2323,6 +2209,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
         },
         34 => {
             app_state.g_all_sessions_unattached_only = !app_state.g_all_sessions_unattached_only;
+            overview_view.state_filter = if (app_state.g_all_sessions_unattached_only) .no_window else null;
             app_state.g_all_sessions_sel = 0;
             if (app_state.g_all_sessions_tab != AS_TAB_ALL and allSessionsClusterCount(app_state.g_all_sessions_tab) == 0) {
                 app_state.g_all_sessions_tab = AS_TAB_ALL;
@@ -2330,14 +2217,18 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
         },
         35 => {
             app_state.g_all_sessions_unattached_only = false;
+            overview_view.state_filter = null;
             app_state.g_all_sessions_tab = AS_TAB_WAITING;
             app_state.g_all_sessions_sel = 0;
         },
         36 => {
             app_state.g_all_sessions_unattached_only = false;
+            overview_view.state_filter = null;
             app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
             app_state.g_all_sessions_sel = 0;
         },
+        37 => overview_view.archiveSelected(),
+        38 => overview_view.starSelected(),
         40 => allSessionsToggleMark(hwnd),
         41 => allSessionsBeginClose(hwnd),
         42 => allSessionsConfirmClose(hwnd),

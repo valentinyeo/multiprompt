@@ -2692,31 +2692,8 @@ pub const WorkspaceRepoCandidate = struct {
     last_active: u64 = 0,
 };
 
-pub const SessionOverviewKind = enum(u8) { open, hidden, reminder, vps_only, archived };
-
-pub const SessionOverviewRow = struct {
-    kind: SessionOverviewKind = .open,
-    shell_id: u32 = 0,
-    ref_idx: u32 = 0,
-    snapshot_order: ?u32 = null,
-    snapshot_name: [256]u8 = @splat(0),
-    snapshot_name_len: u32 = 0,
-    snapshot_favorite: bool = false,
-    host: u8 = 0,
-    activity: u8 = 0,
-    attention: bool = false,
-    last_active: u64 = 0,
-    name: [96]u8 = std.mem.zeroes([96]u8),
-    name_len: u32 = 0,
-    session: [64]u8 = std.mem.zeroes([64]u8),
-    session_len: u32 = 0,
-    context: [64]u8 = std.mem.zeroes([64]u8),
-    context_len: u32 = 0,
-    workspace: u8 = 0,
-    ram_mb: u32 = 0,
-    agent: u8 = 0,
-    stale_candidate: bool = false,
-};
+pub const SessionOverviewKind = @import("all_sessions_model.zig").Kind;
+pub const SessionOverviewRow = @import("all_sessions_model.zig").Row;
 
 pub var g_session_overview_rows: std.ArrayList(SessionOverviewRow) = .empty;
 pub var g_session_overview_count: u32 = 0;
@@ -2758,7 +2735,9 @@ pub const AS_TAB_ARCHIVED: u32 = 203;
 pub const AS_ROW_OTHER: u8 = 0xFF;
 pub var g_all_sessions_tab: u32 = AS_TAB_ALL;
 pub var g_all_sessions_g_tick: u64 = 0;
-pub const ALL_SESSIONS_TAB_COUNT: usize = @as(usize, MAX_LWS) + 4;
+pub const AS_TAB_FREQUENT: u32 = 204;
+pub const AS_TAB_FAVORITES: u32 = 205;
+pub const ALL_SESSIONS_TAB_COUNT: usize = @as(usize, MAX_LWS) + 6;
 pub var g_all_sessions_split_xs: [ALL_SESSIONS_TAB_COUNT]i32 = [_]i32{0} ** ALL_SESSIONS_TAB_COUNT;
 pub var g_all_sessions_split_xe: [ALL_SESSIONS_TAB_COUNT]i32 = [_]i32{0} ** ALL_SESSIONS_TAB_COUNT;
 pub var g_all_sessions_split_ids: [ALL_SESSIONS_TAB_COUNT]u32 = [_]u32{0} ** ALL_SESSIONS_TAB_COUNT;

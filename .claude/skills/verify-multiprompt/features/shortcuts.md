@@ -89,7 +89,8 @@ Headers are verified in F1. Action rows link to the owning user-operation recipe
 | View | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI | [look](settings-appearance.md#look-theme-size-and-window-layout) |
 | View | Ctrl+Shift+R | Reattach active SSH/tmux tab | [restore](relaunch-update.md#restore-restore-instances-and-reconnect) |
 | View | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal | [organize](sidebar-sessions.md#organize-pin-star-move-and-group) |
-| View | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
+| View | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, Shift+A = Archived, u = No window) | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
+| View | A / S in All Sessions | Archive or star the selected session | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
 | View | Ctrl+F in All Sessions | Reduce the list to matching sessions | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
 | View | Space in All Sessions | Mark or unmark the selected unattached session | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
 | View | x in All Sessions | Close the marked unattached sessions, or the selected one, after a confirmation | [overview](sidebar-sessions.md#overview-all-sessions-and-remote-discovery) |
