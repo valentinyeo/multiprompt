@@ -25,7 +25,7 @@ gh workflow run chat-auto-switch.yml --ref <branch>
 
 The Linux job loads `src/chat_history_reader.py` the same way the app does, reads the recorded events from `tools/fixtures/SOFT-2469/`, and feeds them through the production `host_agent_event` turn path of a seeded chat with a queued message. Only the provider CLI start is replaced: the stand-in records the target AI and runs the production `host_auto_switch_run` and `host_switch_ai` bodies against an isolated home and message store. Toggle state is changed through the production `set_auto_switch` request.
 
-Require every check in `journey.json` to pass, the divider and earlier messages in `switched-history.jsonl`, and `revision.txt` to match the pull request head. The artifact is `chat-auto-switch`; `journey.log` carries the same check list.
+Require every check in `journey.json` and `summary.json` to pass, the divider and earlier messages in `switched-history.jsonl`, and `revision.txt` to match the pull request head. `summary.json` is the artifact root file the pull request verifier reads for a `CI workflow:` receipt. The artifact is `chat-auto-switch`; `journey.log` carries the same check list.
 
 The PR selector owns these files through `CI workflow:`, so changing `src/chat_auto_switch.zig`, the switch reader or the recorded fixtures requires this workflow on the exact head.
 

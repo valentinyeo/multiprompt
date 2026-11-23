@@ -186,6 +186,10 @@ def run(evidence):
                    order=ORDER, steps=steps, checks=checks)
     (evidence / "journey.json").write_text(json.dumps(journey, indent=2) + "\n", encoding="utf-8")
     failed = [item for item in checks if not item["passed"]]
+    summary = dict(status=journey["status"], checks=len(checks), failed=[item["check"] for item in failed],
+                   steps=[step["step"] for step in steps], reader_sha256=journey["reader_sha256"],
+                   fixtures=journey["fixtures"], order=ORDER)
+    (evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(dict(status=journey["status"], checks=len(checks), failed=len(failed))))
     for item in failed:
         print("FAILED " + item["step"] + ": " + item["check"] + " -> " + str(item["detail"])[:400])
