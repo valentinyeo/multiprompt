@@ -53,7 +53,7 @@ test("Current UI names Alt+E Waiting and Alt+X Archive", () => {
   assert.match(source, /L\("Archive Session"\)/);
   assert.match(source, /L\("Restore Workspace Waiting Sessions"\)/);
   assert.match(source, /"Press Alt\+X again to archive"/);
-  assert.match(source, /w waiting   Shift+A archived/);
+  assert.match(source, /A archive   S star/);
   assert.doesNotMatch(functionBody("sessionOverviewKindLabel", "sessionOverviewKindMatches"), /"hidden"|"dissolved"/);
 });
 

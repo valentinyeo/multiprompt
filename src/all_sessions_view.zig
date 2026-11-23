@@ -41,6 +41,10 @@ pub fn dayStart() u64 {
     return (@as(u64, stamp.dwHighDateTime) << 32) | stamp.dwLowDateTime;
 }
 
+pub fn headerOffset(width: i32) i32 {
+    return if (width - 2 * cardLeft(width) < scale(760)) scale(44) else 0;
+}
+
 pub fn cardLeft(width: i32) i32 {
     return @max(scale(12), @divTrunc(width - scale(1180), 2));
 }
@@ -114,6 +118,7 @@ pub fn paint(hdc: win.HANDLE) void {
     const brush = win.CreateSolidBrush(bg);
     _ = win.FillRect(hdc, &rc, brush);
     _ = win.DeleteObject(brush);
+    const header_offset = headerOffset(w);
     const left = cardLeft(w);
     const right = w - left;
     const bright = if (app.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242);
@@ -138,16 +143,17 @@ pub fn paint(hdc: win.HANDLE) void {
     for (rows) |row| {
         if (seen[row.host]) continue;
         seen[row.host] = true;
-        pill(hdc, &x, scale(86), right - scale(18), @import("capacity.zig").tmuxHostLongLabel(row.host), model.count(rows, .{ .host = row.host, .state = .running }), server_filter == row.host, .{ .server = row.host });
+        pill(hdc, &x, scale(86) + header_offset, right - scale(18), @import("capacity.zig").tmuxHostLongLabel(row.host), model.count(rows, .{ .host = row.host, .state = .running }), server_filter == row.host, .{ .server = row.host });
     }
     x = left + scale(18);
     const states = [_]?model.RunState{ null, .running, .no_window, .archived };
     for (states) |state| {
-        pill(hdc, &x, scale(124), right - scale(18), if (state) |value| model.stateLabel(value) else "All", model.count(rows, .{ .state = state, .host = server_filter }), state_filter == state, .{ .state = state });
+        pill(hdc, &x, scale(124) + header_offset, right - scale(18), if (state) |value| model.stateLabel(value) else "All", model.count(rows, .{ .state = state, .host = server_filter }), state_filter == state, .{ .state = state });
     }
-    const search_left = @min(right - scale(22), @max(left + scale(230), right - scale(450)));
-    const search = RECT{ .left = search_left, .top = scale(32), .right = right - scale(22), .bottom = scale(68) };
-    if (w - left * 2 > scale(550)) {
+    const search_left = if (header_offset > 0) left + scale(22) else @max(left + scale(320), right - scale(450));
+    const search_y = if (header_offset > 0) scale(82) else scale(32);
+    const search = RECT{ .left = search_left, .top = search_y, .right = right - scale(22), .bottom = search_y + scale(36) };
+    if (search.right > search.left) {
         smooth.fillRoundRect(hdc, search, scale(10), if (app.g_light_theme) RGB(235, 235, 235) else RGB(15, 15, 15));
         var query = search;
         query.left += scale(12);
@@ -180,13 +186,26 @@ pub fn paint(hdc: win.HANDLE) void {
         selected_tab = i;
     };
     if (selected_tab < tab_first) tab_first = selected_tab;
-    const max_tabs: usize = @intCast(@max(1, @divTrunc(right - left - scale(36), scale(120))));
-    if (selected_tab >= tab_first + max_tabs) tab_first = selected_tab - max_tabs + 1;
-    x = left + scale(18);
     _ = win.SelectObject(hdc, drawing.uiFontBot(.name));
-    for (tabs[tab_first..@min(n, tab_first + max_tabs)]) |id| {
+    var widths: [app.ALL_SESSIONS_TAB_COUNT]i32 = undefined;
+    for (tabs[0..n], 0..) |id, i| {
         var label: [32]u8 = undefined;
-        pill(hdc, &x, scale(172), right - scale(18), archive.allSessionsTabLabel(id, &label), archive.allSessionsClusterCount(id), id == app.g_all_sessions_tab, .{ .tab = id });
+        var value: [128]u8 = undefined;
+        const title = std.fmt.bufPrint(&value, "{s}  {d}", .{ archive.allSessionsTabLabel(id, &label), archive.allSessionsClusterCount(id) }) catch "";
+        var wide: [128]u16 = undefined;
+        const len = @import("json_reader.zig").wide(title, &wide);
+        var measured = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        _ = win.DrawTextW(hdc, &wide, @intCast(len), &measured, win.DT_CALCRECT | win.DT_SINGLELINE | win.DT_NOPREFIX);
+        widths[i] = measured.right + scale(32);
+    }
+    var used: i32 = 0;
+    for (widths[tab_first .. selected_tab + 1]) |width| used += width;
+    while (used > right - left - scale(36) and tab_first < selected_tab) : (tab_first += 1) used -= widths[tab_first];
+    x = left + scale(18);
+    for (tabs[tab_first..n]) |id| {
+        if (x >= right - scale(18)) break;
+        var label: [32]u8 = undefined;
+        pill(hdc, &x, scale(172) + header_offset, right - scale(18), archive.allSessionsTabLabel(id, &label), archive.allSessionsClusterCount(id), id == app.g_all_sessions_tab, .{ .tab = id });
     }
     const bounds = layout(w, h);
     const saved = win.SaveDC(hdc);

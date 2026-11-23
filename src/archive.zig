@@ -1704,7 +1704,9 @@ pub fn allSessionsRowVisible(row: *const SessionOverviewRow) bool {
 }
 
 pub fn allSessionsListTop() i32 {
-    return uiScaled(224);
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    return uiScaled(224) + overview_view.headerOffset(rc.right);
 }
 
 pub fn allSessionsVisibleCount() u32 {
@@ -1836,7 +1838,7 @@ pub fn paintAllSessionsActions(hdc: HANDLE, w: i32, h: i32) void {
     } else if (app_state.g_all_sessions_ctx) {
         _ = DrawTextW(hdc, L("Enter / a  Attach     k  Kill remote session     Esc  Cancel"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else {
-        _ = DrawTextW(hdc, L("Arrows move   Enter open   Tab tabs   Space mark   A archive   S star   x close   Ctrl+F search   w waiting   Shift+A archived   u no window   Esc close"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = DrawTextW(hdc, L("Arrows move   Enter open   Tab tabs   Space mark   A archive   S star   Ctrl+F search   x close   Esc back"), -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
 

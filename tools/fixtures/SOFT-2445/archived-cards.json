@@ -1,0 +1,6 @@
+[
+  { "name": "Studio Guide", "session": "fixture-guide", "host": 0, "preview": "The next draft is ready for review.", "minutes": 2 },
+  { "name": "Project Planner", "session": "fixture-planner", "host": 1, "preview": "The checklist has been updated.", "minutes": 20 },
+  { "name": "Research Notes", "session": "fixture-research", "host": 0, "preview": "Three useful references are saved.", "minutes": 1500 },
+  { "name": "Release Helper", "session": "fixture-release", "host": 1, "preview": "The release notes are ready.", "minutes": 4000 }
+]

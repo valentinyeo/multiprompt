@@ -41,6 +41,7 @@ const rows = [
   ['Themes', 'SEARCH_THEME_MENU_OFFSET', 'themes'],
   ['Settings', 'SEARCH_SETTINGS_OFFSET', 'settings'],
   ['Servers', 'SEARCH_SERVERS_OFFSET', 'servers'],
+  ['Show all sessions', 'SEARCH_SESSION_OVERVIEW_MENU_OFFSET', 'show all sessions'],
   ['Chat View: Expand table', 'SEARCH_CHAT_EXPAND_TABLE_OFFSET', 'expand table'],
   ['Chat View: More Menu', 'SEARCH_CHAT_MORE_MENU_OFFSET', 'more menu'],
   ['Computer: Show or hide', 'SEARCH_COMPUTER_TOGGLE_OFFSET', 'computer'],
