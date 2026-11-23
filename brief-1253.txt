@@ -1,0 +1,28 @@
+Task: PR https://github.com/valentinyeo/multiprompt/pull/1253 (SOFT-2642 "Empty session: the dancing dots multiply", https://app.hypertask.ai/detail/project-2060/2642) now conflicts with master after the SOFT-3097 revert (PR 1269) landed.
+Repo valentinyeo/multiprompt, branch mbb-soft-2642-dancing-dots. Merge origin/master into this branch, resolve conflicts keeping master's SOFT-3097 revert behavior AND the PR's one-busy-indicator fix, run the PR's own tests (node --test for the touched tools/*.test.js), push to the same branch. Do not open a new PR, do not merge. Commits start "SOFT-2642: ". No Co-authored-by. Code comment-free.
+End with: RESULT: <PR url> <green|red> <one sentence>.
+
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
