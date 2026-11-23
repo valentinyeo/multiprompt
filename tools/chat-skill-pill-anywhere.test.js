@@ -24,7 +24,7 @@ const next = declaration(skill, 'next');
 const matches = declaration(read('src/chat_complete.zig'), 'commandMatches');
 const leadingOnly = next.replace(
   'if (end > start and known(text[start..end]))',
-  "if (end > start and ((start == 0 and text[start] == '/') or text[start] == '$') and known(text[start..end]))",
+  () => "if (end > start and ((start == 0 and text[start] == '/') or text[start] == '$') and known(text[start..end]))",
 );
 
 const harness = pill => `
