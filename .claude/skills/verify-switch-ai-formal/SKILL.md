@@ -41,6 +41,8 @@ SOFT-3097 changes only the reader's command reconstruction: `clean_command_marku
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish` for `~/.local/state/multiprompt/chat-names.json`. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash moves.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |

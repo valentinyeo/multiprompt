@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MP_SESSIONS = ROOT / "tools" / "mp-sessions"
+MUBO_194_FIXTURES = ROOT / "tools" / "fixtures" / "MUBO-194"
 
 FAKE_READER = r'''
 import json, os, sys
@@ -104,7 +106,8 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
-        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID"):
+        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER",
+                     "MULTIBOT_SID", "MULTIBOT_SESSION", "ZSB_SESSION", "MULTIPROMPT_LAYOUT_PATH"):
             base.pop(name, None)
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
@@ -377,6 +380,114 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
                                        cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+
+    def seed_hosted_fixture(self, entries):
+        self.host.mkdir(parents=True, exist_ok=True)
+        for tmux, entry in entries.items():
+            sid = entry["sid"]
+            key = hashlib.sha256(("claude:" + sid).encode()).hexdigest()[:32]
+            (self.host / (key + ".config.json")).write_text(json.dumps(dict(
+                cwd=str(self.work), enabled=True, provider="claude", sid=sid, tmux=tmux)), encoding="utf-8")
+            (self.host / (key + ".state.json")).write_text(json.dumps(dict(
+                sid=sid, provider="claude", pid=os.getpid(), tmux=tmux)), encoding="utf-8")
+
+    def message_rows(self):
+        store = self.home / ".local/state/multiprompt/shared-messages/store.sqlite3"
+        with sqlite3.connect(store) as db:
+            return db.execute("SELECT id, provider, sid, text, origin FROM shared_messages ORDER BY position").fetchall()
+
+    def test_MUBO_194_hosted_chat_lists_workspace_mine_from_synced_chat_names_when_zsb_offline(self):
+        fixture = json.loads((MUBO_194_FIXTURES / "chat-names.json").read_text(encoding="utf-8"))
+        self.seed_hosted_fixture(fixture)
+        (self.home / ".local/state/multiprompt/chat-names.json").write_text(
+            json.dumps(fixture), encoding="utf-8")
+        offline = json.dumps(dict(ok=False, error="bridge_offline"))
+        for extra in (dict(MULTIBOT_SESSION="live-1111aaaa"),
+                      dict(MULTIBOT_PROVIDER="claude", MULTIBOT_SID="11111111-1111-4111-8111-111111111111")):
+            with self.subTest(extra=extra):
+                listed = self.parsed(self.run_sessions("list", "--workspace", "mine", "--json",
+                                                       MP_SESSIONS_TEST_LIST=offline, **extra))
+                self.assertEqual({row["name"] for row in listed}, {"Lead Chat", "Design Peer", "QA Peer"})
+                for row in listed:
+                    self.assertEqual(row["workspace"], "Studio")
+                    self.assertEqual(row["self"], row["tmux"] == "live-1111aaaa")
+
+    def test_MUBO_194_hosted_chat_lists_workspace_mine_from_synced_layout_when_zsb_offline(self):
+        fixture = json.loads((MUBO_194_FIXTURES / "chat-names.json").read_text(encoding="utf-8"))
+        self.seed_hosted_fixture(fixture)
+        layout_dir = self.home / ".local/share/multiprompt"
+        layout_dir.mkdir(parents=True, exist_ok=True)
+        (layout_dir / "layout.json").write_text(
+            (MUBO_194_FIXTURES / "layout.json").read_text(encoding="utf-8"), encoding="utf-8")
+        offline = json.dumps(dict(ok=False, error="bridge_offline"))
+        listed = self.parsed(self.run_sessions("list", "--workspace", "mine", "--json",
+                                               MP_SESSIONS_TEST_LIST=offline,
+                                               MULTIBOT_SESSION="live-1111aaaa"))
+        self.assertEqual({row["name"] for row in listed}, {"Lead Chat", "Design Peer", "QA Peer"})
+        for row in listed:
+            self.assertEqual(row["workspace"], "Studio")
+            self.assertEqual(row["self"], row["tmux"] == "live-1111aaaa")
+
+    def test_MUBO_194_send_workspace_mine_messages_peers_by_name_and_repeat_is_harmless(self):
+        fixture = json.loads((MUBO_194_FIXTURES / "chat-names.json").read_text(encoding="utf-8"))
+        self.seed_hosted_fixture(fixture)
+        (self.home / ".local/state/multiprompt/chat-names.json").write_text(
+            json.dumps(fixture), encoding="utf-8")
+        offline = json.dumps(dict(ok=False, error="bridge_offline"))
+        first = self.run_sessions("send", "--workspace", "mine", "sync up at noon",
+                                  MP_SESSIONS_TEST_LIST=offline,
+                                  MULTIBOT_SESSION="live-1111aaaa",
+                                  MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(first.returncode, (0, 3), first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertEqual({row["name"] for row in first_payload}, {"Design Peer", "QA Peer"})
+        self.assertEqual({row["sid"] for row in first_payload},
+                         {"22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"})
+        rows_after_first = self.message_rows()
+        self.assertEqual(len(rows_after_first), 2)
+        for row in rows_after_first:
+            self.assertEqual(row[3], "From Lead Chat: sync up at noon")
+            self.assertEqual(row[4], "agent")
+        second = self.run_sessions("send", "--workspace", "mine", "sync up at noon",
+                                   MP_SESSIONS_TEST_LIST=offline,
+                                   MULTIBOT_SESSION="live-1111aaaa",
+                                   MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(second.returncode, (0, 3), second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertEqual({row["id"] for row in second_payload}, {row["id"] for row in first_payload})
+        self.assertEqual(len(self.message_rows()), 2)
+        direct_first = self.run_sessions("send", "Design Peer", "direct ping",
+                                         MP_SESSIONS_TEST_LIST=offline,
+                                         MULTIBOT_SESSION="live-1111aaaa",
+                                         MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(direct_first.returncode, (0, 3), direct_first.stderr)
+        direct_second = self.run_sessions("send", "Design Peer", "direct ping",
+                                          MP_SESSIONS_TEST_LIST=offline,
+                                          MULTIBOT_SESSION="live-1111aaaa",
+                                          MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(direct_second.returncode, (0, 3), direct_second.stderr)
+        self.assertEqual(json.loads(direct_first.stdout)["id"], json.loads(direct_second.stdout)["id"])
+        self.assertEqual(len(self.message_rows()), 3)
+
+    def test_MUBO_194_chat_names_publish_persists_workspace_and_group(self):
+        script = (
+            "import importlib.util,json,sys;"
+            "spec=importlib.util.spec_from_file_location('r',sys.argv[1]);"
+            "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+            "print(json.dumps(m.chat_names_publish(["
+            "{'tmux':'live-1111aaaa','name':'Lead Chat','sid':'11111111-1111-4111-8111-111111111111','workspace':'Studio','group':'Core'},"
+            "{'tmux':'live-3333cccc','name':'QA Peer','sid':'33333333-3333-4333-8333-333333333333','workspace':'Studio','group':''}"
+            "])))"
+        )
+        done = subprocess.run([sys.executable, "-c", script, str(READER)],
+                              capture_output=True, text=True, env=self.env(), timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), dict(status="ok", count=2))
+        stored = json.loads((self.home / ".local/state/multiprompt/chat-names.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["live-1111aaaa"]["workspace"], "Studio")
+        self.assertEqual(stored["live-1111aaaa"]["group"], "Core")
+        self.assertEqual(stored["live-3333cccc"]["workspace"], "Studio")
+        self.assertNotIn("group", stored["live-3333cccc"])
 
 
 if __name__ == "__main__":

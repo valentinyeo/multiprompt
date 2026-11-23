@@ -88,22 +88,72 @@ def enable_args(provider, sid, folder, tmux):
     return command
 
 
+def synced_layout_map(send, caller_tmux=None):
+    tabs = send.synced_layout_tabs()
+    if not tabs:
+        return {}, None
+    explicit = os.environ.get("MULTIPROMPT_HOST")
+    local_host = None
+    if explicit is not None and explicit.strip():
+        try:
+            local_host = host_slot(explicit)
+        except ValueError:
+            local_host = None
+    if local_host is None and caller_tmux:
+        hosts = {tab["tmux_host"] for tab in tabs if tab["tmux"] == caller_tmux and tab.get("tmux_host") is not None}
+        if len(hosts) == 1:
+            local_host = hosts.pop()
+    filtered = [tab for tab in tabs if local_host is None or tab.get("tmux_host") is None or tab.get("tmux_host") == local_host]
+    grouped = {}
+    for tab in filtered:
+        grouped.setdefault(tab["tmux"], []).append(tab)
+    resolved = {}
+    for tmux, items in grouped.items():
+        workspaces = {item["workspace"] for item in items if item.get("workspace")}
+        if len(workspaces) == 1:
+            resolved[tmux] = items[0]
+    return resolved, local_host
+
+
 def session_catalog(send, listing):
-    names = send.published_names()
+    published = send.published_entries()
+    sid_entries = {}
+    for entry in published.values():
+        entry_sid = entry.get("sid")
+        if entry_sid:
+            sid_entries.setdefault(entry_sid, []).append(entry)
+    published_by_sid = {entry_sid: items[0] for entry_sid, items in sid_entries.items() if len(items) == 1}
+    synced, local_host = synced_layout_map(send, send.own_tmux())
     rows = {}
     if listing.get("ok"):
         for workspace, group, tab in send.iter_tabs(listing):
             tmux = tab.get("tmux")
             if not isinstance(tmux, str):
                 continue
+            pub_name = (published.get(tmux) or {}).get("name")
             rows[tmux] = dict(
-                name=tab.get("title") or names.get(tmux) or tmux,
+                name=tab.get("title") or pub_name or tmux,
                 tmux=tmux,
                 host=tab.get("host"),
                 workspace=workspace,
                 group=group,
                 tab_id=tab.get("id"),
                 tab_open=True,
+            )
+    else:
+        allowed_host = local_host if local_host is not None else 0
+        for tmux, tab in synced.items():
+            if tab.get("tmux_host") not in (None, allowed_host):
+                continue
+            pub_name = (published.get(tmux) or {}).get("name")
+            rows[tmux] = dict(
+                name=pub_name or tab.get("name") or tmux,
+                tmux=tmux,
+                host=None,
+                workspace=tab.get("workspace"),
+                group=tab.get("group"),
+                tab_id=None,
+                tab_open=False,
             )
     for path in sorted(send.host_root().glob("*.config.json")):
         config = send.read_json(path)
@@ -116,21 +166,28 @@ def session_catalog(send, listing):
             continue
         provider = config.get("provider") or state.get("provider") or "claude"
         sid = state.get("sid") or config.get("sid")
-        alive = send.pid_alive(state.get("pid"))
+        pub = published.get(tmux) or (published_by_sid.get(sid) if sid else None) or {}
+        lay = synced.get(tmux) or {}
+        alive = send.pid_alive(state.get("pid")) or send.pid_alive(send.host_owner_pid(path))
         row = rows.get(tmux, dict(tmux=tmux, tab_open=False))
+        workspace = row.get("workspace") or pub.get("workspace") or lay.get("workspace") or config.get("spawn_workspace")
+        if "group" in row and row["group"] is not None:
+            group = row["group"]
+        else:
+            group = pub.get("group") or lay.get("group") or config.get("spawn_group")
         row.update(
             provider=provider,
             sid=sid,
             folder=config.get("cwd"),
             spawn_name=config.get("spawn_name"),
             host=row.get("host"),
-            workspace=row.get("workspace") or config.get("spawn_workspace"),
-            group=row.get("group") if "group" in row else config.get("spawn_group"),
+            workspace=workspace,
+            group=group,
         )
         row["running"] = config.get("enabled") is True and alive
         row["busy"] = bool(state.get("inflight")) and alive
         if not row.get("name"):
-            row["name"] = names.get(tmux) or config.get("spawn_display") or tmux
+            row["name"] = pub.get("name") or lay.get("name") or config.get("spawn_display") or tmux
         rows[tmux] = row
     for tmux, row in rows.items():
         row.setdefault("tab_open", False)
@@ -140,7 +197,7 @@ def session_catalog(send, listing):
     return sorted(rows.values(), key=lambda row: ((row.get("name") or row["tmux"]).casefold(), row["tmux"]))
 
 
-def pick_target(send, listing, target):
+def pick_target(send, listing, target, workspace=None):
     wanted = target.strip()
     mention = send.MENTION.match(wanted)
     if mention:
@@ -157,11 +214,19 @@ def pick_target(send, listing, target):
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
+        if workspace:
+            scoped = [row for row in exact if (row.get("workspace") or "") == workspace]
+            if len(scoped) == 1:
+                return scoped[0]
         raise ValueError("more than one chat is named " + repr(target) + "; pass the {session} form")
     prefixed = [row for row in rows if send.squash(row.get("name") or "").startswith(key)]
     if len(prefixed) == 1:
         return prefixed[0]
     if len(prefixed) > 1:
+        if workspace:
+            scoped = [row for row in prefixed if (row.get("workspace") or "") == workspace]
+            if len(scoped) == 1:
+                return scoped[0]
         raise ValueError(repr(target) + " matches more than one chat; type more of the name")
     for row in rows:
         if row["tmux"].casefold() == key:
@@ -226,6 +291,15 @@ def caller_mark(send, listing, rows):
             if row["tmux"] == tmux:
                 workspace = row.get("workspace")
                 break
+    if not workspace:
+        pub = send.published_entries().get(tmux)
+        if pub:
+            workspace = pub.get("workspace")
+    if not workspace:
+        synced, _host = synced_layout_map(send, tmux)
+        tab = synced.get(tmux)
+        if tab:
+            workspace = tab.get("workspace")
     return tmux, workspace
 
 
@@ -264,6 +338,9 @@ def session_message(send, target, text, sender=None):
         except ValueError:
             label = None
     body = text if label is None else ("From " + label + ": " + text)
+    existing = send.recent_same_agent_message(reader, provider, sid, body)
+    if existing is not None:
+        return dict(name=target.get("name"), tmux=tmux, sid=sid, id=existing.get("id"), state=existing.get("state"))
     send.check_rate(reader, provider, sid, label)
     message = send.submit(reader, provider, sid, tmux, body)
     send.dispatch(reader, provider, sid, tmux)
@@ -367,12 +444,14 @@ def parse_send(argv):
         index = rest.index("--workspace")
         if index + 1 >= len(rest):
             raise ValueError("send --workspace needs a workspace name or mine")
-        workspace = rest[index + 1]
+        workspace = rest[index + 1].strip()
+        if not workspace:
+            raise ValueError("send --workspace needs a workspace name or mine")
         del rest[index:index + 2]
-    if workspace == "mine":
+    if workspace is not None:
         if not rest:
             raise ValueError("send needs message text")
-        return argparse.Namespace(workspace="mine", name=None, text=" ".join(rest))
+        return argparse.Namespace(workspace=workspace, name=None, text=" ".join(rest))
     if len(rest) < 2:
         raise ValueError("send needs NAME and message text, or send --workspace mine TEXT")
     return argparse.Namespace(workspace=None, name=rest[0], text=" ".join(rest[1:]))
@@ -384,23 +463,27 @@ def cmd_send(args):
         raise ValueError("empty message")
     send = load_send()
     listing = send.zsb("workspace-list")
+    rows = session_catalog(send, listing)
+    caller, mine = caller_mark(send, listing, rows)
     results = []
-    if args.workspace == "mine":
-        rows = session_catalog(send, listing)
-        caller, mine = caller_mark(send, listing, rows)
-        if not caller or not mine:
-            raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
-        targets = [row for row in filter_workspace(rows, mine) if row["tmux"] != caller and row.get("running")]
+    if args.workspace is not None:
+        if args.workspace == "mine":
+            if not caller or not mine:
+                raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
+            target_workspace = mine
+        else:
+            target_workspace = args.workspace
+        targets = [row for row in filter_workspace(rows, target_workspace) if row["tmux"] != caller and row.get("running")]
         if not targets:
-            raise ValueError("no other running chats in workspace " + repr(mine))
+            raise ValueError("no other running chats in workspace " + repr(target_workspace))
         for target in targets:
             results.append(session_message(send, target, text))
     else:
-        target = pick_target(send, listing, args.name)
-        if send.own_tmux() == target["tmux"]:
+        target = pick_target(send, listing, args.name, workspace=mine)
+        if caller and caller == target["tmux"]:
             raise ValueError("that is this chat; pick another chat")
         results.append(session_message(send, target, text))
-    if args.workspace == "mine":
+    if args.workspace is not None:
         print(json.dumps(results, separators=(",", ":")))
     else:
         print(json.dumps(results[0], separators=(",", ":")))
