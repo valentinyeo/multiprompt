@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "hosts": ["remote-1"],
+  "workspaces": [
+    {
+      "id": 0,
+      "name": "Home",
+      "active": true,
+      "groups": [],
+      "tabs": [
+        {
+          "id": 40,
+          "title": "Home anchor",
+          "host": "remote-1",
+          "tmux": "live-home",
+          "kind": "chat"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Away",
+      "active": false,
+      "tabs": [],
+      "groups": [
+        {
+          "id": 1,
+          "name": "Ops",
+          "tabs": [
+            {
+              "id": 30,
+              "title": "Lead",
+              "host": "remote-1",
+              "tmux": "live-lead",
+              "kind": "chat"
+            },
+            {
+              "id": 31,
+              "title": "Support",
+              "host": "remote-1",
+              "tmux": "live-support",
+              "kind": "chat"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
