@@ -183,11 +183,11 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   const host = { left: 30, top: 40, width: 960, height: 800 };
   const status = { left: 30, top: 80, width: 960, height: 28 };
   const composer = { left: 80, top: 750, width: 800, height: 60 };
-  const viewport = { left: 30, top: 80, width: 960, height: 644 };
+  const viewport = { left: 30, top: 80, width: 960, height: 628 };
   assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
-    transcript: { left: 30, top: 108, width: 960, height: 616 },
+    transcript: { left: 30, top: 108, width: 960, height: 600 },
     rows: status,
-    working: { left: 30, top: 724, width: 960, height: 14 },
+    working: { left: 30, top: 708, width: 960, height: 30 },
   });
   assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
@@ -196,6 +196,23 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
   assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),
     Object.fromEntries(Object.entries(transcriptGeometry(host, status, composer, viewport)).map(([key, value]) => [key, scale(value)])));
+});
+
+
+test('SOFT-3123 recorded native geometry reserves only the stable new-message band', async () => {
+  const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
+  const { host, status, composer, viewport } = require('./fixtures/SOFT-3123/geometry-input.json');
+  for (const factor of [1, 1.5, 2]) {
+    const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * factor]));
+    const measured = transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport));
+    assert.equal(measured.working.height, 30 * factor);
+    assert.equal(measured.transcript.top + measured.transcript.height, (viewport.top + viewport.height) * factor);
+    for (const delta of [-16, -1, 1, 16]) {
+      assert.throws(() => transcriptGeometry(scale(host), scale(status), scale(composer), {
+        ...scale(viewport), height: viewport.height * factor + delta,
+      }), /working strip/);
+    }
+  }
 });
 
 
