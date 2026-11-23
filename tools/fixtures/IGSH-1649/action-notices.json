@@ -5,6 +5,9 @@
     "startMultipromptLogin: showHeaderNoticeAscii(\"Could not start sign-in. Try again.\",6500,true)",
     "startMultipromptLogin: showHeaderNoticeAscii(\"Desktop login redirect must use multiprompt://auth/callback\",6500,true)"
   ],
+  "all_sessions_view.zig": [
+    "starSelected: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not save favorite\",3000,true)"
+  ],
   "archive.zig": [
     "activateSessionOverviewRow: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",
     "activateSessionOverviewRow: showHeaderNoticeAscii(\"Could not attach tmux session\",4000,true)",
@@ -19,6 +22,10 @@
     "allSessionsToggleMark: showHeaderNoticeAscii(\"Only unattached sessions can be marked\",2500,true)",
     "archiveArmOrCommit: showHeaderNoticeAscii(\"Press Alt+X again to archive\",2500,false)",
     "archiveArmOrCommit: showHeaderNoticeAscii(\"Press Alt+X again to close\",2500,false)",
+    "archiveOverviewRow: showHeaderNoticeAscii(\"Could not archive remote session\",3000,true)",
+    "archiveOverviewRow: showHeaderNoticeAscii(\"Could not save archived session\",3000,true)",
+    "archiveOverviewRow: showHeaderNoticeAscii(\"Could not save session details\",3000,true)",
+    "archiveOverviewRow: showHeaderNoticeAscii(\"Wake this workspace before archiving its sessions\",3000,false)",
     "archiveTabAt: showHeaderNoticeAscii(\"Could not kill remote tmux session\",4000,true)",
     "endTmuxSessionAt: showHeaderNoticeAscii(\"Could not kill remote tmux session\",4000,true)",
     "finishUnarchiveUnattachedQueue: showHeaderNoticeAscii(notice,3500,failed>0orworkspace_changed)",

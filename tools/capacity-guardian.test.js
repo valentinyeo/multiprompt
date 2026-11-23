@@ -67,7 +67,7 @@ test("existing attaches and cleanup remain available under pressure", () => {
 });
 
 test("cleanup classification is advisory and cannot auto-kill sessions", () => {
-  assert.match(source, /stale_candidate: bool = false,/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/all_sessions_model.zig'), 'utf8'), /stale_candidate: bool = false,/);
   assert.match(source, /STALE_AFTER_MS: u64 = 72 \* 60 \* 60 \* 1000/);
   const guardianStart = source.indexOf("const CapacityState = enum");
   const guardianEnd = source.indexOf("var g_main_hwnd", guardianStart);

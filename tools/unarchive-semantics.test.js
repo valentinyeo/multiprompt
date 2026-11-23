@@ -36,8 +36,9 @@ assert.match(queueBody, /TIMER_UNARCHIVE_UNATTACHED/, "unattached sessions must 
 assert.strictEqual((queueBody.match(/spawnShellWithSession\(/g) || []).length, 1,
   "the timer step must contain exactly one attach call, never a bulk spawn loop");
 
-assert.match(source, /g_all_sessions_killed_only and row\.kind != \.archived/,
-  "killed action must filter out live hidden and unattached rows");
+const overview = fs.readFileSync(path.join(__dirname, '../src/all_sessions_model.zig'), 'utf8');
+assert.match(overview, /203 => row\.kind == \.archived/,
+  "archived destination must filter out live hidden and unattached rows");
 assert.match(source, /if \(target == SEARCH_ARCHIVED_VIEW_OFFSET\)[\s\S]*?openAllSessions\(hwnd\)/,
   "killed action must open an individual selection view");
 
