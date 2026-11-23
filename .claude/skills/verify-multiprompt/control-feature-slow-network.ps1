@@ -167,11 +167,74 @@ $result.slowNetwork.typingMaxPumpMs = [int](($typing | ForEach-Object { [int]$_.
 $result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true -or $_.hadError -eq $true }).Count -gt 0
 Snapshot 'slow-network-typing'
 
+function Stop-SlowTransportHelper {
+    $helpers = @()
+    try {
+        $helpers = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" | Where-Object {
+            $_.ParentProcessId -eq $process.Id -and [string]$_.CommandLine -match 'python3 -u -c'
+        })
+    } catch {
+        $script:slowInputErrors.Add($_.Exception.Message)
+    }
+    $killed = @()
+    foreach ($helper in $helpers) {
+        $killed += @{ pid = [int]$helper.ProcessId; command = @([string]$helper.CommandLine) }
+        & taskkill /PID $helper.ProcessId /T /F | Out-Null
+    }
+    @($killed)
+}
+
+$archiveTabsBefore = @((Read-Session).tabs).Count
+if ($archiveTabsBefore -lt 2) { throw "Archive step needs two remote chats, found $archiveTabsBefore" }
+Invoke-JourneyCommand 'Archive chat' -SelectOnly
+$archive = Measure-PumpWindow { Press @(0x0D) 'Enter: archive the active remote chat while the link answers in two seconds' } 12000
+$archive.kind = 'archive-remote-chat'
+$archive.tabsBefore = $archiveTabsBefore
+$archiveDeadline = [DateTime]::UtcNow.AddSeconds(180)
+$archiveClosed = $false
+if ($archive.hadError -ne $true) {
+    do {
+        $state = Read-Session
+        if ($null -ne $state -and @($state.tabs).Count -eq $archiveTabsBefore - 1) { $archiveClosed = $true; break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $archiveDeadline)
+}
+$archive.closed = $archiveClosed
+$null = Save-SlowTimings
+$result.slowNetwork.archiveMaxPumpMs = [int]$archive.maxPumpMs
+$result.slowNetwork.archiveClosed = $archiveClosed
+Snapshot 'slow-network-archive'
+if ($archive.hadError -eq $true) { throw "The archive step could not be driven: $($archive.inputError)" }
+
+$state = Read-Session
+if ($null -eq $state) { throw 'Saved tabs unavailable before the first-open step' }
+if ([bool]($state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv)) {
+    Press @(0x12, 0x43) 'Alt+C: close Chat View so the next open is a first open'
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and -not [bool]($state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv)
+    } 'Chat View closed before the first-open step' 60
+}
+$killedHelpers = @(Stop-SlowTransportHelper)
+$result.slowNetwork.transportHelpersKilled = $killedHelpers.Count
+$result.slowNetwork.transportHelperCommands = @($killedHelpers | ForEach-Object { $_.command })
+$result.slowNetwork.readyDelayMs = 2 * [int]$env:MP_VERIFY_SLOW_MS
+$firstOpen = Measure-PumpWindow { Press @(0x12, 0x43) 'Alt+C: first open of a hosted chat whose transport helper is not up' } 12000
+$firstOpen.kind = 'first-open-hosted-chat'
+$firstOpen.transportHelpersKilled = $killedHelpers.Count
+$null = Save-SlowTimings
+$result.slowNetwork.firstOpenMaxPumpMs = [int]$firstOpen.maxPumpMs
+Wait-Until {
+    $state = Read-Session
+    $null -ne $state -and [bool]($state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv)
+} 'hosted chat repainted Chat View after its transport helper was killed' 180
+Snapshot 'slow-network-first-open'
+
 Save-SlowTimings
 Snapshot 'after'
 $worst = $result.slowNetwork.worstMs
 $hungActions = $result.slowNetwork.hungActions
-$result.checks += @{ name = 'slow-network'; sessions = 2; switches = $switches.Count; typed = $typed.Length; worstMs = $worst; limitMs = $slowLimitMs; hungActions = $hungActions; delayMs = [int]$env:MP_VERIFY_SLOW_MS }
+$result.checks += @{ name = 'slow-network'; sessions = 2; switches = $switches.Count; typed = $typed.Length; worstMs = $worst; limitMs = $slowLimitMs; hungActions = $hungActions; delayMs = [int]$env:MP_VERIFY_SLOW_MS; firstOpenMs = $result.slowNetwork.firstOpenMaxPumpMs; archiveMs = $result.slowNetwork.archiveMaxPumpMs; helpersKilled = $result.slowNetwork.transportHelpersKilled }
 
 if ($hungActions -ne 0) { throw "Windows reported a not-responding window or refused input during $hungActions slow-network actions: $($script:slowInputErrors -join '; ')" }
 if ($worst -gt $slowLimitMs) { throw "UI stall ${worst}ms exceeded the ${slowLimitMs}ms limit with a $($env:MP_VERIFY_SLOW_MS)ms one-way slow link" }
