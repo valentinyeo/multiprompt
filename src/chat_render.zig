@@ -2096,10 +2096,22 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
 }
 
 var g_working_rect: ?RECT = null;
+var g_working_painted: ?RECT = null;
 var g_note_logged = false;
 
 fn chatWorkingDotsVisible() bool {
     return @import("window_layout.zig").chatStopVisible();
+}
+
+pub fn chatWorkingScreenRect(source: ?RECT, scroll_y: i32) ?RECT {
+    const rect = source orelse return null;
+    return .{ .left = rect.left, .top = rect.top - scroll_y, .right = rect.right, .bottom = rect.bottom - scroll_y };
+}
+
+pub fn chatWorkingRepaintRegion(painted: ?RECT, current: ?RECT) ?RECT {
+    const a = painted orelse return current;
+    const b = current orelse return a;
+    return .{ .left = @min(a.left, b.left), .top = @min(a.top, b.top), .right = @max(a.right, b.right), .bottom = @max(a.bottom, b.bottom) };
 }
 
 pub fn chatWorkingSync() void {
@@ -2109,21 +2121,28 @@ pub fn chatWorkingSync() void {
         chatViewClientRect(&rc);
         chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-    } else if (g_working_rect) |source| {
-        var rc = source;
-        rc.top -= app_state.g_chat_scroll_y;
-        rc.bottom -= app_state.g_chat_scroll_y;
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, &rc, 0);
+        g_working_painted = null;
+        return;
     }
+    const current = chatWorkingScreenRect(g_working_rect, app_state.g_chat_scroll_y);
+    if (chatWorkingRepaintRegion(g_working_painted, current)) |rc| _ = InvalidateRect(app_state.g_chat_transcript_hwnd, &rc, 0);
+    g_working_painted = current;
 }
 
-fn chatPaintWorking(hdc: HANDLE, now: u64) void {
-    const source = g_working_rect orelse return;
-    if (!chatWorkingDotsVisible()) return;
-    var rc = source;
-    rc.top -= app_state.g_chat_scroll_y;
-    rc.bottom -= app_state.g_chat_scroll_y;
+fn chatRectOverlaps(a: RECT, b: RECT) bool {
+    return a.bottom > b.top and a.top < b.bottom and a.right > b.left and a.left < b.right;
+}
+
+fn chatPaintWorking(hdc: HANDLE, now: u64, paint: RECT) void {
+    const rc = chatWorkingScreenRect(g_working_rect, app_state.g_chat_scroll_y) orelse {
+        if (g_working_painted) |stale| {
+            if (chatRectOverlaps(stale, paint)) g_working_painted = null;
+        }
+        return;
+    };
+    if (!chatWorkingDotsVisible() or !chatRectOverlaps(rc, paint)) return;
     chatPaintWorkingDots(hdc, rc, now);
+    g_working_painted = chatWorkingRepaintRegion(g_working_painted, rc);
 }
 
 const WORKING_DOT_SIZE = 4;
@@ -2710,6 +2729,10 @@ pub fn chatSetTopPad(new_pad: i32) void {
         rect.bottom += delta;
     }
     for (app_state.g_chat_echo_layout[0..app_state.g_chat_echo_layout_count]) |*rect| {
+        rect.top += delta;
+        rect.bottom += delta;
+    }
+    if (g_working_rect) |*rect| {
         rect.top += delta;
         rect.bottom += delta;
     }
@@ -5817,7 +5840,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
-        chatPaintWorking(mem_dc, GetTickCount64());
+        chatPaintWorking(mem_dc, GetTickCount64(), paint);
         if (app_state.g_chat_block_count == 0) {
             const entry = chatHistoryEntry(chatFileIdentity());
             const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
