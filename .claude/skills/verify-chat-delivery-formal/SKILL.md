@@ -57,9 +57,11 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
+
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
-SOFT-2642 moves working-dots painting and invalidation into `src/chat_working_dots.zig` and shifts its rectangle in `chatSetTopPad`. After merging master `bab576f8f18e2a12fc4631702faed8c8b0089ee6`, the covered `chatRelayout` and `chatEchoNotSent` bodies remain byte-identical to master. All other covered files and native probes match master, including its updated delivery probes. Only the render file's hash differs; the sync commit names the reviewed master baseline. Hosted formal CI must recheck the native decisions, inherited findings and mutation replays.
+SOFT-2642 moves working-dots painting and invalidation into `src/chat_working_dots.zig` and shifts its rectangle in `chatSetTopPad`. After merging master `d274603403a5c1126c5a5c096c38be4c765c7e26`, the covered `chatRelayout` and `chatEchoNotSent` bodies remain byte-identical to master. All other covered files and native probes match master, including its updated delivery probes. Only the render file's hash differs; the sync commit names the reviewed master baseline. Hosted formal CI must recheck the native decisions, inherited findings and mutation replays.
 
 | Source | Covered behavior |
 | --- | --- |
