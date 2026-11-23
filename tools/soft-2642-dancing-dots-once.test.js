@@ -41,7 +41,7 @@ const CHAT_AGENT_PAD_X = 4;
 var g_chat_transcript_hwnd: ?HANDLE = 1;
 var g_chat_scroll_y: i32 = 0;
 var g_working_rect: ?RECT = .{ .left = 8, .top = 40, .right = 110, .bottom = 68 };
-var visible = true;
+var busy = true;
 var pending: ?RECT = null;
 var clip: RECT = .{ .left = 0, .top = 0, .right = 128, .bottom = 400 };
 var pixels: [400][128]bool = @splat(@splat(false));
@@ -50,9 +50,9 @@ fn themeConsoleBg() u32 { return 0; }
 fn themeConsoleFg() u32 { return 255; }
 fn customColorOr(_: []const u8, color: u32) u32 { return color; }
 fn blend(_: u32, _: u32, _: u8) u32 { return 102; }
-fn chatWorkingDotsVisible() bool { return visible; }
+fn chatWorkingDotsVisible() bool { return busy; }
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{ .left = 0, .top = 0, .right = 128, .bottom = 400 }; }
-fn chatRelayoutPreservingScroll(_: i32, _: i32) void { if (!visible) g_working_rect = null; }
+fn chatRelayoutPreservingScroll(_: i32, _: i32) void { if (!busy) g_working_rect = null; }
 fn InvalidateRect(_: ?HANDLE, area: ?*const RECT, _: i32) i32 {
     const rc = if (area) |r| r.* else RECT{ .left = 0, .top = 0, .right = 128, .bottom = 400 };
     if (pending) |old| pending = .{
@@ -123,7 +123,7 @@ test "SOFT-2642 repeated layout moves and ticks leave exactly one three-dot indi
         flush(500);
         try expectOneIndicator();
     }
-    visible = false;
+    busy = false;
     chatWorkingSync();
     flush(750);
     for (pixels) |row_pixels| for (row_pixels) |pixel| try std.testing.expect(!pixel);
