@@ -18,7 +18,7 @@ test('host events and snapshots own settings, without optimistic updates', () =>
   assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra \}/);
   assert.match(live, /pub const Effort = enum \{ unknown, low, medium, high \}/);
   const send = read('src/chat_send.zig').split('pub fn chatSetLiveSetting')[1].split('\n}')[0];
-  assert.match(send, /chatLiveReply\(line\)/);
+  assert.match(send, /chatLiveReply\(\.\{ \.identity = identity, \.bytes = line \}\)/);
   assert.doesNotMatch(send, /settings\s*=/);
 });
 
@@ -113,7 +113,7 @@ test('pending settings block sends before draft or outbox changes', () => {
   assert.match(write, /pending_settings\.finish\(\)/);
   assert.match(session, /settingReplyFailed[\s\S]*?pending_settings\.finish\(\)/);
   assert.match(session, /pending_settings\.clear\(\)/);
-  assert.match(write, /stream\.shell_id != key\.shell_id/);
+  assert.match(write, /stream\.identity\.owner != key\.shell_id/);
   const apply = live.split('pub fn applyValue')[1].split('\nfn eventLabel')[0];
   const snapshot = live.split('pub fn applySettingsSnapshot')[1].split('\npub fn ')[0];
   assert.doesNotMatch(apply + snapshot, /pending_settings/);
