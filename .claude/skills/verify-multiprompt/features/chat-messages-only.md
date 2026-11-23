@@ -55,7 +55,7 @@ The recomputed journey gate list is:
 4. The same chat toggles on and off through Ctrl+K, `clean chat`, Enter; each saved setting and unchanged composer are checked.
 5. CLEAN on/off transcript message RGB pixels are identical and nonblank, without alignment or layout-shift allowances.
 6. The recorded status region is background-only when on. Off restores its original pixels, including blank layouts. Every native CLEAN painter positive control also passes.
-7. The composer gap is background-only in both modes and has exactly the normal 14-scaled-pixel height; permission controls remain independently covered.
+7. The composer gap is background-only in both modes and has exactly the stable new-message slot's 30-scaled-pixel height; permission controls remain independently covered.
 8. Off-mode transcript and footer RGB pixels restore the pre-toggle view exactly.
 9. Every existing unread-pill transition, overflow and fresh-log assertion passes, with `new-messages-visible.png`, `new-messages-dismissed.png` and `new-messages-jumped.png` retained.
 10. Complete evidence includes both CLEAN PNG/BMP pairs, the existing captures, source transcript and identity, zero owned processes and scratch cleanup; the pinned pre-fix control still fails specifically on visible activity pixels with successful cleanup.
