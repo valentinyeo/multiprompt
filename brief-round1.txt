@@ -1,0 +1,34 @@
+Small solo-dev commit straight to master of valentinyeo/multiprompt (this worktree, branch mubo-board-move based on origin/master). Context: all open Multi Bot tickets moved from Hypertask board 2060 (prefix IGSH/SOFT) to the Multi Bot board 13734 (prefix MUBO). View: https://app.hypertask.ai/project?id=13734 . Done/archived tickets stayed on 2060, so historical ticket references (IGSH-123 in docs, changelog, fixtures, old URLs to project-2060/<n>) stay as they are.
+
+Change only the live pointers:
+1. CLAUDE.md lines "Ticket board: https://app.hypertask.ai/project?id=2060 (prefix `IGSH`)." and "Hypertask board: 2060, label: Multiprompt" -> board 13734, prefix MUBO (keep the label line format; ask nothing, keep "label: Multiprompt" unless the line obviously needs the new board's label name). In the "Fundamental shared changes need Android tickets" rule, "Reuse board 2060's Multiprompt Android label" -> board 13734. Keep CLAUDE.md under 80 lines.
+2. src/multibot_feedback.py: PROJECT = '2060' -> '13734'; the ticketNumber regex r'IGSH-\d+' must accept the new prefix (MUBO) - check what prefix the API actually returns for board 13734 tickets by reading surrounding code/tests; keep accepting the old prefix only if existing tests need it; the detail URL builder 'https://app.hypertask.ai/detail/project-2060/' -> project-13734. Update its tests (search tools/ and src/ for multibot_feedback tests) to the new board.
+3. Search the repo (excluding src/computer/vendor, tools/fixtures, changelog.d, openwiki history notes) for other LIVE hardcoded uses of 2060 / IGSH used by tooling, CI workflows (.github/workflows), drain/board scripts, or env defaults, and switch them to 13734 / MUBO. List what you changed and what you deliberately left (historical).
+4. The runtime fingerprint updates automatically for src/multibot_feedback.py; never hand-bump RUNTIME_GENERATION. No code comments.
+5. Commit message: "MUBO: Point the repo at the Multi Bot board 13734" with a body listing the files and a line "Undo: git revert <this commit>". Identity software-factory-runners[bot] <348741585+software-factory-runners[bot]@users.noreply.github.com>, no Co-authored-by. Add changelog.d/MUBO-board-move.md only if a user-facing behaviour changes (feedback now files on the new board: one plain sentence).
+6. Push directly: `git push origin HEAD:master` (fast-forward; if master moved, rebase onto origin/master and retry). Never build or run tests on this server; CI on master checks it.
+Report one line: the master commit SHA and the files changed.
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
