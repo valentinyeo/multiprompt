@@ -16,6 +16,6 @@
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
             Assert-VersionLabel 'version-light'
             [void][VerifyNative]::MoveWindow($script:window, 10, 10, 560, 650, $true)
-            Assert-VersionLabel 'version-narrow'
+            Assert-NarrowVersionLabel
             [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
         
