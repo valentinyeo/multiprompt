@@ -654,6 +654,43 @@ pub fn sendChatMessage(text: []const u16) bool {
     return true;
 }
 
+fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
+    const mention = @import("chat_mention.zig");
+    if (message_id == 0 or source_idx >= app_state.shell_count or mention.isMentionNote(text)) return;
+    const shell = &app_state.shells[source_idx];
+    var source_session: [64]u8 = undefined;
+    const source_len: usize = @min(@as(usize, shell.tmux_session_len), source_session.len);
+    if (source_len > 0) @memcpy(source_session[0..source_len], shell.tmux_session[0..source_len]);
+    var name_buf: [192]u8 = undefined;
+    const name_n: usize = if (shell.name_len > 0 and shell.name_len <= shell.name.len) (std.unicode.utf16LeToUtf8(&name_buf, shell.name[0..shell.name_len]) catch 0) else 0;
+    const source_name: []const u8 = if (name_n > 0) name_buf[0..name_n] else if (source_len > 0) source_session[0..source_len] else "this chat";
+    var targets_buf: [16]mention.Chat = undefined;
+    const found = mention.mentionTargets(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
+    if (found.len == 0) return;
+    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8 } = undefined;
+    const count = @min(found.len, plan.len);
+    for (found[0..count], 0..) |chat, i| {
+        const n = @min(chat.session.len, plan[i].session.len);
+        @memcpy(plan[i].session[0..n], chat.session[0..n]);
+        plan[i].session_len = @intCast(n);
+        plan[i].index = chat.index;
+    }
+    var visible_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
+    const visible = mention.copyVisible(text, &.{}, &visible_buf);
+    for (plan[0..count]) |target| {
+        if (target.index == source_idx or target.index >= app_state.shell_count) continue;
+        const session = target.session[0..target.session_len];
+        if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
+        var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
+        const provider = mention.providerName(shell.ai_agent);
+        const sid_len = @min(@as(usize, shell.claude_sid_len), shell.claude_sid.len);
+        const sid: []const u8 = if (sid_len > 0) shell.claude_sid[0..sid_len] else "";
+        const note = mention.mentionNote(source_name, provider, sid, visible, &note_buf) orelse continue;
+        if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
+        mention.mentionMarkDelivered(message_id, session);
+    }
+}
+
 pub fn sendChatPrompt() void {
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
         showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
@@ -808,6 +845,7 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
+    deliverMentions(app_state.active_shell, app_state.g_chat_outbox.items[ei].id, send_text);
     @import("chat_mention.zig").clearPicks();
     send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
     app_state.g_chat_read_open_pending = false;
@@ -1364,6 +1402,72 @@ pub fn chatOutboxSyncCountForShell(idx: u32) usize {
     return n;
 }
 
+const LandedSend = struct {
+    shell_id: u32 = 0,
+    sent_ms: i64 = 0,
+    wire_len: u8 = 0,
+    wire: [81]u8 = @splat(0),
+};
+
+var g_landed_send: [256]LandedSend = @splat(.{});
+
+fn findLandedSend(shell_id: u32) ?*LandedSend {
+    if (shell_id == 0) return null;
+    for (&g_landed_send) |*slot| if (slot.shell_id == shell_id) return slot;
+    return null;
+}
+
+fn clearLandedSend(shell_id: u32) void {
+    if (findLandedSend(shell_id)) |slot| slot.* = .{};
+}
+
+fn rememberLandedSend(idx: u32, entry: app_state.ChatOutboxEntry) void {
+    if (idx >= app_state.shell_count) return;
+    if (entry.state == .cancelled or entry.state == .not_sent) return;
+    const phase = std.mem.sliceTo(&entry.message_phase, 0);
+    if (std.mem.eql(u8, phase, "failed")) return;
+    if (entry.state != .queued and entry.state != .sending and entry.state != .delivered) return;
+    const shell_id = app_state.shells[idx].shell_id;
+    const live = @import("chat_live.zig");
+    const wire = std.mem.sliceTo(&entry.message_wire_id, 0);
+    const running = live.running(shell_id);
+    const reply_present = live.replyPresent(shell_id);
+    const owns = live.ownsTurn(shell_id, wire);
+    const reply_ms: i64 = if (idx == app_state.active_shell) chatEchoLatestReplyMs(app_state.g_chat_blocks[0..app_state.g_chat_block_count]) else 0;
+    const reply_started = (entry.anchor.sent_ms > 0 and reply_ms > entry.anchor.sent_ms) or (owns and running and reply_present);
+    const chat_stopped = owns and !running;
+    if (!chat_echo.landedStillWorking(reply_started, chat_stopped)) return;
+    var slot = findLandedSend(shell_id);
+    if (slot == null) {
+        for (&g_landed_send) |*empty| if (empty.shell_id == 0) {
+            slot = empty;
+            break;
+        };
+    }
+    const dest = slot orelse return;
+    dest.shell_id = shell_id;
+    dest.sent_ms = entry.anchor.sent_ms;
+    dest.wire_len = @intCast(@min(wire.len, dest.wire.len));
+    @memset(&dest.wire, 0);
+    if (dest.wire_len > 0) @memcpy(dest.wire[0..dest.wire_len], wire[0..dest.wire_len]);
+}
+
+fn landedSendWorking(idx: u32, reply_ms: i64, running: bool, reply_present: bool) bool {
+    if (idx >= app_state.shell_count) return false;
+    const shell_id = app_state.shells[idx].shell_id;
+    const slot = findLandedSend(shell_id) orelse return false;
+    const live = @import("chat_live.zig");
+    const wire = slot.wire[0..slot.wire_len];
+    const owns = live.ownsTurn(shell_id, wire);
+    const reply_started = (slot.sent_ms > 0 and reply_ms > slot.sent_ms) or (owns and running and reply_present);
+    const chat_stopped = owns and !running;
+    if (!chat_echo.landedStillWorking(reply_started, chat_stopped)) {
+        slot.* = .{};
+        return false;
+    }
+    return true;
+}
+
 pub fn chatOutboxWorkingForShell(idx: u32) bool {
     if (idx >= app_state.shell_count) return false;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -1383,7 +1487,57 @@ pub fn chatOutboxWorkingForShell(idx: u32) bool {
         const chat_stopped = owns and !running;
         if (chat_echo.keepsWorking(entry.state, phase, reply_started, chat_stopped)) return true;
     }
-    return false;
+    return landedSendWorking(idx, reply_ms, running, reply_present);
+}
+
+test "SOFT-2418 a landed send keeps working until a later reply" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_outbox = app_state.g_chat_outbox;
+    const saved_blocks = app_state.g_chat_block_count;
+    const saved_block = app_state.g_chat_blocks[0];
+    defer {
+        clearLandedSend(2418);
+        for (app_state.g_chat_outbox.items) |item| if (item.text.len > 0) std.heap.page_allocator.free(item.text);
+        app_state.g_chat_outbox.deinit(std.heap.page_allocator);
+        app_state.g_chat_outbox = saved_outbox;
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_chat_block_count = saved_blocks;
+        app_state.g_chat_blocks[0] = saved_block;
+    }
+    app_state.g_chat_outbox = .empty;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = 2418;
+    app_state.shells[0].kind = .tmux;
+    @memcpy(app_state.shells[0].tmux_session[0..6], "term-1");
+    app_state.shells[0].tmux_session_len = 6;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_block_count = 0;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Please reply.");
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(0, &key_buf);
+    try std.testing.expect(chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, .delivered));
+    const entry = &app_state.g_chat_outbox.items[0];
+    entry.anchor.sent_ms = 5_000;
+    entry.message_v1 = true;
+    try std.testing.expect(chatOutboxWorkingForShell(0));
+    const wire = "m-2418";
+    entry.message_wire_id = @splat(0);
+    @memcpy(entry.message_wire_id[0..wire.len], wire);
+    entry.message_phase = @splat(0);
+    @memcpy(entry.message_phase[0..8], "accepted");
+    try std.testing.expect(chatOutboxWorkingForShell(0));
+    rememberLandedSend(0, entry.*);
+    std.heap.page_allocator.free(entry.text);
+    app_state.g_chat_outbox.clearRetainingCapacity();
+    try std.testing.expect(chatOutboxWorkingForShell(0));
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = 0, .role = .prose, .stamp_ms = 6_000 };
+    app_state.g_chat_block_count = 1;
+    try std.testing.expect(!chatOutboxWorkingForShell(0));
 }
 
 pub fn chatEchoCountNotSentForShell(idx: u32) usize {
@@ -1867,6 +2021,7 @@ fn chatEchoConfirmWithBlock(ei: usize, block: ChatBlock) void {
     const klen: usize = e.key_len;
     @memcpy(key_copy[0..klen], e.key[0..klen]);
     chatConfirmedAdd(key_copy[0..klen], e.text, block, e);
+    if (chatOutboxShellForKey(e.key[0..klen])) |idx| rememberLandedSend(idx, e);
     chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, ei);
     _ = saveChatOutbox();
     chatOutboxChanged();
@@ -2008,6 +2163,7 @@ pub fn chatEchoMatchActive() void {
             @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
             chatConfirmedAdd(key_copy[0..e.key_len], e.text, app_state.g_chat_blocks[mi], e);
             if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
+            rememberLandedSend(app_state.active_shell, e);
             chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             changed = true;
             continue;
@@ -3828,6 +3984,9 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started") or std.mem.eql(u8, phase, "cancelled")) {
         if (found == null) return true;
         if (std.mem.eql(u8, phase, "cancelled") or app_state.shells[idx].ai_agent != 1) {
+            if (found) |i| {
+                if (!std.mem.eql(u8, phase, "cancelled")) rememberLandedSend(idx, app_state.g_chat_outbox.items[i]);
+            }
             if (found) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             return true;
         }
@@ -4397,6 +4556,7 @@ fn chatFullSettleFinish() void {
 
 pub fn chatStopAgent(shell_index: u32) bool {
     if (!app_state.ISSUE_265_WORKING_BAR or shell_index >= app_state.shell_count) return false;
+    clearLandedSend(app_state.shells[shell_index].shell_id);
     if (chatLiveCancelApproval(shell_index)) return true;
     if (chatLiveInterrupt(shell_index)) return true;
     return chatAgentKey(shell_index, 0x1B);
