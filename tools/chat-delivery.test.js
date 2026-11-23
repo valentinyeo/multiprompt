@@ -531,8 +531,8 @@ test "delivery: SOFT-3098 a delivered row in a chat nobody is looking at is conf
     g_chat_outbox.items[0].message_v1 = true;
     const wire = "desktop-3098";
     @memcpy(g_chat_outbox.items[0].message_wire_id[0..wire.len], wire);
-    const row = "{\"role\":\"user\",\"id\":\"u-1\",\"client_id\":\"" ++ wire ++ "\",\"text\":\"Valentin mentioned you in Factory\",\"offset\":0,\"end\":100}";
-    try history_entry.history.apply(std.heap.page_allocator, "@mp\t1\thistory\tok\tsid\t0\t100\t1\t0\tclaude\tt\t0\t\ttail\t0\n" ++ row ++ "\n@@MP_END@@\n", 1, chatFileIdentityForShell(0));
+    const row = "{\\\"role\\\":\\\"user\\\",\\\"id\\\":\\\"u-1\\\",\\\"client_id\\\":\\\"" ++ wire ++ "\\\",\\\"text\\\":\\\"Valentin mentioned you in Factory\\\",\\\"offset\\\":0,\\\"end\\\":100}";
+    try history_entry.history.apply(std.heap.page_allocator, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t100\\t1\\t0\\tclaude\\tt\\t0\\t\\ttail\\t0\\n" ++ row ++ "\\n@@MP_END@@\\n", 1, chatFileIdentityForShell(0));
     try std.testing.expect(chatEchoReconcileShell(0));
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
