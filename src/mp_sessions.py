@@ -134,6 +134,7 @@ def session_catalog(send, listing):
         row.setdefault("tab_open", False)
         row.setdefault("running", False)
         row.setdefault("busy", False)
+        row["link"] = send.link_token(row.get("name"), tmux)
     return sorted(rows.values(), key=lambda row: ((row.get("name") or row["tmux"]).casefold(), row["tmux"]))
 
 
@@ -238,7 +239,7 @@ def catalog_table(rows):
     body = []
     for row in rows:
         mark = "*" if row.get("self") else " "
-        body.append((mark + (row.get("name") or row["tmux"]), row.get("workspace") or "", row.get("group") or "",
+        body.append((mark + (row.get("link") or row.get("name") or row["tmux"]), row.get("workspace") or "", row.get("group") or "",
                      row_state(row), row["tmux"], row.get("sid") or ""))
     data = [headers] + body
     widths = [max(len(row[i]) for row in data) for i in range(len(headers))]
@@ -274,6 +275,7 @@ def live_catalog_rows(send):
     for chat in send.live_chats():
         rows.append(dict(
             name=chat.get("name"),
+            link=chat.get("link"),
             tmux=chat["tmux"],
             sid=chat["sid"],
             provider=chat.get("provider"),

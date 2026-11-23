@@ -303,8 +303,9 @@ def live_chats():
             continue
         if sessions is not None and tmux not in sessions:
             continue
+        shown = names.get(tmux)
         started = state.get("started") if isinstance(state.get("started"), (int, float)) else 0
-        row = dict(name=names.get(tmux), provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state="busy" if state.get("inflight") else "idle", started=started)
+        row = dict(name=shown, provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state="busy" if state.get("inflight") else "idle", started=started, link=link_token(shown, tmux))
         if tmux not in best or started >= best[tmux]["started"]:
             best[tmux] = row
     rows = sorted(best.values(), key=lambda row: ((row["name"] or row["tmux"]).casefold(), row["tmux"]))
@@ -395,6 +396,16 @@ def last_answer(reader, chat):
 
 def label(chat):
     return chat["name"] or chat["tmux"]
+
+
+def link_token(name, tmux):
+    text = name.strip() if isinstance(name, str) else ""
+    if not text or "{" in text or "}" in text or "@" in text:
+        text = tmux
+    token = text + "{" + tmux + "}"
+    if " " in text:
+        token = "@" + token
+    return token
 
 
 def squash(text):
@@ -499,6 +510,30 @@ def read_text(text):
     return text
 
 
+def resolve_destination(reader, provider, sid, tmux):
+    tmux = tmux or reader.host_chat_name(provider, sid) or locator_tmux(reader, provider, sid) or sid
+    if TMUX_NAME.fullmatch(tmux) is None:
+        raise ValueError("invalid terminal session: " + str(tmux))
+    bound = None
+    if sid == tmux:
+        hosted = reader.host_sid_for_tmux(provider, tmux)
+        if hosted:
+            sid = hosted
+        else:
+            bound = reader.resolve_tmux_agent(provider, tmux, require_bound=True)
+            if bound:
+                sid = bound[0]
+    if SESSION_ID.fullmatch(sid) is None:
+        raise ValueError("invalid session id: " + str(sid))
+    hosting = reader.host_dispatch_switch(provider, sid)
+    if hosting and reader.host_chat_name(provider, sid) == tmux and reader.host_owned(provider, sid):
+        return sid, tmux
+    bound = bound or reader.resolve_tmux_agent(provider, tmux, require_bound=True)
+    if bound and bound[0] == sid and (not hosting or reader.host_chat_name(provider, sid) == tmux):
+        return sid, tmux
+    raise ValueError("no live host or pane agent for " + provider + " session " + sid + " in " + tmux + "; run mp-sessions to find a live chat")
+
+
 def deliver(args, provider, sid, tmux, text, sender=None):
     reader = reader_module(args.reader)
     check_rate(reader, provider, sid, sender)
@@ -521,24 +556,18 @@ def deliver(args, provider, sid, tmux, text, sender=None):
             print(line)
     state = (final or {}).get("state")
     if state == "failed" or state == "cancelled":
+        print("mp-send: message " + str(state) + ": " + str((final or {}).get("receipt") or "delivery failed"), file=sys.stderr)
         return 3
-    if not args.wait:
-        return 0
-    if state not in TERMINAL_STATES:
-        print("timed out waiting for the message", file=sys.stderr)
+    if state not in (TERMINAL_STATES if args.wait else HANDOFF_STATES):
+        print("mp-send: timed out waiting for the message" + ("" if args.wait else " handoff; delivery is unconfirmed"), file=sys.stderr)
         return 4
     return 0
 
 
 def run(args):
-    if SESSION_ID.match(args.sid) is None:
-        raise ValueError("invalid session id: " + str(args.sid))
     text = read_text(args.text)
-    reader = reader_module(args.reader)
-    tmux = args.tmux or locator_tmux(reader, args.provider, args.sid)
-    if not tmux:
-        raise ValueError("no terminal binding for this session; pass --tmux")
-    return deliver(args, args.provider, args.sid, tmux, text)
+    sid, tmux = resolve_destination(reader_module(args.reader), args.provider, args.sid, args.tmux)
+    return deliver(args, args.provider, sid, tmux, text)
 
 
 def run_named(args):
@@ -581,7 +610,7 @@ def run_read(argv):
 def table(chats):
     rows = [("NAME", "AI", "STATE", "TMUX", "SID", "FOLDER")]
     for chat in chats:
-        rows.append((chat["name"] or "(no name yet)", chat["provider"], chat["state"], chat["tmux"], chat["sid"], chat["cwd"] or ""))
+        rows.append((chat.get("link") or chat["name"] or "(no name yet)", chat["provider"], chat["state"], chat["tmux"], chat["sid"], chat["cwd"] or ""))
     widths = [max(len(row[i]) for row in rows) for i in range(5)]
     return "\n".join("  ".join(row[i].ljust(widths[i]) for i in range(5)) + "  " + row[5] for row in rows)
 

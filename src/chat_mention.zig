@@ -1,6 +1,7 @@
 const std = @import("std");
 const app = @import("app_state.zig");
 const complete = @import("chat_complete.zig");
+const ChatBlock = app.ChatBlock;
 
 pub const Chat = struct { name: []const u8, session: []const u8, index: u32 };
 pub const Span = struct { start: usize, visible_end: usize, end: usize };
@@ -78,6 +79,50 @@ fn namedAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
 
 pub fn spanAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
     return markerAt(text, pos) orelse namedAt(text, pos, chats);
+}
+
+pub fn plainNameLinkAt(text: []const u16, pos: usize) ?struct { start: usize, end: usize } {
+    if (pos >= text.len or !boundary(text, pos)) return null;
+    var order: [app.MAX_SHELLS]u16 = undefined;
+    const chats = currentLive(null);
+    const n = @min(chats.len, order.len);
+    for (0..n) |i| order[i] = @intCast(i);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        var best: usize = i;
+        var j = i + 1;
+        while (j < n) : (j += 1) {
+            if (chats[order[j]].name.len > chats[order[best]].name.len) best = j;
+        }
+        if (best != i) {
+            const swap = order[i];
+            order[i] = order[best];
+            order[best] = swap;
+        }
+    }
+    var wide: [192]u16 = undefined;
+    var blocked: usize = 0;
+    for (order[0..n]) |index| {
+        const chat = chats[index];
+        const name_len = std.unicode.utf8ToUtf16Le(&wide, chat.name) catch continue;
+        if (name_len == 0 or pos + name_len > text.len) continue;
+        if (!std.mem.eql(u16, text[pos..][0..name_len], wide[0..name_len])) continue;
+        const next = pos + name_len;
+        if (next < text.len and !space(text[next]) and text[next] != '{' and text[next] != '@') {
+            blocked = @max(blocked, name_len);
+            continue;
+        }
+        if (name_len <= blocked) continue;
+        return .{ .start = pos, .end = next };
+    }
+    return null;
+}
+
+pub fn liveSessionForName(name: []const u16) ?[]const u8 {
+    for (currentLive(null)) |chat| {
+        if (sameName(name, chat.name)) return chat.session;
+    }
+    return null;
 }
 
 fn resolve(name: []const u16, chosen: []const Chat, used: *[16]bool, chats: []const Chat) ?[]const u8 {
@@ -417,35 +462,109 @@ pub fn providerName(agent: u8) []const u8 {
     };
 }
 
-const mention_read_line = "List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl";
+const mention_for_you = std.unicode.utf8ToUtf16LeStringLiteral(". This message is for you. Context:\n\n");
+const mention_source_mark = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
 
-pub fn mentionNote(source_name: []const u8, provider: []const u8, sid: []const u8, visible: []const u16, out: []u16) ?[]const u16 {
-    const lead = "Valentin mentioned you in ";
-    const ask = ". Answer his question first. ";
-    var head: [768]u16 = undefined;
-    var w: usize = appendAscii(&head, 0, lead) orelse return null;
-    w = appendUtf8(&head, w, source_name) orelse return null;
-    if (provider.len > 0 or sid.len > 0) {
-        w = appendAscii(&head, w, " (") orelse return null;
-        if (provider.len > 0) w = appendUtf8(&head, w, provider) orelse return null;
-        if (provider.len > 0 and sid.len > 0) w = appendAscii(&head, w, ", ") orelse return null;
-        if (sid.len > 0) w = appendUtf8(&head, w, sid) orelse return null;
-        w = appendAscii(&head, w, ")") orelse return null;
+pub fn trimWireNote(text: []const u16) []const u16 {
+    const mark = mention_source_mark[0..mention_source_mark.len];
+    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
+    return text[0..idx];
+}
+
+pub fn mentionContextTail(blocks: []const ChatBlock, text: []const u16, omit_trailing_user: bool, out: []u8) ?[]const u8 {
+    if (blocks.len == 0 or text.len == 0) return null;
+    var end = blocks.len;
+    if (omit_trailing_user) {
+        while (end > 0) : (end -= 1) {
+            if (blocks[end - 1].role == .user) break;
+        }
+        if (end == 0) return null;
     }
-    w = appendAscii(&head, w, ": ") orelse return null;
-    var foot: [512]u16 = undefined;
-    var t: usize = appendAscii(&foot, 0, ask) orelse return null;
-    t = appendAscii(&foot, t, mention_read_line) orelse return null;
-    if (w + t > out.len) return null;
-    var quote_len = @min(visible.len, out.len - w - t);
+    var picked: [3]struct { start: usize, len: usize, user: bool } = undefined;
+    var picked_n: usize = 0;
+    var i = end;
+    while (i > 0 and picked_n < picked.len) : (i -= 1) {
+        const block = blocks[i - 1];
+        if (block.role != .user and block.role != .prose) continue;
+        if (block.len == 0 or block.start > text.len or block.start + block.len > text.len) continue;
+        picked[picked_n] = .{ .start = block.start, .len = block.len, .user = block.role == .user };
+        picked_n += 1;
+    }
+    if (picked_n == 0) return null;
+    var w: usize = 0;
+    var scratch: [768]u16 = undefined;
+    var pi: usize = picked_n;
+    while (pi > 0) : (pi -= 1) {
+        const pick = picked[pi - 1];
+        const slice = text[pick.start..][0..pick.len];
+        const line = if (pick.user) copyVisible(slice, &.{}, &scratch) else slice;
+        if (line.len == 0) continue;
+        if (w > 0) {
+            const separator = "\n\n---\n\n";
+            if (separator.len > out.len - w) return out[0..w];
+            @memcpy(out[w..][0..separator.len], separator);
+            w += separator.len;
+        }
+        const n = std.unicode.utf16LeToUtf8(out[w..], line) catch return out[0..w];
+        w += n;
+    }
+    if (w == 0) return null;
+    return out[0..w];
+}
+
+pub fn mentionSourceNote(targets: []const Chat, out: []u16) ?[]const u16 {
+    if (targets.len == 0) return null;
+    const lead = "\n\n(This line is addressed to ";
+    var w: usize = appendAscii(out, 0, lead) orelse return null;
+    for (targets, 0..) |chat, i| {
+        if (i > 0) {
+            const sep = if (i + 1 == targets.len) " and " else ", ";
+            w = appendAscii(out, w, sep) orelse return null;
+        }
+        w = appendUtf8(out, w, chat.name) orelse return null;
+    }
+    const mid = if (targets.len == 1)
+        " and was already delivered to it. Do not answer for "
+    else
+        " and was already delivered to them. Do not answer for ";
+    w = appendAscii(out, w, mid) orelse return null;
+    for (targets, 0..) |chat, i| {
+        if (i > 0) w = appendAscii(out, w, if (i + 1 == targets.len) " or " else ", ") orelse return null;
+        w = appendUtf8(out, w, chat.name) orelse return null;
+    }
+    w = appendAscii(out, w, " or relay it unless you are also asked.)") orelse return null;
+    return out[0..w];
+}
+
+pub fn composeWireText(source_session: []const u8, live: []const Chat, text: []const u16, out: []u16) []const u16 {
+    var targets_buf: [16]Chat = undefined;
+    const targets = mentionTargets(text, source_session, live, &targets_buf);
+    if (targets.len == 0 or text.len > out.len) return text;
+    @memcpy(out[0..text.len], text);
+    const suffix = mentionSourceNote(targets, out[text.len..]) orelse return text;
+    return out[0 .. text.len + suffix.len];
+}
+
+pub fn mentionNote(source_name: []const u8, visible: []const u16, context: []const u8, out: []u16) ?[]const u16 {
+    const lead = "Valentin mentioned you in ";
+    var w: usize = appendAscii(out, 0, lead) orelse return null;
+    w = appendUtf8(out, w, source_name) orelse return null;
+    const mid = mention_for_you[0..mention_for_you.len];
+    if (w + mid.len > out.len) return null;
+    @memcpy(out[w..][0..mid.len], mid);
+    w += mid.len;
+    var quote_len = @min(visible.len, out.len - w);
     if (quote_len > 0 and quote_len < visible.len) {
         const unit = visible[quote_len - 1];
         if (unit >= 0xD800 and unit <= 0xDBFF) quote_len -= 1;
     }
-    @memcpy(out[0..w], head[0..w]);
     if (quote_len > 0) @memcpy(out[w..][0..quote_len], visible[0..quote_len]);
-    @memcpy(out[w + quote_len ..][0..t], foot[0..t]);
-    return out[0 .. w + quote_len + t];
+    w += quote_len;
+    if (context.len > 0) {
+        w = appendAscii(out, w, "\n\n") orelse return null;
+        w = appendUtf8(out, w, context) orelse return null;
+    }
+    return out[0..w];
 }
 
 const MentionSent = struct {
@@ -604,9 +723,10 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     var visible_buf: [640]u16 = undefined;
     const visible = copyVisible(typed, &.{}, &visible_buf);
     var note_buf: [640]u16 = undefined;
-    const note = mentionNote("Factory", "claude", "11111111-2222-3333-4444-555555555555", visible, &note_buf).?;
-    const expected = w(&storage, &slot, "Valentin mentioned you in Factory (claude, 11111111-2222-3333-4444-555555555555): ask @Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    const note = mentionNote("Factory", visible, "user: prior\n\n---\n\nassistant: reply", &note_buf).?;
+    const expected = w(&storage, &slot, "Valentin mentioned you in Factory. This message is for you. Context:\n\nask @Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term\n\nuser: prior\n\n---\n\nassistant: reply");
     try std.testing.expectEqualSlices(u16, expected, note);
+    try std.testing.expect(std.mem.indexOf(u16, note, mention_for_you[0..mention_for_you.len]) != null);
     try std.testing.expect(isMentionNote(note));
     var echoed: [900]u16 = undefined;
     const extra = w(&storage, &slot, " @Notes{live-notes}");
@@ -614,13 +734,13 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     @memcpy(echoed[note.len..][0..extra.len], extra);
     try std.testing.expectEqual(@as(usize, 0), mentionTargets(echoed[0 .. note.len + extra.len], "live-factory", &chats, &targets).len);
     const hello = w(&storage, &slot, "hello");
-    const quoted = mentionNote("Say \"hi\"", "claude", "abc", hello, &note_buf).?;
-    const quoted_expected = w(&storage, &slot, "Valentin mentioned you in Say \"hi\" (claude, abc): hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    const quoted = mentionNote("Say \"hi\"", hello, "", &note_buf).?;
+    const quoted_expected = w(&storage, &slot, "Valentin mentioned you in Say \"hi\". This message is for you. Context:\n\nhello");
     try std.testing.expectEqualSlices(u16, quoted_expected, quoted);
-    const plain = mentionNote("Factory", "", "", hello, &note_buf).?;
-    const plain_expected = w(&storage, &slot, "Valentin mentioned you in Factory: hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    const plain = mentionNote("Factory", hello, "", &note_buf).?;
+    const plain_expected = w(&storage, &slot, "Valentin mentioned you in Factory. This message is for you. Context:\n\nhello");
     try std.testing.expectEqualSlices(u16, plain_expected, plain);
-    try std.testing.expect(mentionNote("Factory", "claude", "abc", visible, note_buf[0..8]) == null);
+    try std.testing.expect(mentionNote("Factory", visible, "", note_buf[0..8]) == null);
     mentionForgetDelivered();
     try std.testing.expect(!mentionDelivered(9, "live-design"));
     mentionMarkDelivered(9, "live-design");
@@ -643,6 +763,59 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     try std.testing.expect(mentionDelivered(65, "live-65"));
     try std.testing.expect(mentionDelivered(2, "live-2"));
     mentionForgetDelivered();
+}
+
+test "SOFT-2464 plain session names link longest matches first" {
+    const count = app.shell_count;
+    const Snap = struct { name: [64]u16, name_len: u32, session: [64]u8, session_len: u32, chat_view_on: bool };
+    var prior: [3]Snap = undefined;
+    for (0..3) |i| prior[i] = .{ .name = app.shells[i].name, .name_len = app.shells[i].name_len, .session = app.shells[i].tmux_session, .session_len = app.shells[i].tmux_session_len, .chat_view_on = app.shells[i].chat_view_on };
+    defer {
+        app.shell_count = count;
+        for (0..3) |i| {
+            app.shells[i].name = prior[i].name;
+            app.shells[i].name_len = prior[i].name_len;
+            app.shells[i].tmux_session = prior[i].session;
+            app.shells[i].tmux_session_len = prior[i].session_len;
+            app.shells[i].chat_view_on = prior[i].chat_view_on;
+        }
+    }
+    app.shell_count = 3;
+    const set = struct {
+        fn chat(index: u32, name: []const u8, session: []const u8) void {
+            const shell = &app.shells[index];
+            shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, name) catch 0);
+            @memset(&shell.tmux_session, 0);
+            @memcpy(shell.tmux_session[0..session.len], session);
+            shell.tmux_session_len = @intCast(session.len);
+            shell.chat_view_on = false;
+        }
+    };
+    set.chat(0, "Alpha", "live-a");
+    set.chat(1, "Alpha Lead", "live-al");
+    set.chat(2, "Home", "live-h");
+    const storage = [_][]const u8{
+        "ask Alpha Lead now",
+        "Alpha only",
+        "partial Alpha Leader",
+        "`Alpha Lead`",
+    };
+    var wide: [4][256]u16 = undefined;
+    for (storage, 0..) |text, i| {
+        const n = std.unicode.utf8ToUtf16Le(&wide[i], text) catch unreachable;
+        const slice = wide[i][0..n];
+        if (i == 0) {
+            const hit = plainNameLinkAt(slice, 4).?;
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha Lead"), slice[hit.start..hit.end]);
+        } else if (i == 1) {
+            const hit = plainNameLinkAt(slice, 0).?;
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha"), slice[hit.start..hit.end]);
+        } else if (i == 2) {
+            try std.testing.expect(plainNameLinkAt(slice, 8) == null);
+        } else {
+            try std.testing.expect(plainNameLinkAt(slice, 0) == null);
+        }
+    }
 }
 
 test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" {
@@ -684,4 +857,58 @@ test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" 
         try std.testing.expectEqualSlices(u16, want[0..m], raw[0..got]);
         try std.testing.expect(std.mem.indexOf(u16, raw[0..got], hidden) == null);
     }
+}
+
+test "SOFT-3084 recent mention context separates UTF-8 lines" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hi雪ping");
+    const blocks = [_]ChatBlock{
+        .{ .start = 0, .len = 2, .role = .user },
+        .{ .start = 2, .len = 1, .role = .prose },
+        .{ .start = 3, .len = 4, .role = .user },
+    };
+    var out: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("hi\n\n---\n\n雪\n\n---\n\nping", mentionContextTail(&blocks, text, false, &out).?);
+    try std.testing.expectEqualStrings("hi", mentionContextTail(&blocks, text, false, out[0..3]).?);
+}
+
+test "SOFT-3084 mention framing separates typing chat from recipients" {
+    const chats = [_]Chat{
+        .{ .name = "Alpha", .session = "live-alpha", .index = 0 },
+        .{ .name = "Beta", .session = "live-beta", .index = 1 },
+    };
+    var storage: [8][640]u16 = undefined;
+    var slot: usize = 0;
+    const w = struct {
+        fn next(store: [][640]u16, used: *usize, text: []const u8) []const u16 {
+            const buf = &store[used.*];
+            used.* += 1;
+            return utf16(text, buf);
+        }
+    }.next;
+    const typed = w(&storage, &slot, "ping @Beta{live-beta} now");
+    var targets: [4]Chat = undefined;
+    const found = mentionTargets(typed, "live-alpha", &chats, &targets);
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("Beta", found[0].name);
+    var visible_buf: [256]u16 = undefined;
+    const visible = copyVisible(typed, &.{}, &visible_buf);
+    var note_buf: [640]u16 = undefined;
+    const note = mentionNote("Alpha", visible, "earlier line", &note_buf).?;
+    try std.testing.expect(std.mem.indexOf(u16, note, mention_for_you[0..mention_for_you.len]) != null);
+    try std.testing.expect(std.mem.indexOf(u16, note, w(&storage, &slot, "earlier line")) != null);
+    var wire_buf: [768]u16 = undefined;
+    const wire = composeWireText("live-alpha", &chats, typed, &wire_buf);
+    try std.testing.expect(wire.len > typed.len);
+    try std.testing.expect(std.mem.startsWith(u16, wire, typed));
+    try std.testing.expect(std.mem.eql(u16, trimWireNote(wire), typed));
+    var suffix_buf: [512]u16 = undefined;
+    const suffix = mentionSourceNote(found[0..1], &suffix_buf).?;
+    try std.testing.expect(std.mem.indexOf(u16, wire, suffix) != null);
+    const multi = w(&storage, &slot, "hi @Beta{live-beta} and @Beta{live-beta}");
+    const multi_targets = mentionTargets(multi, "live-alpha", &chats, &targets);
+    try std.testing.expectEqual(@as(usize, 1), multi_targets.len);
+    const multi_suffix = mentionSourceNote(multi_targets, &suffix_buf).?;
+    try std.testing.expect(std.mem.indexOf(u16, multi_suffix, w(&storage, &slot, "Beta")) != null);
+    try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "note @Alpha{live-alpha}"), "live-alpha", &chats, &targets).len);
+    try std.testing.expect(std.mem.eql(u16, composeWireText("live-alpha", &chats, w(&storage, &slot, "note @Alpha{live-alpha}"), &wire_buf), w(&storage, &slot, "note @Alpha{live-alpha}")));
 }

@@ -314,6 +314,86 @@ const InlineScan = struct {
     }
 };
 
+fn tokenBoundary(text: []const u16, pos: usize) bool {
+    if (pos == 0) return true;
+    const c = text[pos - 1];
+    return c == ' ' or c == '\t' or c == '\n' or c == '\r';
+}
+
+fn sessionChar(c: anytype) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.' or c == ':' or c == '-';
+}
+
+pub fn sessionId(text: []const u8) bool {
+    if (text.len == 0 or text.len > 64) return false;
+    var hyphen = false;
+    for (text) |c| {
+        if (c == '-') hyphen = true else if (!sessionChar(c)) return false;
+    }
+    return hyphen;
+}
+
+fn sessionIdWide(text: []const u16) bool {
+    if (text.len == 0 or text.len > 64) return false;
+    var hyphen = false;
+    for (text) |c| {
+        if (c == '-') hyphen = true else if (!sessionChar(c)) return false;
+    }
+    return hyphen;
+}
+
+pub fn sessionBrace(text: []const u16, target: Range) bool {
+    if (target.end <= target.start or target.start == 0 or target.end >= text.len) return false;
+    if (text[target.start - 1] != '{' or text[target.end] != '}') return false;
+    return sessionIdWide(text[target.start..target.end]);
+}
+
+const SessionLink = struct { name: Range, target: Range, end: usize };
+
+fn sessionLinkFrom(text: []const u16, pos: usize, allow_spaces: bool) ?SessionLink {
+    if (pos >= text.len) return null;
+    var i = pos;
+    if (text[i] == '@') {
+        i += 1;
+        if (i >= text.len) return null;
+    }
+    if (text[i] == '{' or text[i] == ' ' or text[i] == '\t' or text[i] == '\n' or text[i] == '\r') return null;
+    const name_start = i;
+    while (i < text.len and i - pos <= 192) : (i += 1) {
+        const c = text[i];
+        if (c == '\n' or c == '\r') return null;
+        if (c == ' ' or c == '\t') {
+            if (!allow_spaces) return null;
+            continue;
+        }
+        if (c == '{') break;
+    }
+    if (i >= text.len or text[i] != '{' or i == name_start or text[i - 1] == ' ' or text[i - 1] == '\t') return null;
+    var j = i + 1;
+    while (j < text.len and text[j] != '}' and j - i <= 65) : (j += 1) {}
+    if (j >= text.len or text[j] != '}' or !sessionIdWide(text[i + 1 .. j])) return null;
+    return .{ .name = .{ .start = name_start, .end = i }, .target = .{ .start = i + 1, .end = j }, .end = j + 1 };
+}
+
+fn lineSessionLink(text: []const u16, pos: usize) ?SessionLink {
+    var s = pos;
+    while (s > 0 and text[s - 1] != '\n' and text[s - 1] != '\r') {
+        if (text[s - 1] != ' ' and text[s - 1] != '\t') return null;
+        s -= 1;
+    }
+    const link = sessionLinkFrom(text, pos, true) orelse return null;
+    var k = link.end;
+    while (k < text.len and (text[k] == ' ' or text[k] == '\t')) : (k += 1) {}
+    if (k < text.len and text[k] != '\n' and text[k] != '\r') return null;
+    return link;
+}
+
+fn sessionLinkAt(text: []const u16, pos: usize) ?SessionLink {
+    if (pos >= text.len or !tokenBoundary(text, pos)) return null;
+    if (text[pos] == '@') return sessionLinkFrom(text, pos, true);
+    return lineSessionLink(text, pos) orelse sessionLinkFrom(text, pos, false);
+}
+
 fn inlineAtom(text: []const u16, pos: usize, scan: *InlineScan) ?InlineAtom {
     if (text[pos] == '`') {
         var content = pos + 1;
@@ -329,6 +409,13 @@ fn inlineAtom(text: []const u16, pos: usize, scan: *InlineScan) ?InlineAtom {
             if (stop - end == content - pos) return .{ .span = .{ .text = .{ .start = content, .end = end }, .style = .{ .code = true } }, .end = stop };
             end = stop;
         }
+    }
+    if (sessionLinkAt(text, pos)) |link| {
+        return .{ .span = .{ .text = link.name, .target = link.target }, .end = link.end };
+    }
+    if (@import("chat_mention.zig").plainNameLinkAt(text, pos)) |plain| {
+        const range = Range{ .start = plain.start, .end = plain.end };
+        return .{ .span = .{ .text = range, .target = range }, .end = plain.end };
     }
     if (text[pos] == '[') {
         if (scan.closing(text, pos + 1, ']')) |label_end| {
@@ -856,6 +943,46 @@ test "user content is not interpreted as assistant markup" {
     try std.testing.expectEqual(@as(usize, 8), out[0].start);
     try std.testing.expectEqual(Kind.paragraph, out[0].kind);
 }
+test "SOFT-2464 a reply session token is a link span with the name and tmux target" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("See Poteto{live-8bc7bac} now");
+    var out: [8]Span = undefined;
+    const n = inlineSpans(text, &out);
+    var found = false;
+    for (out[0..n]) |span| {
+        const target = span.target orelse continue;
+        try std.testing.expectEqualSlices(u16, w("Poteto"), text[span.text.start..span.text.end]);
+        try std.testing.expectEqualSlices(u16, w("live-8bc7bac"), text[target.start..target.end]);
+        found = true;
+    }
+    try std.testing.expect(found);
+    const marked = w("@Poteto 2 LC{live-8bc7bac}");
+    const marked_n = inlineSpans(marked, &out);
+    var marked_found = false;
+    for (out[0..marked_n]) |span| {
+        const target = span.target orelse continue;
+        try std.testing.expectEqualSlices(u16, w("Poteto 2 LC"), marked[span.text.start..span.text.end]);
+        try std.testing.expectEqualSlices(u16, w("live-8bc7bac"), marked[target.start..target.end]);
+        marked_found = true;
+    }
+    try std.testing.expect(marked_found);
+    const plain = w("config{debug} stays");
+    const plain_n = inlineSpans(plain, &out);
+    for (out[0..plain_n]) |span| try std.testing.expect(span.target == null);
+    const line = w("Alpha Lead{live-alpha}");
+    const line_n = inlineSpans(line, &out);
+    var line_found = false;
+    for (out[0..line_n]) |span| {
+        const target = span.target orelse continue;
+        try std.testing.expectEqualSlices(u16, w("Alpha Lead"), line[span.text.start..span.text.end]);
+        try std.testing.expectEqualSlices(u16, w("live-alpha"), line[target.start..target.end]);
+        line_found = true;
+    }
+    try std.testing.expect(line_found);
+    try std.testing.expect(sessionId("live-8bc7bac"));
+    try std.testing.expect(!sessionId("debug"));
+}
+
 test "inline bold italic code links escapes and unfinished syntax" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("**bold** *italic* `x` [site](https://example.test) \\*literal **unfinished");
     var out: [40]Span = undefined;
