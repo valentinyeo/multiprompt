@@ -13,31 +13,7 @@ pub const WORKING_DOT_SIZE = 4;
 pub const WORKING_DOT_STEP = 8;
 const WORKING_DOT_ALPHA: u8 = 102;
 
-var layout_rect: ?RECT = null;
 var painted_rect: ?RECT = null;
-
-pub fn visible() bool {
-    return @import("window_layout.zig").chatStopVisible();
-}
-
-pub fn layoutRect() ?RECT {
-    return layout_rect;
-}
-
-pub fn setLayoutRect(rc: RECT) void {
-    layout_rect = rc;
-}
-
-pub fn clearLayoutRect() void {
-    layout_rect = null;
-}
-
-pub fn shiftLayout(delta: i32) void {
-    if (layout_rect) |*rect| {
-        rect.top += delta;
-        rect.bottom += delta;
-    }
-}
 
 pub fn screenRect(source: ?RECT, scroll_y: i32) ?RECT {
     const rect = source orelse return null;
@@ -54,9 +30,9 @@ fn overlaps(a: RECT, b: RECT) bool {
     return a.bottom > b.top and a.top < b.bottom and a.right > b.left and a.left < b.right;
 }
 
-pub fn sync() void {
+pub fn sync(working_rect: ?RECT, visible: bool) void {
     const hwnd = app_state.g_chat_transcript_hwnd orelse return;
-    if ((layout_rect != null) != visible()) {
+    if ((working_rect != null) != visible) {
         var rc: RECT = std.mem.zeroes(RECT);
         @import("chat_render.zig").chatViewClientRect(&rc);
         @import("chat_session.zig").chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
@@ -64,19 +40,19 @@ pub fn sync() void {
         painted_rect = null;
         return;
     }
-    const current = screenRect(layout_rect, app_state.g_chat_scroll_y);
+    const current = screenRect(working_rect, app_state.g_chat_scroll_y);
     if (repaintRegion(painted_rect, current)) |rc| _ = InvalidateRect(hwnd, &rc, 0);
     painted_rect = current;
 }
 
-pub fn paint(hdc: HANDLE, paint_rect: RECT, now: u64) void {
-    const rc = screenRect(layout_rect, app_state.g_chat_scroll_y) orelse {
+pub fn paint(hdc: HANDLE, paint_rect: RECT, now: u64, working_rect: ?RECT, visible: bool) void {
+    const rc = screenRect(working_rect, app_state.g_chat_scroll_y) orelse {
         if (painted_rect) |stale| {
             if (overlaps(stale, paint_rect)) painted_rect = null;
         }
         return;
     };
-    if (!visible() or !overlaps(rc, paint_rect)) return;
+    if (!visible or !overlaps(rc, paint_rect)) return;
     paintDots(hdc, rc, now);
     painted_rect = repaintRegion(painted_rect, rc);
 }

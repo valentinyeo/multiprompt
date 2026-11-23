@@ -59,15 +59,15 @@ test('SOFT-2642 an empty session keeps one row of working dots while the layout 
 
 test('SOFT-2642 the working dots repaint uses one rect for the paint and the invalidation', () => {
   const sync = sliceFn(dots, 'sync');
-  assert.match(sync, /screenRect\(layout_rect, app_state\.g_chat_scroll_y\)/);
+  assert.match(sync, /screenRect\(working_rect, app_state\.g_chat_scroll_y\)/);
   assert.match(sync, /repaintRegion\(painted_rect, current\)/);
   assert.match(sync, /painted_rect = current;/);
 
   const paint = sliceFn(dots, 'paint');
   assert.equal(paint.match(/paintDots\(/g).length, 1, 'one paint call per frame');
-  assert.match(paint, /screenRect\(layout_rect, app_state\.g_chat_scroll_y\)/);
+  assert.match(paint, /screenRect\(working_rect, app_state\.g_chat_scroll_y\)/);
   assert.match(paint, /painted_rect = repaintRegion\(painted_rect, rc\);/);
-  assert.match(paint, /if \(!visible\(\) or !overlaps\(rc, paint_rect\)\) return;/);
+  assert.match(paint, /if \(!visible or !overlaps\(rc, paint_rect\)\) return;/);
 
   const painted = sliceFn(dots, 'paintDots');
   assert.match(painted, /for \(0\.\.3\) \|i\|/, 'the indicator is exactly three dots');
@@ -76,7 +76,7 @@ test('SOFT-2642 the working dots repaint uses one rect for the paint and the inv
 });
 
 test('SOFT-2642 the working row follows the content when the top pad changes', () => {
-  assert.match(sliceFn(dots, 'shiftLayout'), /rect\.top \+= delta;\n\s+rect\.bottom \+= delta;/);
-  assert.match(sliceFn(render, 'chatSetTopPad'), /chat_dots\.shiftLayout\(delta\);/);
-  assert.match(render, /const chat_dots = @import\("chat_working_dots\.zig"\);/, 'the dots rect has one owner');
+  assert.match(sliceFn(render, 'chatSetTopPad'), /if \(g_working_rect\) \|\*rect\| \{\n\s+rect\.top \+= delta;\n\s+rect\.bottom \+= delta;/);
+  assert.match(sliceFn(render, 'chatWorkingSync'), /@import\("chat_working_dots\.zig"\)\.sync\(g_working_rect, chatWorkingDotsVisible\(\)\);/);
+  assert.match(render, /@import\("chat_working_dots\.zig"\)\.paint\(mem_dc, paint, GetTickCount64\(\), g_working_rect, chatWorkingDotsVisible\(\)\);/);
 });

@@ -2095,9 +2095,16 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
     return y;
 }
 
-const chat_dots = @import("chat_working_dots.zig");
-
+var g_working_rect: ?RECT = null;
 var g_note_logged = false;
+
+fn chatWorkingDotsVisible() bool {
+    return @import("window_layout.zig").chatStopVisible();
+}
+
+pub fn chatWorkingSync() void {
+    @import("chat_working_dots.zig").sync(g_working_rect, chatWorkingDotsVisible());
+}
 
 const CHOICE_CARD_H = 52;
 const CHOICE_GAP = 6;
@@ -2470,7 +2477,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 
 pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_layout_count +%= 1;
-    chat_dots.clearLayoutRect();
+    g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_width = client_width;
@@ -2636,13 +2643,13 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
-    if (chat_dots.visible()) {
+    if (chatWorkingDotsVisible()) {
         y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
         const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
         rc.left += content.left;
         rc.right += content.left;
-        chat_dots.setLayoutRect(rc);
+        g_working_rect = rc;
         y = rc.bottom;
     }
     app_state.g_chat_content_h = y;
@@ -2670,7 +2677,10 @@ pub fn chatSetTopPad(new_pad: i32) void {
         rect.top += delta;
         rect.bottom += delta;
     }
-    chat_dots.shiftLayout(delta);
+    if (g_working_rect) |*rect| {
+        rect.top += delta;
+        rect.bottom += delta;
+    }
     if (app_state.g_chat_read_boundary.index != null) app_state.g_chat_read_divider_y += delta;
     if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
@@ -5775,17 +5785,17 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
-        chat_dots.paint(mem_dc, paint, GetTickCount64());
+        @import("chat_working_dots.zig").paint(mem_dc, paint, GetTickCount64(), g_working_rect, chatWorkingDotsVisible());
         if (app_state.g_chat_block_count == 0) {
             const entry = chatHistoryEntry(chatFileIdentity());
             const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
             const brand_new_chat = if (entry) |e| (e.key.sid[0] != 0 and e.history.blocks.items.len == 0 and e.loaded_ms == 0 and e.failures < chat_history.NEW_CHAT_GRACE) else false;
             const failed_load = if (entry) |e| (e.failures > 0 and !brand_new_chat) else false;
-            const paint_note = chat_dots.layoutRect() == null or missing_note or failed_load;
+            const paint_note = g_working_rect == null or missing_note or failed_load;
             if (paint_note and missing_note and !g_note_logged and verboseLoggingEnabled()) debugLog("[chat] note shown: " ++ chat_history.NOT_AVAILABLE_NOTE);
             g_note_logged = paint_note and missing_note;
             if (paint_note) {
-                const extra_top = if (chat_dots.layoutRect()) |working| working.bottom - app_state.g_chat_scroll_y else 0;
+                const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
                 const message: ?LPCWSTR = if (entry) |e|
                     (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else null)
                 else
@@ -7999,7 +8009,7 @@ test "IGSH-959 working dots have no bubble and are small and dim" {
     defer _ = DeleteObject(brush);
     _ = FillRect(dc, &area, brush);
     const rc = RECT{ .left = 20, .top = 30, .right = 380, .bottom = 30 + uiScaled(48) };
-    chat_dots.paintDots(dc, rc, 0);
+    @import("chat_working_dots.zig").paintDots(dc, rc, 0);
     const pixels: [*]const u32 = @ptrCast(@alignCast(bits.?));
     const bg_rgb = ((background & 0xFF) << 16) | (background & 0xFF00) | ((background >> 16) & 0xFF);
     const fg = customColorOr("text", themeConsoleFg());
@@ -8022,8 +8032,8 @@ test "IGSH-959 working dots have no bubble and are small and dim" {
     }
     const full = channelDistance(fg_rgb, bg_rgb);
     try std.testing.expect(painted > 0);
-    try std.testing.expect(painted <= 3 * @as(usize, @intCast((uiScaled(chat_dots.WORKING_DOT_SIZE) + 2) * (uiScaled(chat_dots.WORKING_DOT_SIZE) + 2))));
-    try std.testing.expect(max_x - min_x < 3 * uiScaled(chat_dots.WORKING_DOT_STEP));
+    try std.testing.expect(painted <= 3 * @as(usize, @intCast((uiScaled(@import("chat_working_dots.zig").WORKING_DOT_SIZE) + 2) * (uiScaled(@import("chat_working_dots.zig").WORKING_DOT_SIZE) + 2))));
+    try std.testing.expect(max_x - min_x < 3 * uiScaled(@import("chat_working_dots.zig").WORKING_DOT_STEP));
     try std.testing.expect(brightest * 100 <= full * 50);
 }
 
@@ -8045,7 +8055,7 @@ fn liveWorkingProofFrame(dc: HANDLE, name: LPCWSTR, bytes: []const u8, header: a
     try scrollProofSave(name, bytes, header);
     std.debug.print("IGSH1668 case={s} stage={s} elapsed_ms={d} live={any} screen={any} visible={any} slot={any} timer={any} blocks={d}\n", .{
         case, stage, GetTickCount64() -| started, @import("chat_live.zig").running(app_state.shells[0].shell_id),
-        app_state.g_chat_screen_working, @import("window_layout.zig").chatStopVisible(), chat_dots.layoutRect() != null,
+        app_state.g_chat_screen_working, @import("window_layout.zig").chatStopVisible(), g_working_rect != null,
         app_state.g_chat_working_timer_running, app_state.g_chat_block_count,
     });
 }
@@ -8100,7 +8110,7 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         app_state.g_chat_block_count = 0;
         app_state.g_chat_last_len = 0;
         app_state.g_chat_layout_reuse = 0;
-        chat_dots.clearLayoutRect();
+        g_working_rect = null;
     }
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].shell_id = shell_id;
@@ -8163,7 +8173,7 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         app_state.g_chat_outbox.items[0].channel_sent = true;
         layout.chatWorkingIndicatorSync();
         try std.testing.expect(layout.chatStopVisible());
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         try liveWorkingProofFrame(dc, case.files[1], bytes, info.header, started, case.name, "accepted-before-event");
         const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{\"message_id\":\"m-1668\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, begin));
@@ -8171,7 +8181,7 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");
         try std.testing.expect(live.running(shell_id));
         try std.testing.expect(layout.chatStopVisible());
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         try std.testing.expect(app_state.g_chat_working_timer_running);
         w.Sleep(300);
         layout.chatWorkingBarTick();
@@ -8182,26 +8192,26 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try liveWorkingProofFrame(dc, case.files[4], bytes, info.header, started, case.name, "reply-delta");
         try std.testing.expect(live.running(shell_id));
         try std.testing.expect(layout.chatStopVisible());
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, end));
         app_state.shells[0].activity = .active;
         session.chatFileOnReady();
         layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[5], bytes, info.header, started, case.name, "turn-ended");
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         try std.testing.expect(layout.chatStopVisible());
         app_state.g_chat_outbox.items[0].state = .queued;
         layout.chatWorkingIndicatorSync();
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         app_state.shells[0].activity = .idle;
         layout.chatWorkingIndicatorSync();
-        try std.testing.expect(chat_dots.layoutRect() != null);
+        try std.testing.expect(g_working_rect != null);
         try std.testing.expect(layout.chatStopVisible());
         app_state.g_chat_outbox.items[0].state = .delivered;
         layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[6], bytes, info.header, started, case.name, "idle");
-        try std.testing.expect(chat_dots.layoutRect() == null);
+        try std.testing.expect(g_working_rect == null);
         try std.testing.expect(!layout.chatStopVisible());
         try std.testing.expect(!app_state.g_chat_working_timer_running);
         std.heap.page_allocator.free(app_state.g_chat_outbox.items[0].text);
@@ -8237,7 +8247,7 @@ test "IGSH-924 working dots reserve the next reply rectangle and disappear for i
         app_state.g_chat_block_count = 0;
         app_state.g_chat_last_len = 0;
         app_state.g_chat_layout_reuse = 0;
-        chat_dots.clearLayoutRect();
+        g_working_rect = null;
     }
     app_state.g_chat_transcript_hwnd = hwnd;
     app_state.shell_count = 1;
@@ -8254,7 +8264,7 @@ test "IGSH-924 working dots reserve the next reply rectangle and disappear for i
     app_state.g_chat_blocks[0] = .{ .start = 0, .len = 8, .role = .user, .first = true };
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
-    const placeholder = chat_dots.layoutRect() orelse return error.TestUnexpectedResult;
+    const placeholder = g_working_rect orelse return error.TestUnexpectedResult;
     const question = app_state.g_chat_layout_rects[0];
     const busy_height = app_state.g_chat_content_h;
     try std.testing.expectEqual(question.bottom + uiScaled(24), placeholder.top);
@@ -8264,7 +8274,7 @@ test "IGSH-924 working dots reserve the next reply rectangle and disappear for i
     app_state.g_chat_block_count = 2;
     chatRelayout(800);
     const reply = app_state.g_chat_layout_rects[1];
-    try std.testing.expect(chat_dots.layoutRect() == null);
+    try std.testing.expect(g_working_rect == null);
     try std.testing.expectEqual(placeholder.top, reply.top);
     try std.testing.expectEqual(placeholder.bottom, reply.bottom);
     try std.testing.expectEqual(placeholder.left, reply.left + app_state.g_chat_content_left);
@@ -8274,11 +8284,11 @@ test "IGSH-924 working dots reserve the next reply rectangle and disappear for i
     app_state.g_chat_permission.count = 1;
     app_state.shells[0].permission_answered = false;
     chatRelayout(800);
-    try std.testing.expect(chat_dots.layoutRect() == null);
+    try std.testing.expect(g_working_rect == null);
     app_state.g_chat_permission.count = 0;
     app_state.g_chat_active = false;
     chatRelayout(800);
-    try std.testing.expect(chat_dots.layoutRect() == null);
+    try std.testing.expect(g_working_rect == null);
 }
 
 fn floatProofWindow(layout: app_state.ChatViewLayout) RECT {
