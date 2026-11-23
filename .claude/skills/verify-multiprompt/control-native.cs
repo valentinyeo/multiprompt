@@ -233,15 +233,12 @@ public static class VerifyNative {
         return result;
     }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
-    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr value);
-    delegate bool EnumChildProc(IntPtr hwnd, IntPtr value);
     public static IntPtr FirstVisibleChild(IntPtr parent, string className) {
         IntPtr found = IntPtr.Zero;
-        EnumChildProc visit = delegate(IntPtr hwnd, IntPtr value) {
+        EnumChildWindows(parent, delegate(IntPtr hwnd, IntPtr data) {
             if (Class(hwnd) == className && IsWindowVisible(hwnd)) { found = hwnd; return false; }
             return true;
-        };
-        EnumChildWindows(parent, visit, IntPtr.Zero);
+        }, IntPtr.Zero);
         return found;
     }
     public static List<Dictionary<string, object>> DesktopWindows() {
