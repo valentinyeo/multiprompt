@@ -65,7 +65,7 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
         .agent = if (shell.ai_agent == 0 and shell.claude_sid_len > 0) 1 else shell.ai_agent,
         .chat_id = shell.chat_id,
         .cwd = if (shell.claude_cwd_len > 0) try alloc.dupe(u8, shell.claude_cwd[0..shell.claude_cwd_len]) else if (shell.cached_cwd_len > 0) try alloc.dupe(u8, shell.cached_cwd[0..shell.cached_cwd_len]) else null,
-        .pinned = sidebar.effPinnedTop(idx),
+        .pinned = shell.pinned_top,
         .waiting = shell.inbox_archived and !shell.needs_attention,
         .visible = hidden == null,
         .hidden_reason = hidden,

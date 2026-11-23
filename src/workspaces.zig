@@ -3063,6 +3063,7 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
         app_state.shells[ws].workspace = @intCast(ws);
         app_state.shells[ws].shell_id = @intCast(41 + ws);
         app_state.shells[ws].favorite = true;
+        app_state.shells[ws].starred_pinned_top = true;
         app_state.shells[ws].name[0] = @intCast('A' + ws);
         app_state.shells[ws].name_len = 1;
         app_state.shells[ws].tmux_session[0] = @intCast('a' + ws);
