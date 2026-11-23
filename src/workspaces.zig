@@ -2766,6 +2766,21 @@ pub fn restoreSessionGroup(saved: @TypeOf(app_state.groups[0]), workspace: u8, s
 pub fn reopenLastClosedShell() void {
     if (app_state.g_closed_count == 0) return;
     const entry = app_state.g_closed_history[app_state.g_closed_count - 1];
+    const key = if (entry.tab_key_len > 0) entry.tab_key[0..entry.tab_key_len] else entry.tmux_session[0..entry.tmux_session_len];
+    const host: u8 = if (entry.kind == .cmd or entry.kind == .pwsh or entry.kind == .bash or entry.kind == .gitbash) 3 else entry.tmux_host;
+    if (@import("tab_state_desktop.zig").restoreByKey(host, key)) |restored| {
+        if (restored) {
+            const shell = &app_state.shells[app_state.active_shell];
+            shell.favorite = entry.favorite;
+            shell.face = entry.face;
+            shell.color = entry.color;
+            shell.avatar_local_id = entry.avatar_local_id;
+            app_state.g_closed_count -= 1;
+            saveSession();
+        }
+        return;
+    }
+
 
     const ts: ?[]const u8 = if (entry.tmux_session_len > 0) entry.tmux_session[0..entry.tmux_session_len] else null;
     const cwd: ?[]const u8 = if (entry.cached_cwd_len > 0) entry.cached_cwd[0..entry.cached_cwd_len] else null;

@@ -253,6 +253,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (!@import("tab_state_desktop.zig").appendState(&json_buf, &pos, i)) return false;
+
         const wake_id: u32 = if (workspace_filter != null) @intCast(written_tabs) else app_state.shells[i].wake_id;
         if (wake_id != 0) {
             const pre_id = ",\"wake_id\":";
@@ -826,12 +828,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             const gmid = ",\"name\":\"";
             @memcpy(json_buf[pos .. pos + gmid.len], gmid);
             pos += gmid.len;
-            for (0..app_state.groups[gi].name_len) |j| {
-                const u = app_state.groups[gi].name[j];
-                const b: u8 = if (u < 128) @intCast(u) else '?';
-                appendJsonEscaped(&json_buf, &pos, &.{b});
-                if (pos >= json_buf.len - 40) break;
-            }
+            appendJsonEscapedWide(&json_buf, &pos, app_state.groups[gi].name[0..app_state.groups[gi].name_len]);
             json_buf[pos] = '"';
             pos += 1;
             if (app_state.groups[gi].collapsed) {
@@ -996,6 +993,8 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     const idx = app_state.shell_count;
     var shell = empty_shell;
     shell.kind = tab.kind;
+    shell.tab_key = tab.tab_key;
+    shell.tab_key_len = tab.tab_key_len;
     shell.shell_id = app_state.allocateShellId() orelse return null;
     shell.wake_id = tab.wake_id;
     shell.chat_id = tab.chat_id;
@@ -1417,6 +1416,8 @@ fn applySavedTabFields(idx: u32, tab: *const SavedTab) void {
     if ((tab.kind == .vps or tab.kind == .vps2) and tab.tmux_session_len == 0 and app_state.shells[idx].name_source == .semantic) {
         app_state.shells[idx].name_source = .default;
     }
+    app_state.shells[idx].tab_key = tab.tab_key;
+    app_state.shells[idx].tab_key_len = tab.tab_key_len;
     app_state.shells[idx].tmux_host = tab.tmux_host;
     app_state.shells[idx].tmux_identity = tab.tmux_identity;
     app_state.shells[idx].tmux_identity_len = tab.tmux_identity_len;
@@ -1737,14 +1738,18 @@ pub fn restoreSession() u32 {
         const entries = app_state.g_tmux_closed.entries.items;
         const start = entries.len - @min(entries.len, app_state.MAX_CLOSED_HISTORY);
         for (entries[start..]) |entry| {
+            if (entry.host > 2 and entry.tab_state == null) continue;
+            const plain = std.mem.startsWith(u8, entry.name[0..entry.len], "@shell-");
             var name: [64]u16 = @splat(0);
             for (entry.name[0..entry.len], 0..) |c, i| name[i] = c;
             app_state.g_closed_history[app_state.g_closed_count] = .{
-                .kind = .tmux,
+                .kind = if (!plain) .tmux else if (entry.host == 3) .cmd else if (entry.host == 0) .vps else .vps2,
+                .tab_key = if (plain) entry.name else @splat(0),
+                .tab_key_len = if (plain) @intCast(entry.len) else 0,
                 .name = name,
                 .name_len = @intCast(entry.len),
                 .tmux_session = entry.name,
-                .tmux_session_len = @intCast(entry.len),
+                .tmux_session_len = if (plain) 0 else @intCast(entry.len),
                 .tmux_host = entry.host,
                 .face = entry.face,
                 .color = entry.color,

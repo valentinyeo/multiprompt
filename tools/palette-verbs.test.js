@@ -46,3 +46,15 @@ test('the screen-only list is written next to the three-part rule', async () => 
     assert.ok(doc.includes(line), line);
   }
 });
+
+
+test('tab state actions are command-line verbs, not screen-only marks', async () => {
+  const { verbs, screen, screenOnly } = await map();
+  for (const [row, verb] of Object.entries({ SEARCH_TABCTX_PIN_TOP: 'pin', SEARCH_TABCTX_ARCHIVE: 'archive', SEARCH_TABCTX_HIDE: 'wait', SEARCH_REOPEN_OFFSET: 'restore', SEARCH_UNARCHIVE_HIDDEN_OFFSET: 'restore' })) {
+    assert.equal(verbs[row], verb);
+    assert.equal(screen[row], undefined);
+  }
+  assert.doesNotMatch(screenOnly.local, /\b(pin|archive|waiting)\b/);
+  for (const verb of ['open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore']) assert.match(usage, new RegExp('^  ' + verb + ' ', 'm'));
+  assert.ok(claude.split('\n').length < 80);
+});

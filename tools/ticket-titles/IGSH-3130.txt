@@ -1,0 +1,1 @@
+mp-sessions restart resumes a running chat in place

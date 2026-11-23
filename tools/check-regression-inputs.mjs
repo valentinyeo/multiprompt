@@ -75,6 +75,8 @@ export function findHistoryInputs(file, source, added) {
   const array = /(['"`])(show|cat-file|archive)\1\s*,\s*(['"`])((?:\\.|(?!\3)[^\n])*)\3/g;
   for (const match of source.matchAll(shell)) operations.push({ start: match.index, end: match.index + match[0].length, command: match[1], argument: match[2].trim(), shell: true });
   for (const match of source.matchAll(array)) {
+    const prefix = source.slice(Math.max(0, match.index - 200), match.index);
+    if (!/(?:\bgit\s*\(\s*\[?\s*|['"]git['"]\s*,\s*\[?\s*)$/.test(prefix)) continue;
     let argument = match[4];
     let end = match.index + match[0].length;
     if (argument.startsWith('-')) {

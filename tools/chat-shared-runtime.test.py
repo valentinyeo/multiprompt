@@ -169,7 +169,7 @@ class RuntimeTest(unittest.TestCase):
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
-        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
+        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode(((ROOT / 'src/mp_tab_state.py').read_bytes() + b'\n' if name == 'MP_SESSIONS_SOURCE' else b'') + (ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
         return prelude + SOURCE
 
     def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
@@ -184,7 +184,8 @@ class RuntimeTest(unittest.TestCase):
         for name, file in (('mp-sessions', 'src/mp_sessions.py'), ('mp-layout', 'src/mp_layout.mjs')):
             published = runtime / name
             self.assertTrue(published.is_symlink(), name)
-            self.assertEqual(published.read_text(), (ROOT / file).read_text(), name)
+            expected = ((ROOT / "src/mp_tab_state.py").read_text() + "\n" if name == "mp-sessions" else "") + (ROOT / file).read_text()
+            self.assertEqual(published.read_text(), expected, name)
             self.assertTrue(os.access(published, os.X_OK), name)
         self.assertTrue(os.readlink(runtime / 'mp-layout').endswith('.mjs'), 'node must see the module extension')
 
@@ -195,6 +196,15 @@ class RuntimeTest(unittest.TestCase):
         listed = subprocess.run([str(sessions)], text=True, capture_output=True, env=self.env, timeout=30)
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertIn('STATE', listed.stdout)
+
+    def test_SOFT_3140_published_mp_sessions_health_executes_without_a_sibling_module(self):
+        self.info(self.bundle())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        self.assertFalse((runtime / 'mp_sessions_health.py').exists())
+        result = subprocess.run([str(runtime / 'mp-sessions'), 'health', '--json'],
+                                text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [])
 
     def test_published_mp_layout_answers_help_from_the_runtime_copy(self):
         self.info(self.bundle())
