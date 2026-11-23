@@ -1561,6 +1561,7 @@ def transport_reader():
                 threading.Thread(target=read_output, args=(cid, item), daemon=True).start()
                 threading.Thread(target=write_input, args=(cid, item), daemon=True).start()
             item = channels[cid]
+            record("invocations.jsonl", kind="channel-request", channel=cid, data=data[:600])
             line = (data + "\n").encode("utf-8")
             with item["lock"]:
                 item["bytes"] += len(line)

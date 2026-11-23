@@ -1,0 +1,29 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+profile = Path(sys.argv[1])
+rounds = sys.argv[3]
+state = profile / 'state'
+settings = profile / 'roaming' / 'ZigShell'
+state.mkdir(parents=True)
+settings.mkdir(parents=True)
+names = [f'verify-agent-{i + 1}' for i in range(10)]
+sids = {name: f'a1b2c3d4-1068-4000-8000-{i:012d}' for i, name in enumerate(names)}
+document = dict(name='mbv-249', fake=True, mode='idle', suggestion='', sessions=names,
+                panes={name: 4300 + i for i, name in enumerate(names)}, sids=sids,
+                home=str(profile / 'home'), procRoot=str(Path(profile.anchor) / 'proc'))
+(state / 'state.json').write_text(json.dumps(document), encoding='utf-8')
+env = dict(os.environ, MP_VERIFY_STATE=str(state))
+subprocess.run([sys.executable, os.environ['MP_VERIFY_BOUNDARY'], 'shell', 'seed-many', rounds], env=env, check=True)
+seed = dict(active_tab=0, single_window=True, chat_active=True,
+            tabs=[dict(shell_id=i + 1, kind='tmux', name=name, manual=True, tmux_host=0, tmux_session=name, cv=True, pid=0) for i, name in enumerate(names)])
+snapshot = dict(active=1, chat=True, single_window=True, sort_auto=False,
+                rows=[dict(id=i + 1, name=[ord(c) for c in name], kind=3) for i, name in enumerate(names)])
+(settings / 'session.json').write_text(json.dumps(seed), encoding='utf-8')
+(settings / 'session.json.launch.json').write_text(json.dumps(snapshot), encoding='utf-8')
+(settings / 'ssh-path.txt').write_text(sys.argv[2], encoding='utf-8')
+transcripts = {name: str(profile / 'home' / '.claude' / 'projects' / f'C--verify-work{i}' / (sids[name] + '.jsonl')) for i, name in enumerate(names)}
+(state / 'workload.json').write_text(json.dumps(dict(sessionCount=10, rounds=int(rounds), sids=sids, transcripts=transcripts)), encoding='utf-8')
