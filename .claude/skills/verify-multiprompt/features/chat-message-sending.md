@@ -14,7 +14,7 @@ Select a chat and type. Enter or Ctrl+Enter sends unless a command suggestion is
 
 Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
-1. Use Part A data and a healthy Part B host. Send distinct idle messages using each entry point and one multiline message.
+1. Send distinct idle messages using each entry point and one multiline message on the merged `feature=server-chat` host. Part A's real-size profile never landed.
 2. While a reply is running, send three numbered messages. Require their receiving-host order, exactly one copy of each, and retained conversation identity.
 3. Interrupt transport, send two more messages, remove one, reconnect and retry the other. Require no removed message at the receiver and exactly one retry.
 4. In a supported terminal Claude session, test Ctrl+X then Ctrl+S steering separately. Do not claim live-host steering from a terminal stand-in.
@@ -30,7 +30,7 @@ Follow the priority send recipe above; exercise each named queue action only on 
 
 Observable proof: Independent host receipts show exact order/count, removed messages never arrive and draft/newline semantics remain exact.
 
-Journey: chat-delivery, chat-send-latency, chat-not-sent-remove. Complete real-host proof requires Part B; busy-queue product changes belong to SOFT-2566.
+Journey: chat-delivery, chat-send-latency, chat-not-sent-remove. Complete real-host proof needs transport control the merged `server-chat` host does not expose to the driver; busy-queue product changes belong to SOFT-2566.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
@@ -48,10 +48,10 @@ Journey: chat-delivery, chat-send-latency, chat-not-sent-remove. Complete real-h
 - **Discard Unsent Messages:** create two Not sent messages, choose the row and require their removal from the native transcript and app-written outbox, with no receiving-host receipt.
 - **Send again:** use a failed message's context action after restoring transport. Require exactly one retry of that message. The old Retry palette ID is not currently inserted into results.
 
-These complete paths remain unreachable until Part B exposes transport control/receipts and the driver exercises these exact controls.
+These complete paths remain unreachable: the merged `server-chat` host gives real transport receipts but the driver does not yet cut transport or exercise these exact controls.
 
 ## Gotchas
 
-UNREACHABLE for the complete real-server sequence until Part B supplies controllable real transport and host receipts, and the driver exposes each send/retry/remove input. Busy live-host queue behavior is tracked by SOFT-2566; do not duplicate its fix.
+UNREACHABLE for the complete real-server sequence until the driver can cut and restore the `server-chat` transport, read its host receipts and reach each send/retry/remove input. Busy live-host queue behavior is tracked by SOFT-2566; do not duplicate its fix.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A ([PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070), `seed-profile.py`, `seed-profile.ps1`, the `chat-real-size` journey) was closed unmerged, so master still has no real-size seeded profile. Part B ([PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072)) merged on 2026-11-18 as the runner-owned SSH/tmux [server chat](server-chat.md) journey, which runs as `feature=server-chat`; use it rather than adding another server fixture. Do not add replacement real-size fixtures here until a Part A equivalent lands.
