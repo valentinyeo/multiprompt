@@ -18,7 +18,7 @@ Agents use `node tools/mbv.mjs` (`run`, `watch`, `proof`, `doctor`, `failures`, 
 gh workflow run verify.yml -f feature=<stem>
 ```
 
-Use `appearance` when unsure. Stems include `session-restore`, `palette-order`, `status-card`, `remind-me`, `tab-names`, `relaunch-saved-sessions`, `chat-first-paint`, `chat-send-latency`, `browser-switch-speed`, `browser-pane-locked`, and `browser-pane-stuck`. Optional `--ref <branch>` and `-f tag=v<version>`; tag runs download a release binary instead of building the branch. See [verification-reference.md](verification-reference.md#launch) for the full stem list, PR-triggered set, and tag rules.
+Use `appearance` when unsure. Stems include `session-restore`, `session-restart`, `palette-order`, `status-card`, `remind-me`, `tab-names`, `relaunch-saved-sessions`, `chat-first-paint`, `chat-send-latency`, `browser-switch-speed`, `browser-pane-locked`, and `browser-pane-stuck`. Optional `--ref <branch>` and `-f tag=v<version>`; tag runs download a release binary instead of building the branch. See [verification-reference.md](verification-reference.md#launch) for the full stem list, PR-triggered set, and tag rules.
 
 The workflow builds with pinned Zig 0.16.0 or verifies a tagged release. Ordinary journeys start `--single-window --no-window-restore` in an empty isolated profile with `MULTIPROMPT_NO_LOGIN=1`, bounded 60s readiness for an owned `ZigShell` window and initial CMD tab. `IGSH_246=0` keeps the selected binary fixed for the run. One owned instance per harness; do not double-drive a shared desktop. `session-restore` retains data within the job; `safe-updates` and `browser-emulation` need branch builds.
 

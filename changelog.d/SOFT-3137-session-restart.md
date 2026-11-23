@@ -1,0 +1,1 @@
+A hosted verification journey checks that a chat closed and restarted from the server comes back as a chat tab, not a shell tab.

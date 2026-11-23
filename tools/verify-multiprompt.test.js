@@ -2792,6 +2792,24 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
 });
 
+test('SOFT-3137 session-restart stays delegated with mp-sessions close and chat-tab assertions', () => {
+  const driver = read('tools/verify-session-restart/drive.ps1');
+  const map = read(skill + 'features/session-restart.md');
+  assert.ok(featureMatrix(workflow).available.includes('session-restart'));
+  assert.match(control, /ValidateSet\([^\n)]*'session-restart'/);
+  assert.match(control, /verify-session-restart\/drive\.ps1/);
+  assert.match(driver, /Invoke-LinuxMpSessions @\('close', \$chatName\)/);
+  assert.match(driver, /Invoke-LinuxMpSessions @\('restart', \$chatName\)/);
+  assert.match(driver, /cv=false/);
+  assert.ok(driver.includes("Shot 'before-restart'"));
+  assert.ok(driver.includes("Shot 'after-app-restart'"));
+  assert.match(driver, /Restart-DesktopApp/);
+  for (const source of ['src/mp_sessions.py', 'src/mp_send.py', 'src/mp_helper.py', 'src/mp_fresh.py', 'tools/mp-sessions']) {
+    assert.match(map, new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(read(skill + 'features/README.md'), /\[Restarted chat tab kind\]\(session-restart\.md\)/);
+});
+
 test('SOFT-2713 bot-photo closes its tab with the id the app routes "close tab" to', () => {
   const palette = read('src/command_palette.zig');
   const constants = new Map([...read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)]

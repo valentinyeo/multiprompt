@@ -41,6 +41,7 @@ Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/comman
 ## Real server journey
 
 - [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
+- [Restarted chat tab kind](session-restart.md): hosted chat in a named workspace and group; `mp-sessions close` and `restart` plus an app relaunch must reopen Chat View, not a shell tab, and still accept a second message.
 
 ## Source feature coverage
 
