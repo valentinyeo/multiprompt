@@ -55,6 +55,7 @@ test('IGSH-1832 local deletion reports refusal rather than pretending success', 
 test('IGSH-1832 production delete routing closes legacy and stale-host local slots and preserves refused targets', { skip: process.env.GITHUB_ACTIONS !== 'true' }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-delete-'));
   try {
+    fs.writeFileSync(path.join(dir, 'account_desktop.zig'), 'pub var published: usize = 0;\npub fn publishSessionLayout() void { published += 1; }\n');
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
 const HANDLE = ?*anyopaque;
 const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, name: [64]u8 = @splat(0), name_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0, archived: bool = false };
@@ -108,6 +109,7 @@ fn seed(id: []const u8, host: []const u8) void {
     removed = false;
     refusal = null;
     refuse_slot = false;
+    @import("account_desktop.zig").published = 0;
 }
 test "local identity wins over missing or stale host and refusal never removes it" {
     for ([_][]const u8{ "", "container", "stale-window" }) |host| {
@@ -115,10 +117,12 @@ test "local identity wins over missing or stale host and refusal never removes i
         try std.testing.expect(workspaceCanDelete(0));
         try std.testing.expect(deleteWorkspaceByIndex(0));
         try std.testing.expect(closed and removed and refusal == null);
+        try std.testing.expectEqual(@as(usize, 1), @import("account_desktop.zig").published);
         seed("local", host);
         refuse_slot = true;
         try std.testing.expect(!deleteWorkspaceByIndex(0));
         try std.testing.expect(!closed and !removed and refusal != null);
+        try std.testing.expectEqual(@as(usize, 0), @import("account_desktop.zig").published);
     }
     for ([_][]const u8{ "default", "container" }) |id| {
         seed(id, "");
