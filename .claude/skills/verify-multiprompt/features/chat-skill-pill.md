@@ -4,7 +4,7 @@ Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, s
 
 ## Sub-features
 
-Known complete skill names and slash commands use one accent foreground and a soft rounded background with a slight lower edge. Arguments stay normal. Both the composer and user messages use the same exact catalog-name rule; unknown names and paths stay plain. Native caret positions, wrapping, selection, undo and sent text remain unchanged.
+Only slash skills and commands at the very start of a message get a pill; mid-message and trailing slash words remain plain text, including when accepted from autocomplete. Dollar-prefixed skills keep their existing behavior. Known complete skill names and slash commands use one accent foreground and a soft rounded background with a slight lower edge. Arguments stay normal. Both the composer and user messages use the same exact catalog-name rule; unknown names and paths stay plain. Native caret positions, wrapping, selection, undo and sent text remain unchanged.
 
 ## How to get to it (user POV)
 
@@ -19,9 +19,9 @@ gh workflow run verify.yml --ref <branch> -f feature=chat-skill-pill
 gh workflow run verify.yml --ref <branch> -f feature=chat-skill-pill -f tag=v0.28.912
 ```
 
-The same harness must fail `IGSH-928 skill pill pixels` on the old release and pass on the shipped release. Download `verify-chat-skill-pill` and inspect its ten named screenshots, `skill-pill.json`, `skill-pill-summary.json`, `result.json` and action trace.
+The same harness must fail `IGSH-928 skill pill pixels` on the old release and pass on the shipped release. Download `verify-chat-skill-pill` and inspect its eighteen named screenshots, `skill-pill.json`, `skill-pill-summary.json`, `result.json` and action trace.
 
-The journey creates a real skill definition under the isolated profile before launch. In each theme, it opens a fresh CMD tab through the palette, types unknown slash text, replaces it with a plain message, sends that message, then types and sends the known skill plus arguments. Screenshots use screen capture; native HWND client bounds isolate composer or transcript pixels. The oracle requires both accent glyph pixels and the soft blue pill fill, and requires neither for plain messages and unknown names.
+The journey creates a real skill definition under the isolated profile before launch. In each theme, it opens a fresh CMD tab through the palette, types unknown slash text, replaces it with a plain message, sends that message, then types and sends mid-message and trailing skill mentions as plain text before sending the leading known skill plus arguments. Screenshots use screen capture; native HWND client bounds isolate composer or transcript pixels. The oracle requires both accent glyph pixels and the soft blue pill fill, and requires neither for plain messages and unknown names.
 
 ## Gotchas
 

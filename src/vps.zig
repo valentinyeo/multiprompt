@@ -1349,6 +1349,92 @@ fn repoFetchCommand(host: u8, buf: *[2048]u8) ?[]const u8 {
     return buf[0..pos];
 }
 
+const FOLDER_PROBE_OK = "@@MP_FOLDER_OK@@";
+const FOLDER_PROBE_MISSING = "@@MP_FOLDER_MISSING@@";
+
+fn appendShellSingleQuoted(out: []u8, pos: *usize, text: []const u8) bool {
+    if (pos.* + 1 >= out.len) return false;
+    out[pos.*] = '\'';
+    pos.* += 1;
+    for (text) |c| {
+        if (c == '\'') {
+            if (pos.* + 4 > out.len) return false;
+            @memcpy(out[pos.* .. pos.* + 4], "'\\''");
+            pos.* += 4;
+        } else {
+            if (pos.* >= out.len) return false;
+            out[pos.*] = c;
+            pos.* += 1;
+        }
+    }
+    if (pos.* >= out.len) return false;
+    out[pos.*] = '\'';
+    pos.* += 1;
+    return true;
+}
+
+fn remoteFolderProbeCommand(host: u8, path: []const u8, out: *[2048]u8) ?[]const u8 {
+    var pos: usize = 0;
+    if (!appendSshExe(out, &pos)) return null;
+    if (!appendAsciiBuf(out, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return null;
+    if (!appendAsciiBuf(out, &pos, tmuxSshTarget(host))) return null;
+    if (!appendAsciiBuf(out, &pos, " \"folder=")) return null;
+    if (!appendShellSingleQuoted(out, &pos, path)) return null;
+    if (!appendAsciiBuf(out, &pos, "; if test -e \\\"$folder\\\"; then printf '\\n")) return null;
+    if (!appendAsciiBuf(out, &pos, FOLDER_PROBE_OK)) return null;
+    if (!appendAsciiBuf(out, &pos, "\\n'; else printf '\\n")) return null;
+    if (!appendAsciiBuf(out, &pos, FOLDER_PROBE_MISSING)) return null;
+    if (!appendAsciiBuf(out, &pos, "\\n'; fi\"")) return null;
+    if (pos == 0 or pos >= out.len) return null;
+    return out[0..pos];
+}
+
+fn remoteGitOriginCommand(host: u8, path: []const u8, out: *[2048]u8) ?[]const u8 {
+    var pos: usize = 0;
+    if (!appendSshExe(out, &pos)) return null;
+    if (!appendAsciiBuf(out, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return null;
+    if (!appendAsciiBuf(out, &pos, tmuxSshTarget(host))) return null;
+    if (!appendAsciiBuf(out, &pos, " \"folder=")) return null;
+    if (!appendShellSingleQuoted(out, &pos, path)) return null;
+    if (!appendAsciiBuf(out, &pos, "; cd \\\"$folder\\\" && git remote get-url origin 2>/dev/null | head -1\"")) return null;
+    if (pos == 0 or pos >= out.len) return null;
+    return out[0..pos];
+}
+
+pub fn remoteWorkspaceFolderExists(host: u8, path: []const u8) bool {
+    if (path.len == 0) return false;
+    var command_buf: [2048]u8 = undefined;
+    const command = remoteFolderProbeCommand(host, path, &command_buf) orelse return false;
+    var text_buf: [512]u8 = undefined;
+    const result = sshOneShotCaptureInput(command, &text_buf, null, 5000);
+    return result.success and std.mem.indexOf(u8, text_buf[0..result.len], FOLDER_PROBE_OK) != null;
+}
+
+pub fn remoteGitOriginUrl(host: u8, path: []const u8, out: []u8) ?[]const u8 {
+    if (path.len == 0) return null;
+    var command_buf: [2048]u8 = undefined;
+    const command = remoteGitOriginCommand(host, path, &command_buf) orelse return null;
+    var text_buf: [512]u8 = undefined;
+    const result = sshOneShotCaptureInput(command, &text_buf, null, 5000);
+    if (!result.success or result.len == 0) return null;
+    var end = result.len;
+    while (end > 0 and (text_buf[end - 1] == '\n' or text_buf[end - 1] == '\r' or text_buf[end - 1] == ' ' or text_buf[end - 1] == '\t')) : (end -= 1) {}
+    var start: usize = 0;
+    while (start < end and (text_buf[start] == '\n' or text_buf[start] == '\r' or text_buf[start] == ' ' or text_buf[start] == '\t')) : (start += 1) {}
+    if (start >= end) return null;
+    const url = text_buf[start..end];
+    if (url.len >= out.len) return null;
+    @memcpy(out[0..url.len], url);
+    return out[0..url.len];
+}
+
+test "SOFT-3051 remote folder probe commands quote paths safely" {
+    var buf: [2048]u8 = undefined;
+    const cmd = remoteFolderProbeCommand(0, "/home/x/o'brien", &buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, cmd, "o'\\''brien") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, FOLDER_PROBE_OK) != null);
+}
+
 fn repoPublish(cache: *RepoCache, generation: u64, success: bool, rows: []const RepoRow) void {
     if (cache.generation != generation or !cache.enabled) return;
     if (success) {

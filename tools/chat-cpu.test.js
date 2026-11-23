@@ -402,6 +402,10 @@ fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
 fn chatLinkFont(_: bool) HANDLE { return 1; }
 fn chatCodeTokenColor(_: chat_code.Kind) u32 { return 0; }
 fn chatUserBubbleColor() u32 { return 0; }
+fn chatSessionKnown(_: []const u16) bool { return false; }
+fn chatSessionKnownByName(_: []const u16) bool { return false; }
+fn sessionLinkKnown(_: []const u16, _: @import("chat_markdown.zig").Span) bool { return false; }
+fn sessionLinkClickRange(_: []const u16, _: @import("chat_markdown.zig").Span, _: usize) link_detect.Range { return .{ .start = 0, .end = 0 }; }
 fn chatPaintSelectionRun(_: HANDLE, _: []const u16, _: usize, _: i32, _: i32, _: i32) void { selection_runs += 1; }
 `;
 const flowChecks = `
@@ -460,6 +464,7 @@ const chat_markdown = @import("chat_markdown.zig");
 var width_calls: usize = 0;
 var draw_hash: u64 = 0;
 fn chatRichFont(_: chat_markdown.Style, _: u3) HANDLE { return 1; }
+fn chatAgentBubbleColor() u32 { return 0; }
 fn CreateSolidBrush(_: u32) HANDLE { return 1; }
 fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }

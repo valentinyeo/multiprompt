@@ -249,8 +249,9 @@ test('the Claude key reaches only the independent judge and never a script', () 
   assert.equal(uses.length, 1);
   for (const [line, index] of uses) {
     assert.match(line, /^          claude_code_oauth_token: /);
-    const action = lines.slice(index - 4, index).join('\n');
+    const action = lines.slice(index - 5, index).join('\n');
     assert.match(action, /uses: anthropics\/claude-code-action@[0-9a-f]{40}/);
+    assert.match(action, /allowed_bots: software-factory-runners,hypertask-runners,cursor/);
   }
   assert.doesNotMatch(workflow, /secrets: inherit/);
   assert.doesNotMatch(workflow, /^\s+secrets:/m);

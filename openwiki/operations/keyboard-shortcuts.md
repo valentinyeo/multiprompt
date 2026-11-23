@@ -227,6 +227,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
+| Ctrl+K -&gt; Move workspace to server | Point this workspace default folder at the same path on another account server |
+| Ctrl+K -&gt; New tab on server | Open one workspace tab on another account server without moving the workspace |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
 | Alt+H | Remind Me: hide local tab, keep tmux running, return when due |

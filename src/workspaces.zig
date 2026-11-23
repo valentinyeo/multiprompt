@@ -29,6 +29,7 @@ const SW_RESTORE = @import("win32.zig").SW_RESTORE;
 const WM_APP_FOCUS = @import("win32.zig").WM_APP_FOCUS;
 const WM_APP_SHELL_EXITED = @import("win32.zig").WM_APP_SHELL_EXITED;
 const WM_APP_SWITCH_WORKSPACE = @import("win32.zig").WM_APP_SWITCH_WORKSPACE;
+pub const WM_APP_WORKSPACE_MENU_REGISTRY_READY = @import("win32.zig").WM_APP_WORKSPACE_MENU_REGISTRY_READY;
 const WM_COPYDATA = @import("win32.zig").WM_COPYDATA;
 const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
@@ -505,7 +506,10 @@ fn unlockWorkspaceRegistry(mutex: HANDLE) void {
     _ = CloseHandle(mutex);
 }
 
+var registry_revision: u64 = 0;
+
 fn writeWorkspaceRegistryFile() void {
+    registry_revision +%= 1;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
     var path_buf: [512]u8 = undefined;
@@ -1253,6 +1257,104 @@ fn upsertMySlotEntries() void {
         const nm = workspaceDisplayName(ws, &nbuf);
         addOrUpdateWorkspaceHosted(app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], nm, false, me);
     }
+}
+
+var menu_wake: HANDLE = null;
+var menu_reading = std.atomic.Value(bool).init(false);
+var menu_snapshot_ready = std.atomic.Value(bool).init(false);
+var menu_snapshot: [8192]u8 = undefined;
+var menu_snapshot_len: usize = 0;
+var menu_snapshot_revision: u64 = 0;
+
+fn readMenuRegistry() void {
+    const revision = registry_revision;
+    menu_snapshot_len = 0;
+    var path_buf: [512]u8 = undefined;
+    if (getWorkspaceRegistryPath(&path_buf)) |path| {
+        if (lockWorkspaceRegistryWithTimeout(5000)) |mutex| {
+            defer unlockWorkspaceRegistry(mutex);
+            menu_snapshot_len = readWorkspaceRegistryBytes(path, &menu_snapshot) orelse 0;
+        }
+    }
+    menu_snapshot_revision = revision;
+    menu_snapshot_ready.store(true, .release);
+    if (menu_wake) |wake| _ = @import("focus.zig").PostMessageW(wake, WM_APP_WORKSPACE_MENU_REGISTRY_READY, 0, 0);
+}
+
+pub fn prepareMenuEntries() void {
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+}
+
+pub fn refreshMenuRegistry(wake: HANDLE) void {
+    menu_wake = wake;
+    if (menu_snapshot_ready.load(.acquire) or menu_reading.load(.acquire)) return;
+    menu_reading.store(true, .release);
+    const thread = std.Thread.spawn(.{}, readMenuRegistry, .{}) catch {
+        menu_reading.store(false, .release);
+        return;
+    };
+    thread.detach();
+}
+
+fn menuSnapshotUsable(len: usize, read_revision: u64) bool {
+    return len > 0 and read_revision == registry_revision;
+}
+
+pub fn takeMenuRegistrySnapshot() bool {
+    if (!menu_snapshot_ready.swap(false, .acq_rel)) return false;
+    menu_reading.store(false, .release);
+    if (!menuSnapshotUsable(menu_snapshot_len, menu_snapshot_revision)) return false;
+    app_state.g_workspace_count = 0;
+    parseWorkspaceRegistryJson(menu_snapshot[0..menu_snapshot_len]);
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+    return true;
+}
+
+fn holdWorkspaceRegistryForTest(started: *std.atomic.Value(bool), stop: *std.atomic.Value(bool)) void {
+    const mutex = lockWorkspaceRegistryWithTimeout(5000);
+    started.store(true, .release);
+    while (!stop.load(.acquire)) std.atomic.spinLoopHint();
+    if (mutex) |held| unlockWorkspaceRegistry(held);
+}
+
+test "SOFT-2374 the workspace menu opens while another window holds the registry" {
+    const old_workspaces = app_state.g_workspaces;
+    const old_count = app_state.g_workspace_count;
+    const old_single = app_state.g_single_window;
+    defer {
+        app_state.g_workspaces = old_workspaces;
+        app_state.g_workspace_count = old_count;
+        app_state.g_single_window = old_single;
+    }
+    app_state.g_workspace_count = 0;
+    app_state.g_single_window = false;
+    var holding = std.atomic.Value(bool).init(false);
+    var stopped = std.atomic.Value(bool).init(false);
+    const holder = std.Thread.spawn(.{}, holdWorkspaceRegistryForTest, .{ &holding, &stopped }) catch return error.SkipZigTest;
+    while (!holding.load(.acquire)) std.atomic.spinLoopHint();
+    const began = GetTickCount64();
+    prepareMenuEntries();
+    refreshMenuRegistry(null);
+    const elapsed = GetTickCount64() - began;
+    stopped.store(true, .release);
+    holder.join();
+    try std.testing.expect(elapsed < 250);
+    const deadline = GetTickCount64() + 5000;
+    while (!menu_snapshot_ready.load(.acquire) and GetTickCount64() < deadline) std.atomic.spinLoopHint();
+    try std.testing.expect(menu_snapshot_ready.load(.acquire));
+    _ = takeMenuRegistrySnapshot();
+}
+
+test "SOFT-2374 a finished read is used only when no local save came after it" {
+    const saved = registry_revision;
+    defer registry_revision = saved;
+    registry_revision = 7;
+    try std.testing.expect(menuSnapshotUsable(24, 7));
+    try std.testing.expect(!menuSnapshotUsable(0, 7));
+    registry_revision = 8;
+    try std.testing.expect(!menuSnapshotUsable(24, 7));
 }
 
 pub fn syncInProcessWorkspacesToRegistry() void {
