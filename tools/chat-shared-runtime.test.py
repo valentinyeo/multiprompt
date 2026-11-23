@@ -162,6 +162,7 @@ class RuntimeTest(unittest.TestCase):
     def bundle(self):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
+            ('FEEDBACK_SOURCE', 'src/multibot_feedback.py'),
             ('MP_FRESH_SOURCE', 'src/mp_fresh.py'),
             ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
             ('MP_SHELL_SOURCE', 'src/mp_shell.py'),
@@ -177,6 +178,37 @@ class RuntimeTest(unittest.TestCase):
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-fresh'
         self.assertTrue(published.is_symlink())
         self.assertTrue(os.access(published, os.X_OK))
+
+    RUNNABLE_TOOLS = (
+        ('mp-send', 'src/mp_send.py'),
+        ('multibot-feedback', 'src/multibot_feedback.py'),
+        ('mp-helper', 'src/mp_helper.py'),
+        ('mp-shell', 'src/mp_shell.py'),
+        ('mp-sessions', 'src/mp_sessions.py'),
+        ('mp-fresh', 'src/mp_fresh.py'),
+        ('mp-zsb', 'src/mp_zsb.sh'),
+        ('mp-layout', 'src/mp_layout.mjs'),
+    )
+
+    def test_every_installed_chat_tool_runs(self):
+        self.info(self.bundle())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        for name, file in self.RUNNABLE_TOOLS:
+            with self.subTest(tool=name):
+                link = runtime / name
+                self.assertTrue(link.is_symlink(), name)
+                target = runtime / os.readlink(link)
+                self.assertEqual(target.parent, runtime, name)
+                self.assertEqual(target.read_text(), (ROOT / file).read_text(), name)
+                self.assertTrue(os.access(target, os.X_OK), name + ' is not executable')
+                self.assertTrue(os.access(link, os.X_OK), name + ' does not resolve to an executable file')
+
+    def test_install_removes_leftover_temporary_files(self):
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        runtime.mkdir(mode=0o700)
+        (runtime / '.tmp-leftover').write_text('stale')
+        self.info(self.bundle())
+        self.assertEqual([path.name for path in runtime.iterdir() if path.name.startswith('.tmp-')], [])
 
     def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
         self.info(self.bundle())
