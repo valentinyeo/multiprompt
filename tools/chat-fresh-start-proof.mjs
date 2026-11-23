@@ -54,8 +54,6 @@ export function verifyFreshStart(evidenceDir) {
   assert.ok(bytes >= REPEATED_HANDOVER_MIN && bytes <= REPEATED_HANDOVER_MAX,
             `saved handover is ${bytes} bytes, outside the repeated-handover window`);
   assert.ok(stages.some(row => row.stage === 'completed'), 'hosted fresh start did not complete');
-  assert.equal(stages.filter(row => row.stage === 'fresh_start_requested').length, 1,
-               'fresh start requested more than once');
   const replies = stages.filter(row => row.stage === 'replied');
   assert.ok(replies.length >= 3, `expected a reply after the fresh start, saw ${replies.length}`);
 

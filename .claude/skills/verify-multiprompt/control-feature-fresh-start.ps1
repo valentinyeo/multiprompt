@@ -120,6 +120,7 @@ try {
     }
     if ($before.native_session -ceq $after.native_session) { throw 'native_session did not rotate' }
     if ($after.matchingSidebarRows -ne 1) { throw "expected one sidebar row, found $($after.matchingSidebarRows)" }
+    Wait-ChatFocus 'Edit' 'fresh-start-after-ready'
     Type-Text 'fresh-start after'
     Press @(0x0D) 'Enter: send composer message after fresh start'
     Wait-Until {
