@@ -674,7 +674,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/changelog-layout.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/workspace-views.test.js", "tools/changelog-layout.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
@@ -770,6 +770,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_autocomplete_tests.step);
     const chat_skill_owner_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-owner.test.js" });
     vps_test_step.dependOn(&chat_skill_owner_linux_tests.step);
+    const completer_deploy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/completer-deploy.test.js" });
+    test_step.dependOn(&completer_deploy_tests.step);
+    vps_test_step.dependOn(&completer_deploy_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });
     const run_bridge_tests = b.addRunArtifact(bridge_tests);
     test_step.dependOn(&run_bridge_tests.step);

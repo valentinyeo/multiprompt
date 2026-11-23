@@ -54,7 +54,8 @@ test('favorite action saves and immediately publishes both true and false states
   const publisher = between('fn publishInboxStateNow(', 'fn deleteInboxStateFile(');
   assert.ok(publisher.includes('if (shells[i].favorite) ",\\"favorite\\":true" else ",\\"favorite\\":false"'));
   assert.match(between('fn loadInboxFile(', 'fn inboxRowLess('), /\.favorite = json_reader\.boolTrue\(o, "favorite"\)/);
-  assert.match(between('fn inboxRowVisible(', 'fn inboxNameBounds('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
+  assert.match(between('fn inboxRowVisible(', 'fn rowVisibleInSplit('), /rowVisibleInSplit\(r, g_inbox_tab, /);
+  assert.match(between('fn rowVisibleInSplit(', 'test "cached inbox navigation'), /!favoriteSplitMatches\(split, r.ws, r.favorite\)\) return false/);
 });
 
 test('Favorites split follows Frequent and ALL by default and shares configured split navigation', () => {

@@ -31,13 +31,17 @@ The failure depends on whether an acceptance receipt or saved chat arrives befor
 
 - One logical human message, at most two wire IDs, one explicit retry, one app restart and a ten-minute age boundary. Disconnect and reconnect may repeat; the finite state space closes those cycles.
 - One retained terminal-backed Claude chat, a fixed session identity and at most one native acceptance. Receipts may be arbitrarily delayed or absent. The app's local outbox save succeeds. Host writes are transactional and wire IDs do not collide.
-- Host dispatch, native acceptance and store confirmation are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one user block carrying the original client ID, regardless of its displayed text or timestamp.
+- Host dispatch, native acceptance and store confirmation are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
 - Transcript installation and echo reconciliation are one UI-thread action, before painting. A written pending bubble should be replaced by that user block. Unwritten restored entries are checked separately. The native probe also checks two identical pending texts cannot claim the same block.
 - The timeout action includes the production outbox timeout branch. Restart applies `stateOnLoad` and the parser's empty-phase requeue guard. Retry covers rejection of an already accepted host row and aged replacement. Early unaccepted rejection, two native consumptions and live-stream row projections are outside this bound. External connection and process lifecycle events remain modeled boundaries.
 
 No liveness is claimed when a connection can stay down forever. This does not verify all strings, allocation or disk failures, full serialization, event pagination, scheduling, cancellation, session rotation, stale-session callbacks, provider restarts, Codex/Pi, assistant reply formatting, rendering pixels or Android. SOFT-2688's three assistant forms and SOFT-2681's stale session are motivating adjacent problems, not covered proofs. Use their real app journeys for those cases.
 
 ## Coverage and sync
+
+SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
+
+SOFT-3097 reverts `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6` on top of `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, so pending rows reconcile by exact text again and id-less history rows key on their text. `pickBlock`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch and the restore guard are unchanged from the pre-identity source, and the native probes and replay supply only the text block. The recorded decision table still matches, because it models one exact-text echo. The reader's `client_id` metadata and alias persistence are gone; the covered reader functions are otherwise unchanged. Only the echo, send and reader hashes move, and the sync commit names the base it was reviewed on. Bounds, decisions, mutations and properties remain unchanged.
 
 SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
 
@@ -51,13 +55,15 @@ Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` 
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
-SOFT-2526 carries the existing client ID into history blocks and uses it for pending-row assignment. Native probes and counterexample replays now supply that ID. The one-message TLA+ transition table is unchanged: it assumes an echo belonging to that send. The desktop never uses the legacy text-only assignment path for identified sends. Separate delivery and history regressions cover two identical prompts, rewritten text, late ID metadata, cache replay and id-less history. The reader adds optional `client_id` metadata and persists native aliases in existing attempt bindings; no wire ID, delivery state or database schema changes. Older clients may ignore the extra metadata.
-
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
+
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
+
+SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |
 | --- | --- |
-| `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
+| `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one exact-text echo. These execute unchanged in native probes. |
 | `src/chat_send.zig`: `chatEchoWaitsOnTranscript`, timeout branch in `chatOutboxTick`, state assignment in `chatMessageReduce`, empty-phase guard in `chatOutboxParseJson` | These source fragments execute unchanged in replay. Only the fields they read are supplied by a small boundary struct. |
 | `src/chat_send.zig`: `chatEchoEnqueueForShell`, `chatOutboxTrySendEntry`, `sendTextToShellVerifiedAt`, `chatEchoSendAgain`, `chatEchoMatchActive` | Reviewed mapping for durable enqueue, send reservation, load invocation, replacement request and atomic removal after matching. These complete functions are not executed by the native replay. |
 | `src/chat_render.zig`: `chatRelayout`, `chatEchoNotSent`; `src/app_state.zig`: `ChatOutboxEntry` | Reviewed mapping for counting a pending bubble and the failure label. Native replay checks the underlying predicate, not pixels. |
