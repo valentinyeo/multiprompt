@@ -23,6 +23,7 @@ Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOF
 Start with one feature, then pick a named journey. The area files keep the reference's four-section contract. Their operation recipes name user inputs, observable proof and exact missing prerequisites. The shortcut crosswalk includes every source row; the owning area files include palette actions and dynamic row families.
 
 - [Sidebar sessions](sidebar-sessions.md).
+- [All Sessions card](all-sessions.md).
 - [Chat view and composer](chat-and-composer.md).
 - [Command palette](palette.md).
 - [Browser pane](browser-pane.md).

@@ -1560,7 +1560,6 @@ pub fn buildSessionOverviewRows() void {
     for (app_state.g_session_overview_rows.items) |*row| {
         if (row.kind == .open or row.kind == .hidden) {
             const shell = &app_state.shells[row.ref_idx];
-            row.preview_len = copyAsciiField(&row.preview, shell.preview[0..shell.preview_len]);
             row.favorite = shell.favorite;
             row.frequent = frequent.inFrequent(shell.visits.optional() orelse &.{}, now_ms, if (shell.input != 0) shell.input else null);
         } else {
