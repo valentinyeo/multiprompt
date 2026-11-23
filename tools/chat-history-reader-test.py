@@ -6976,6 +6976,22 @@ class HostEventStreamFixture:
 
 
 class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
+    def test_soft_2681_config_follows_the_live_claude_session_after_resume(self):
+        self.sid = '11111111-1111-4111-8111-111111111111'
+        resumed = '22222222-2222-4222-8222-222222222222'
+        config = dict(enabled=True, provider=self.provider, sid=self.sid, tmux=self.tmux,
+                      cwd=str(self.home), model='opus')
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['config'], dict(config, native_session=self.sid))
+        for native in (self.sid, resumed):
+            with self.subTest(native=native):
+                self.feed(dict(type='system', subtype='init', session_id=native))
+                saved = json.loads(paths['config'].read_text())
+                self.assertEqual(saved.get('native_session'), native)
+                self.assertEqual({key: saved[key] for key in config}, config)
+                self.assertEqual(reader.host_session_state(self.provider, self.sid)['native_session'], native)
+                self.assertEqual(reader.host_sid_for_tmux(self.provider, self.tmux), self.sid)
+
     def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
