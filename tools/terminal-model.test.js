@@ -59,6 +59,15 @@ int main(void) {
     mp_terminal_paste(t, 0);
     assert(!strcmp(output, "\033[200~\xe9\x9b\xaa\033[201~"));
     used = 0;
+    mp_terminal_char(t, 3, VTERM_MOD_CTRL);
+    assert(used == 1 && output[0] == 3);
+    used = 0;
+    mp_terminal_char(t, 4, VTERM_MOD_CTRL);
+    assert(used == 1 && output[0] == 4);
+    used = 0;
+    mp_terminal_char(t, 3, VTERM_MOD_ALT | VTERM_MOD_CTRL);
+    assert(used == 2 && output[0] == 27 && output[1] == 3);
+    used = 0;
     feed(t, "\033[?1000h\033[?1006h");
     assert(mp_terminal_mouse_mode(t));
     mp_terminal_mouse(t, 2, 3, 1, 1, 0);
