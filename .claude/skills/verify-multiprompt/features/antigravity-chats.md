@@ -12,7 +12,7 @@ Source files: src/agent_host.zig, src/capacity.zig, src/archive.zig, src/notific
 
 Ctrl+K, type **new antigravity sessions**, then choose the row with Up/Down and Enter. The new tab opens in Chat View on Antigravity.
 
-In a live Claude chat, Ctrl+K, type **switch ai to antigravity keep chat name**, then choose the row with Up/Down and Enter. The chat keeps its sidebar row, name, photo and address; earlier messages stay above a Switch AI divider, and the next message is answered by the new provider. The right-click tab row does the same.
+In a live Claude chat, Ctrl+K, type **switch ai to antigravity**, then choose the row with Up/Down and Enter. The chat keeps its sidebar row, name, photo and address; earlier messages stay above a Switch AI divider, and the next message is answered by the new provider. The right-click tab row does the same.
 
 ## Driving it with control.ps1
 

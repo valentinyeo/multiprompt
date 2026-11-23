@@ -27,7 +27,7 @@ $claudeHistory = @(Get-ChildItem "$hostDir/*.history.jsonl" | Where-Object { (Re
 Copy-Item $claudeHistory "$caseDir/claude-history.jsonl"
 $tabsBefore = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
 Shot 'antigravity-chat-before'
-Palette-Choose 'switch ai to antigravity keep chat name' 7053 'antigravity-switch-palette'
+Palette-Choose 'switch ai to antigravity' 7053 'antigravity-switch-palette'
 [void](Wait-For 'antigravity host enabled by the switch' {
     $configs = @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue)
     (@($configs | Where-Object { (Read-Shared $_.FullName) -match '"provider":"antigravity"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -eq 1)
