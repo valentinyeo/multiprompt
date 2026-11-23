@@ -43,6 +43,14 @@ each changed file beside itself with a `.pre-zigshell-<timestamp>` suffix. It on
 configures agent profile directories that already exist. Rerunning is idempotent.
 Use Python 3.11 or newer.
 
+The app also refreshes `~/.local/share/zigshell/mp_complete.py` by itself. Before
+it opens the slash command channel for an account, it sends the completer it was
+built with over SSH to that account's login. The host compares the content and
+replaces the file only when it differs, then stops any `--serve` process still
+running the old copy so the next channel starts the new one. An inne chat needs no
+install step on the server, and an app update needs no rerun here. `install.py`
+still deploys the same file for hosts the app never reaches.
+
 Files installed:
 
 - `~/.local/share/zigshell/notify.py`, shared silent dispatcher.

@@ -4347,6 +4347,13 @@ def host_fresh_drain_queued(provider, sid, tmux, session):
     return True
 
 
+def host_fresh_reply(texts):
+    if not isinstance(texts, dict):
+        return ""
+    replies = [value.strip() for value in texts.values() if isinstance(value, str) and value.strip()]
+    return max(replies, key=len) if replies else ""
+
+
 def host_fresh_finish(provider, sid, tmux, session, status):
     fresh = session["state"].get("fresh_start")
     if not isinstance(fresh, dict):
@@ -4360,7 +4367,7 @@ def host_fresh_finish(provider, sid, tmux, session, status):
         return
     if fresh["phase"] != "handover":
         return
-    text = "\n\n".join(fresh["text"].values()).strip()
+    text = host_fresh_reply(fresh.get("text"))
     if status != "completed" or not text or len(text.encode("utf-8")) > HOST_EVENT_TEXT_LIMIT:
         host_fresh_error(provider, sid, tmux, session, "The handover did not finish.")
         return
