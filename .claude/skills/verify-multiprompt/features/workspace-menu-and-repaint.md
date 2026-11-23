@@ -1,5 +1,7 @@
 # Workspace menu speed and session repaint churn
 
+Source files: src/workspace_switcher.zig, src/chat_live.zig, src/chat_session.zig, src/workspaces.zig, src/win32.zig, .claude/skills/verify-multiprompt/control-feature-workspace-menu-and-repaint.ps1, .claude/skills/verify-multiprompt/workspace-menu-native.cs
+
 Measure the workspace menu and live-session repaint behaviour on a selected release with twenty real CMD sessions, without writing app state.
 
 ## Sub-features
@@ -23,7 +25,7 @@ Preconditions:
 - `control.ps1` writes one saved-tab file before launch: twenty local CMD tabs, five in each of four workspaces, first tab active, single-window mode. No state is edited after launch.
 - Launch, read-only Doctor and the foreground window are the ordinary baseline; the run waits up to 180 seconds for twenty restored CMD sessions and four saved workspaces.
 
-- **Open.** For five samples: record the workspace name point from the saved sidebar state, take a screen patch of the menu region, arm the message-pump probe, click the name with real mouse input, and poll that patch every 2 ms until at least 100 sampled pixels differ. Record the paint time, the time until the native `MultiPromptWorkspaceSwitcher` window is visible and the worst pump round trip in the sample. Capture `workspace-menu-open.png` on the fifth open, then dismiss on the menu's top padding.
+- **Open.** Warm the path up to three times while the twenty restored consoles are still starting, keep every warm-up sample, then for five measured samples: record the workspace name point from the saved sidebar state, take a screen patch of the menu region, arm the message-pump probe, click the name with real mouse input, and poll that patch every 2 ms until at least 100 sampled pixels differ. Record the paint time, the time until the native `MultiPromptWorkspaceSwitcher` window is visible and the worst pump round trip in the sample. Capture `workspace-menu-open.png` on the fifth open, then dismiss on the menu's top padding.
 - **Hover.** Open the menu once, read its window rectangle, then move the real pointer to the centre of rows one, two and three, waiting 350 ms on each. Capture `workspace-menu-hover-<row>.png` with the pointer position, hit window and foreground logged in `workspace-menu-hover.json` and `workspace-menu-hover-<row>.focus.json`.
 - **Churn.** In three sessions: type `for /l %i in (1,1,20) do @(echo churn-line-%i & ping -n 4 127.0.0.1 >nul)`, press Enter and turn on Chat View. Return to the first session and capture presented frames at 10 fps for 30 seconds across the sidebar and the chat pane. Save `session-repaint-churn.json` with every frame, and `session-repaint-strip.png` as six full-resolution sidebar crops five seconds apart.
 - **Proof.** Pass requires all five opens painted within 300 ms, no pump round trip over 300 ms, the highlighted band equal to the hovered row for all three rows with a measurable fill, at least 270 of 300 frames captured, at least eight chat-pane changes proving output reached the screen, zero blank sidebar frames and at most three sidebar changes per second.

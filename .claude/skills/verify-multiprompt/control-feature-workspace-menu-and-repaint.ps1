@@ -7,11 +7,6 @@ public static class MenuCardProof {
 }
 '@
 
-# SOFT-2374 / SOFT-2580 / SOFT-2373: screen-only measurement of the workspace menu and of
-# live session repaint churn on the selected release. Nothing here writes app state or
-# posts application messages; every number comes from a real screen capture or from the
-# read-only message-pump probe already used by the release speed journeys.
-
 function Test-SavedChatView($state, [int]$index) {
     if ($null -eq $state) { return $false }
     $tab = @($state.tabs)[$index]
@@ -79,7 +74,7 @@ $state = Read-Session
 Save-Json @{ tabs = @($state.tabs).Count; workspaces = $state.workspace_count; livePids = @($state.tabs | Where-Object { $_.PSObject.Properties['pid'] -and [int]$_.pid -gt 0 }).Count; names = @($state.workspaces | ForEach-Object { $_.name }) } 'seed-restored.json'
 Snapshot 'before'
 
-# ---------------------------------------------------------------- A: SOFT-2374 open
+Write-Host 'SOFT-2374: workspace menu open, five measured samples'
 $header = Get-WorkspaceHeaderPoint
 $cardTop = $header.y + 14
 $cardBottom = [Math]::Min($cardTop + 230, 600)
@@ -104,9 +99,6 @@ function Invoke-MenuOpen([string]$Label) {
 }
 try {
     [VerifyNative]::StartHangProbe($script:window)
-    # Warm-up: the app is still starting the twenty restored consoles, so the very first
-    # click after launch can land while it is busy. Warm the path up without counting it,
-    # then measure the five opens the ticket asks for. Every warm-up sample is retained.
     for ($warm = 1; $warm -le 3; $warm++) {
         $sample = Invoke-MenuOpen "Click the workspace name: unmetered warm-up $warm"
         $warmups += $sample
@@ -132,7 +124,7 @@ $result.checks += @{ name = 'workspace-menu-open'; opens = 5; budgetMs = 300; se
 if ($slowPaint.Count -gt 0) { throw "SOFT-2374: $($slowPaint.Count) of 5 workspace menu opens painted later than 300 ms: $($slowPaint | ForEach-Object { $_.paintMs }) ms" }
 if ($slowPump.Count -gt 0) { throw "SOFT-2374: the window message pump stalled longer than 300 ms during $($slowPump.Count) opens: $($slowPump | ForEach-Object { $_.pumpStallMs }) ms" }
 
-# ---------------------------------------------------------------- B: SOFT-2580 hover
+Write-Host 'SOFT-2580: pointer-following row fill on three rows'
 $hoverRows = @(1, 2, 3)
 $hoverShots = @()
 $card = [IntPtr]::Zero
@@ -190,7 +182,7 @@ try {
     if ((Get-MenuCard) -ne [IntPtr]::Zero) { Dismiss-MenuCard 'Dismiss workspace menu after the pointer proof' }
 }
 
-# ---------------------------------------------------------------- C: SOFT-2373 churn
+Write-Host 'SOFT-2373: 30 s presented-frame capture over three streaming chats'
 $launchPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
 $sidebarWidth = 300
 if (Test-Path $launchPath) {
