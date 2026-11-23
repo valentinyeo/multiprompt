@@ -405,7 +405,7 @@ try {
             $remoteTabs[1].ccwd = '/home/inne/projects/sample'
         }
         if ($Feature -eq 'chat-still') { foreach ($tab in $remoteTabs) { $tab.cv = $true }; $env:MULTIPROMPT_CHAT_STILL_PROOF = '1' }
-        $remoteSeed = @{ active_tab = 0; single_window = $false; chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs }
+        $remoteSeed = @{ active_tab = 0; single_window = ($Feature -eq 'release-proof'); chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs }
         $remoteSeedJson = ConvertTo-Json -InputObject $remoteSeed -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson

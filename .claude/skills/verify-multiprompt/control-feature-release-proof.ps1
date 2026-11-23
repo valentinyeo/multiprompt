@@ -19,6 +19,11 @@ function Find-ConsoleWindow {
         }
         if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null) }
         if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal') }
+        if ($candidate -eq [IntPtr]::Zero) {
+            foreach ($entry in [VerifyNative]::DesktopWindows()) {
+                if ([int]$entry.pid -eq $process.Id -and $entry.class -ceq 'MPTerminal' -and $entry.visible) { $candidate = [IntPtr][long]$entry.handle; break }
+            }
+        }
         $candidate -ne [IntPtr]::Zero
     } 'hosted native terminal window' 60
     return $candidate
