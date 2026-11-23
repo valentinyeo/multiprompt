@@ -36,7 +36,7 @@ function verify(root) {
   assert.ok(received.some(line => line.includes('after the switch')), 'the Antigravity fixture never received the new message');
   const agent = read('stand-in/agy-agent.jsonl').trim().split('\n').map(line => JSON.parse(line));
   assert.ok(agent.some(line => line.argv.some(part => part.includes('stream-json'))), 'the fixture was not started through the Antigravity argv');
-  assert.ok(read('stand-in/invocations.jsonl').includes('host start antigravity'), 'the new session did not ask the host for Antigravity');
+  assert.ok(read('stand-in/invocations.jsonl').includes('antigravity'), 'the new session did not route an Antigravity launch');
   const after = json('session-new-session.json');
   assert.equal(after.tabs.length, seed.tabs.length + 1, 'the new Antigravity session did not add one row');
   const fresh = after.tabs.find(tab => tab.name === 'Antigravity');

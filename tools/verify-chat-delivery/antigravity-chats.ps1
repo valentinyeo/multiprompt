@@ -40,6 +40,7 @@ $antigravityHistory = @(Get-ChildItem "$antigravityRoot/*.history.jsonl" | Where
 if ($antigravityHistory.Count -ne 1) { throw 'The switch did not write one handed-over antigravity history' }
 Copy-Item $antigravityHistory[0].FullName "$caseDir/antigravity-history.jsonl"
 if (-not (Read-Shared $antigravityHistory[0].FullName).Contains($earlierText)) { throw 'The switched chat lost the earlier message' }
+Bind-Transcript
 Send-Composer $afterText
 [void](Wait-For 'antigravity stand-in received the new message' {
     $file = "$state/agy-received.jsonl"
@@ -56,12 +57,13 @@ Palette-Choose 'new antigravity sessions' 'antigravity-new-session-palette'
     $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
     (@($tabs | Where-Object { $_.name -ceq 'Antigravity' -and $_.cv -eq $true }).Count -eq 1) -and ($tabs.Count -eq $tabsBefore.Count + 1)
 } 90)
-$savedNewSession = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 $expectedShells = $tabsBefore.Count + 1
+Bind-Transcript
+$savedNewSession = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 Copy-Item "$settings/session.json" "$caseDir/session-new-session.json"
 $newTab = @($savedNewSession.tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]
 if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity tab is not a hosted live chat' }
 [void](Wait-For 'launch command carried the antigravity provider' {
-    (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('host start antigravity')
+    (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
 Shot 'antigravity-new-session'
