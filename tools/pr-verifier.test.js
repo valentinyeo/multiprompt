@@ -666,3 +666,61 @@ test('inspecting known failed tests can never turn an independent PASS into a gr
   assert.match(workflow, /inspect_failed_tests:[\s\S]*?default: false/);
   assert.match(workflow, /inputs\.inspect_failed_tests && needs\.tests\.outputs\.result == 'FAIL'/);
 });
+
+test('SOFT-3100 chat source changes without a passing send-and-read journey are FAIL, not PASS+NOTES', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-still': { status: 'passed', checks: [1] },
+    'verify-chat-delivery': { status: 'failed', error: 'message order never shown' },
+  }), ['chat-delivery', 'chat-still']);
+  summary.masterFailures = ['chat-delivery'];
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS+NOTES', evidence: ['chat-still kept the message rectangle'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-delivery', 'chat-still'], { chatFiles: ['src/chat_echo.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /sends a message and reads the reply/);
+  assert.match(body, /src\/chat_echo\.zig/);
+});
+
+test('SOFT-3100 chat source changes with no selected sender journey are FAIL', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-chat-still': { status: 'passed' } }), ['chat-still']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['chat-still kept the message rectangle'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-still'], { chatFiles: ['src/chat_session.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /server-chat/);
+});
+
+test('SOFT-3100 a passing send-and-read journey keeps a chat change reviewable', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-still': { status: 'passed' },
+    'verify-server-chat': { status: 'passed' },
+  }), ['chat-still', 'server-chat']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['server-chat sent a message and copied its reply'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-still', 'server-chat'], { chatFiles: ['src/chat_history.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+});
+
+test('SOFT-3100 non-chat changes keep their existing verdicts', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance']),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+});
