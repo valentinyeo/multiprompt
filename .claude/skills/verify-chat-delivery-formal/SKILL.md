@@ -63,6 +63,10 @@ SOFT-3092's merge of `a9411464a` imports master's workspace view fields into `sr
 
 SOFT-3092's merge of `ddd9c677f` takes master's SOFT-3038 resubmit change, which moves the whole-file hashes of `src/chat_echo.zig` and `src/chat_send.zig` to the values master already recorded. `v1SendingAbandoned` gains a send-job argument, `chatOutboxTick` clears an orphaned `channel_pending`, and `chatOutboxParseJson` keeps an unconfirmed `queued` or `sent` row for resubmit. The restart and timeout extraction in `native.py` is master's, and it reads both the master shape and this branch's, so the extracted decisions keep following the merged code. The reader hash from the SOFT-3092 fix above still matches, and bounds, decisions and properties remain unchanged.
 
+SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
+
+SOFT-3092's merge of `2035b6a98` preserves both the Windows publish retry and master's automatic AI fallback. The covered reader functions match master exactly; all other covered files match master's hashes. The coverage hashes were regenerated from the merged files, with that master tip as the sync commit. Bounds, decisions, probes and properties are unchanged.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
