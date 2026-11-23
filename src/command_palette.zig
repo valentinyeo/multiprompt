@@ -200,6 +200,7 @@ const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_RE
 const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -1013,6 +1014,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
+        SEARCH_CHAT_AUTO_SWITCH_OFFSET => "Chat View: Auto-switch AI when a plan runs out fallback next ai usage limit rate limit quota",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -4635,12 +4637,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TOOL_STEPS_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TOOL_STEPS_OFFSET, &[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, false);
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4687,6 +4684,8 @@ pub fn updateSearchResults() void {
         }
     }
 
+    chatPaletteRow(SEARCH_CHAT_AUTO_SWITCH_OFFSET, &[_][]const u8{ "Chat View: Auto-switch AI when a plan runs out", "fallback next ai usage limit rate limit quota ran out of plan" }, true);
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4708,18 +4707,8 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TODO_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_CODE_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TODO_OFFSET, &[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, false);
+    chatPaletteRow(SEARCH_CHAT_COPY_CODE_OFFSET, &[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, false);
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -6220,6 +6209,15 @@ fn appendTmuxCacheRows() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TMUX_OFFSET + cache_idx;
         app_state.g_search_result_count += 1;
     }
+}
+
+fn chatPaletteRow(id: usize, labels: []const []const u8, needs_live: bool) void {
+    if (!app_state.g_chat_active or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    if (needs_live and !liveChatTab(app_state.active_shell)) return;
+    if (app_state.g_search_result_count >= app_state.g_search_results.len) return;
+    if (!labelsMatchQuery(labels, app_state.g_search_buf[0..app_state.g_search_len])) return;
+    app_state.g_search_results[app_state.g_search_result_count] = id;
+    app_state.g_search_result_count += 1;
 }
 
 pub fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {

@@ -57,6 +57,8 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
