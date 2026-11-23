@@ -39,6 +39,17 @@ test('SOFT-2380 the open workspace card handles keys before global shortcuts', (
   assert.match(journey, /'Enter activates arrow-selected workspace'/);
 });
 
+test('SOFT-2380 the workspace journey owns foreground input and creates an undeleted archive fixture', () => {
+  const journey = read('.claude/skills/verify-multiprompt/workspace-switcher.ps1');
+  assert.match(journey, /function Open-WorkspaceCard\(\[string\]\$Shot\) \{\s+Doctor\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Wait-Until \{ \[VerifyNative\]::GetForegroundWindow\(\) -eq \$script:window \}/);
+  const deletion = journey.indexOf("Delete-WorkspaceFixture 'CEO Runners' $false");
+  const create = journey.indexOf("'Ctrl+N: create a separate workspace for archive and restore'");
+  const archive = journey.indexOf("Select-WorkspaceCard $created 'archive-before'");
+  assert.ok(deletion >= 0 && create > deletion && archive > create);
+  assert.match(journey.slice(create, archive), /workspace_count -eq \$beforeArchiveCreate \+ 1/);
+  assert.match(journey.slice(create, archive), /\$created = \(Read-Session\)\.active_workspace/);
+});
+
 test('IGSH-2281 an empty Main workspace stays out of the menu', () => {
   const empty = body('emptyHome');
   assert.match(empty, /eql\(u8, entry\.id\[0\.\.entry\.id_len\], "default"\)/);

@@ -14,6 +14,9 @@ function Get-WorkspaceCard {
 }
 
 function Open-WorkspaceCard([string]$Shot) {
+    Doctor
+    [VerifyNative]::BringToForeground($script:window)
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace header click'
     $state = Read-Session
     if (($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)) { throw 'Workspace header must be expanded and visible' }
     $top = if ($state.hide_pills) { 0 } else { 34 }
@@ -315,6 +318,10 @@ $result.checks += @{ name = 'workspace-delete-main-protected'; persistentSeconds
 Snapshot 'workspace-delete-complete'
 Snapshot 'after'
 
+$beforeArchiveCreate = (Read-Session).workspace_count
+Press @(0x11, 0x4E) 'Ctrl+N: create a separate workspace for archive and restore'
+Wait-Until { (Read-Session).workspace_count -eq $beforeArchiveCreate + 1 } 'separate archive workspace and CMD tab persisted'
+$created = (Read-Session).active_workspace
 Select-WorkspaceCard $created 'archive-before'
 $archiveBefore = Read-Session
 $archiveId = [string]$archiveBefore.workspaces[$created].wid
