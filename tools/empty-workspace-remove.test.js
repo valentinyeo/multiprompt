@@ -10,6 +10,7 @@ const palette = read('src/command_palette.zig');
 const sidebar = read('src/sidebar.zig');
 const main = read('src/main.zig');
 const switcher = read('src/workspace_switcher.zig');
+const deletePalette = read('src/workspace_delete_palette.zig');
 const mb = read('tools/mb.mjs');
 
 function body(source, name) {
@@ -34,9 +35,9 @@ test('MUBO-251 an empty workspace is removed at once instead of waiting to be ar
 });
 
 test('MUBO-251 a workspace that still holds chats asks where they go before it is removed', () => {
-  assert.match(main, /app_state\.g_search_workspace_move_source = workspace_idx;/);
-  assert.match(main, /deleteWorkspaceMovingChats\(source, workspace_idx\)/);
-  assert.match(palette, /g_search_workspace_move_source\) \|source\|/);
+  assert.match(deletePalette, /workspaces\.setWorkspaceDeleteMoveSource\(workspace_idx\)/);
+  assert.match(deletePalette, /workspaces\.deleteWorkspaceMovingChats\(source, workspace_idx\)/);
+  assert.match(palette, /@import\("workspaces\.zig"\)\.workspaceDeleteMoveSource\(\)/);
   assert.match(sidebar, /Where should the chats go\?/);
   assert.match(sidebar, /Move Chats To: /);
   const move = publicBody(workspaces, 'deleteWorkspaceMovingChats');
@@ -48,8 +49,8 @@ test('MUBO-251 the workspace menu can remove the highlighted workspace', () => {
   assert.match(switcher, /0x2E => deleteSelected\(\)/);
   assert.match(switcher, /workspaces\.requestWorkspaceDelete\(entry\.id\[0\.\.entry\.id_len\]\)/);
   assert.match(switcher, /PostMessageW\(app_state\.g_main_hwnd, w\.WM_APP_SEARCH_OPEN, 0, 0\)/);
-  assert.match(main, /takeRequestedWorkspaceDelete\(&requested_delete_buf\)/);
-  assert.match(main, /app_state\.g_search_workspace_delete_mode = true;/);
+  assert.match(main, /takeRequested\(\)/);
+  assert.match(deletePalette, /app_state\.g_search_workspace_delete_mode = true;/);
 });
 
 test('MUBO-251 a removed empty workspace is remembered so account sync cannot bring it back', () => {

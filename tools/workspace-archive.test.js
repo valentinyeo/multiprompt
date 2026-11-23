@@ -50,8 +50,10 @@ test('IGSH-1664 normal navigation excludes archives; restoration must succeed be
   assert.match(restore, /switchToWorkspace\(slot\)/);
 });
 
-test('IGSH-1664 archive and restore are reachable while deletion requires an archived workspace', () => {
-  assert.match(body(workspaces, 'workspaceCanDelete'), /if \(!e\.archived\) return false/);
+test('IGSH-1664 archive and restore are reachable while deletion no longer requires an archived workspace', () => {
+  const canDelete = body(workspaces, 'workspaceCanDelete');
+  assert.doesNotMatch(canDelete, /if \(!e\.archived\) return false/);
+  assert.match(canDelete, /return e\.host_len == 0;/);
   assert.match(read('src/ui_words.zon'), /palette_close_workspace = "Archive workspace"/);
   assert.match(palette, /"Archived workspaces", "restore workspace"/);
   assert.match(palette, /g_remind_ws_id_len > 0 and labelsMatchQuery\(&\.\{"Archive workspace"\}/);
@@ -108,7 +110,7 @@ test "archive flags survive reload and absent flags remain visible" {
     try std.testing.expect(!app_state.g_workspaces[1].restore);
     try std.testing.expect(!app_state.g_workspaces[2].archived);
     try std.testing.expect(workspaceCanArchive(0));
-    try std.testing.expect(!workspaceCanDelete(0));
+    try std.testing.expect(workspaceCanDelete(0));
     try std.testing.expect(!workspaceCanArchive(1));
     try std.testing.expect(workspaceCanDelete(1));
     addOrUpdateWorkspace("live", "Live", false);
