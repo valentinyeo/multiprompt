@@ -112,39 +112,48 @@ def base_tables(baseline, output):
         return decisions(root, output)
 
 
+MUTATIONS = (
+    ("doubled chat", ("OneLiveChat", "IdentityStable"), 'src/chat_history_reader.py',
+     '            db.execute("DELETE FROM message_locators WHERE provider=? AND sid=?", (provider, sid))',
+     '            pass'),
+    ("lost chat", ("HistoryReadable",), 'src/chat_history_reader.py',
+     'for row in rows + [divider]',
+     'for row in [divider]'),
+    ("lost message", ("NoLostOrDuplicate",), 'src/chat_history_reader.py',
+     '            db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state=\'queued\'",\n                       (target, new_sid, provider, sid))',
+     '            pass'),
+)
+
+
 def self_test(root, output):
     reliable = check(json.loads((HERE / "decisions.json").read_text()), output / "reliable-control", reliable=True)
     if any(result["status"] != "PASS" for result in reliable.values()):
         raise ValueError("Reliable mutation control must pass before planting a break")
-    mutations = {
-        "OneLiveChat": (
-            "src/chat_history_reader.py",
-            '            db.execute("DELETE FROM message_locators WHERE provider=? AND sid=?", (provider, sid))',
-            '            pass',
-        ),
-        "NoLostOrDuplicate": (
-            "src/chat_history_reader.py",
-            '            db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state=\'queued\'",\n                       (target, new_sid, provider, sid))',
-            '            pass',
-        ),
-    }
     caught = []
-    for rule, (file, before, after) in mutations.items():
+    for name, rules, file, before, after in MUTATIONS:
         with tempfile.TemporaryDirectory(prefix="switch-break-") as directory:
             scratch = pathlib.Path(directory)
             (scratch / "src").mkdir()
             shutil.copyfile(root / file, scratch / file)
             source = (scratch / file).read_text()
             if source.count(before) != 1:
-                raise ValueError("Mutation no longer matches " + rule)
+                raise ValueError("Mutation " + name + " no longer matches")
             (scratch / file).write_text(source.replace(before, after, 1))
-            values = decisions(scratch, output / rule / "native")
-            result = check(values, output / rule, reliable=True)
-            if result.get(rule, {}).get("status") != "FAIL":
-                raise ValueError("Planted production break escaped " + rule)
-            replay(root, {rule: result[rule]}, output / rule / "replay", scratch)
-            caught.append(rule)
-    return caught
+            values = decisions(scratch, output / name / "native")
+            result = check(values, output / name, reliable=True)
+            failed = [rule for rule in RULES if result[rule]["status"] == "FAIL"]
+            missed = [rule for rule in rules if rule not in failed]
+            if missed:
+                raise ValueError("Planted break " + name + " escaped " + ", ".join(missed))
+            replay(scratch, {rule: result[rule] for rule in failed}, output / name / "replay", scratch)
+            for rule in failed:
+                try:
+                    replay(root, {rule: result[rule]}, output / name / "control" / rule, root)
+                except ValueError:
+                    continue
+                raise ValueError("Counterexample " + rule + " also replays on unbroken source")
+            caught.extend(failed)
+    return sorted(set(caught))
 
 
 def main():

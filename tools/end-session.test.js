@@ -107,10 +107,12 @@ test('IGSH-1266 a kill that never reached the server is retried in the backgroun
   assert.match(fetch, /@import\("archive\.zig"\)\.retryPendingSessionKills\(\);/);
 });
 
-test('IGSH-1266 the archive keeps its own guard when the server cannot be reached', () => {
+test('IGSH-1266 the archive keeps its own guard when the remote target is refused', () => {
   const archive = body('src/archive.zig', 'pub fn archiveTabAt(', 'pub fn archiveActiveTab(');
-  assert.ok(archive.includes('if (killRemoteTmuxSession(identity, null) != .gone) {'));
+  assert.match(archive, /const outcome = killRemoteTmuxSession\(identity, null\);/);
+  assert.match(archive, /if \(outcome == \.unsafe\) \{/);
   assert.match(archive, /showHeaderNoticeAscii\("Could not kill remote tmux session", 4000, true\);/);
+  assert.ok(archive.indexOf('showHeaderNoticeAscii("Could not kill remote tmux session"') < archive.indexOf('closeShell('), 'a refused kill must leave the tab open');
   assert.match(body('src/archive.zig', 'pub fn rejectPinnedSessionClose(', 'pub fn anyPinnedSession('), /app_state\.shells\[i\]\.pinned_top/);
 });
 
