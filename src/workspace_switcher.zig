@@ -108,6 +108,12 @@ fn rowCount() usize {
     return entry_count + 2;
 }
 
+const RowHighlight = enum { none, selected };
+
+fn rowHighlight(index: usize) RowHighlight {
+    return if (selected == index) .selected else .none;
+}
+
 fn rowRect(index: usize) w.RECT {
     const gap: i32 = if (index == entry_count + 1) scale(7) else 0;
     const top = scale(6) + @as(i32, @intCast(index - first)) * scale(28) + gap;
@@ -205,7 +211,7 @@ fn paint(dc: w.HANDLE) void {
             _ = w.FillRect(dc, &line, brush);
             _ = w.DeleteObject(brush);
         }
-        if (is_current or selected == index) fillRoundRect(dc, rc, scale(10), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
+        if (rowHighlight(index) == .selected) fillRoundRect(dc, rc, scale(10), divider);
         var buf: [12]u8 = undefined;
         const count = countLabel(if (is_action) null else sessionCount(index), &buf);
         var label = rc;
@@ -262,8 +268,8 @@ pub fn headerClick(x: i32, y: i32) bool {
     }
     focus.cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
-    workspaces.syncInProcessWorkspacesToRegistry();
-    workspaces.mergeWorkspaceRegistryFromDisk();
+    _ = workspaces.takeMenuRegistrySnapshot();
+    workspaces.prepareMenuEntries();
     loadEntries();
     selected = 0;
     for (0..entry_count) |i| {
@@ -289,11 +295,36 @@ pub fn headerClick(x: i32, y: i32) bool {
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(hwnd);
     _ = w.InvalidateRect(hwnd, null, 0);
+    workspaces.refreshMenuRegistry(hwnd);
     return true;
 }
 
 fn step(direction: i32) void {
     selected = @intCast(@mod(@as(i32, @intCast(selected)) + direction, @as(i32, @intCast(rowCount()))));
+    if (selected < first) first = selected;
+    if (selected >= first + visible) first = selected - visible + 1;
+    if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
+}
+
+fn refreshEntries() void {
+    var keep: [64]u8 = std.mem.zeroes([64]u8);
+    var keep_len: u32 = 0;
+    if (selected >= 1 and selected <= entry_count) {
+        keep = entries[selected - 1].id;
+        keep_len = entries[selected - 1].id_len;
+    }
+    loadEntries();
+    selected = @min(selected, rowCount() - 1);
+    if (keep_len > 0) {
+        for (0..entry_count) |index| {
+            const entry = &entries[index];
+            if (entry.id_len == keep_len and std.mem.eql(u8, entry.id[0..keep_len], keep[0..keep_len])) {
+                selected = index + 1;
+                break;
+            }
+        }
+    }
+    first = if (rowCount() > visible) @min(first, rowCount() - visible) else 0;
     if (selected < first) first = selected;
     if (selected >= first + visible) first = selected - visible + 1;
     if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
@@ -347,6 +378,10 @@ fn wndProc(window: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w
         w.WM_MOUSEWHEEL => {
             const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
             step(if (delta > 0) -1 else 1);
+            return 0;
+        },
+        workspaces.WM_APP_WORKSPACE_MENU_REGISTRY_READY => {
+            if (workspaces.takeMenuRegistrySnapshot() and opened) refreshEntries();
             return 0;
         },
         w.WM_KEYDOWN => {
@@ -458,6 +493,20 @@ test "IGSH-1687 compact rows share exact paint and hit bounds" {
     try std.testing.expect(hit(action.left, action.top - 1) == null);
     try std.testing.expect(hit(action.left, action.bottom) == null);
     try std.testing.expect(hit(scale(6), scale(5)) == null);
+}
+
+test "SOFT-2580 the menu highlight follows the pointer instead of the current workspace" {
+    const old_count = entry_count;
+    const old_selected = selected;
+    defer {
+        entry_count = old_count;
+        selected = old_selected;
+    }
+    entry_count = 3;
+    selected = 2;
+    for (0..rowCount()) |index| {
+        try std.testing.expect((rowHighlight(index) == .selected) == (index == 2));
+    }
 }
 
 fn testEntry(id: []const u8, name: []const u8) app_state.WorkspaceEntry {
