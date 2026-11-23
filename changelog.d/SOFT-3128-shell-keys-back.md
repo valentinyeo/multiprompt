@@ -1,0 +1,1 @@
+Server shell tabs again support copy, paste, scrolling, and keyboard shortcuts.
