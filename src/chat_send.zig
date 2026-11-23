@@ -2187,18 +2187,13 @@ pub fn chatEchoReconcileShell(idx: u32) bool {
             i += 1;
             continue;
         };
-        var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-        @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
-        chatConfirmedAdd(key_copy[0..e.key_len], e.text, history.history.blocks.items[bi], e);
-        if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
-        rememberLandedSend(idx, e);
-        chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+        chatEchoConfirmWithBlock(i, history.history.blocks.items[bi]);
         changed = true;
     }
     return changed;
 }
 
-fn chatEchoMatchActive() void {
+pub fn chatEchoMatchActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;

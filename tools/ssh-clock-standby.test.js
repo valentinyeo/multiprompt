@@ -352,6 +352,7 @@ fn saveChatOutbox() bool { return true; }
 fn chatOutboxChanged() void {}
 fn chatOutboxShellForKey(_: []const u8) ?u32 { return 0; }
 fn chatEchoMatchActive() void {}
+fn chatEchoReconcileShell(_: u32) bool { return false; }
 fn chatOutboxFindSending(_: anytype) ?usize { return 0; }
 fn chatLinkLooksDown(_: u32) bool { return false; }
 fn chatTmuxSendEligible(_: u32) bool { return false; }
