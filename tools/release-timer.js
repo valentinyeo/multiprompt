@@ -130,7 +130,8 @@ async function main() {
   const fixtureIndex = args.indexOf('--fixture');
   if (args.some((arg, index) => !['--dry-run', '--fixture'].includes(arg) && !(fixtureIndex >= 0 && index === fixtureIndex + 1))
     || (fixtureIndex >= 0 && (!dryRun || !args[fixtureIndex + 1]))) throw new Error('Usage: release-timer.js [--dry-run] [--fixture FILE]');
-  if (!dryRun && (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REF !== 'refs/heads/master')) throw new Error('Writes are allowed only on GitHub Actions master');
+  if (!dryRun && (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REF !== 'refs/heads/master'
+    || process.env.GITHUB_REPOSITORY !== repository)) throw new Error('Writes require GitHub Actions master in valentinyeo/multiprompt');
   const snapshot = fixtureIndex >= 0 ? JSON.parse(fs.readFileSync(args[fixtureIndex + 1], 'utf8')) : collect();
   const result = await execute(snapshot, { dryRun, now: snapshot.now ? Date.parse(snapshot.now) : Date.now() });
   console.log(JSON.stringify(result, null, 2));

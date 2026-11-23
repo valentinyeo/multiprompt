@@ -9,12 +9,6 @@ on:
         description: Report decisions without merges, closures, board writes or model calls
         type: boolean
         default: true
-  pull_request:
-    paths:
-      - .github/workflows/release-timer.yml
-      - tools/release-timer*
-      - tools/automerge-admit*
-      - tools/fixtures/SOFT-1944/**
 
 permissions:
   contents: read
@@ -24,22 +18,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  rules:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Prove the timer rules and dry run
-        run: timeout 120 node --test tools/release-timer.test.js tools/automerge-admit-run.test.js
-
   monitor:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-    needs: rules
+    if: github.repository == 'valentinyeo/multiprompt' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

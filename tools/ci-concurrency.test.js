@@ -59,11 +59,11 @@ test('every pull_request workflow cancels only a superseded pull request run', (
   }
 });
 
-test('every workflow cancels superseded work except a release that is already publishing', () => {
+test('every workflow cancels superseded work except release publication and serialized release maintenance', () => {
   for (const name of fs.readdirSync(workflowDir).filter(name => /\.ya?ml$/.test(name))) {
     const concurrency = topConcurrency(read(name));
     assert.match(concurrency, /^  group: .+$/m, name);
-    if (name === 'auto-release.yml' || name === 'release.yml') {
+    if (name === 'auto-release.yml' || name === 'release.yml' || name === 'release-timer.yml') {
       assert.match(concurrency, /^  cancel-in-progress: false$/m, name);
       continue;
     }

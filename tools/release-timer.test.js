@@ -10,6 +10,19 @@ const fixturePath = path.join(__dirname, 'fixtures/SOFT-1944/snapshot.json');
 const fixture = () => JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 const plan = input => decide(input, Date.parse(input.now));
 
+test('only the trusted scheduled/manual workflow can mutate, and only its broken output calls the ladder', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/release-timer.yml'), 'utf8');
+  assert.match(workflow, /cron: '\*\/30 \* \* \* \*'/);
+  assert.doesNotMatch(workflow, /^  pull_request:/m);
+  assert.match(workflow, /if: github.repository == 'valentinyeo\/multiprompt' && github.ref == 'refs\/heads\/master'/);
+  assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(workflow, /self-hosted/);
+  assert.equal([...workflow.matchAll(/uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
+  assert.match(workflow, /if: \$\{\{ !cancelled\(\) && steps.timer.outputs.broken == 'true' \}\}/);
+  assert.match(workflow, /default: true/);
+});
+
 test('healthy published master needs no model; approved idle PR is a merge candidate', () => {
   const result = plan(fixture());
   assert.deepEqual(result.broken, []);
