@@ -16,9 +16,10 @@ function body(name) {
 test('remote rename uses one SSH command and never types into chat-only sessions', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-remote-rename-'));
   try {
-    copyZig(['chat_view.zig'], dir);
+    copyZig(['chat_view.zig', 'session_identity.zig'], dir);
     const fixture = String.raw`
 const std = @import("std");
+const SessionIdentity = @import("session_identity.zig").Session;
 const DWORD = u32;
 const STARTUPINFOW = extern struct { cb: u32 = 0 };
 const PROCESS_INFORMATION = struct { hProcess: usize = 1, hThread: usize = 2 };
@@ -52,7 +53,7 @@ fn expectRename(session: []const u8, agent: bool, expected: []const u8) !void {
     @memcpy(app_state.shells[0].tmux_session[0..session.len], session);
     app_state.shells[0].tmux_session_len = session.len;
     launches = 0;
-    syncRemoteDisplayNameForShell(0, "New name", agent);
+    syncRemoteDisplayNameForShell(SessionIdentity.remote(0, session, "", 1).?, "New name", agent);
     try std.testing.expectEqual(@as(usize, 1), launches);
     const actual = try std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, command[0..command_len]);
     defer std.testing.allocator.free(actual);
@@ -66,8 +67,8 @@ test "rename command boundaries" {
     try expectRename("agent-1", true, prefix ++ "\"tmux rename-window -t agent-1: 'New name'; tmux send-keys -t agent-1 '/rename New name' Enter\"");
     try expectRename("agent-1", false, prefix ++ "\"tmux rename-window -t agent-1: 'New name'\"");
     launches = 0;
-    syncRemoteDisplayNameForShell(0, "bad'name", true);
-    syncRemoteDisplayNameForShell(1, "New name", true);
+    syncRemoteDisplayNameForShell(SessionIdentity.remote(0, "agent-1", "", 1).?, "bad'name", true);
+    try std.testing.expect(SessionIdentity.remote(3, "agent-1", "", 1) == null);
     try std.testing.expectEqual(@as(usize, 0), launches);
 }
 `;

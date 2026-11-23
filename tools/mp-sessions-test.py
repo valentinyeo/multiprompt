@@ -304,6 +304,23 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
 
+    def test_SOFT_3093_list_json_shows_a_hosted_chat_with_no_terminal(self):
+        key = "a" * 32
+        self.host.mkdir(parents=True, exist_ok=True)
+        (self.host / (key + ".config.json")).write_text(json.dumps(dict(cwd=str(self.work), enabled=True, tmux="live-hosted")))
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid="hosted-session", pid=os.getpid(),
+                                                                       provider="claude", started=2.0)))
+        (self.home / ".local/state/multiprompt/chat-names.json").write_text(
+            json.dumps({"live-hosted": dict(name="Hosted Lead", at=1)}))
+        tmux = self.bin / "tmux"
+        tmux.write_text("#!" + sys.executable + "\nimport sys\nif sys.argv[1:2] == ['list-sessions']:\n"
+                        " print('live-other')\nelse:\n sys.exit(1)\n", encoding="utf-8")
+        tmux.chmod(0o755)
+        rows = self.parsed(self.run_sessions("list", "--json"))
+        self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
+        self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
+                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+
 
 if __name__ == "__main__":
     unittest.main()
