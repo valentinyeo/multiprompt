@@ -1,0 +1,3 @@
+{"at":1795172400,"event":"start","detail":{"tmux":"live-recorded"}}
+{"at":1795172460,"event":"agent_started","detail":{"pid":1210}}
+{"at":1795174800,"event":"stop","detail":{"cause":"stop_requested"}}

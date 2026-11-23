@@ -7657,43 +7657,19 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertNotIn('message', decision)
         self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
 
-    def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):
+    def test_a_quiet_host_keeps_its_agent_running_past_the_old_idle_limit(self):
         import socket as module
-        path = self.home / 'loop.sock'
+        path = self.home / 'still-here.sock'
         listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
         listener.bind(str(path))
         listener.listen(1)
         self.addCleanup(listener.close)
         read_end, write_end = os.pipe()
         self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            time.sleep(0.2)
-            session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
-            time.sleep(0.8)
-            self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
-            session['parked'].clear()
-            running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_IGSH_1907_a_host_quiet_for_ten_minutes_keeps_its_bot_warm(self):
-        import socket as module
-        path = self.home / 'warm.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        signals = []
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0),
+                                      wait=lambda timeout=None: signals.append('wait'),
+                                      kill=lambda: signals.append('kill'))
         self.addCleanup(agent.stdout.close)
         session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
@@ -7701,49 +7677,13 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         running.start()
         self.addCleanup(stop_fixture_host_loop, self, running, session)
         self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-        session['idle'] = time.time() - 600
-        time.sleep(1.5)
-        self.assertTrue(running.is_alive(), 'a host quiet for ten minutes stopped its bot, so the next message pays a cold start')
-        self.assertEqual([row for row in self.host_events('idle_stop')], [])
         session['idle'] = time.time() - 7200
-        running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'a host quiet for two hours must still stop its bot')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
-        import socket as module
-        path = self.home / 'long-turn.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
-            session['state']['inflight'] = session['inflight']
-            time.sleep(0.5)
-            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
-            for _ in range(6):
-                os.write(write_end, b'x')
-                time.sleep(0.15)
-            self.assertTrue(running.is_alive(), 'an open turn must survive the idle timer while the agent writes output')
-            self.assertEqual([row for row in self.host_events('idle_stop')], [],
-                             'the host must never stop itself while its turn is open')
-            session['turn'], session['inflight'], session['state']['inflight'] = None, None, None
-            running.join(timeout=10)
-        self.assertFalse(running.is_alive(), 'a host quiet after its turn must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-
+        time.sleep(2)
+        self.assertTrue(running.is_alive(), 'a hosted chat with no turn and nothing inflight stopped itself after two quiet hours')
+        self.assertEqual(signals, [], 'the agent process must not be signalled while the chat is quiet')
+        self.assertFalse(agent.stdin.closed, 'the host must keep the agent stdin open while the chat is quiet')
+        self.assertFalse(session['stop'], 'the host must stay up until an explicit stop, fresh start, Switch AI or a crash')
+        self.assertEqual([row for row in self.host_events('idle_stop')], [])
 
 
 class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
