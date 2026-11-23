@@ -16,11 +16,11 @@ test('shared Windows verifier builds use a portable CPU', () => {
 test('sessions installs the SSH boundary before launch', () => {
   assert.ok(existsSync('tools/verify-repo-picker/ssh.c'), 'repository picker boundary source must exist');
   const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
-  const setup = control.indexOf("if ($Feature -in @('sessions', 'all-sessions')) {");
+  const setup = control.indexOf("if ($Feature -eq 'sessions') {");
   const launch = control.indexOf('$process = $job.Start(');
   assert.ok(setup > 0 && setup < launch);
   assert.match(control.slice(setup, launch), /zig cc[\s\S]*ssh-path\.txt[\s\S]*active_tab = 1; active_workspace = 0; single_window = \$true[\s\S]*tmux_host = 0[\s\S]*tmux_host = 2[\s\S]*session\.json[\s\S]*seed-session\.json/);
-  assert.match(control, /'sessions', 'all-sessions', 'browser-own-profile'[\s\S]*'--single-window'/);
+  assert.match(control, /'sessions', 'browser-own-profile'[\s\S]*'--single-window'/);
   assert.match(ssh, /invocation-%lu\.txt/);
   assert.match(ssh, /\/work\/projects\/alpha/);
   assert.match(ssh, /\/work\/projects\/beta/);
@@ -47,7 +47,7 @@ test('initial picker captures the combined all-server search', () => {
 });
 
 test('cross-host and offline journeys require the selected host and rejection', () => {
-  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('--tmux '\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('tmux new-session'\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
   const normalizeHost = /\$hostId = if \(\$tab\.PSObject\.Properties\['tmux_host'\]\) \{ \[int\]\$tab\.tmux_host \} else \{ 0 \}/.source;
   assert.match(sessions, new RegExp(`Where-Object \\{ \\$tab = \\$_; ${normalizeHost}; \\$hostId -eq 1 \\}\\)\\.Count -ne 0`));
   assert.match(sessions, new RegExp(`${normalizeHost}\\s+\\$tab\\.cwd -eq \\$case\\.cwd -and \\$hostId -eq \\$case\\.host -and \\$tab\\.cv -eq \\$true`));

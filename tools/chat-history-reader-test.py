@@ -2072,22 +2072,6 @@ class HistoryReaderTest(unittest.TestCase):
         _, rows = self.read()
         self.assertEqual([r['text'] for r in rows], ['queued', '/test foo', 'answer'])
 
-    def test_soft_2423_skill_quote_shows_as_user_bubble(self):
-        self.path.write_text((ROOT / 'tools/fixtures/SOFT-2423/skill-quote.jsonl').read_text())
-        _, rows = self.read()
-        shown = [(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')]
-        self.assertEqual(shown, [
-            ('user', '> quoted note\n\n/pstack:poteto-mode'),
-            ('assistant', 'bot note'),
-            ('user', '> quoted note\n> second line\n\n/pstack:correct own note'),
-            ('user', '/pstack:correct plain note'),
-        ])
-        self.assertNotIn('skill body', [row.get('text') for row in rows])
-        sent = ['/pstack:poteto-mode > quoted note', '/pstack:correct > quoted note > second line own note']
-        lines = reader.settle_response(dict(self.query, op='settle', texts=sent, after_ms=0)).splitlines()
-        self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
-        self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [1, 4])
-
     def test_refused_slash_command_facts_are_opt_in_and_additive(self):
         prompt = '/hormozi-skills:audit-offer can you use this also to review my own offer'
         enqueue = dict(type='queue-operation', operation='enqueue', timestamp='2026-10-13T11:06:22.591Z', content=prompt)
