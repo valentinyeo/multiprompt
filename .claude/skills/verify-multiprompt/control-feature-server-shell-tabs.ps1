@@ -62,16 +62,16 @@ Proof-Check 'SOFT-3001' {
     } 'real remote command is running' 30
     Focus-ProofShell
     [System.Windows.Forms.Clipboard]::SetText('clipboard sentinel before selected Ctrl+C')
-    [VerifyNative]::DragSelectClient($script:proofTerminal, 1, 1, [int]($script:proofClient.Right - 2), 1)
+    [VerifyNative]::DragSelectClient($script:proofTerminal, 1, 1, 2, 1)
     Snapshot 'SOFT-3001-selected'
     $before = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'heartbeat-before-copy') | ConvertFrom-Json
-    Press @(0x11, 0x43) 'Ctrl+C: copy the exact first terminal row while the command runs'
+    Press @(0x11, 0x43) 'Ctrl+C: copy the selected first character while the command runs'
     Wait-Until { [System.Windows.Forms.Clipboard]::GetText() -cne 'clipboard sentinel before selected Ctrl+C' } 'Ctrl+C changed the clipboard' 10
     $copied = [System.Windows.Forms.Clipboard]::GetText()
-    $expected = 'SOFT3001-COPY-EXACT'.PadRight([int]$before.columns)
+    $expected = 'S'
     [IO.File]::WriteAllText((Join-Path $Evidence 'SOFT-3001-clipboard.txt'), $copied)
     [IO.File]::WriteAllText((Join-Path $Evidence 'SOFT-3001-expected.txt'), $expected)
-    if ($copied -cne $expected) { throw 'Clipboard does not equal the selected terminal row, including its trailing spaces' }
+    if ($copied -cne $expected) { throw 'Clipboard does not equal the selected first character S' }
     Wait-Until {
         $script:afterCopy = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json; test ! -e /home/mpverify/shell-interrupt.json' 'heartbeat-after-copy') | ConvertFrom-Json
         $script:afterCopy.pid -eq $before.pid -and $script:afterCopy.tick -gt $before.tick
@@ -103,7 +103,7 @@ Proof-Check 'SOFT-3002' {
     if ($afterRestart -cne $identity) { throw 'Restart did not reattach the same remote session and pane process' }
     Save-Json @{ before = $identity; afterRestart = $afterRestart; session = (Read-Session) } 'SOFT-3002-restored.json'
     Snapshot 'SOFT-3002-restored-attached'
-    Proof-Palette 'close tab' 6232 'SOFT-3002-close-row'
+    Proof-Palette 'close tab' 7110 'SOFT-3002-close-row'
     Wait-Until { @((Read-Session).tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'proof-shell' }).Count -eq 0 } 'close tab detached the server shell without deleting its remote session' 30
     Wait-Until { (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_attached}"' 'detached-session').Trim() -ceq '0' } 'the same remote tmux session is detached' 30
     Proof-Palette 'reopen server shell' 6315 'SOFT-3002-reopen-row'

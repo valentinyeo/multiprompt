@@ -1,0 +1,130 @@
+﻿{
+    "sourceNote":  "SOFT-3003 shipped mp-shell open. No chat-specific open-shell row is present in the shortcut table.",
+    "expectedFolder":  "/home/mpverify/shell-proof-folder",
+    "command":  "Ctrl+K Open shell on VPS 1",
+    "actualFolder":  "/home/mpverify",
+    "before":  {
+                   "tabs":  [
+                                {
+                                    "kind":  "tmux",
+                                    "name":  "Runner server chat",
+                                    "manual":  true,
+                                    "tmux_session":  "live-ci",
+                                    "used_unix":  true,
+                                    "used":  1795000000,
+                                    "shell_id":  3,
+                                    "la":  134399038230152438,
+                                    "lv":  134399038987475772,
+                                    "chat_id":  2313707163906846,
+                                    "ai_agent":  1,
+                                    "last_read_message_id":  "0",
+                                    "csid":  "a1b2c3d4-2567-4000-8000-000000002567",
+                                    "cv":  true
+                                },
+                                {
+                                    "kind":  "tmux",
+                                    "name":  "TMUX 2",
+                                    "tmux_session":  "proof-shell",
+                                    "used_unix":  true,
+                                    "used":  0,
+                                    "visits":  [
+                                                   1795430245914
+                                               ],
+                                    "shell_id":  4,
+                                    "la":  134399038459040133,
+                                    "lv":  134399038459080561,
+                                    "chat_id":  5036127771768957,
+                                    "last_read_message_id":  "0"
+                                }
+                            ],
+                   "active_tab":  0,
+                   "active_shell_id":  3,
+                   "starred_view":  false,
+                   "shared_server_connection":  true,
+                   "hide_pills":  true,
+                   "inbox_tab":  1,
+                   "inbox_visits_order":  true,
+                   "single_window":  true,
+                   "active_workspace":  0,
+                   "workspace_count":  1,
+                   "workspaces":  [
+                                      {
+                                          "name":  "Other",
+                                          "wid":  "ws-831562-0",
+                                          "last_shell":  3,
+                                          "focus":  "none"
+                                      }
+                                  ],
+                   "closed_tmux":  [
+
+                                   ]
+               },
+    "after":  {
+                  "tabs":  [
+                               {
+                                   "kind":  "tmux",
+                                   "name":  "Runner server chat",
+                                   "manual":  true,
+                                   "tmux_session":  "live-ci",
+                                   "used_unix":  true,
+                                   "used":  1795000000,
+                                   "shell_id":  3,
+                                   "la":  134399038230152438,
+                                   "lv":  134399038987475772,
+                                   "chat_id":  2313707163906846,
+                                   "ai_agent":  1,
+                                   "last_read_message_id":  "0",
+                                   "csid":  "a1b2c3d4-2567-4000-8000-000000002567",
+                                   "cv":  true
+                               },
+                               {
+                                   "kind":  "tmux",
+                                   "name":  "TMUX 2",
+                                   "tmux_session":  "proof-shell",
+                                   "used_unix":  true,
+                                   "used":  0,
+                                   "visits":  [
+                                                  1795430245914
+                                              ],
+                                   "shell_id":  4,
+                                   "la":  134399038459040133,
+                                   "lv":  134399038459080561,
+                                   "chat_id":  5036127771768957,
+                                   "last_read_message_id":  "0"
+                               },
+                               {
+                                   "kind":  "vps",
+                                   "name":  "VPS 5",
+                                   "used_unix":  true,
+                                   "used":  0,
+                                   "shell_id":  5,
+                                   "la":  134399039017878089,
+                                   "lv":  134399039017906004,
+                                   "chat_id":  7535286431179701,
+                                   "last_read_message_id":  "0"
+                               }
+                           ],
+                  "active_tab":  2,
+                  "active_shell_id":  5,
+                  "starred_view":  false,
+                  "shared_server_connection":  true,
+                  "hide_pills":  true,
+                  "inbox_tab":  1,
+                  "inbox_visits_order":  true,
+                  "single_window":  true,
+                  "active_workspace":  0,
+                  "workspace_count":  1,
+                  "workspaces":  [
+                                     {
+                                         "name":  "Other",
+                                         "wid":  "ws-831562-0",
+                                         "last_shell":  5,
+                                         "focus":  "shell"
+                                     }
+                                 ],
+                  "closed_tmux":  [
+
+                                  ]
+              },
+    "host":  0
+}

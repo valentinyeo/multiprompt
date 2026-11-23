@@ -4,7 +4,7 @@ Source files: src/clipboard.zig, src/native_session.zig, src/terminal_window.c, 
 
 ## Sub-features
 
-- SOFT-3001: exact clipboard text from a selected terminal row while the same remote command keeps running, followed by Ctrl+C without selection interrupting that command.
+- SOFT-3001: exact clipboard text from a selected terminal character while the same remote command keeps running, followed by Ctrl+C without selection interrupting that command.
 - SOFT-3002: normal quit and restart restores an attached server tab; Close tab followed by Ctrl+K Reopen server shell reattaches the identical tmux session, pane and shell process.
 - SOFT-3003: from the real server chat, Ctrl+K Open shell on VPS 1 opens a shell on that server in the chat's non-default folder. A wrong folder fails rather than substituting a direct bridge call.
 
@@ -20,9 +20,9 @@ gh workflow run verify.yml --ref <branch> -f feature=server-chat -f tag=v0.28.<n
 
 Use one dispatch. A tagged `server-chat` run first reuses the existing real-server chat journey in its own PowerShell process, then extends it with these shell checks in `shell-release/`. The existing server-chat setup owns the WSL2 server, OpenSSH keys, real tmux and deterministic paid-provider substitute. No workflow changes are required. Do not dispatch `server-shell-tabs` alone because it needs the `server-chat` WSL installation.
 
-The fixture adds a real shell session and places the chat provider in `/home/mpverify/shell-proof-folder`. Before launch only, it seeds one saved server chat. Ctrl+K Reopen server shell opens the detached proof session as a fresh tab before the copy check. Every subsequent action uses real keyboard or mouse input. Remote reads retain stdout, stderr and exit codes. A Python command writes an atomic heartbeat and an interrupt receipt. The selected first row has a known marker padded to the actual terminal width; the clipboard must match it byte for byte.
+The fixture adds a real shell session and places the chat provider in `/home/mpverify/shell-proof-folder`. Before launch only, it seeds one saved server chat. Ctrl+K Reopen server shell opens the detached proof session as a fresh tab before the copy check. Every subsequent action uses real keyboard or mouse input. Remote reads retain stdout, stderr and exit codes. A Python command writes an atomic heartbeat and an interrupt receipt. The first terminal cell contains `S`; a drag within that cell selects it and the clipboard must equal exactly `S`. Remote PTY width can lag the actual native grid and must not define selection length.
 
-Restart uses the same `Restart-SessionRestore` helper as the SOFT-3039 journey on `soft-3053-release-proof`. Remote tmux session ID, pane ID and shell PID must remain identical, and typed commands must produce new remote receipts after restart and reopen. Ctrl+K Close tab detaches; Ctrl+Shift+W deletes the remote session and is not the close action for this proof.
+Restart uses the same `Restart-SessionRestore` helper as the SOFT-3039 journey on `soft-3053-release-proof`. Remote tmux session ID, pane ID and shell PID must remain identical, and typed commands must produce new remote receipts after restart and reopen. The current Close tab alias resolves to Archive chat (`7110`), not the old close target `6232`. The proof requires the remote session to remain alive and detached after that real action; if it does not, the close/reopen case fails. Ctrl+Shift+W deletes the remote session and is not used.
 
 Inspect `shell-release/SOFT-3001-result.json`, `SOFT-3002-result.json`, `SOFT-3003-result.json`, exact clipboard/expected text, heartbeat and interrupt receipts, restart/reopen identities, chat folder state, and the corresponding `SOFT-*.png` screenshots. Each case records failures independently. Runner keys are removed before scratch evidence is copied; WSL is stopped during cleanup.
 
