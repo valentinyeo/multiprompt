@@ -1,0 +1,4 @@
+{"type":"agent_start"}
+{"type":"message_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"429 rate limit exceeded for provider opencode-go"}}
+{"type":"agent_settled"}

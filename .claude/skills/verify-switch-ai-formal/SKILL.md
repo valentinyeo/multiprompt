@@ -33,7 +33,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `175a58efdcea4c990f972df28239d57e830e0101`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 | Source | Covered behavior |
 | --- | --- |

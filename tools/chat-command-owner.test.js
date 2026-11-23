@@ -71,6 +71,7 @@ fn GetTickCount64() u64 { return 1; }
 fn Sleep(_: u32) void {}
 fn PostMessageW(_: anytype, _: anytype, _: anytype, _: anytype) i32 { return 1; }
 fn debugLog(_: []const u8) void {}
+fn syncAcCompleter(_: u8) void {}
 fn appendSshExe(buf: []u8, pos: *usize) bool { @memcpy(buf[0..4], "ssh "); pos.* = 4; return true; }
 fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
     received_host = host;
