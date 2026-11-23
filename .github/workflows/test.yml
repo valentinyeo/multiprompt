@@ -57,6 +57,8 @@ jobs:
         run: node --test tools/release-update-gate.test.mjs
       - name: Test the runtime fingerprint guard
         run: node --test tools/check-runtime-generation.test.js
+      - name: Test automatic helper bundle versions
+        run: python3 tools/runtime-fingerprint.test.py -v
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat
