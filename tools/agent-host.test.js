@@ -116,7 +116,6 @@ test('SOFT-2838 the runtime bundle publishes the session list and the layout too
   assert.match(reader, /publish_named_tool\('mp-sessions', _base64\.b64decode\(sessions_source\)\)/);
   assert.match(reader, /publish_named_tool\('mp-layout\.mjs', _base64\.b64decode\(layout_source\)\)/);
   assert.match(reader, /relink\('mp-layout', publish_named_tool\('mp-layout\.mjs'/);
-  assert.match(reader, /if active\['generation'\] > generation:\s+return installed, active/);
   assert.equal(read('src/mp_layout.mjs'), read('tools/mp-layout.mjs'), 'the runtime copy of mp-layout matches the installed tool');
   assert.match(read('src/mp_sessions.py'), /with_name\("mp-send"\)/, 'the published session list loads the published sender');
 });

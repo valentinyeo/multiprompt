@@ -65,6 +65,15 @@ fn statusColor(used: u16) w.DWORD {
     return if (red) RGB(229, 72, 77) else if (amber) RGB(245, 165, 36) else RGB(242, 242, 242);
 }
 
+pub const version_label = "v" ++ @import("main.zig").APP_VERSION;
+
+pub fn versionLabelRect(icon: RECT, sidebar_right: i32) ?RECT {
+    const left = icon.right + px(8);
+    const right = sidebar_right - px(12);
+    if (right - left < px(40)) return null;
+    return .{ .left = left, .top = icon.top, .right = right, .bottom = icon.bottom };
+}
+
 pub fn paintSidebarFooter(dc: w.HANDLE) void {
     if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
     const rect = @import("capacity.zig").sidebarUsageRowRect();
@@ -95,6 +104,12 @@ pub fn paintSidebarFooter(dc: w.HANDLE) void {
     const segments: usize = if (known) @intCast(@divTrunc(@as(u32, used) * 32, 1000)) else 0;
     if (segments > 0) canvas.strokePolyline(points[0 .. segments + 1], statusColor(used), @floatFromInt(px(4)));
     smooth.fillEllipse(dc, .{ .left = rect.left + px(16), .top = rect.top + px(20), .right = rect.left + px(20), .bottom = rect.top + px(24) }, if (known or statusColor(used) != RGB(242, 242, 242)) statusColor(used) else RGB(100, 100, 100));
+    if (versionLabelRect(rect, @import("browser_pane.zig").SIDEBAR_W())) |label| {
+        const old_font = w.SelectObject(dc, footerFont(3, 12, 400));
+        defer _ = w.SelectObject(dc, old_font);
+        const color = @import("themes.zig").customColorOr("muted", if (state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138));
+        text(dc, version_label, label, color, 0);
+    }
 }
 
 fn rowCount(data: *const state.AiPaceSnapshot) usize {
@@ -613,6 +628,24 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         else => return w.DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+test "SOFT-3099 footer label uses this executable's version" {
+    try std.testing.expectEqualStrings("v" ++ @import("main.zig").APP_VERSION, version_label);
+}
+
+test "SOFT-3099 version stays beside the icon and inside the sidebar at every scale" {
+    const saved = state.g_ui_scale;
+    defer state.g_ui_scale = saved;
+    for ([_]u32{ 75, 100, 150, 200 }) |scale| {
+        state.g_ui_scale = scale;
+        const icon = RECT{ .left = px(12), .top = px(552), .right = px(48), .bottom = px(588) };
+        const label = versionLabelRect(icon, px(280)).?;
+        try std.testing.expectEqualDeep(RECT{ .left = px(56), .top = icon.top, .right = px(268), .bottom = icon.bottom }, label);
+        try std.testing.expect(versionLabelRect(icon, px(80)) == null);
+        try std.testing.expect(versionLabelRect(icon, px(107)) == null);
+        try std.testing.expect(versionLabelRect(icon, px(108)) != null);
     }
 }
 
