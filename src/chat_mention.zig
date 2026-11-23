@@ -1157,9 +1157,7 @@ test "MUBO-247 real mention shapes separate addressing, reference, fyi and unsur
         .{ .name = "Verifier", .session = "live-verifier", .index = 8 },
         .{ .name = "Mobile", .session = "live-mobile", .index = 9 },
     };
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "tools/fixtures/MUBO-247/cases.json", std.testing.allocator, .limited(64 * 1024));
-    defer std.testing.allocator.free(bytes);
-    const parsed = try std.json.parseFromSlice([]const FixtureCase, std.testing.allocator, bytes, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    const parsed = try std.json.parseFromSlice([]const FixtureCase, std.testing.allocator, @embedFile("testdata/mubo-247-cases.json"), .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
     defer parsed.deinit();
     try std.testing.expect(parsed.value.len >= 20);
     var wide_buf: [1024]u16 = undefined;

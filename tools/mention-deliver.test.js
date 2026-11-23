@@ -185,7 +185,9 @@ test('SOFT-3084 typing chat wires a source note and recipient copy is framed', (
 });
 
 test('MUBO-247 real mention shapes separate addressing, reference, fyi and unsure', () => {
-  const cases = JSON.parse(fs.readFileSync(path.join(root, 'tools', 'fixtures', 'MUBO-247', 'cases.json'), 'utf8'));
+  const fixtureRaw = fs.readFileSync(path.join(root, 'tools', 'fixtures', 'MUBO-247', 'cases.json'), 'utf8');
+  assert.equal(fs.readFileSync(path.join(root, 'src', 'testdata', 'mubo-247-cases.json'), 'utf8'), fixtureRaw);
+  const cases = JSON.parse(fixtureRaw);
   const chats = [
     { name: 'Current', session: 'live-current', index: 0 },
     { name: 'Builder', session: 'live-builder', index: 1 },
