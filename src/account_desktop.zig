@@ -1898,8 +1898,13 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_source = if (tab.manual) .manual else .semantic;
             if (tab.csid) |sid| {
                 @memset(&shell.claude_sid, 0);
-                @memcpy(shell.claude_sid[0..sid.len], sid);
-                shell.claude_sid_len = @intCast(sid.len);
+                if (@import("bot_photo_key.zig").chatId(sid, "")) |id| {
+                    const restored_sid = try std.fmt.bufPrint(&shell.claude_sid, "{s}-{s}-{s}-{s}-{s}", .{ id[0..8], id[8..12], id[12..16], id[16..20], id[20..] });
+                    shell.claude_sid_len = @intCast(restored_sid.len);
+                } else {
+                    @memcpy(shell.claude_sid[0..sid.len], sid);
+                    shell.claude_sid_len = @intCast(sid.len);
+                }
             }
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
             if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false, desired.tabs);

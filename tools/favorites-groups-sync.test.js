@@ -22,8 +22,10 @@ function save(previous, incoming, tokens) {
   const end = worker.indexOf("          const photo = photos.get(", start);
   assert.ok(start >= 0 && end > start);
   const context = { previousLayout: structuredClone(previous), layout: structuredClone(incoming), req: new Request('https://example.com', { headers: { 'X-Layout-Features': tokens } }) };
-  const stored = 'const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));\n';
-  vm.runInNewContext(worker.slice(worker.indexOf('const layoutFeature ='), worker.indexOf('function layoutResponse')) + stored + worker.slice(start, end) + '}', context);
+  const photos = read('service/bot-photo.js');
+  const identity = photos.slice(photos.indexOf('export function chatPhotoId('), photos.indexOf('export async function chatPhotoKey(')).replace('export ', '');
+  const stored = worker.slice(worker.indexOf('        const stored = new Map('), worker.indexOf('        const photos = new Map('));
+  vm.runInNewContext(identity + worker.slice(worker.indexOf('const layoutFeature ='), worker.indexOf('function layoutResponse')) + stored + worker.slice(start, end) + '}', context);
   return JSON.parse(JSON.stringify(context.layout));
 }
 

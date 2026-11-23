@@ -197,7 +197,7 @@
     "wndProc: if(!@import(\"workspaces.zig\").archiveWorkspaceByIndex(index))showHeaderNoticeAscii(\"Could not archive workspace\",4500,true)",
     "wndProc: if(!@import(\"workspaces.zig\").restoreArchivedWorkspaceByIndex(@intCast(workspace_idx)))showHeaderNoticeAscii(\"Could not restore workspace - archive kept\",4500,true)",
     "wndProc: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",
-    "wndProc: if(!photo.reset(digest))showHeaderNoticeAscii(\"Could not reset image\",4000,true)",
+    "wndProc: if(!photo.resetForShell(&app_state.shells[idx]))showHeaderNoticeAscii(\"Could not reset image\",4000,true)",
     "wndProc: if(!pi_models.ready())showHeaderNoticeAscii(\"Asking Pi for its model list...\",4000,false)",
     "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",

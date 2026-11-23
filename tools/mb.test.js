@@ -436,7 +436,7 @@ test('MUBO-244 style publishes a chat-names identity before uploading both photo
     writeFileSync(photo, PNG);
     const result = await box.call(['style', 'Runner', '--photo', photo]);
     assert.equal(result.code, 0, text(result));
-    assert.equal(box.layout.tabs[0].csid, '11111111222243338444555555555555');
+    assert.equal(box.layout.tabs[0].csid, '11111111-2222-4333-8444-555555555555');
     assert.equal(box.photos.get('e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576'), PNG.toString('base64'));
     assert.equal(box.photos.size, 2);
     const writes = box.puts.length;

@@ -227,7 +227,7 @@ async function syncPhoto(ctx, host, session, png, dry) {
         if (current.csid.replaceAll('-', '').toLowerCase() !== id) throw new Failure('chat identity changed; try again');
         return null;
       }
-      current.csid = id;
+      current.csid = [id.slice(0, 8), id.slice(8, 12), id.slice(12, 16), id.slice(16, 20), id.slice(20)].join('-');
       return layout;
     });
   }
