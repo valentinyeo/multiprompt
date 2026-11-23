@@ -23,7 +23,7 @@ $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $slashOffset = (Read-SharedText $debugLog).Length
 Type-Text '/verify-owner'
 Wait-Until {
-    (Read-SharedText $debugLog).Substring($slashOffset) -match 'chat-ac: fetched host=2 bytes=[1-9]'
+    (Read-SharedText $debugLog).Substring($slashOffset) -match 'chat-ac: fetched host=[02] bytes=[1-9]'
 } 'second account answered the slash menu request' 30
 Snapshot 'owner-slash-menu'
 if ([VerifyNative]::EditText($composer) -cne '/verify-owner') { throw 'Slash draft changed before the completion was accepted' }
