@@ -78,7 +78,7 @@ Wait-Until {
     $null -ne $state -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 0 -and $state.tabs[0].name -ceq 'Quiet chat' -and $state.tabs[1].name -ceq 'Loud chat'
 } 'two saved sessions restored with the first one active' 180
 [void][VerifyNative]::DwmFlush()
-[VerifyNative]::MoveMouseClient($script:window, 900, 420, $true)
+[VerifyNative]::MoveMouseClient($script:window, 900, 420, $false)
 Start-Sleep -Milliseconds 400
 $frame = New-Object VerifyNative+Rect
 $origin = New-Object VerifyNative+Point
@@ -92,7 +92,7 @@ $row = $bands[$bands.Count - 1]
 $clickX = $dx + 85
 $clickY = [int](($row.top + $row.bottom) / 2)
 Record ("Pointer target: sidebar row at client $clickX,$clickY spanning $($row.top)..$($row.bottom)")
-[VerifyNative]::MoveMouseClient($script:window, $clickX, $clickY, $true)
+[VerifyNative]::MoveMouseClient($script:window, $clickX, $clickY, $false)
 Start-Sleep -Milliseconds 500
 WindowShot 'sidebar-row-before'
 $pointerBefore = [SidebarRowCursor]::Now()
