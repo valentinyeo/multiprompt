@@ -19,6 +19,11 @@ tmpr="$(mktemp 2>/dev/null || echo /tmp/zs_ram.$$)"
             pp = par[pid]
             if (pp in sid) {
                 ram[sid[pp]] += rss[pid]
+                base = args[pid]
+                sub(/.*\//, "", base)
+                sub(/ .*/, "", base)
+                if (base == "claude" || base == "codex" || base == "pi" || base == "kimi" || base == "kimi-code" || base == "hax" || base == "grok")
+                    agent[sid[pp]] = (base == "kimi-code" ? "kimi" : base)
                 if (args[pid] ~ /\/cursor-agent\/versions\/[^/]+\/index\.js/) agent[sid[pp]] = "cursor"
             }
         }
