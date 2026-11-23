@@ -19,13 +19,13 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - Release updates reach users via the in-app updater. Never compile on the laptop.
 - Every extension change (`bridge.js`, manifest) bumps `"version"` in `extension/manifest.json`, independent of the app version. The extension-version check fails a PR that changes shipped files in `extension/` without a bump.
 - Everything here is public: never commit keys, private host names, internal paths, emails or private messages. The secret-scan check runs on every PR.
-- Ticket board: https://app.hypertask.ai/project?id=2060 (prefix `IGSH`).
-- Hypertask board: 2060, label: Multiprompt
+- Ticket board: https://app.hypertask.ai/project?id=13734 (prefix `MUBO`).
+- Hypertask board: 13734, label: Multiprompt
 
 ## Hard rules
 
 - The helper bundle derives its runtime fingerprint from its contents; never hand-bump `RUNTIME_GENERATION`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
-- Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
+- Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 13734's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.
 - **Never compile on the laptop.** Use the in-app updater.
 - **Every user-facing feature ships on all three surfaces in the same version:** a keyboard shortcut (when sensible), a Ctrl+K palette entry, and a row in `SHORTCUT_ROWS` (`src/shortcuts.zig`) plus `openwiki/operations/keyboard-shortcuts.md`. Tab actions also go in the tab-context palette band (7100+). `tools/palette-rows.test.js` and `tools/shortcuts-doc.test.js` fail on drift (regenerate with `node tools/shortcuts-doc.mjs`).

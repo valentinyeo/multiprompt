@@ -88,7 +88,7 @@ The flag is the user's permission to create tickets. Never create one without it
 
 1. Check that the session has the Hypertask tools. If not, write the plan files and say why tickets were skipped.
 2. Show the titles about to become tickets. Confirm once if someone is there to answer.
-3. Create one ticket per plan on board 2060, prefix `IGSH`. The description is the plan body.
+3. Create one ticket per plan on board 13734, prefix `MUBO`. The description is the plan body.
 4. The title is plain user language. Release notes print it as written, so no file names or code names.
 5. For a change to chat, sessions or sync, create or update the paired Android ticket first, link both ways, and use the board's Multiprompt Android label.
 6. Do not file a build ticket for a chat or sidebar element. List it for Valentin as an option.

@@ -1,4 +1,4 @@
-const prefixes = { IGSH: ['IGSH', 2060], SOFT: ['IGSH', 2060], HYCI: ['HYCI', 11514] };
+const prefixes = { IGSH: ['IGSH', 2060], SOFT: ['IGSH', 2060], MUBO: ['MUBO', 13734], HYCI: ['HYCI', 11514] };
 
 function parseTicketId(value) {
   const match = typeof value === 'string' && /^([A-Z][A-Z0-9]*)-([1-9]\d*)$/.exec(value);

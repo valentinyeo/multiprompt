@@ -58,7 +58,7 @@ async function main() {
   const [ticket, runUrl, journeys] = process.argv.slice(2);
   const credential = process.env.HYPERTASK_AGENT_TOKEN;
   if (!credential) throw new Error('HYPERTASK_AGENT_TOKEN is not set');
-  if (parseTicketId(ticket)?.prefix !== 'IGSH' || !/^https:\/\/github\.com\/valentinyeo\/multiprompt\/actions\/runs\/[1-9]\d*$/.test(runUrl || '') || !journeys) throw new Error('Usage: auto-revert-board.js TICKET RUN_URL JOURNEYS');
+  if (!['IGSH', 'MUBO'].includes(parseTicketId(ticket)?.prefix) || !/^https:\/\/github\.com\/valentinyeo\/multiprompt\/actions\/runs\/[1-9]\d*$/.test(runUrl || '') || !journeys) throw new Error('Usage: auto-revert-board.js TICKET RUN_URL JOURNEYS');
   const outcome = await reopenTicket({ api: boardApi(credential, process.env.HYPERTASK_API_BASE || boardBase), ticket, runUrl, journeys });
   console.log(`${ticket} ${outcome}`);
 }

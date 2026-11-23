@@ -118,7 +118,7 @@ test('nightly feature failures are reported without raising reusable caller perm
   assert.doesNotMatch(reusable, /nightly-report:|actions: read/);
 });
 
-test('nightly reporting creates one board 2060 ticket, updates it, and deduplicates retries', async () => {
+test('nightly reporting creates one board 13734 ticket, updates it, and deduplicates retries', async () => {
   assert.ok(fs.existsSync(path.join(root, '.github/workflows/nightly-verification-report.yml')), 'Nightly failures reach the board');
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/nightly-verification-report.yml'), 'utf8');
   assert.match(workflow, /nightly-verification-ticket\.cjs/);
@@ -127,13 +127,13 @@ test('nightly reporting creates one board 2060 ticket, updates it, and deduplica
   const comments = [];
   const api = async (method, endpoint, body) => {
     if (endpoint.startsWith('/tasks/search?')) {
-      assert.equal(new URLSearchParams(endpoint.split('?')[1]).get('project_id'), '2060');
+      assert.equal(new URLSearchParams(endpoint.split('?')[1]).get('project_id'), '13734');
       return { tasks };
     }
-    if (endpoint === '/projects/2060/labels') return { labels: ['Poteto', 'brain-medium'].map((name, id) => ({ name, id })) };
-    if (endpoint === '/projects/2060/sections') return { sections: [{ id: 4351, section_title: 'Todo' }] };
+    if (endpoint === '/projects/13734/labels') return { labels: ['Poteto', 'brain-medium'].map((name, id) => ({ name, id })) };
+    if (endpoint === '/projects/13734/sections') return { sections: [{ id: 4351, section_title: 'Todo' }] };
     if (method === 'POST' && endpoint === '/tasks/create') {
-      assert.equal(body.project_id, 2060);
+      assert.equal(body.project_id, 13734);
       assert.equal(body.section_id, 4351);
       assert.deepEqual(body.labels, [0, 1]);
       const task = { id: 999, ticketNumber: 'SOFT-999', title: body.title, section: 'Todo' };

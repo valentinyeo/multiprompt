@@ -313,7 +313,7 @@ def file_tickets(findings, state_path):
                            '<br>Lines/timestamps: ' + html.escape(json.dumps(item.get('transcript_lines', []))) +
                            '<br>Evidence: ' + html.escape(item.get('text', '')[:80]) + '</li>')
         description = '<ul>' + ''.join(details) + '</ul><p>Filed by the chat sync audit.</p>'
-        output = run(['project', 'task', 'create', '--project', '2060', '--section', 'Todo',
+        output = run(['project', 'task', 'create', '--project', '13734', '--section', 'Todo',
                       '--title', 'Chat sync audit: ' + kind + ' drift', '--labels', 'Desktop App,Bug',
                       '--description', description])
         match = re.search(r'"ticketNumber":\s*"([A-Z][A-Z0-9]*-\d+)"', output)

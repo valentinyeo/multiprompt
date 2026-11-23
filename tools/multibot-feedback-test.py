@@ -49,7 +49,7 @@ elif args[:2] == ['task', 'list']:
     page('tasks', [task for task in state['tasks'] if task['status'] == option('--status')])
 elif args[:2] == ['task', 'create']:
     number = 1000 + len(state['tasks'])
-    task = dict(title=option('--title'), ticketNumber='IGSH-' + str(number), status='Normal', labels=[dict(name=name) for name in option('--labels').split(',')], description=option('--description'))
+    task = dict(title=option('--title'), ticketNumber='MUBO-' + str(number), status='Normal', labels=[dict(name=name) for name in option('--labels').split(',')], description=option('--description'))
     state['tasks'].append(task)
     state_path.write_text(json.dumps(state))
     print(json.dumps(dict(success=True, task=task)))
@@ -116,7 +116,7 @@ class BoardFeedbackTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(ROOT / 'src/multibot_feedback.py'), *args], cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
 
     def task(self, number, title, labels=('Multiprompt', 'Agent Feedback'), status='Normal'):
-        return dict(ticketNumber='IGSH-' + str(number), title=title, status=status, labels=[dict(name=name) for name in labels])
+        return dict(ticketNumber='MUBO-' + str(number), title=title, status=status, labels=[dict(name=name) for name in labels])
 
     def vote(self, agent, date):
         return dict(id='activity-id', runId='run-id', type='thought', text='multibot-feedback-vote:v1', agentId=agent, agentName='Agent', createdAt=date.isoformat())
@@ -259,7 +259,7 @@ class BoardFeedbackTest(unittest.TestCase):
         state = dict(tasks=[self.task(1, 'Multibot wish: capture', ('Other', 'Agent Feedback')), self.task(2, 'Multibot wish: capture more'), self.task(3, 'Multibot wish: capture', status='Archive')], comments={})
         self.write_board(state)
         result = self.run_cli('capture')
-        self.assertEqual(result.stdout.strip(), 'filed https://app.hypertask.ai/detail/project-2060/3')
+        self.assertEqual(result.stdout.strip(), 'filed https://app.hypertask.ai/detail/project-13734/3')
         self.assertEqual(len(self.read_board()['tasks']), 3)
         state['tasks'].append(self.task(4, 'Multibot wish: deleted', status='Deleted'))
         self.write_board(state)
@@ -270,7 +270,7 @@ class BoardFeedbackTest(unittest.TestCase):
     def test_weekly_rank_counts_distinct_agents_and_sorts_ties(self):
         now = datetime.datetime.now(datetime.timezone.utc)
         start = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        state = dict(tasks=[self.task(1, 'Multibot wish: beta'), self.task(2, 'Multibot wish: alpha'), self.task(3, 'Multibot wish: old'), self.task(4, 'Multibot wish: leading')], comments={'IGSH-1': [self.vote('a', start), self.vote('a', start)], 'IGSH-2': [self.vote('b', start)], 'IGSH-3': [self.vote('c', start - datetime.timedelta(seconds=1))], 'IGSH-4': [self.vote('d', start), self.vote('e', start)]})
+        state = dict(tasks=[self.task(1, 'Multibot wish: beta'), self.task(2, 'Multibot wish: alpha'), self.task(3, 'Multibot wish: old'), self.task(4, 'Multibot wish: leading')], comments={'MUBO-1': [self.vote('a', start), self.vote('a', start)], 'MUBO-2': [self.vote('b', start)], 'MUBO-3': [self.vote('c', start - datetime.timedelta(seconds=1))], 'MUBO-4': [self.vote('d', start), self.vote('e', start)]})
         self.write_board(state)
         result = self.run_cli('--weekly')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -305,10 +305,10 @@ class BoardFeedbackTest(unittest.TestCase):
 
     def test_full_activity_window_refuses_unverifiable_vote(self):
         task = self.task(1, 'Multibot wish: crowded')
-        self.write_board(dict(tasks=[task], comments={'IGSH-1': [self.vote('a', datetime.datetime.now(datetime.timezone.utc))] * 100}))
+        self.write_board(dict(tasks=[task], comments={'MUBO-1': [self.vote('a', datetime.datetime.now(datetime.timezone.utc))] * 100}))
         result = self.run_cli('crowded')
         self.assertIn('activity limit reached', result.stdout)
-        self.assertEqual(len(self.read_board()['comments']['IGSH-1']), 100)
+        self.assertEqual(len(self.read_board()['comments']['MUBO-1']), 100)
 
     def test_malformed_activity_fails_closed(self):
         task = self.task(1, 'Multibot wish: bad activity')

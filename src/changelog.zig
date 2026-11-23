@@ -1686,7 +1686,7 @@ pub fn moveChangelogSelection(action: WPARAM) void {
 }
 
 fn changelogTicketUrl(ticket: []const u8, buf: []u8) []const u8 {
-    const board = if (std.mem.startsWith(u8, ticket, "IGSH-")) "2060" else if (std.mem.startsWith(u8, ticket, "HYCI-")) "11514" else return ticket;
+    const board = if (std.mem.startsWith(u8, ticket, "IGSH-")) "2060" else if (std.mem.startsWith(u8, ticket, "MUBO-")) "13734" else if (std.mem.startsWith(u8, ticket, "HYCI-")) "11514" else return ticket;
     if (ticket.len == 5) return ticket;
     for (ticket[5..]) |c| if (c < '0' or c > '9') return ticket;
     return std.fmt.bufPrint(buf, "https://app.hypertask.ai/detail/project-{s}/{s}", .{ board, ticket[5..] }) catch "";
@@ -1695,6 +1695,7 @@ fn changelogTicketUrl(ticket: []const u8, buf: []u8) []const u8 {
 test "changelog ticket IDs resolve without changing existing links" {
     var buf: [512]u8 = undefined;
     try std.testing.expectEqualStrings("https://app.hypertask.ai/detail/project-2060/1243", changelogTicketUrl("IGSH-1243", &buf));
+    try std.testing.expectEqualStrings("https://app.hypertask.ai/detail/project-13734/2072", changelogTicketUrl("MUBO-2072", &buf));
     try std.testing.expectEqualStrings("https://example.com/ticket", changelogTicketUrl("https://example.com/ticket", &buf));
     try std.testing.expectEqualStrings("IGSH-x", changelogTicketUrl("IGSH-x", &buf));
 }

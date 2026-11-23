@@ -57,6 +57,13 @@ test('a Done ticket moves to Todo with one comment and a retry posts no second c
   assert.equal(board.state.calls.filter(call => call.path === '/tasks/update').length, 1);
 });
 
+test('a MUBO ticket from the Multi Bot board reopens the same way', async t => {
+  const board = await fakeBoard(t);
+  assert.match(await board.run(['MUBO-837', runUrl, 'appearance']), /reopened/);
+  assert.equal(board.state.section, 'Todo');
+  assert.equal(board.state.comments.length, 1);
+});
+
 for (const section of ['Doing', 'AI Review', 'Todo']) test(`active ${section} work stays where it is`, async t => {
   const board = await fakeBoard(t, { section });
   await board.run();

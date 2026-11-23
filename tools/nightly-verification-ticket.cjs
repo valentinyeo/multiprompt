@@ -12,7 +12,7 @@ async function reportNightly({ api, failures, runUrl, sha }) {
   const cursors = new Set();
   let cursor;
   do {
-    const query = new URLSearchParams({ project_id: '2060', q: title, limit: '100' });
+    const query = new URLSearchParams({ project_id: '13734', q: title, limit: '100' });
     if (cursor) query.set('cursor', cursor);
     const page = await api('GET', `/tasks/search?${query}`);
     if (!Array.isArray(page.tasks)) throw new Error('Invalid task search response');
@@ -25,8 +25,8 @@ async function reportNightly({ api, failures, runUrl, sha }) {
   if (matches.length > 1) throw new Error('Multiple open nightly failure tickets');
   let task = matches[0];
   if (!task) {
-    const { labels } = await api('GET', '/projects/2060/labels');
-    const { sections } = await api('GET', '/projects/2060/sections');
+    const { labels } = await api('GET', '/projects/13734/labels');
+    const { sections } = await api('GET', '/projects/13734/sections');
     const labelIds = ['Poteto', 'brain-medium'].map(name => {
       const label = labels?.find(label => label.name === name && !label.deleted);
       if (!label) throw new Error(`Required label missing: ${name}`);
@@ -35,7 +35,7 @@ async function reportNightly({ api, failures, runUrl, sha }) {
     const section = sections?.find(section => section.section_title === 'Todo' && !section.deleted);
     if (!section) throw new Error('Todo section unavailable');
     const created = await api('POST', '/tasks/create', {
-      project_id: 2060, title, section_id: section.id, labels: labelIds,
+      project_id: 13734, title, section_id: section.id, labels: labelIds,
       description: '<h2>Problem</h2><p>Nightly journeys found broken or unverified features.</p><h2>Fix</h2><p>Reproduce each failure on its matching screen.</p><p>Revert first if users cannot work.</p><h2>Done when</h2><p>The failed journeys pass on master.</p><h2>Risk</h2><p>Some features may remain broken.</p><h2>Decision</h2><p>None.</p>',
     });
     task = created.task ?? created.tasks?.[0];

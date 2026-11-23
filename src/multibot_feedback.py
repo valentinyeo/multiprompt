@@ -20,7 +20,7 @@ from pathlib import Path
 EMPTY_WANT = 'multibot-feedback: say what you want from Multibot'
 BOARD_QUEUE_NAME = 'feedback-board-queue.jsonl'
 ATTACHMENT_DIR_NAME = 'feedback-attachments'
-PROJECT = '2060'
+PROJECT = '13734'
 PREFIX = 'Multibot wish: '
 VOTE = 'multibot-feedback-vote:v1'
 LABELS = {'Multiprompt', 'Agent Feedback'}
@@ -296,7 +296,7 @@ def tasks(status):
             raise BoardError('invalid task response')
         names = {label.get('name') for label in task['labels'] if isinstance(label, dict)}
         if LABELS <= names and task['title'].startswith(PREFIX):
-            if not isinstance(task.get('ticketNumber'), str) or not re.fullmatch(r'IGSH-\d+', task['ticketNumber']):
+            if not isinstance(task.get('ticketNumber'), str) or not re.fullmatch(r'MUBO-\d+', task['ticketNumber']):
                 raise BoardError('invalid task reference')
             yield task
 
@@ -356,7 +356,7 @@ def votes(task):
 
 
 def ticket_url(task):
-    return 'https://app.hypertask.ai/detail/project-2060/' + task['ticketNumber'].split('-', 1)[1]
+    return 'https://app.hypertask.ai/detail/project-13734/' + task['ticketNumber'].split('-', 1)[1]
 
 
 def submit(row, snapshots):

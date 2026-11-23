@@ -633,7 +633,7 @@ class ChatSyncAuditTest(unittest.TestCase):
                 audit.file_tickets([finding, finding], state)
                 self.assertEqual(command.call_count, 1)
                 argv = command.call_args.args[0]
-                self.assertIn('2060', argv)
+                self.assertIn('13734', argv)
                 self.assertIn('Filed by the chat sync audit.', argv[-1])
                 self.assertEqual(json.loads(state.read_text()), {'raw_markup': 'DEMO-900'})
             with patch.object(audit, 'run', return_value=json.dumps(dict(task=dict(section=dict(name='Todo'))))) as command:
