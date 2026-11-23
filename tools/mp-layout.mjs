@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -13,15 +13,18 @@ commands:
   create-section <name>                            add a workspace
   move --to <workspace> [--create] <session>...    move sessions into a workspace in one change
   move --to <workspace> --match <glob> [--host N]  move every session whose name matches
-  spawn --name NAME --folder DIR --workspace WORKSPACE [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT] [--host N]  create or reveal a live chat
+  spawn --name NAME --folder DIR --workspace WORKSPACE --host N [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT]  create or reveal a live chat
   open <session> [--workspace <name>] [--host N] [--title <text>|--name <text>] [--group <group>] [--star] [--move] [--no-tmux]
-  open --kind shell --tmux <session> --name <title> --workspace <name> [--group <group>] [--host N] [--star] [--move] [--no-tmux]
-  open --kind chat --name NAME --folder DIR --workspace WORKSPACE [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT] [--host N]
+  open --kind shell --tmux <session> --name <title> --workspace <name> [--host N] [--group <group>] [--star] [--move] [--no-tmux]
+  open --kind chat --name NAME --folder DIR --workspace WORKSPACE --host N [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT]
+
+every write names its server: --host is required to create a tab, and a reopen takes the
+host recorded when the chat was created. There is no default host.
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
   MULTIPROMPT_URL   account service address (default ${DEFAULT_URL})
-  MULTIPROMPT_HOST  default host slot for open and spawn (default 0)
+  MULTIPROMPT_SERVERS  path to the installed servers file
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
@@ -61,6 +64,55 @@ const hostSlot = text => {
   if (!Number.isInteger(n) || n < 0 || n > 2) throw new Failure('host must be 0, 1 or 2');
   return n;
 };
+
+const HOST_RECORD = '.local/state/multiprompt/agent-host';
+const SERVERS_FILE = '.local/share/vstack/servers.json';
+
+function readRecord(file) {
+  try {
+    const value = JSON.parse(readFileSync(file, 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch { return null; }
+}
+
+function chatRecords(env, session) {
+  const wanted = session.toLowerCase();
+  const records = [];
+  if (!env.HOME) return records;
+  const root = join(env.HOME, HOST_RECORD);
+  let names = [];
+  try { names = readdirSync(root); } catch { names = []; }
+  for (const name of names.filter(entry => entry.endsWith('.config.json'))) {
+    const config = readRecord(join(root, name));
+    if (!config || typeof config.tmux !== 'string' || config.tmux.toLowerCase() !== wanted) continue;
+    if (Number.isInteger(config.spawn_host) && config.spawn_host >= 0 && config.spawn_host <= 2) records.push(config.spawn_host);
+  }
+  const facts = readRecord(env.MULTIPROMPT_SERVERS || join(env.HOME, SERVERS_FILE));
+  if (!facts) return records;
+  const servers = Array.isArray(facts.servers) ? facts.servers : [];
+  for (const chat of Array.isArray(facts.chats) ? facts.chats : []) {
+    if (!chat || typeof chat.session !== 'string' || chat.session.toLowerCase() !== wanted) continue;
+    const server = servers.find(item => item && item.name === chat.server);
+    if (!server || !Number.isInteger(server.slot) || server.slot < 0 || server.slot > 2) continue;
+    if (!Array.isArray(server.users) || !server.users.includes(chat.user)) continue;
+    records.push(server.slot);
+  }
+  return records;
+}
+
+export function resolveTabHost(env, session, explicit) {
+  const records = chatRecords(env, session);
+  const hosts = new Set(records);
+  if (explicit !== undefined) {
+    const slot = hostSlot(explicit);
+    const conflicting = records.find(host => host !== slot);
+    if (conflicting !== undefined) throw new Failure(`--host ${slot} contradicts the host ${conflicting} recorded for ${session}`);
+    return slot;
+  }
+  if (hosts.size === 1) return [...hosts][0];
+  if (hosts.size > 1) throw new Failure(`give --host: ${session} has conflicting recorded hosts`);
+  throw new Failure(`give --host: ${session} has no recorded host`);
+}
 
 function normalizedGroup(value) {
   if (value === undefined) return null;
@@ -168,7 +220,7 @@ async function open(ctx, flags) {
   const session = flags.tmux || positional[0];
   if (!session || positional.length > 1 || (flags.tmux && positional.length === 1 && positional[0] !== flags.tmux)) throw new Failure('give one session name');
   if (!/^[A-Za-z0-9_-]{1,63}$/.test(session)) throw new Failure('session names use letters, digits, - and _ (63 at most)');
-  const host = hostSlot(flags.host ?? ctx.env.MULTIPROMPT_HOST ?? '0');
+  const host = resolveTabHost(ctx.env, session, flags.host);
   const title = flags.name || flags.title || session;
   const group = normalizedGroup(flags.group);
   ctx.features = flags.star ? 'groups,favorite' : 'groups';
@@ -233,9 +285,9 @@ async function spawnSession(ctx, flags) {
   if (!name || name.length > 64 || /[\p{Cc}\p{Cs}]/u.test(name)) throw new Failure('invalid session name');
   if (!flags.workspace.trim() || Buffer.byteLength(flags.workspace, 'utf8') > 31 || /[\p{Cc}\p{Cs}]/u.test(flags.workspace)) throw new Failure('invalid workspace');
   if (flags.task !== undefined && (!flags.task.trim() || flags.task.includes('\0') || Buffer.byteLength(flags.task, 'utf8') > 65536)) throw new Failure('invalid task');
-  const hostText = flags.host ?? ctx.env.MULTIPROMPT_HOST ?? '0';
-  if (!/^[0-2]$/.test(hostText)) throw new Failure('host must be 0, 1 or 2');
-  const host = hostSlot(hostText);
+  if (flags.host === undefined) throw new Failure('give --host: a new chat must name the server it runs on');
+  if (!/^[0-2]$/.test(flags.host)) throw new Failure('host must be 0, 1 or 2');
+  const host = hostSlot(flags.host);
   let folder;
   try { folder = ctx.resolveFolder(flags.folder); }
   catch { throw new Failure('invalid folder'); }
@@ -287,6 +339,7 @@ async function spawnSession(ctx, flags) {
     const owner = readState('.owner.json');
     if (owner?.owner === 'terminal') throw new Failure('session is owned by terminal');
     if (config && (config.cwd !== folder || config.tmux !== session || config.spawn_workspace !== flags.workspace || config.spawn_name !== name.toLowerCase() || (config.spawn_group ?? null) !== group)) throw new Failure('host configuration collision');
+    if (config && Number.isInteger(config.spawn_host) && config.spawn_host !== host) throw new Failure(`this chat is recorded on host ${config.spawn_host}, not ${host}`);
     if (mode === 'headless' && config && config.spawn_mode !== 'headless') throw new Failure('session is already visible');
     const current = await call(ctx, 'GET');
     if (current.status !== 200) throw new Failure(current.status === 401 || current.status === 403 ? 'key not authorized' : 'account read failed');
@@ -294,14 +347,15 @@ async function spawnSession(ctx, flags) {
     const parked = ctx.tmux(['has-session', '-t', '=' + session]).status === 0;
     if (parked && !config) throw new Failure('terminal collision');
     if (parked && mode === 'headless') throw new Failure('parking session already exists');
-    if (!config) {
-      const target = join(root, stateKey + '.config.json');
+    const writeConfig = (target, value, exclusive) => {
       const temporary = target + '.' + process.pid + '.' + Math.random().toString(16).slice(2);
       try {
-        writeFileSync(temporary, JSON.stringify({ enabled: false, cwd: folder, tmux: session, spawn_workspace: flags.workspace, spawn_name: name.toLowerCase(), spawn_group: group, spawn_mode: mode }), { mode: 0o600, flag: 'wx' });
+        writeFileSync(temporary, JSON.stringify(value), exclusive ? { mode: 0o600, flag: 'wx' } : { mode: 0o600 });
         renameSync(temporary, target);
       } catch { try { unlinkSync(temporary); } catch {} throw new Failure('cannot write host state'); }
-    }
+    };
+    if (!config) writeConfig(join(root, stateKey + '.config.json'), { enabled: false, cwd: folder, tmux: session, spawn_workspace: flags.workspace, spawn_name: name.toLowerCase(), spawn_group: group, spawn_mode: mode, spawn_host: host }, true);
+    if (config && !Number.isInteger(config.spawn_host)) writeConfig(join(root, stateKey + '.config.json'), { ...config, spawn_host: host }, false);
     const runtime = (args, input) => {
       let result;
       try { result = ctx.runtime(args, input); } catch { throw new Failure('host operation failed'); }
