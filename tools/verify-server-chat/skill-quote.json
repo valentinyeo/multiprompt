@@ -14,11 +14,7 @@
     ">",
     "> quoted line five",
     ">",
-<<<<<<< HEAD
-    "> ... own question @Builder ?"
-=======
     "> … own question @Builder{live-builder} ?"
->>>>>>> 9e2d4f12 (SOFT-3097: Paste skill-quote journey text through the clipboard)
   ],
   "requiredTranscriptTags": [
     "<command-message>pstack:correct</command-message>",
