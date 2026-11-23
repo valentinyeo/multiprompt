@@ -10,6 +10,26 @@ from pathlib import Path
 
 PROVIDERS = ("claude", "codex", "pi", "cursor")
 
+_health_report_fn = None
+
+
+def health_report_fn():
+    global _health_report_fn
+    if _health_report_fn is not None:
+        return _health_report_fn
+    fn = globals().get("health_report")
+    if callable(fn):
+        _health_report_fn = fn
+        return _health_report_fn
+    here = Path(__file__).resolve().parent
+    path = here / "mp_sessions_health.py"
+    loader = importlib.machinery.SourceFileLoader("mp_sessions_health", str(path))
+    spec = importlib.util.spec_from_loader("mp_sessions_health", loader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _health_report_fn = module.health_report
+    return _health_report_fn
+
 
 def load_send(session_api=True):
     here = Path(__file__).resolve()
@@ -533,6 +553,13 @@ def cmd_move(args):
     return 0
 
 
+def cmd_health(args):
+    send = load_send()
+    listing = send.zsb("workspace-list")
+    rows = session_catalog(send, listing)
+    return health_report_fn()(send, listing, rows, args.ping, args.json)
+
+
 def cmd_close(args):
     send = load_send()
     listing = send.zsb("workspace-list")
@@ -587,9 +614,12 @@ def parse(argv):
     ending = commands.add_parser("close", help="stop a chat and close its tab")
     ending.add_argument("name")
     ending.add_argument("--force", action="store_true")
+    probe = commands.add_parser("health", help="check each chat host, tab, history and optional ping")
+    probe.add_argument("--json", action="store_true")
+    probe.add_argument("--ping", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
-    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
+    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "health", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -611,7 +641,7 @@ def main(argv=None):
     command = args.command or "list"
     send = load_send(session_api=False)
     handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
-                    close=cmd_close, send=cmd_send)
+                    close=cmd_close, send=cmd_send, health=cmd_health)
     try:
         if command == "send":
             tail = argv[1:] if argv and argv[0] == "send" else argv

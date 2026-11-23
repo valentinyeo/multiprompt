@@ -26,7 +26,11 @@ The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multib
 mp-send list
 mp-send list --json
 mp-sessions
+mp-sessions health
+mp-sessions health --json
 ```
+
+`mp-sessions health` prints one `OK` or `BROKEN reason` line per live chat. It checks the host process, the registered conversation, the desktop tab view, and whether history can be read. `--ping` sends a visible health ping through chat delivery. When the desktop app is offline, tab and history checks report `UNKNOWN desktop offline` instead of `OK`. Any broken chat makes the command exit non-zero.
 
 Each row has the session link, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. The link looks like `Poteto{live-8bc7bac}`. A name with a space looks like `@Alpha Lead{live-alpha}`. `--json` also has a `link` field with that token. In Chat View the token shows the name, and a click opens that session. A click works when that session is open. An unknown session stays plain text. A chat counts as live when its host process runs or its terminal session exists, so a hosted chat needs no terminal and a terminal chat with a stopped host still appears, as `stopped`. A chat whose name has not been published yet uses its terminal session as the name inside the link, and can still be reached by that session.
 

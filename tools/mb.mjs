@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { run as layoutRun } from './mp-layout.mjs';
 
@@ -32,6 +34,7 @@ commands:
   group rename <old> <new>
   group delete <name>
   roster apply <file> [--dry-run]
+  health [--json] [--ping]
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
@@ -63,7 +66,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux'].includes(name)) flags[name] = true;
+    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -797,6 +800,35 @@ async function pull(ctx, flags) {
   await list(ctx, flags);
 }
 
+function mpSessionsScript(env) {
+  const runtime = join(env.HOME || '', '.multiprompt-runtime/mp-sessions');
+  const talk = join(env.HOME || '', '.local/share/multiprompt-talk/mp_sessions.py');
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'mp-sessions');
+  for (const candidate of [env.MULTIPROMPT_MP_SESSIONS, runtime, talk, checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
+}
+
+async function health(ctx, flags) {
+  if (flags._.length) throw new Failure('health takes no arguments');
+  const args = ['health'];
+  if (flags.json) args.push('--json');
+  if (flags.ping) args.push('--ping');
+  const script = mpSessionsScript(ctx.env);
+  const home = ctx.env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  const result = spawnSync('python3', [script, ...args], {
+    encoding: 'utf8',
+    env: { ...ctx.env, HOME: home, PATH: ctx.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }
+  });
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const err = (result.stderr || '').trimEnd();
+  if (err) ctx.err(err);
+  return result.status ?? 1;
+}
+
 export async function run(argv, overrides = {}) {
   const env = overrides.env || process.env;
   const out = overrides.out || (line => process.stdout.write(line + '\n'));
@@ -804,6 +836,12 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (command === 'health') {
+      const flags = parse(rest);
+      const home = env.HOME;
+      if (!home) throw new Failure('HOME is required');
+      return await health({ env, out, err }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;
