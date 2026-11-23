@@ -1,0 +1,11 @@
+SOFT-3048 server shell copy and scroll, run 45127101468
+release v0.28.1881 (contains f895b5178)
+result.status: passed
+clipboard: SOFT3048SCROLL-42
+marker: SOFT3048SCROLL-42
+clipboard equals marker: True
+first visible scroll index before wheel: 179
+first visible scroll index after wheel up: 143
+wheel up showed older lines: True
+interrupt received by boundary: True
+cleanup: owned process tree stopped; scratch copied to evidence/data then removed
