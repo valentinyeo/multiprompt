@@ -129,6 +129,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
 - [Session actions](session-actions.md): native quit/reopen, ordered right-click actions, single-request deletion and reopening/copying both original histories through explicit synthetic remote boundaries.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
+- [Workspace menu speed and session repaint churn](workspace-menu-and-repaint.md): with twenty restored CMD sessions, open the workspace menu five times under a 300 ms paint and pump budget, follow the pointer onto three menu rows, then count sidebar changes at 10 fps for 30 seconds of live console output.
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Server runner group](server-open-group.md): import one account shell tab into a group named Runners, then import that same tab again without adding a tab or a group.

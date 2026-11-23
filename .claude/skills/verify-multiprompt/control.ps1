@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'workspace-menu-and-repaint', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -497,6 +497,21 @@ try {
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $relaunchSeed.document -Depth 8), (New-Object Text.UTF8Encoding $false))
         Save-Json $relaunchSeed.document 'seed-session.json'
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
+    } elseif ($Feature -eq 'workspace-menu-and-repaint') {
+        $churnWorkspaces = @(@{ name = 'Main'; wid = 'churn-main' }, @{ name = 'Work'; wid = 'churn-work' }, @{ name = 'Client'; wid = 'churn-client' }, @{ name = 'Personal'; wid = 'churn-personal' })
+        $churnTabs = @()
+        $seedId = 200
+        for ($index = 0; $index -lt 20; $index++) {
+            $workspace = [int][Math]::Floor($index / 5)
+            $churnTabs += @{ kind = 'cmd'; name = ('Menu {0:00}' -f ($index + 1)); manual = $true; shell_id = $seedId; workspace = $workspace }
+            $seedId++
+        }
+        $churnSeed = @{ active_tab = 0; active_workspace = 0; workspace_count = 4; single_window = $true; workspaces = $churnWorkspaces; tabs = $churnTabs }
+        New-Item -ItemType Directory -Force (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $churnSeed -Depth 8), (New-Object Text.UTF8Encoding $false))
+        Save-Json $churnSeed 'seed-session.json'
+        $result.seedBoundary = 'The harness writes the saved-tab file once before launch: twenty local CMD sessions over four workspaces, five per workspace. Nothing is edited after launch and no test-only setter exists; the app creates the real consoles and the real workspace menu from that saved state.'
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     }
@@ -627,6 +642,7 @@ try {
             . (Join-Path $PSScriptRoot 'control-feature-session-restore.ps1')
         }
         'workspaces' { . (Join-Path $PSScriptRoot 'workspace-switcher.ps1') }
+        'workspace-menu-and-repaint' { . (Join-Path $PSScriptRoot 'control-feature-workspace-menu-and-repaint.ps1') }
         'chat-browser-shortcut' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-browser-shortcut.ps1')
         }
