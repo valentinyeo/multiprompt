@@ -2120,6 +2120,14 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
         self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [1, 4])
 
+    def test_soft_3097_skill_quote_echo_keeps_the_command_in_front(self):
+        self.path.write_text((ROOT / 'tools/fixtures/SOFT-3097/skill-quote-echo.jsonl').read_text())
+        _, rows = self.read()
+        quoted = ('> quoted line one\n>\n> quoted line two\n>\n> quoted line three\n>\n'
+                  '> quoted line four\n>\n> quoted line five\n>\n> … own question @Builder{live-builder} ?')
+        self.assertEqual([(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')],
+                         [('user', '/pstack:correct ' + quoted), ('assistant', 'echo reply')])
+
     def test_refused_slash_command_facts_are_opt_in_and_additive(self):
         prompt = '/hormozi-skills:audit-offer can you use this also to review my own offer'
         enqueue = dict(type='queue-operation', operation='enqueue', timestamp='2026-10-13T11:06:22.591Z', content=prompt)
