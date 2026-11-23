@@ -45,6 +45,8 @@ SOFT-2524 changes only the outer runtime selection and bundle identity. The cove
 
 SOFT-2526 carries the existing client ID into history blocks and uses it for pending-row assignment. Native probes and counterexample replays now supply that ID. The one-message TLA+ transition table is unchanged: it assumes an echo belonging to that send. The desktop never uses the legacy text-only assignment path for identified sends. Separate delivery and history regressions cover two identical prompts, rewritten text, late ID metadata, cache replay and id-less history. The reader adds optional `client_id` metadata and persists native aliases in existing attempt bindings; no wire ID, delivery state or database schema changes. Older clients may ignore the extra metadata.
 
+SOFT-3054 merges master into the fresh-start handover branch. Master's runtime fingerprint moves the reader's `RUNTIME_GENERATION` into the canonical inner source; the covered reader functions and the delivery model are unchanged, so their file hashes still describe the code.
+
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
 | Source | Covered behavior |
