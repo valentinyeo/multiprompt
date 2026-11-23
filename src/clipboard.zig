@@ -1255,6 +1255,10 @@ pub fn sendClaudeSendQueuedNowToShell(shell_index: u32) bool {
 
 pub fn sendCtrlCToShell(shell_index: u32) void {
     if (shell_index >= app_state.shell_count) return;
+    if (app_state.shells[shell_index].native_terminal) {
+        @import("native_session.zig").interrupt(app_state.shells[shell_index].shell_id);
+        return;
+    }
     const pid = app_state.shells[shell_index].pid;
     if (pid == 0) return;
 

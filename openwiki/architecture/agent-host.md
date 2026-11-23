@@ -80,8 +80,8 @@ under the 108-character limit a Unix socket path has, whatever the home director
   `attempt_prepare` with binding
   `{"v":1,"mode":"stream_json_user_line","host":<pid>,"session":<sid>}`. After a successful
   stdin write and flush it records the message id in `state.json` and calls `attempt_finish(sent)`.
-- **idle stop**: no in-flight message and no delivery request for 1800 s. The host closes
-  stdin, waits up to 5 s, kills, unlinks the socket, removes `owner.json`, releases the lock.
+- A quiet chat keeps its host and agent running, including its background work. Only an
+  explicit stop, a fresh start, Switch AI or a crash ends the agent.
 - **crash restart**: the next delivery request finds no socket, starts a host (which takes
   the stale lock), and retries once. Repeated requests for an id already written in the same
   epoch answer `duplicate` and write nothing.

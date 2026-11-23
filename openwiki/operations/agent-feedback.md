@@ -10,7 +10,7 @@ multibot-feedback "a browser screenshot shortcut" --why "capturing a screenshot 
 
 Each wish is saved in the local user's private feedback log first. The local record keeps session and working-folder context. Never put credentials in feedback. The command rejects known credentials and paths. Session names and folder names are not attached automatically. Review the deliberate want and why before submitting; automatic checks cannot recognize every secret.
 
-Board submission requires the installed `hypertask` CLI and an already-authorized agent's `HT_TOKEN` in that agent's environment. No token is bundled or saved by this command. The command checks that the explicit token authenticates an agent. It never falls back to the CLI's saved login for a write. A different workspace account does not inherit the host account's token.
+When the chat has an agent `HT_TOKEN`, the command files or votes immediately. When it does not, the wish is still saved locally and appended to a shared server queue under the host account's state directory. The agent host and `multibot-feedback --drain` submit that queue with whichever agent token the host already holds. No token is bundled or saved by this command. It never falls back to the CLI's saved login for a write.
 
 New board tickets have the existing Multiprompt and Agent Feedback labels. They contain the wish, reason, running app version and provider. Session names, paths and local context are not attached. The two labels must already exist. The app version comes from the desktop build, not a manual field. Older clients without a version keep feedback local.
 
@@ -18,7 +18,7 @@ Wish titles are Unicode-normalized, case-folded and whitespace-normalized. Exact
 
 The activity API returns at most 100 entries without an activity cursor. If that window fills, submission and ranking fail closed rather than miss older votes.
 
-The output says `submitted` or `voted` only after reading the ticket and vote back. If a board call fails, local feedback remains and the output says board submission was not confirmed. A ticket or vote may nevertheless have reached the board before a failed response. Retry the same wish to reconcile it.
+The output says `filed` with the ticket link only after reading the ticket and vote back. If the chat has no token or a board call fails, local feedback and the shared queue keep the row and the output says `queued, will be filed` with the reason. Run `multibot-feedback --drain` on the host (or wait for the agent host idle drain) to file queued rows once a token is available. A ticket or vote may nevertheless have reached the board before a failed response. Retry the same wish to reconcile it.
 
 To rank actual votes in the current UTC week, run:
 

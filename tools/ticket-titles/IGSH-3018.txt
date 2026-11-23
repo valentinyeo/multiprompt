@@ -1,0 +1,1 @@
+Multiprompt: releases land within 15 minutes of merge

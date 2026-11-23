@@ -24,7 +24,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 ## Hard rules
 
-- Every inner reader edit increments `RUNTIME_GENERATION` in `src/chat_history_reader.py`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
+- The helper bundle derives its runtime fingerprint from its contents; never hand-bump `RUNTIME_GENERATION`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
 - Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.
 - **Never compile on the laptop.** Use the in-app updater.
@@ -49,7 +49,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Keep source feature coverage visible; it never gates a pull request. | `tools/check-feature-coverage.mjs` reports in `maintain-verification.yml` with `continue-on-error: true`; existing gaps belong to Part H, w-2567h |
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
-| Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
+| Every reader and bundled helper edit changes its runtime fingerprint automatically. | `tools/check-runtime-generation.mjs` runs `tools/runtime-fingerprint.test.py` (test workflow) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |

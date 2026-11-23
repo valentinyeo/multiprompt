@@ -1,0 +1,9 @@
+{
+  "switch_targets": ["claude", "codex", "pi", "antigravity"],
+  "labels": {
+    "claude": "Claude",
+    "codex": "Codex",
+    "pi": "Pi",
+    "antigravity": "Antigravity"
+  }
+}
