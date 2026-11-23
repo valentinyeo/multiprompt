@@ -499,6 +499,30 @@ def read_text(text):
     return text
 
 
+def resolve_destination(reader, provider, sid, tmux):
+    tmux = tmux or reader.host_chat_name(provider, sid) or locator_tmux(reader, provider, sid) or sid
+    if TMUX_NAME.fullmatch(tmux) is None:
+        raise ValueError("invalid terminal session: " + str(tmux))
+    bound = None
+    if sid == tmux:
+        hosted = reader.host_sid_for_tmux(provider, tmux)
+        if hosted:
+            sid = hosted
+        else:
+            bound = reader.resolve_tmux_agent(provider, tmux, require_bound=True)
+            if bound:
+                sid = bound[0]
+    if SESSION_ID.fullmatch(sid) is None:
+        raise ValueError("invalid session id: " + str(sid))
+    hosting = reader.host_dispatch_switch(provider, sid)
+    if hosting and reader.host_chat_name(provider, sid) == tmux and reader.host_owned(provider, sid):
+        return sid, tmux
+    bound = bound or reader.resolve_tmux_agent(provider, tmux, require_bound=True)
+    if bound and bound[0] == sid and (not hosting or reader.host_chat_name(provider, sid) == tmux):
+        return sid, tmux
+    raise ValueError("no live host or pane agent for " + provider + " session " + sid + " in " + tmux + "; run mp-sessions to find a live chat")
+
+
 def deliver(args, provider, sid, tmux, text, sender=None):
     reader = reader_module(args.reader)
     check_rate(reader, provider, sid, sender)
@@ -521,24 +545,18 @@ def deliver(args, provider, sid, tmux, text, sender=None):
             print(line)
     state = (final or {}).get("state")
     if state == "failed" or state == "cancelled":
+        print("mp-send: message " + str(state) + ": " + str((final or {}).get("receipt") or "delivery failed"), file=sys.stderr)
         return 3
-    if not args.wait:
-        return 0
-    if state not in TERMINAL_STATES:
-        print("timed out waiting for the message", file=sys.stderr)
+    if state not in (TERMINAL_STATES if args.wait else HANDOFF_STATES):
+        print("mp-send: timed out waiting for the message" + ("" if args.wait else " handoff; delivery is unconfirmed"), file=sys.stderr)
         return 4
     return 0
 
 
 def run(args):
-    if SESSION_ID.match(args.sid) is None:
-        raise ValueError("invalid session id: " + str(args.sid))
     text = read_text(args.text)
-    reader = reader_module(args.reader)
-    tmux = args.tmux or locator_tmux(reader, args.provider, args.sid)
-    if not tmux:
-        raise ValueError("no terminal binding for this session; pass --tmux")
-    return deliver(args, args.provider, args.sid, tmux, text)
+    sid, tmux = resolve_destination(reader_module(args.reader), args.provider, args.sid, args.tmux)
+    return deliver(args, args.provider, sid, tmux, text)
 
 
 def run_named(args):

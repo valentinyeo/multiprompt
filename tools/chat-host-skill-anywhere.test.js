@@ -8,12 +8,13 @@ const path = require('node:path');
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
 
-test('a live chat message that names an installed skill anywhere starts with that skill', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-anywhere-'));
+test('SOFT-3086 the agent receives slash skills exactly where the user typed them', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-position-'));
   try {
     const program = String.raw`
-import json, sys
+import io, json, sys
 from pathlib import Path
+from types import SimpleNamespace
 outer = {}
 exec(compile(sys.stdin.read(), 'reader', 'exec'), outer)
 r = {'__name__': 'probe'}
@@ -28,32 +29,35 @@ own.mkdir(parents=True)
 project = home / 'work'
 (project / '.claude' / 'commands').mkdir(parents=True)
 (project / '.claude' / 'commands' / 'ship.md').write_text('x')
-lead = r['host_claude_lead_skill']
+r['host_config'] = lambda *args: dict(cwd=str(project))
 cases = [
-    ('fix the pile up /pstack:poteto-mode', None, '/pstack:poteto-mode fix the pile up'),
-    ('runners /house-rules should stay /pstack:poteto-mode', None, '/pstack:poteto-mode runners /house-rules should stay'),
-    ('runners /house-rules should stay', None, '/house-rules runners should stay'),
-    ('please /ship it', str(project), '/ship please it'),
-    ('/pstack:poteto-mode already first', None, '/pstack:poteto-mode already first'),
-    ('open /home/user/file and /pstack:missing-skill', None, 'open /home/user/file and /pstack:missing-skill'),
-    ('see https://x.test/a:b and /tmp', None, 'see https://x.test/a:b and /tmp'),
-    ('/pstack:poteto-mode', None, '/pstack:poteto-mode'),
+    'why is this not done via /house-rules ?',
+    'fix the pile up /pstack:poteto-mode',
+    'runners /house-rules should stay /pstack:poteto-mode',
+    'please /ship it',
+    'keep  /house-rules\t exactly',
+    'first line\n/house-rules',
+    ' /house-rules',
+    '/pstack:poteto-mode already first',
+    '/house-rules',
+    '/ship it',
+    'open /home/user/file and /pstack:missing-skill',
+    'see https://x.test/a:b and /tmp',
 ]
-for text, cwd, want in cases:
-    got = lead(text, cwd)
-    assert got == want, (text, got)
-print('skills lead the message')
+for fresh in (False, True):
+    for text in cases:
+        stream = io.BytesIO()
+        session = dict(state=dict(fresh_start=fresh), agent=SimpleNamespace(stdin=stream))
+        assert r['host_claude_write']('claude', 'fixture', session, 'message-token', text)
+        sent = json.loads(stream.getvalue())
+        assert sent['type'] == 'user', sent
+        assert sent['message'] == dict(role='user', content=[dict(type='text', text=text)]), (text, sent)
+print('slash positions and whitespace preserved in agent input')
 `;
     const result = spawnSync('python3', ['-c', program, home], { input: source, encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME: home } });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /skills lead the message/);
+    assert.match(result.stdout, /slash positions and whitespace preserved in agent input/);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
-});
-
-test('the claude host writes the skill-led text', () => {
-  const start = source.indexOf('def host_claude_write(');
-  const body = source.slice(start, source.indexOf('\ndef ', start + 5));
-  assert.match(body, /host_claude_lead_skill\(text,/);
 });
