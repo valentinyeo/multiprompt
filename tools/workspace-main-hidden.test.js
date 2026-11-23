@@ -50,6 +50,14 @@ test('SOFT-2380 the workspace journey owns foreground input and creates an undel
   assert.match(journey.slice(create, archive), /\$created = \(Read-Session\)\.active_workspace/);
 });
 
+test('SOFT-2380 a background menu refresh preserves selection past all three built-in rows', () => {
+  const refresh = body('refreshEntries');
+  assert.match(refresh, /selected >= views\.len and selected < entry_count \+ views\.len/);
+  assert.match(refresh, /keep = entries\[selected - views\.len\]\.id/);
+  assert.match(refresh, /keep_len = entries\[selected - views\.len\]\.id_len/);
+  assert.match(refresh, /selected = index \+ views\.len/);
+});
+
 test('IGSH-2281 an empty Main workspace stays out of the menu', () => {
   const empty = body('emptyHome');
   assert.match(empty, /eql\(u8, entry\.id\[0\.\.entry\.id_len\], "default"\)/);

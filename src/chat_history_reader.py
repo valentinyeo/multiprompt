@@ -814,6 +814,7 @@ def conversation_event(event, agent):
     else:
         text = content if isinstance(content, str) else ""
     text = _SYSTEM_REMINDER.sub("", text)
+    tracked = _TRACKED_ID.search(text) if role == "user" else None
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
@@ -824,6 +825,8 @@ def conversation_event(event, agent):
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
+    if tracked:
+        result["client_id"] = tracked.group(1)
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -2012,6 +2015,45 @@ def fit_tail(rows, oldest):
     return kept, oldest
 
 
+def history_client_ids(rows, provider, sid):
+    import sqlite3
+    import uuid
+    from contextlib import closing
+    path = message_store_path()
+    if not path.exists() or not any(row.get('role') == 'user' for row in rows):
+        return
+    aliases = {}
+    def bind(native, client):
+        if isinstance(native, str) and native:
+            aliases[native] = client if native not in aliases or aliases[native] == client else None
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+        for (client,) in db.execute('SELECT id FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)):
+            bind(client, client)
+            if provider == 'claude':
+                bind(str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + client)), client)
+        for client, raw in db.execute('SELECT id,binding FROM message_attempts WHERE provider=? AND sid=?', (provider, sid)):
+            binding = json.loads(raw)
+            bind(binding.get('app_id'), client)
+            for native in binding.get('uuids') or []:
+                bind(native, client)
+        for (raw,) in db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='turn.started'", (provider, sid)):
+            event = json.loads(raw)
+            if event.get('kind') != 'turn.started':
+                continue
+            payload = event.get('payload') or {}
+            client = payload.get('message_id')
+            if not isinstance(client, str) or event.get('room_scope') is not None:
+                continue
+            for native in payload.get('uuids') or []:
+                bind(native, client)
+    for row in rows:
+        if row.get('role') != 'user':
+            continue
+        client = aliases.get(row.get('client_id')) or aliases.get(row.get('id'))
+        if client:
+            row['client_id'] = client
+
+
 def response(q, source=None, as_owner=False, resolved=None):
     q["_held_queue_progress"] = False
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -2180,6 +2222,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
         paired = pair_tool_rows(rows)
+        history_client_ids(paired, agent, sid)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
@@ -4782,6 +4825,11 @@ def host_bind_uuid(provider, sid, tmux, session, event):
     if not uuids or not sends:
         return
     sends[-1]["uuid"] = uuids
+    if tmux is not None:
+        entry = sends[-1]
+        with host_db(provider, sid, tmux, session) as db:
+            db.execute("UPDATE message_attempts SET binding=json_set(binding,'$.uuids',json(?)) WHERE provider=? AND sid=? AND id=? AND attempt=?",
+                       (json.dumps(uuids), provider, sid, entry['id'], entry['attempt']))
     host_turn_started(provider, sid, tmux, session, sends[-1])
 
 

@@ -54,8 +54,8 @@ const ChatOutboxEntry = struct {
                 source += '''    transcript = true;
     if (chatEchoWaitsOnTranscript(entry)) {
         const text = std.unicode.utf8ToUtf16LeStringLiteral("synthetic delivery probe");
-        var p = [_]chat_echo.Pending{.{ .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } }};
-        const blocks = [_]chat_echo.UserBlock{.{ .text = text, .stamp_ms = 200, .message_id = 1 }};
+        var p = [_]chat_echo.Pending{.{ .client_id = 1, .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } }};
+        const blocks = [_]chat_echo.UserBlock{.{ .text = text, .stamp_ms = 200, .message_id = 1, .client_id = 1 }};
         var picked: [1]?usize = undefined;
         chat_echo.assign(&p, &blocks, false, &.{}, &picked);
         if (picked[0] != null) pending = false;
