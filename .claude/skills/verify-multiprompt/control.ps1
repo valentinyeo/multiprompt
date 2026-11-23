@@ -429,6 +429,7 @@ try {
             $remoteTabs[0].cv = $true
             $remoteTabs[0].csid = $remoteSids['verify-fresh-start']
             $remoteTabs[0].claude_session = $true
+            $remoteTabs[0].ai_agent = 1
         }
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = ($Feature -in @('chat-still', 'fresh-start')); tabs = $remoteTabs } -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
