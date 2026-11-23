@@ -34,7 +34,7 @@ jobs:
       chat_row_identity_proof: true
   regressions:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,7 +52,7 @@ jobs:
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Reconcile hosted rows and pending sends
-        run: timeout 600 node --test tools/chat-row-identity.test.js tools/chat-delivery.test.js
+        run: timeout 600 node --test tools/chat-row-identity.test.js tools/chat-row-identity-proof.test.js tools/chat-delivery.test.js
       - name: Verify hosted reads and client identity mapping
         run: |
           timeout 120 python3 tools/verify-hosted-chat-reads.py

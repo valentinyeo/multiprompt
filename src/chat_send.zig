@@ -1798,9 +1798,8 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             if (app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent >= 2) continue;
         }
         const wire = std.mem.sliceTo(&e.message_wire_id, 0);
-        if (wire.len == 0) continue;
         pending[result.count] = .{
-            .client_id = @import("chat_markdown.zig").rowKey(wire),
+            .client_id = if (wire.len == 0) 0 else @import("chat_markdown.zig").rowKey(wire),
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,

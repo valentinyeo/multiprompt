@@ -55,7 +55,7 @@ test "SOFT-2526 native transcript ids are not client ids" {
     try std.testing.expectEqual(@as(u64, 0), h.blocks.items[0].client_id);
 }
 
- test "SOFT-2526 identified hosted echo retires pending above its reply" {
+test "SOFT-2526 identified hosted echo retires pending above its reply" {
     const a = std.testing.allocator;
     var h: history.History = .{};
     defer h.deinit(a);
@@ -73,6 +73,27 @@ test "SOFT-2526 native transcript ids are not client ids" {
     try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
     try std.testing.expectEqual(.user, h.blocks.items[0].role);
     try std.testing.expectEqual(.prose, h.blocks.items[1].role);
+}
+
+test "SOFT-2526 normalized idless rows keep their place when source offsets change" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "hosted-chat", "hosted-session");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try load(&h, 11);
+    try h.apply(a, "@mp\t1\thistory\tok\thosted-session\t0\t400\t12\t0\tclaude\thosted-chat\t2000\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"text\":\"New unrelated row\",\"timestamp\":\"2026-11-07T00:00:00Z\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"user\",\"text\":\"Please  check this\",\"timestamp\":\"2026-11-07T00:00:02Z\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"Checked\",\"timestamp\":\"2026-11-07T00:00:03Z\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    try std.testing.expectEqual(.user, h.blocks.items[1].role);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Checked"), h.text.items[h.blocks.items[2].start..][0..h.blocks.items[2].len]);
+    const cached = try h.encode(a, key);
+    defer a.free(cached);
+    var restored = try history.History.decode(a, cached, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqual(@as(usize, 3), restored.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
 }
 
 test "SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair" {
@@ -116,4 +137,8 @@ test('SOFT-2526 native transcript ids are not client ids', () => {
 
 test('SOFT-2526 identified hosted echo retires pending above its reply', () => {
   runZigTest('SOFT-2526 identified hosted echo retires pending above its reply');
+});
+
+test('SOFT-2526 normalized idless rows keep their place when source offsets change', () => {
+  runZigTest('SOFT-2526 normalized idless rows keep their place when source offsets change');
 });

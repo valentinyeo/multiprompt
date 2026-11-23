@@ -842,13 +842,15 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
                 if (picked == bi) break;
             } else return bi;
         }
-        return null;
     }
     if (p.prefix.len == 0) return null;
     var full: [16384]u16 = undefined;
     const norm = normalize(p.text, &full);
     const pending_hash = if (claimed.len > 0) textHash(p.text) else 0;
     for (blocks, 0..) |b, bi| {
+        if (p.client_id != 0 and (b.client_id != 0 or !sameText(b.text, p.text))) continue;
+        if (p.anchor.sent_ms > 0 and b.stamp_ms > 0 and
+            (b.stamp_ms < p.anchor.sent_ms - SEND_SKEW_MS or b.stamp_ms > p.anchor.sent_ms + NOT_SENT_WAIT_MS)) continue;
         const after_anchor = b.message_id != 0 and p.anchor.after_id != 0 and b.stamp_ms == p.anchor.after_ms and (for (blocks[0..bi]) |before| {
             if (before.message_id == p.anchor.after_id) break true;
         } else false);
@@ -1482,14 +1484,14 @@ test "SOFT-2526 rewritten history replaces its send without matching text or tim
     try std.testing.expectEqual(@as(?usize, 0), picked[0]);
 }
 
-test "SOFT-2526 idless history cannot consume an identified send with identical text" {
+test "SOFT-2526 idless history replaces an identified send by normalized text and time" {
     const text = w("same prompt");
     var pending = [_]Pending{.{ .text = &text, .prefix = &text, .anchor = .{ .after_ms = 1000 } }};
     if (@hasField(Pending, "client_id")) pending[0].client_id = 11;
     const blocks = [_]UserBlock{ ub("same prompt", 2000), ub("same prompt", 2000) };
     var picked: [1]?usize = undefined;
     assign(&pending, &blocks, false, &.{}, &picked);
-    try std.testing.expectEqual(@as(?usize, null), picked[0]);
+    try std.testing.expectEqual(@as(?usize, 0), picked[0]);
 }
 
 test "IGSH-1605 a message typed while the link is down waits then is delivered once after reconnect" {
@@ -1507,7 +1509,6 @@ test "IGSH-1605 a send that failed when the link dropped is requeued by its clie
     try std.testing.expect(!requeueOnReconnect(.not_sent, true, true, true, false));
 }
 
-
 test "IGSH-1831 reordered skills match only confirmed messages and preserve words and multiplicity" {
     const original = w("guess why /deeper /pstack:poteto-mode");
     const reordered = w("/pstack:poteto-mode guess why /deeper");
@@ -1523,4 +1524,22 @@ test "IGSH-1831 reordered skills match only confirmed messages and preserve word
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /deeper")));
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /pstack:poteto-mode /extra")));
     try std.testing.expect(!sameSkillText(&w("ordinary words"), &w("words ordinary")));
+}
+
+test "SOFT-2526 fallback rejects a different client id and old or future echoes" {
+    const text = w("same prompt");
+    var pending = [_]Pending{.{ .text = &text, .prefix = &text, .client_id = 11, .anchor = .{ .sent_ms = 100_000 } }};
+    var blocks = [_]UserBlock{.{ .text = &text, .stamp_ms = 100_001, .client_id = 22 }};
+    var picked: [1]?usize = undefined;
+    assign(&pending, &blocks, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, null), picked[0]);
+    blocks[0].client_id = 0;
+    for ([_]i64{ 1, 100_000 + NOT_SENT_WAIT_MS + 1 }) |stamp| {
+        blocks[0].stamp_ms = stamp;
+        assign(&pending, &blocks, false, &.{}, &picked);
+        try std.testing.expectEqual(@as(?usize, null), picked[0]);
+    }
+    blocks[0].stamp_ms = 100_001;
+    assign(&pending, &blocks, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, 0), picked[0]);
 }

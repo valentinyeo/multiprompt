@@ -183,7 +183,7 @@ pub const History = struct {
             }
             const role: md.Role = if (std.mem.eql(u8, m.role, "user")) .user else if (std.mem.eql(u8, m.role, "assistant")) .prose else continue;
             if (m.text.len == 0) return error.InvalidHistory;
-            const client = if (m.client_id.len > 0) m.client_id else m.id;
+            const client = m.client_id;
             const merge = m.id.len > 0 and std.mem.eql(u8, m.id, last_id.items) and role == last_role and segment == m.segment;
             if (role == .user and m.client_id.len > 0 and !merge) {
                 if (users.contains(client)) continue;
@@ -469,7 +469,17 @@ pub const History = struct {
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
-            const matched = incoming.getPtr(key);
+            var matched = incoming.getPtr(key);
+            if (matched != null and key.id.len == 0 and matched.?.known) matched = null;
+            if (matched == null) {
+                for (order.items) |candidate| {
+                    const entry = incoming.getPtr(candidate).?;
+                    if (!entry.known and key.matchesLegacy(candidate)) {
+                        matched = entry;
+                        break;
+                    }
+                }
+            }
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
             if (matched) |entry| {
                 entry.known = true;
@@ -538,15 +548,35 @@ pub const History = struct {
         end: u64,
         segment: u64,
         timestamp: []const u8,
+        text: []const u16,
+        ordinal: usize,
         settlement: @FieldType(Message, "settlement"),
+
+        fn matchesLegacy(lhs: RowIdentity, rhs: RowIdentity) bool {
+            if ((lhs.id.len > 0 and rhs.id.len > 0) or lhs.segment != rhs.segment or
+                !std.mem.eql(u8, lhs.role, rhs.role) or !std.mem.eql(u16, lhs.text, rhs.text)) return false;
+            const left = echo.stampMs(lhs.timestamp);
+            const right = echo.stampMs(rhs.timestamp);
+            if ((left == 0) != (right == 0) or @abs(left - right) > echo.SEND_SKEW_MS) return false;
+            if ((lhs.settlement == null) != (rhs.settlement == null)) return false;
+            if (lhs.settlement) |fact| {
+                if (!std.mem.eql(u8, fact.operation, rhs.settlement.?.operation) or !std.mem.eql(u8, fact.content, rhs.settlement.?.content)) return false;
+            }
+            return true;
+        }
 
         const Context = struct {
             pub fn hash(_: @This(), key: RowIdentity) u64 {
                 var h = std.hash.Wyhash.init(key.segment);
-                inline for (.{ "role", "id", "timestamp" }) |field| {
+                inline for (.{ "role", "id" }) |field| {
                     const bytes = @field(key, field);
                     std.hash.autoHash(&h, bytes.len);
                     h.update(bytes);
+                }
+                if (key.id.len == 0) {
+                    h.update(key.timestamp);
+                    h.update(std.mem.sliceAsBytes(key.text));
+                    std.hash.autoHash(&h, key.ordinal);
                 }
                 std.hash.autoHash(&h, key.settlement != null);
                 if (key.settlement) |fact| {
@@ -559,9 +589,10 @@ pub const History = struct {
 
             pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
                 if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
-                inline for (.{ "role", "id", "timestamp" }) |field| {
+                inline for (.{ "role", "id" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
+                if (lhs.id.len == 0 and (lhs.ordinal != rhs.ordinal or !std.mem.eql(u8, lhs.timestamp, rhs.timestamp) or !std.mem.eql(u16, lhs.text, rhs.text))) return false;
                 if (lhs.settlement) |fact| {
                     if (!std.mem.eql(u8, fact.operation, rhs.settlement.?.operation) or !std.mem.eql(u8, fact.content, rhs.settlement.?.content)) return false;
                 }
@@ -570,14 +601,11 @@ pub const History = struct {
         };
     };
 
-    fn rowIdentity(self: History, a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
+    fn rowIdentity(_: History, a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
         const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
-        const native_id = m.read_id orelse m.id;
-        const id = if (native_id.len > 0) native_id else if (m.end > m.offset)
-            try std.fmt.allocPrint(a, "source:{d}:{d}:{d}", .{ self.inode, m.offset, m.end })
-        else
-            try std.fmt.allocPrint(a, "legacy:{d}:{d}:{d}:{d}", .{ self.inode, self.start, self.offset, ordinal });
-        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .settlement = m.settlement };
+        const text = try std.unicode.utf8ToUtf16LeAlloc(a, m.text);
+        const normalized = try a.alloc(u16, text.len);
+        return .{ .role = m.role, .id = m.read_id orelse m.id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .text = @import("chat_echo.zig").normalize(text, normalized), .ordinal = ordinal, .settlement = m.settlement };
     }
 
     pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {

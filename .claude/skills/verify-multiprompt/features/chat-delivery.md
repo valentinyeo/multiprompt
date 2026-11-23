@@ -171,3 +171,11 @@ The same driver must first reject the checksum-pinned released v0.28.946 app bec
 Inspect all eight notes-<theme>-<state>.png screenshots and the independent pixel probes. Five compact painted labels must occupy at most 180 scaled pixels; expanded body spacing must exceed that span and remain after a source turn/poll. app-cache.jsonl retains all five full source notes. Check actions.json for four owned native clicks, doctor.json for exact app identity, result.json for passed, and cleanup.json for zero owned processes and removed scratch data. No screenshot alone certifies working body links or remote account synchronization.
 
 Use the Android IGSH-1005 native chip screenshots beside desktop: the label is `sender to recipient · TICKET`, with existing dim text and an expansion arrow. Only viewport sizing differs. No Android product change is needed for this desktop parity ticket.
+
+### One prompt above its reply (SOFT-2526, SOFT-3100)
+
+`chat-row-identity.yml` runs the chat-delivery driver on GitHub Windows with `chat_row_identity_proof=true`. The real composer sends two prompts through the production hosted Claude dispatcher. The provider stand-in withholds each reply until the driver copies the pending conversation. Its first transcript user row has no native or client ID; its second carries the dispatched UUID, which the embedded reader maps to the client ID. Both rows have real timestamps. No production reconciliation function is replaced.
+
+The driver waits for each reply, copies rendered rows using Select All and Ctrl+C, then clicks the real More Menu's Resync row and copies again. The independent oracle requires every prompt exactly once and above its reply, with both turns in send order after reconciliation and refresh. It retains `identity-{reconciled,refreshed}-{1,2}.png`, matching text files, raw provider events, Doctor identity and owned-process cleanup in `verify-chat-delivery`.
+
+The boundary replaces SSH, tmux and the paid Claude process. It does not prove a real provider or server. `tools/chat-row-identity.test.js` separately executes the Zig history and echo functions against replacement-file and native-ID fixtures; the production outbox suite covers send retirement. The plain re-applied 1237 build is the required negative control, not a release selected for an unrelated failure.

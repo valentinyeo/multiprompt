@@ -77,3 +77,7 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - The native painter test uses only synthetic public text and does not write session JSON, agent transcripts, settings or a test-only app setter.
 - Release-tag runs exercise the desktop toggle and local console stand-ins; the supplemental painter image is generated only for branch builds.
 - Palette entry, theme variants, long-message scrolling and actual browser navigation are outside this selected journey. Link hit coordinates, nested-table scrolling, full-layout find positions, parse reuse and a body longer than a fixed block buffer are covered by regression tests.
+
+### Sent-row identity and order
+
+The [one prompt above its reply journey](chat-delivery.md#one-prompt-above-its-reply-soft-2526-soft-3100) sends through the real Windows composer and checks the copied visible row order, exactly-once prompts and retained screenshots before and after Resync. It covers hosted transcript echoes with and without a client ID. It is separate from this feature's offline toggle and renderer proofs.

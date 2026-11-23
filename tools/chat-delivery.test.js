@@ -1059,7 +1059,7 @@ test "delivery: legacy delivered entries without a timestamp cannot stay queued 
     try std.testing.expect(g_chat_outbox.items[0].retryable);
     transcript(std.unicode.utf8ToUtf16LeStringLiteral("legacy stuck"), 100);
     chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
 test "delivery: restored delivered outbox preserves its deadline and keeps late matching" {
     defer clear();

@@ -53,7 +53,7 @@ Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` 
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
-SOFT-2526 carries the existing client ID into history blocks and uses it for pending-row assignment. Native probes and counterexample replays now supply that ID. The one-message TLA+ transition table is unchanged: it assumes an echo belonging to that send. The desktop never uses the legacy text-only assignment path for identified sends. Separate delivery and history regressions cover two identical prompts, rewritten text, late ID metadata, cache replay and id-less history. The reader adds optional `client_id` metadata and persists native aliases in existing attempt bindings; no wire ID, delivery state or database schema changes. Older clients may ignore the extra metadata.
+SOFT-2526 carries the client ID into history blocks. Two identified sides match only by that ID. If either side lacks a client ID, pending assignment falls back to normalized text, user role and the existing anchor within one minute before to ten minutes after the send. Provider-native IDs are not client IDs. Native probes now require both identified and ID-less echoes to retire exactly one of two pending copies. The one-message TLA+ transition table remains unchanged: its echo belongs to that send in either representation. Separate history and desktop journeys cover replacement-file refresh, normalized ID-less rows, repeated prompts and prompt-before-reply ordering. Optional reader metadata remains compatible with old clients; Android's host-row/wire-ID presentation is unchanged. The covered message store functions and connector poll are unchanged.
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
@@ -71,6 +71,21 @@ SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one 
 | `tools/chat-history-reader-test.py`: `IGSH_1266_SharedMessageHostTest`; `tools/multibot-feedback-test.py` | Existing isolated host fixture and its import dependency. They supply a synthetic transcript, temporary home and terminal-send stand-in. |
 
 Whole-file drift stops before checking, even for an unrelated function change. This favors an explicit source review over silently trusting a stale model. Re-read the covered functions and callers; change the mapping, native probes or bounds when needed. Update `decisions.json` only from native output after understanding the semantic change. Update hashes and move the sync commit forward **only after confirming the verification still describes the code**. A hash refresh alone is not verification.
+
+After reviewing the mapping above, regenerate whole-file hashes, never merge them by hand:
+
+```sh
+python3 - <<'PY'
+import hashlib, json, pathlib, subprocess
+root = pathlib.Path.cwd()
+for skill in ("verify-chat-delivery-formal", "verify-switch-ai-formal"):
+    path = root / ".claude/skills" / skill / "coverage.json"
+    record = json.loads(path.read_text())
+    record["sync_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    record["files"] = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in record["files"]}
+    path.write_text(json.dumps(record, indent=2) + "\n")
+PY
+```
 
 ## Prove the checker can fail
 

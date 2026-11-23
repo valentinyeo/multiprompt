@@ -67,6 +67,10 @@ const ChatOutboxEntry = struct {
     chat_echo.assign(&pending, &block, false, &.{}, &picked);
     try std.testing.expectEqual(@as(?usize, 0), picked[0]);
     try std.testing.expectEqual(@as(?usize, null), picked[1]);
+    if (@hasField(chat_echo.UserBlock, "client_id")) block[0].client_id = 0;
+    chat_echo.assign(&pending, &block, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, 0), picked[0]);
+    try std.testing.expectEqual(@as(?usize, null), picked[1]);
     var queued = ChatOutboxEntry{};
     var sending = ChatOutboxEntry{ .state = .sending };
     try std.testing.expect(timeout(&queued, 601000));
