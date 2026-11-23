@@ -1448,7 +1448,16 @@ var g_chat_live_preview_shell: u32 = 0;
 var g_chat_live_preview: @import("agent_second_line.zig").Line = .{};
 
 pub fn chatFileOnReady() void {
-    if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_chat_browser_swap.shell_id != 0) {
+        const on_screen = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+        if (app_state.g_chat_browser_swap.shell_id != on_screen) {
+            app_state.g_chat_browser_swap.cancel();
+        } else if (app_state.g_chat_browser_swap.held(GetTickCount64())) {
+            _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+            app_state.g_chat_browser_swap.cancel();
+            debugLog("[switch] paint held, chat content released");
+        } else return;
+    }
     const key = chatCacheIdentity();
     var active_changed = false;
     var preview_changed = false;
@@ -2052,6 +2061,21 @@ pub fn chatSwitchBrowserTick() void {
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     if (app_state.g_chat_browser_swap.shell_id == 0 or app_state.g_chat_browser_swap.shell_id != shell_id) return;
     if (app_state.g_chat_switch_preparing or !chatViewOwnsInput() or app_state.g_edit_hwnd != null or app_state.g_popup_menu_active) {
+        if (app_state.g_chat_browser_swap.held(GetTickCount64())) {
+            var held: [192]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&held, "[switch] paint held shell={d} preparing={} owns={} edit={} menu={} ms={d}", .{
+                shell_id,
+                app_state.g_chat_switch_preparing,
+                chatViewOwnsInput(),
+                app_state.g_edit_hwnd != null,
+                app_state.g_popup_menu_active,
+                GetTickCount64() -| app_state.g_chat_browser_swap.requested_at,
+            }) catch "[switch] paint held");
+            app_state.g_chat_browser_swap.cancel();
+            chatFileOnReady();
+            if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+            return;
+        }
         _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, chat_switch.paint_deadline_ms, null);
         return;
     }
