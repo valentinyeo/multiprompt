@@ -67,7 +67,7 @@ fn queuePendingSessionKill(_: SessionIdentity) ${admits ? 'bool' : 'void'} { que
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
 fn removePaneSessionFilesForShell(_: u32) void {}
 fn closeShellRemember(_: u32, remember: bool) void {
-    if (remember) app_state.g_tmux_closed.close(std.testing.allocator, 0, "session-one") catch unreachable;
+    if (remember) app_state.g_tmux_closed.close(std.testing.allocator, 0, "session-one", 1) catch unreachable;
     app_state.shell_count = 0;
 }
 fn fetchTmuxSessions() void {}
@@ -79,6 +79,7 @@ var sync_closed = false;
 fn staleLayout(a: std.mem.Allocator) ![]session_layout.Tab {
     const closed_state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .tmux = "SESSION-ONE", .name = "Draft", .closed = true };
     var desired = struct { tabs: []const session_layout.Tab }{ .tabs = &.{ .{ .tmux_host = 0, .tmux_session = "SESSION-ONE", .tab_state = if (sync_closed) closed_state else null }, .{ .tmux_host = 1, .tmux_session = "session-one" } } };
+    const server = struct { value: struct { tabs: []const session_layout.Tab } }{ .value = .{ .tabs = desired.tabs } };
 ${filter}
     return kept.items;
 }
@@ -105,7 +106,7 @@ test "offline end prevents stale sync resurrection but not another host" {
     const kept = try staleLayout(arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), kept.len);
     try std.testing.expectEqual(@as(u8, 1), kept[0].tmux_host);
-    app_state.g_tmux_closed.reopen(0, "session-one");
+    app_state.g_tmux_closed.reopenEverywhere("session-one");
 }
 test "full queue and unsafe target preserve tab, successful end needs no retry" {
     reset(); admitted = false; kill_outcome = .retry;
@@ -202,7 +203,7 @@ ${reopen}
 test "only explicit accepted reopen cancels end and clears tombstone" {
     app_state.g_pending_session_kills = .{};
     defer app_state.g_tmux_closed.entries.deinit(std.testing.allocator);
-    try app_state.g_tmux_closed.close(std.testing.allocator, 0, "queued");
+    try app_state.g_tmux_closed.close(std.testing.allocator, 0, "queued", 1);
     _ = app_state.g_pending_session_kills.add(SessionIdentity.remote(0, "queued", "", 2).?).?;
     app_state.g_restoring = true;
     spawnAccepted("queued");

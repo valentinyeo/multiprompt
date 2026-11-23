@@ -80,7 +80,7 @@ pub fn rememberClose(idx: usize) void {
     defer arena.deinit();
     var state = capture(arena.allocator(), idx) catch return;
     const host: u8 = @import("capacity.zig").remoteHostForShell(shell) orelse 3;
-    app.g_tmux_closed.close(a, host, state.tmux) catch return;
+    app.g_tmux_closed.close(a, host, state.tmux, @import("tmux_closed.zig").now()) catch return;
     for (app.g_tmux_closed.entries.items) |*entry| {
         if (!@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], host, state.tmux)) continue;
         state.closed = true;
