@@ -17,7 +17,7 @@ python3 .claude/skills/verify-switch-ai-formal/check.py --self-test --output /tm
 
 Use a new output directory. `TLA2TOOLS` and `JAVA` may point at existing installations. The GitHub workflow runs the same command on Ubuntu.
 
-Exit 0 classifies inherited findings on pull requests. Exit 1 reports current counterexamples. Exit 2 means drift, tool failure or failed replay. Read `summary.json`, `current/results.json`, `current/*.log` and `replay/host.json`.
+Exit 0 classifies inherited findings on pull requests. Exit 1 reports current counterexamples. Exit 2 means drift, tool failure or failed replay: a counterexample that finishes without reproducing its symptom counts as a failed replay. Read `summary.json`, `current/results.json`, `current/*.log` and `replay/host.json`.
 
 Read **every result with pstack /statechart** using `current/Switch.tla`, the generated config and `view.mjs`. Provider names come from [providers.json](providers.json); add Antigravity there when SOFT-3050 lands without editing the checker.
 
@@ -25,11 +25,11 @@ Read **every result with pstack /statechart** using `current/Switch.tla`, the ge
 
 ## Why TLA+
 
-Switch AI interleaves host start, locator moves, handover history, message-store updates and stopping the old agent. TLA+ explores busy switches, failed starts, restarts, round-trips and concurrent requests within a small bound without live tmux or paid providers. Python runs the real `host_switch_ai` decisions in native probes and replays each counterexample through isolated homes and SQLite stores.
+Switch AI interleaves host start, locator moves, handover history, message-store updates and stopping the old agent. TLA+ explores busy switches, failed starts, restarts, round-trips and concurrent requests within a small bound without live tmux or paid providers. Python runs the real `host_switch_ai` decisions in native probes and replays each counterexample through isolated homes and SQLite stores, then requires the symptom the rule names to appear in that replay.
 
 ## Bounds and assumptions
 
-One logical chat address, at most two pending switch requests, five successful switches per run and one start failure. Busy refusal, start failure, the old agent's stop, queued-message adoption and locator deletion are modeled as native decisions. Agent processes may overlap for the moment between the new start and the old stop; `liveCount` counts chats on the address, so a missing old-agent stop shows up as two. Doubling is a second locator for the same address, because the reader resolves one locator per address. Duplicate rendering and unreadable history beyond a failed handover are out of scope for this bound. Antigravity is listed in `providers.json` but excluded from TLC constants until `HOST_SWITCH_TARGETS` includes it.
+One logical chat address, at most two pending switch requests, five successful switches per run and one start failure. Busy refusal, start failure, the old agent's stop, queued-message adoption, locator deletion, config identity carry and history carry are modeled as native decisions. Agent processes may overlap for the moment between the new start and the old stop; `liveCount` counts chats on the address, so a missing old-agent stop shows up as two. Doubling is a second locator for the same address, because the reader resolves one locator per address. `identityOk` falls when a switch keeps two locators for the address or does not carry the picture and board login into the new config. `historyOk` falls when a commit opens the new chat without the earlier rows. Duplicate rendering is out of scope for this bound. Antigravity is listed in `providers.json` but excluded from TLC constants until `HOST_SWITCH_TARGETS` includes it.
 
 ## Coverage and sync
 
@@ -42,7 +42,13 @@ Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8
 
 ## Prove the checker can fail
 
-`--self-test` first checks a reliable control. It then plants two breaks in real source: replacing the locator delete with a no-op must fail `OneLiveChat` with `SkipLocatorDelete` true, and replacing the queued-message adoption with a no-op must fail `NoLostOrDuplicate` with `CarryQueuedMessages` false. Both must replay through production `host_switch_ai`. Restoring the checkout must return to the starting findings.
+`--self-test` first checks a reliable control. It then plants three breaks in real source and requires the named rule to fail in each:
+
+- Doubling a chat, by replacing the locator delete with a no-op, must fail `OneLiveChat` and `IdentityStable` with two locators for one address.
+- Losing the earlier conversation, by writing only the divider into the new chat's history, must fail `HistoryReadable`.
+- Losing a queued message, by replacing the queued-message adoption with a no-op, must fail `NoLostOrDuplicate` with the message still queued on the old provider and sid.
+
+Every failing trace replays through production `host_switch_ai`, including sends that happen while a switch runs. The replay must show the symptom the rule names, so a trace that finishes without reproducing it is a red run. Each trace is then replayed against the unbroken source, which must not show the symptom. Restoring the checkout must return to the starting findings.
 
 ## Read current findings
 
