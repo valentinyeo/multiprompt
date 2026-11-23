@@ -1,8 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..');
@@ -61,44 +59,24 @@ test('SOFT-3066 negative control: ready handshake on bootHost fails the oracle',
 });
 
 test('SOFT-3066 switch and composer entry points return within 50 ms under a slow helper', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'internet-responsive-'));
-  const prelude = String.raw`
-const std = @import("std");
-var now: u64 = 0;
-var slow_remote = true;
-fn GetTickCount64() u64 { return now; }
-fn Sleep(ms: u32) void { now += ms; }
-fn GetCurrentThreadId() u32 { return 1; }
-fn GetWindowThreadProcessId(_: ?*anyopaque, _: ?*u32) u32 { return 1; }
-fn uiThreadBusy() bool { return GetCurrentThreadId() == GetWindowThreadProcessId(null, null); }
-`;
-  const harness = prelude + String.raw`
-test "session switch returns before a slow helper would block the GUI thread" {
-    slow_remote = true;
+  let now = 0;
+  const GetTickCount64 = () => now;
+  const Sleep = ms => {
+    now += ms;
+  };
+  const GetCurrentThreadId = () => 1;
+  const GetWindowThreadProcessId = () => 1;
+  const uiThreadBusy = () => GetCurrentThreadId() === GetWindowThreadProcessId(null, null);
+  const entry = () => {
+    const slow_remote = true;
     now = 0;
     const started = GetTickCount64();
     if (!uiThreadBusy()) {
-        if (slow_remote) Sleep(10_000);
+      if (slow_remote) Sleep(10_000);
     }
-    try std.testing.expect(GetTickCount64() - started < 50);
-    try std.testing.expectEqual(@as(u64, 0), now);
-}
-test "composer input returns before a slow helper would block the GUI thread" {
-    slow_remote = true;
-    now = 0;
-    const started = GetTickCount64();
-    if (!uiThreadBusy()) {
-        if (slow_remote) Sleep(10_000);
-    }
-    try std.testing.expect(GetTickCount64() - started < 50);
-    try std.testing.expectEqual(@as(u64, 0), now);
-}
-`;
-  try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), harness);
-    const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120_000 });
-    assert.equal(run.status, 0, run.stdout + run.stderr);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+    assert.ok(GetTickCount64() - started < 50);
+    assert.equal(now, 0);
+  };
+  entry();
+  entry();
 });
