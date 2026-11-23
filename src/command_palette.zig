@@ -503,28 +503,20 @@ fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
     return buf[0 .. appdata_len + rest.len];
 }
 
+const SessionIdentity = @import("session_identity.zig").Session;
+
 const ShellRow = struct { target: usize, keywords: []const u8 };
 
 const AdoptHostJob = struct {
-    id: u32 = 0,
-    host: u8 = 0,
-    sid: [36]u8 = std.mem.zeroes([36]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
+    identity: ?SessionIdentity = null,
     cwd: [256]u8 = std.mem.zeroes([256]u8),
     cwd_len: u16 = 0,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
 const MoveChatJob = struct {
-    id: u32 = 0,
-    host: u8 = 0,
+    identity: ?SessionIdentity = null,
     target: u8 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
     cwd: [256]u8 = std.mem.zeroes([256]u8),
     cwd_len: u16 = 0,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -536,14 +528,7 @@ const RestartChatJob = struct {
     fresh: bool = false,
     switch_to: u8 = 0,
     count: u8 = 0,
-    hosts: [RESTART_HOSTS]u8 = @splat(0),
-    ids: [RESTART_HOSTS]u32 = @splat(0),
-    provider: [8]u8 = std.mem.zeroes([8]u8),
-    provider_len: u8 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
+    identities: [RESTART_HOSTS]SessionIdentity = undefined,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
@@ -2596,10 +2581,11 @@ fn adoptHostThread(job: *AdoptHostJob) void {
     defer finishAdoptHostJob(job);
     const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
-    const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
+    const identity = job.identity orelse return;
+    const request = adoptHostRequest(identity, job.cwd[0..job.cwd_len], &buf) orelse return;
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    _ = @import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null);
     if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
         if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
     } else {
@@ -2611,6 +2597,7 @@ fn adoptHostThread(job: *AdoptHostJob) void {
 pub fn startAdoptHost(tab: usize) bool {
     if (tab >= app_state.shell_count) return false;
     const shell = &app_state.shells[tab];
+    const identity = SessionIdentity.fromShell(shell.*) orelse return false;
     const job = std.heap.page_allocator.create(AdoptHostJob) catch return false;
     var cwd: [256]u8 = undefined;
     var cwd_len: usize = 0;
@@ -2619,9 +2606,7 @@ pub fn startAdoptHost(tab: usize) bool {
         cwd[i] = c;
         cwd_len = i + 1;
     }
-    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .sid_len = @intCast(@min(shell.claude_sid_len, 36)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
-    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    job.* = .{ .identity = identity, .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
     @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, adoptHostThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -2641,12 +2626,13 @@ fn moveChatThread(job: *MoveChatJob) void {
     const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
     const target: @import("agent_host.zig").MoveTarget = if (job.target == 1) .terminal else .chat;
-    const request = @import("agent_host.zig").moveRequest(&buf, target, job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len]) orelse return;
+    const identity = job.identity orelse return;
+    const request = @import("agent_host.zig").moveRequest(&buf, target, identity, job.cwd[0..job.cwd_len]) orelse return;
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    _ = @import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null);
     if (@import("agent_host.zig").movedReply(response.items)) {
-        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(job.id), @intCast(job.target));
+        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(identity.owner), @intCast(job.target));
     } else {
         const notice = a.dupeZ(u8, "Move chat: the chat did not move, see the tab") catch return;
         if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
@@ -2681,6 +2667,7 @@ pub fn startMoveChat(tab: usize, target: u8) bool {
     if (tab >= app_state.shell_count) return false;
     const shell = &app_state.shells[tab];
     if (!canMoveHostChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) return false;
+    const identity = SessionIdentity.fromShell(shell.*) orelse return false;
     const job = std.heap.page_allocator.create(MoveChatJob) catch return false;
     var cwd: [256]u8 = undefined;
     var cwd_len: usize = 0;
@@ -2689,9 +2676,7 @@ pub fn startMoveChat(tab: usize, target: u8) bool {
         cwd[i] = c;
         cwd_len = i + 1;
     }
-    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .target = target, .sid_len = @intCast(@min(shell.claude_sid_len, 40)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
-    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    job.* = .{ .identity = identity, .target = target, .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
     @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, moveChatThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -2806,7 +2791,11 @@ pub fn adoptedSwitch(allocator: std.mem.Allocator, body: []const u8, sid_out: []
     return .{ .agent = agent, .sid_len = fields.sid.len };
 }
 
-fn switchAiRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, to: []const u8) ?[]const u8 {
+fn switchAiRequest(out: []u8, identity: SessionIdentity, to: []const u8) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const provider = identity.provider();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
     if (provider.len == 0 or sid.len == 0 or to.len == 0) return null;
     return std.fmt.bufPrint(out, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ id, host, provider, sid, to }) catch null;
 }
@@ -2826,7 +2815,11 @@ test "IGSH-2280 a switch reply replaces the shell provider and sid" {
     try std.testing.expect(!switchAiVisible(agent, 3));
     try std.testing.expect(!switchAiVisible(1, 1));
     var buf: [256]u8 = undefined;
-    const request = switchAiRequest(&buf, 4, 0, switchAiName(agent), shell_sid[0..shell_sid_len], "claude") orelse return error.TestUnexpectedResult;
+    const request = switchAiRequest(&buf, blk: {
+        var key = @import("chat_transcript.zig").Identity.init(4, 0, false, shell_sid[0..shell_sid_len], "");
+        key.agent = agent;
+        break :blk key.checked().?;
+    }, "claude") orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"pi\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, request, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee") != null);
     try std.testing.expect(std.mem.indexOf(u8, request, old) == null);
@@ -2899,7 +2892,7 @@ fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
                 restartChatNotice(switchAiDone(job.switch_to));
                 return;
             };
-            if (!postSwitchAdopt(job.ids[0], agent, fields.sid)) restartChatNotice(switchAiDone(agent));
+            if (!postSwitchAdopt(job.identities[0].owner, agent, fields.sid)) restartChatNotice(switchAiDone(agent));
             return;
         }
         restartChatNotice(if (std.mem.eql(u8, fields.status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
@@ -2942,24 +2935,25 @@ fn restartChatThread(job: *RestartChatJob) void {
     var buf: [512]u8 = undefined;
     var answered = false;
     if (job.all) {
-        for (job.hosts[0..job.count], job.ids[0..job.count]) |host_index, id| {
-            const request = agent_host.restartAllRequest(&buf, id, host_index) orelse continue;
+        for (job.identities[0..job.count]) |identity| {
+            const request = agent_host.restartAllRequest(&buf, identity) orelse continue;
             var response: std.ArrayList(u8) = .empty;
             defer response.deinit(a);
-            if (!@import("chat_session.zig").chatHistoryPersistent(host_index, id, request, 65536, &response, null)) continue;
+            if (!@import("chat_session.zig").chatHostPersistent(identity.host, request, 65536, &response)) continue;
             answered = true;
             restartChatReply(job, response.items);
         }
     } else {
+        const identity = job.identities[0];
         const request = if (job.switch_to != 0)
-            switchAiRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to)) orelse return
+            switchAiRequest(&buf, identity, switchAiName(job.switch_to)) orelse return
         else if (job.fresh)
-            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
+            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ identity.owner, identity.host.index(), identity.provider(), std.mem.sliceTo(&identity.sid, 0) }) catch return
         else
-            agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+            agent_host.restartRequest(&buf, identity) orelse return;
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
-        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
+        if (!@import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null)) {
             restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
             return;
         }
@@ -2991,12 +2985,12 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
             const shell = &app_state.shells[i];
             if (!canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) continue;
             var seen = false;
-            for (job.hosts[0..job.count]) |known| {
-                if (known == shell.tmux_host) seen = true;
+            const identity = @import("chat_session.zig").chatFileIdentityForShell(@intCast(i)).checked() orelse continue;
+            for (job.identities[0..job.count]) |known| {
+                if (known.host == identity.host) seen = true;
             }
             if (seen) continue;
-            job.hosts[job.count] = shell.tmux_host;
-            job.ids[job.count] = shell.shell_id;
+            job.identities[job.count] = identity;
             job.count += 1;
         }
         if (job.count == 0) {
@@ -3008,22 +3002,17 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
             std.heap.page_allocator.destroy(job);
             return false;
         }
-        const shell = &app_state.shells[tab];
         const key = @import("chat_session.zig").chatFileIdentityForShell(tab);
-        const provider = key.provider();
-        if (provider.len > job.provider.len or key.sid[0] == 0 or key.tmux[0] == 0) {
+        const identity = key.checked() orelse {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        };
+        if (key.sid[0] == 0 or key.tmux[0] == 0) {
             std.heap.page_allocator.destroy(job);
             return false;
         }
         job.count = 1;
-        job.hosts[0] = shell.tmux_host;
-        job.ids[0] = shell.shell_id;
-        job.provider_len = @intCast(provider.len);
-        @memcpy(job.provider[0..provider.len], provider);
-        job.sid_len = @intCast(@min(shell.claude_sid_len, 40));
-        @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-        job.tmux_len = @intCast(@min(shell.tmux_session_len, 64));
-        @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+        job.identities[0] = identity;
     }
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, restartChatThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -3033,7 +3022,11 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
     return true;
 }
 
-pub fn adoptHostRequest(id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8, out: []u8) ?[]const u8 {
+pub fn adoptHostRequest(identity: SessionIdentity, cwd: []const u8, out: []u8) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    const tmux = std.mem.sliceTo(&identity.tmux, 0);
     if (sid.len == 0 or sid.len > 80 or tmux.len == 0 or tmux.len > 80) return null;
     return std.fmt.bufPrint(out, "{{\"op\":\"host_adopt\",\"id\":{d},\"host\":{d},\"provider\":\"claude\",\"sid\":\"{s}\",\"tmux\":\"{s}\",\"cwd\":\"{s}\"}}", .{ id, host, sid, tmux, cwd }) catch null;
 }
@@ -3045,9 +3038,12 @@ test "IGSH-1266 moving a chat to the new mode needs an idle old-style Claude tab
     try std.testing.expect(!canAdoptHostTab(1, 0, 12, false));
     try std.testing.expect(!canAdoptHostTab(1, 36, 0, false));
     var buf: [512]u8 = undefined;
-    const request = adoptHostRequest(7, 0, "ffffffff-ffff-4fff-bfff-ffffffffffff", "term-abc", "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
+    var key = @import("chat_transcript.zig").Identity.init(7, 0, false, "ffffffff-ffff-4fff-bfff-ffffffffffff", "");
+    @memcpy(key.tmux[0..8], "term-abc");
+    const request = adoptHostRequest(key.checked().?, "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("{\"op\":\"host_adopt\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", request);
-    try std.testing.expect(adoptHostRequest(7, 0, "", "term-abc", "/home/x/proj", &buf) == null);
+    key.sid = @splat(0);
+    try std.testing.expect(adoptHostRequest(key.checked().?, "/home/x/proj", &buf) == null);
 }
 
 pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
@@ -3321,7 +3317,7 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
             const shell = &app_state.shells[ns];
             shell.chat_view_on = true;
             const started = live.starting(shell.shell_id, host, host_sid.?);
-            if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, host_sid.?);
+            if (shell.native_terminal) @import("native_session.zig").launch(SessionIdentity.fromShell(shell.*) orelse return false);
             if (app_state.active_shell == ns) {
                 if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
                 app_state.g_chat_screen_working = live.running(shell.shell_id);
@@ -3405,7 +3401,7 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
         const shell = &app_state.shells[ns];
         shell.chat_view_on = true;
         const started = live.starting(shell.shell_id, host, sid);
-        if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, sid);
+        if (shell.native_terminal) @import("native_session.zig").launch(SessionIdentity.fromShell(shell.*) orelse return false);
         if (app_state.active_shell == ns) {
             if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
             app_state.g_chat_screen_working = live.running(shell.shell_id);
