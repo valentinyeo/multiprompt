@@ -1,4 +1,4 @@
-Add-Type @'
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Drawing;
