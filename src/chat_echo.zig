@@ -285,9 +285,21 @@ const Normalized = struct {
     }
 };
 
+const mention_wire_note = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
+
+fn trimMentionWireNote(text: []const u16) []const u16 {
+    const ending = std.unicode.utf8ToUtf16LeStringLiteral(" or relay it unless you are also asked.)");
+    if (!std.mem.endsWith(u16, text, ending)) return text;
+    const mark = mention_wire_note[0..mention_wire_note.len];
+    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
+    return text[0..idx];
+}
+
 pub fn sameText(a: []const u16, b: []const u16) bool {
-    var left = Normalized{ .text = a };
-    var right = Normalized{ .text = b };
+    const at = trimMentionWireNote(a);
+    const bt = trimMentionWireNote(b);
+    var left = Normalized{ .text = at };
+    var right = Normalized{ .text = bt };
     while (true) {
         const l = left.next();
         const r = right.next();
@@ -759,6 +771,15 @@ test "SOFT-2929 a mention suffix the transcript adds still matches the waiting c
     try std.testing.expect(blockMatches(&marked, prefix));
     try std.testing.expect(!sameText(&typed, &elsewhere));
     try std.testing.expect(!sameText(&typed, &extended));
+}
+
+test "SOFT-3084 only a complete mention wire note is ignored during echo matching" {
+    const typed = w("ask @Builder{live-builder}");
+    const framed = w("ask @Builder{live-builder}\n\n(This line is addressed to Builder and was already delivered to it. Do not answer for Builder or relay it unless you are also asked.)");
+    const unfinished = w("ask @Builder{live-builder}\n\n(This line is addressed to someone else");
+    try std.testing.expect(sameText(&typed, &framed));
+    try std.testing.expect(sameText(&framed, &typed));
+    try std.testing.expect(!sameText(&typed, &unfinished));
 }
 
 test "SOFT-2929 a slash command wrapped in command tags matches the typed copy" {

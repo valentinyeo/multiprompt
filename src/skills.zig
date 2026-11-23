@@ -67,13 +67,11 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, markdown: []const u8, fallbac
 }
 
 pub fn composeMessage(allocator: std.mem.Allocator, prompt: []const u8, skill: Skill) ![]u8 {
-    const marker = try std.fmt.allocPrint(allocator, "/{s} ", .{skill.name});
+    const marker = try std.fmt.allocPrint(allocator, "/{s}", .{skill.name});
     defer allocator.free(marker);
-    const left_trimmed = std.mem.trimStart(u8, prompt, " \t\r\n");
-    const without_marker = if (std.mem.startsWith(u8, left_trimmed, marker))
-        std.mem.trim(u8, left_trimmed[marker.len..], " \t\r\n")
-    else
-        std.mem.trim(u8, prompt, " \t\r\n");
+    if (!std.mem.startsWith(u8, prompt, marker) or
+        (prompt.len > marker.len and !std.ascii.isWhitespace(prompt[marker.len]))) return allocator.dupe(u8, prompt);
+    const without_marker = std.mem.trim(u8, prompt[marker.len..], " \t\r\n");
     return if (without_marker.len == 0)
         std.fmt.allocPrint(allocator, "/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ skill.name, skill.name, std.mem.trim(u8, skill.body, " \t\r\n") })
     else
@@ -259,6 +257,22 @@ test "skill-only sends match Android" {
     const message = try composeMessage(std.testing.allocator, "/i-have-adhd ", skill);
     defer std.testing.allocator.free(message);
     try std.testing.expectEqualStrings("/i-have-adhd\n\n<skill name=\"i-have-adhd\">\nbody of i-have-adhd\n</skill>", message);
+}
+
+test "SOFT-3086 a selected skill runs only while its command leads the message" {
+    const a = std.testing.allocator;
+    const skill = Skill{ .name = @constCast("review"), .description = @constCast(""), .body = @constCast("review instructions"), .source = .multiprompt };
+    for ([_][]const u8{ "why /review ?", "why /review", " /review", "why\n/review", "/review/path", "/reviewer" }) |text| {
+        const message = try composeMessage(a, text, skill);
+        defer a.free(message);
+        try std.testing.expectEqualStrings(text, message);
+    }
+    const message = try composeMessage(a, "/review check this", skill);
+    defer a.free(message);
+    try std.testing.expectEqualStrings("check this\n\n/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", message);
+    const only = try composeMessage(a, "/review", skill);
+    defer a.free(only);
+    try std.testing.expectEqualStrings("/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", only);
 }
 
 test "off skill overrides are excluded" {

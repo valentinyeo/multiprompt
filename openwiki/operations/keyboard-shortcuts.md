@@ -176,6 +176,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
+| Ctrl+K -&gt; Reopen server shell | List the detached sessions on this tab's server and attach the one you pick |
 | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
@@ -225,6 +226,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
+| Ctrl+K -&gt; Move workspace to server | Point this workspace default folder at the same path on another account server |
+| Ctrl+K -&gt; New tab on server | Open one workspace tab on another account server without moving the workspace |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
 | Alt+H | Remind Me: hide local tab, keep tmux running, return when due |

@@ -1,4 +1,3 @@
-"""Classify stored app claims; never write a ledger or infer transport IDs."""
 from collections import Counter
 
 REQUIRED_CHECKS = (
@@ -12,7 +11,6 @@ LEGACY = 'existing_app_legacy_content_correlated_claim'
 
 
 def classify(rows):
-    """Return one result per ledger row, preserving uncertain source states."""
     keys = Counter((r['db'], r['message']) for r in rows)
     occurrences = Counter((c.get('source'), c.get('offset_rank'))
                           for r in rows for c in r.get('claims', []))
@@ -60,7 +58,6 @@ def classify(rows):
 
 
 def resolve(classifications, requests):
-    """Resolve explicitly bound IDs, including beyond any visible/history window."""
     index = {(r['db'], r['message'], r['session'], r['source']): r for r in classifications}
     return [index.get((q['db'], q['message'], q['session'], q['source']),
                       {'classification': 'unconfirmed', 'reason': 'identity_not_found'})

@@ -677,15 +677,22 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
     }
     var visible_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
     const visible = mention.copyVisible(text, &.{}, &visible_buf);
+    var context_buf: [2048]u8 = undefined;
+    const context: []const u8 = blk: {
+        if (source_idx == app_state.active_shell and app_state.g_chat_block_count > 0) {
+            break :blk mention.mentionContextTail(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_capture[0..app_state.g_chat_last_len], true, &context_buf) orelse "";
+        }
+        if (chatHistoryEntry(chatFileIdentityForShell(source_idx))) |history| {
+            break :blk mention.mentionContextTail(history.history.blocks.items, history.history.text.items, false, &context_buf) orelse "";
+        }
+        break :blk "";
+    };
     for (plan[0..count]) |target| {
         if (target.index == source_idx or target.index >= app_state.shell_count) continue;
         const session = target.session[0..target.session_len];
         if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
         var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
-        const provider = mention.providerName(shell.ai_agent);
-        const sid_len = @min(@as(usize, shell.claude_sid_len), shell.claude_sid.len);
-        const sid: []const u8 = if (sid_len > 0) shell.claude_sid[0..sid_len] else "";
-        const note = mention.mentionNote(source_name, provider, sid, visible, &note_buf) orelse continue;
+        const note = mention.mentionNote(source_name, visible, context, &note_buf) orelse continue;
         if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
         mention.mentionMarkDelivered(message_id, session);
     }
@@ -2842,6 +2849,10 @@ fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry)
 
 fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
     if (shell_index >= app_state.shell_count) return .write_failed;
+    var wire_buf: [CHAT_OUTBOX_MSG_CAP + 768]u16 = undefined;
+    const sh = &app_state.shells[shell_index];
+    const session = sh.tmux_session[0..@min(@as(usize, sh.tmux_session_len), sh.tmux_session.len)];
+    const wire_text = @import("chat_mention.zig").composeWireText(session, @import("chat_mention.zig").currentLive(null), send_text, &wire_buf);
     if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
@@ -2892,11 +2903,11 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
         }
         return .write_failed;
     }
-    if (chatTmuxSendEligible(shell_index) and chatTmuxSendStart(shell_index, send_text, echo_id, false, false, false)) return .ok;
+    if (chatTmuxSendEligible(shell_index) and chatTmuxSendStart(shell_index, wire_text, echo_id, false, false, false)) return .ok;
     if (chatOutboxIndexById(echo_id)) |ei| {
         if (app_state.g_chat_outbox.items[ei].message_v1) return .write_failed;
     }
-    return chatSendViaConsole(shell_index, send_text, echo_id);
+    return chatSendViaConsole(shell_index, wire_text, echo_id);
 }
 
 fn chatSendViaConsole(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
@@ -4205,7 +4216,7 @@ fn chatMessageSyncFinish() void {
     var parsed = json_reader.parse(std.heap.page_allocator, job.response.items) catch return;
     defer parsed.deinit();
     const epoch = json_reader.uintDefault(parsed.value, "epoch", 0);
-    if (job.synced and epoch != job.epoch) {
+    if (job.synced and (epoch != job.epoch or json_reader.boolTrue(parsed.value, "resync_required"))) {
         history.message_synced = false;
         history.message_snapshot = @splat(0);
         history.message_cursor = 0;
