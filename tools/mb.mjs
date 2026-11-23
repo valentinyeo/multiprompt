@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { run as layoutRun } from './mp-layout.mjs';
@@ -14,6 +14,7 @@ commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
+  restart <name> [--host N]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -287,6 +288,30 @@ async function open(ctx, flags) {
   }
   if (!flags.tmux || !flags.workspace) throw new Failure('shell open needs --tmux and --workspace');
   return placeShell(ctx, flags);
+}
+
+function mpSessionsBin(env) {
+  const home = env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  for (const candidate of [join(home, '.multiprompt-runtime/mp-sessions'), join(home, '.local/bin/mp-sessions')]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Failure('mp-sessions is not installed');
+}
+
+async function restartSession(ctx, flags) {
+  if (flags._.length !== 1) throw new Failure('restart needs a session name');
+  const bin = mpSessionsBin(ctx.env);
+  const done = spawnSync('python3', [bin, 'restart', clean(flags._[0])], { encoding: 'utf8', env: ctx.env });
+  if (done.status !== 0) {
+    const message = (done.stderr || done.stdout || 'mp-sessions restart failed').trim().split('\n').pop();
+    throw new Failure(message.replace(/^mp-sessions: /, ''));
+  }
+  let payload;
+  try { payload = JSON.parse(done.stdout.trim()); } catch { throw new Failure('invalid mp-sessions response'); }
+  if (!payload.ok) throw new Failure('restart failed');
+  const word = payload.status === 'already' ? 'already restarted' : payload.status === 'waiting' ? 'waiting to restart' : 'restarted';
+  ctx.out(`${word} ${clean(flags._[0])}`);
 }
 
 async function close(ctx, flags) {
@@ -828,7 +853,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, open, close, restart: restartSession, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

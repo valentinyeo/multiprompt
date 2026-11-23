@@ -6,7 +6,10 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
+
+HOST_RESTART_PENDING = 6 * 60 * 60
 
 PROVIDERS = ("claude", "codex", "pi", "cursor")
 
@@ -206,6 +209,33 @@ def start_host(send, provider, sid, folder, tmux):
     if started.get("status") not in ("started", "already"):
         raise ValueError("chat host did not start: " + str(started.get("reason") or started.get("status")))
     return started
+
+
+def restart_pending(send, provider, sid):
+    path = send.host_root() / (send.host_config_key(provider, sid) + ".restart.json")
+    saved = send.read_json(path)
+    if not saved or not isinstance(saved.get("at"), (int, float)):
+        return False
+    return 0 <= time.time() - float(saved["at"]) <= HOST_RESTART_PENDING
+
+
+def restart_host(send, provider, sid):
+    result = send.reader_cli("restart", provider, sid)
+    status = result.get("status")
+    if status in ("restarted", "restarting", "waiting", "already"):
+        return result
+    raise ValueError("chat host did not restart: " + str(result.get("reason") or status))
+
+
+def resume_status(result):
+    status = result.get("status")
+    if status == "waiting":
+        return "waiting"
+    if status == "already":
+        return "already"
+    if status in ("restarted", "restarting"):
+        return "resumed"
+    return "restarted"
 
 
 def row_state(row):
@@ -477,13 +507,23 @@ def cmd_restart(args):
     sid = target["sid"]
     tmux = target["tmux"]
     folder = target.get("folder") or os.getcwd()
-    if target.get("running") and target.get("tab_open"):
-        print(json.dumps(dict(ok=True, status="already", name=target.get("name"), tmux=tmux, sid=sid), separators=(",", ":")))
-        return 0
-    if target.get("busy"):
-        raise ValueError(target.get("name") or tmux + " is busy; wait for its turn to finish")
-    start_host(send, provider, sid, folder, tmux)
     display = target.get("name") or tmux
+    if target.get("busy"):
+        raise ValueError(display + " is busy; wait for its turn to finish")
+    if target.get("running"):
+        if target.get("tab_open") and restart_pending(send, provider, sid):
+            print(json.dumps(dict(ok=True, status="already", name=display, tmux=tmux, sid=sid), separators=(",", ":")))
+            return 0
+        result = restart_host(send, provider, sid)
+        status = resume_status(result)
+        if not target.get("tab_open"):
+            shown = ensure_visible(send, listing, target, display)
+            print(json.dumps(dict(ok=True, status=status, name=display, tmux=tmux, sid=sid,
+                                  visible=shown.get("ok") is True, tab=shown.get("tab")), separators=(",", ":")))
+        else:
+            print(json.dumps(dict(ok=True, status=status, name=display, tmux=tmux, sid=sid), separators=(",", ":")))
+        return 0
+    start_host(send, provider, sid, folder, tmux)
     shown = ensure_visible(send, listing, target, display)
     print(json.dumps(dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
                           visible=shown.get("ok") is True, tab=shown.get("tab")), separators=(",", ":")))
@@ -575,7 +615,7 @@ def parse(argv):
     begin.add_argument("--group")
     begin.add_argument("--provider", choices=PROVIDERS)
     begin.add_argument("--task", help="first task; - reads stdin")
-    again = commands.add_parser("restart", help="start a stopped chat and reopen its tab")
+    again = commands.add_parser("restart", help="resume a running chat in place, or start a stopped chat and reopen its tab")
     again.add_argument("name")
     renamed = commands.add_parser("rename", help="rename a chat tab on the desktop")
     renamed.add_argument("name")

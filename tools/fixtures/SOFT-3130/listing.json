@@ -1,0 +1,1 @@
+{"ok": true, "hosts": ["remote-1"], "workspaces": [{"id": 0, "name": "Home", "active": true, "groups": [], "tabs": [{"id": 50, "title": "Pinned chat", "host": "remote-1", "tmux": "live-caller", "pinned_top": true}]}]}

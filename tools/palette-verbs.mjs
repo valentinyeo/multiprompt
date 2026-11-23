@@ -49,7 +49,8 @@ export const verbs = {
   "SEARCH_MOVE_WORKSPACE_SERVER_OFFSET": "workspace",
   "SEARCH_NEW_TAB_ON_SERVER_OFFSET": "open",
   "SEARCH_WORKSPACE_SERVER_ROW_OFFSET": "open",
-  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open"
+  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open",
+  "SEARCH_TABCTX_CHAT_RESTART_IN_PLACE": "restart"
 };
 
 export const screen = {
