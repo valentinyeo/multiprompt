@@ -9,7 +9,7 @@ test('probe and Chat View share the body and bold creation path without changing
   assert.match(fonts, /body_weight: i32 = 400/);
   assert.match(fonts, /bold_weight: i32 = 700/);
   assert.match(fonts, /CHAT_QUALITY: w\.DWORD = 4/);
-  for (const name of ['chat_render', 'chat_composer', 'font_probe']) {
+  for (const name of ['chat_fonts', 'chat_composer', 'font_probe']) {
     assert.match(read(`src/${name}.zig`), /(?:fonts|@import\("fonts.zig"\))\.chat\(/);
   }
   const probe = read('src/font_probe.zig');
