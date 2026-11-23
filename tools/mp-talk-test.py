@@ -38,7 +38,7 @@ class ChatsTalkTest(unittest.TestCase):
         self.chat("k4", "live-dead", DEAD, 2 ** 22 + 12345, busy=False)
         self.chat("k5", "live-pi", PI, os.getpid(), busy=False, provider="pi", cwd="/work/pi")
         self.chat("k6", "live-codex", CODEX, os.getpid(), busy=False, provider="codex", cwd="/work/codex")
-        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Gone Chat", "live-pi": "Pi Helper", "live-codex": "Codex Helper"})
+        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Paused Chat", "live-pi": "Pi Helper", "live-codex": "Codex Helper"})
 
     def chat(self, key, tmux, sid, pid, busy, provider="claude", cwd=None):
         (self.host / (key + ".config.json")).write_text(json.dumps(dict(cwd=cwd or "/work/" + tmux, enabled=True, permission_mode="bypassPermissions", tmux=tmux)))
@@ -69,7 +69,8 @@ class ChatsTalkTest(unittest.TestCase):
         done = self.run_tool(MP_SESSIONS, "--json")
         self.assertEqual(done.returncode, 0, done.stderr)
         chats = {chat["tmux"]: chat for chat in json.loads(done.stdout)}
-        self.assertEqual(sorted(chats), ["live-alpha", "live-beta", "live-codex", "live-gamma", "live-pi"])
+        self.assertEqual(sorted(chats), ["live-alpha", "live-beta", "live-codex", "live-dead", "live-gamma", "live-pi"])
+        self.assertEqual(chats["live-dead"]["state"], "stopped")
         self.assertEqual(chats["live-alpha"]["name"], "Alpha Lead")
         self.assertEqual(chats["live-alpha"]["sid"], ALPHA)
         self.assertEqual(chats["live-alpha"]["provider"], "claude")
@@ -88,7 +89,8 @@ class ChatsTalkTest(unittest.TestCase):
         self.assertIn("live-gamma{live-gamma}", done.stdout)
         self.assertIn("live-beta", done.stdout)
         self.assertIn("busy", done.stdout)
-        self.assertNotIn("Gone Chat", done.stdout)
+        self.assertIn("Paused Chat", done.stdout)
+        self.assertIn("stopped", done.stdout)
 
     def test_IGSH_1865_send_by_name_reaches_that_chat_and_says_who_sent_it(self):
         done = self.run_tool(MP_SEND, "--to", "alpha lead", "check the build", MULTIPROMPT_TAB="live-beta")
@@ -124,9 +126,25 @@ class ChatsTalkTest(unittest.TestCase):
         self.assertEqual(self.rows(), [])
 
     def test_IGSH_1865_send_refuses_a_chat_that_is_not_live(self):
+        gone_sid = "88888888-1111-2222-3333-444444444444"
+        self.chat("k8", "live-gone", gone_sid, os.getpid(), busy=False)
+        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Paused Chat", "live-gone": "Gone Chat"})
         done = self.run_tool(MP_SEND, "--to", "Gone Chat", "hello", MULTIPROMPT_TAB="live-alpha")
         self.assertEqual(done.returncode, 2)
         self.assertIn("no live chat", done.stderr)
+
+    def test_SOFT_3060_sessions_list_a_stopped_hosted_chat_by_name(self):
+        stopped_sid = "99999999-1111-2222-3333-444444444444"
+        self.bin.joinpath("tmux").write_text(
+            "#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf 'live-alpha\\nlive-beta\\nlive-gamma\\nlive-dead\\nlive-pi\\nlive-codex\\nlive-stopped\\n'; exit 0; fi\nexit 1\n")
+        self.chat("k7", "live-stopped", stopped_sid, 99999999, busy=False)
+        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-stopped": "Paused Lead"})
+        done = self.run_tool(MP_SESSIONS, "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        chats = {chat["tmux"]: chat for chat in json.loads(done.stdout)}
+        self.assertIn("live-stopped", chats)
+        self.assertEqual(chats["live-stopped"]["state"], "stopped")
+        self.assertEqual(chats["live-stopped"]["name"], "Paused Lead")
 
     def test_IGSH_1865_send_refuses_to_message_itself(self):
         done = self.run_tool(MP_SEND, "--to", "alpha", "hello", MULTIPROMPT_TAB="live-alpha")
@@ -170,7 +188,7 @@ class ChatsTalkTest(unittest.TestCase):
     def test_IGSH_2279_a_pi_chat_lists_every_open_chat_with_the_same_tool(self):
         done = self.run_tool(MP_SEND, "list", "--json", MULTIPROMPT_TAB="live-pi")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(sorted(chat["tmux"] for chat in json.loads(done.stdout)), ["live-alpha", "live-beta", "live-codex", "live-gamma", "live-pi"])
+        self.assertEqual(sorted(chat["tmux"] for chat in json.loads(done.stdout)), ["live-alpha", "live-beta", "live-codex", "live-dead", "live-gamma", "live-pi"])
         self.assertIn("Alpha Lead", self.run_tool(MP_SEND, "list").stdout)
 
     def test_IGSH_2279_a_codex_chat_messages_a_claude_chat_and_a_claude_chat_messages_pi(self):

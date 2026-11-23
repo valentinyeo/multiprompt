@@ -95,6 +95,27 @@ class MpSendTest(unittest.TestCase):
         self.assertEqual(self.run_send("claude", SID, "   ", "--tmux", "mp-test-a").returncode, 2)
         self.assertEqual(self.run_send("codex", SID, "hello", "--tmux", "mp-test-a", "--id", "short").returncode, 2)
 
+    def test_SOFT_3060_stopped_hosted_chats_still_appear_in_the_session_list(self):
+        module = load_mp_send()
+        host = self.home / ".local/state/multiprompt/agent-host"
+        host.mkdir(parents=True)
+        tmux, sid = "live-stopped", SID
+        (host / "k1.config.json").write_text(json.dumps(dict(cwd="/work/x", enabled=True, tmux=tmux)))
+        (host / "k1.state.json").write_text(json.dumps(dict(sid=sid, pid=99999999, provider="claude", started=1.0)))
+        names = self.home / ".local/state/multiprompt/chat-names.json"
+        names.write_text(json.dumps({tmux: dict(name="Paused Lead", at=1.0)}))
+        bin_dir = self.home / "bin"
+        bin_dir.mkdir()
+        tmux_sh = bin_dir / "tmux"
+        tmux_sh.write_text("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf 'live-stopped\\n'; exit 0; fi\nexit 1\n")
+        tmux_sh.chmod(0o755)
+        os.environ["HOME"] = str(self.home)
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+        chats = {row["tmux"]: row for row in module.live_chats()}
+        self.assertIn(tmux, chats)
+        self.assertEqual(chats[tmux]["state"], "stopped")
+        self.assertEqual(chats[tmux]["name"], "Paused Lead")
+
     def test_IGSH_1266_installed_runtime_reader_is_preferred(self):
         runtime = self.home / ".multiprompt-runtime"
         runtime.mkdir(mode=0o700)

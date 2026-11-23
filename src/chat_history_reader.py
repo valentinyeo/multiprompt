@@ -3432,6 +3432,9 @@ def host_start(provider, sid, source=None):
     if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
     host_clear_stale(provider, sid)
+    owner = host_owner(provider, sid)
+    if owner and owner.get("owner") == "host":
+        return dict(status="error", reason="owner_busy", pid=owner["pid"])
     child = host_spawn(provider, sid, source)
     if child is None:
         return dict(status="error", reason="host_launch_unavailable")
@@ -6741,6 +6744,7 @@ def host_dispatch_switch(provider, sid):
 def host_dispatch_start(provider, sid):
     if host_backoff(provider, sid) > 0:
         return dict(status="backoff")
+    host_clear_stale(provider, sid)
     if host_owned(provider, sid):
         return dict(status="owned")
     started = host_start(provider, sid)
@@ -8587,7 +8591,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 148
+RUNTIME_GENERATION = 149
 
 if __name__ == '__main__':
     import base64 as _base64
