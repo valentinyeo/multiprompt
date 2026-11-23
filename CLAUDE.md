@@ -56,5 +56,5 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
-| Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every PR commit in `test.yml` |
+| Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every new commit on a pull request and on a master push in `test.yml`; the squash-merge helper strips trailers |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
