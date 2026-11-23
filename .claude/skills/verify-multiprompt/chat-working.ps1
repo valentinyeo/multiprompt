@@ -71,7 +71,7 @@ $check.frames += (Get-Content (Join-Path $Evidence 'working-1.json') -Raw | Conv
 $single = @{ name = 'SOFT-2642-one-set-of-dots'; passed = $false; rows = @() }
 $result.checks += $single
 foreach ($frame in @('working-still-0', 'working-still-1', 'working-still-2')) {
-    Wait-Until { & $probe $frame 'busy' } ('SOFT-2642 one set of dots on the empty session frame ' + $frame) -Seconds 20
+    if (-not (& $probe $frame 'busy')) { throw ('SOFT-2642 expected exactly one set of dots in ' + $frame) }
     $single.rows += (Get-Content (Join-Path $Evidence ($frame + '.json')) -Raw | ConvertFrom-Json).rows
     Start-Sleep -Milliseconds 750
 }
