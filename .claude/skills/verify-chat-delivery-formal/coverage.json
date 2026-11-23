@@ -2,7 +2,7 @@
   "sync_commit": "9e4d749e01aea7405ed2bde50182ce4507e1fafd",
   "files": {
     "src/chat_echo.zig": "c50872715a4b9cdcd56cf1184dd39d0ae2c8173cc654d22fc96ee544ea7cafd9",
-    "src/chat_send.zig": "38077fc21ee0ad055d7fcb9f3e8bf442dbdba8bdae4c623db5a3f865b37a9f4f",
+    "src/chat_send.zig": "a86d0c5e34e74e79ff1c2b35bce9b4e58ad4c1d902b507cdcb5d07e93f474377",
     "src/chat_render.zig": "1492e46382856c4b949e8f4a4c1b94ba40ad348b9e8c8c0a17dfa7068c18bd24",
     "src/chat_history_reader.py": "183775a8fc90e1a119e2baed3a611d3e39a5adf1f7485589ae68cb144913b419",
     "src/app_state.zig": "ed748571f275af0bbc759771070da43f166db6cf731b5e9d41fda5f649bd2895",
