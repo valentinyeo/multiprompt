@@ -44,5 +44,17 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   const picked = touchedJourneys(['src/session_layout_sync.zig'], path.join(root, skill, 'features'));
   assert.deepEqual(picked.features, ['mb-tab-layout-sync']);
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  const drive = fs.readFileSync(path.join(root, skill, 'drive.ps1'), 'utf8');
   assert.match(workflow, /Install browser toggle recorder[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
+  assert.match(workflow, /choco install ffmpeg[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
+  assert.match(workflow, /uses: actions\/setup-node[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
+  assert.match(workflow, /name: Build the test account service[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
+  assert.match(drive, /Resolve-DriveRecorder 'ffmpeg\.exe'/);
+  assert.match(drive, /Resolve-DriveRecorder 'ffprobe\.exe'/);
+  assert.match(driver, /Resolve-MbTabExecutable 'node\.exe'/);
+  assert.match(driver, /Resolve-MbTabExecutable 'npm\.cmd'/);
+  const mbTabRecorderIf = workflow.match(/name: Install browser toggle recorder\n\s+if: ([^\n]+)/)[1];
+  assert.ok(mbTabRecorderIf.includes("startsWith(env.FEATURE, 'mb-tab-')"), 'ffmpeg install must cover mb-tab journeys');
+  const setupNodeBlocks = [...workflow.matchAll(/uses: actions\/setup-node@[^\n]+\n\s+if: ([^\n]+)/g)];
+  assert.ok(setupNodeBlocks.some(block => block[1].includes("startsWith(env.FEATURE, 'mb-tab-')")), 'Node setup must cover mb-tab journeys');
 });

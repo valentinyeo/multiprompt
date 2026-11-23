@@ -536,6 +536,19 @@ jobs:
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
           if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: startsWith(env.FEATURE, 'mb-tab-')
+        with:
+          node-version: 22
+      - name: Build the test account service
+        if: startsWith(env.FEATURE, 'mb-tab-')
+        working-directory: service
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund --prefer-offline
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Worker build failed' }
       - name: Check browser recovery journey contract
         continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs

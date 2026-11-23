@@ -7,6 +7,12 @@ $Evidence = [IO.Path]::GetFullPath($Evidence)
 New-Item -ItemType Directory -Force -Path $Evidence | Out-Null
 if ((Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before mb tab journey' }
 if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable version mismatch before mb tab journey' }
+function Resolve-MbTabExecutable([string]$Name) {
+    try { return (Get-Command $Name -ErrorAction Stop).Source }
+    catch { throw "$Name is not installed or not on PATH" }
+}
+$MbTabNode = Resolve-MbTabExecutable 'node.exe'
+$MbTabNpm = Resolve-MbTabExecutable 'npm.cmd'
 $MbTabSession = 'mb-proof-1'
 $MbTabTitle = 'MB proof tab'
 $MbTabWork = 'Multiprompt'
@@ -64,7 +70,7 @@ function Format-MbTabArgs([string[]]$Values) {
 function Invoke-MbLayoutNode([string[]]$NodeArgs) {
     $outputPath = Join-Path $workRoot 'layout-out.txt'
     $errorPath = Join-Path $workRoot 'layout-err.txt'
-    $nodeProcess = Start-Process -FilePath 'node' -ArgumentList (Format-MbTabArgs $NodeArgs) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $nodeProcess = Start-Process -FilePath $MbTabNode -ArgumentList (Format-MbTabArgs $NodeArgs) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     $combined = (Read-MbTabText $outputPath) + (Read-MbTabText $errorPath)
     Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
     $reported = ($combined -replace 'mpk_[A-Za-z0-9_-]+', '<redacted>').Trim()
@@ -78,7 +84,7 @@ function Invoke-MbTabNode([string[]]$NodeArgs) {
     $mbTool = Join-Path $repoRoot 'tools/mb.mjs'
     $outputPath = Join-Path $workRoot 'mb-out.txt'
     $errorPath = Join-Path $workRoot 'mb-err.txt'
-    $nodeProcess = Start-Process -FilePath 'node' -ArgumentList (Format-MbTabArgs (@($mbTool) + $NodeArgs)) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $nodeProcess = Start-Process -FilePath $MbTabNode -ArgumentList (Format-MbTabArgs (@($mbTool) + $NodeArgs)) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     $combined = (Read-MbTabText $outputPath) + (Read-MbTabText $errorPath)
     Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
     $reported = ($combined -replace 'mpk_[A-Za-z0-9_-]+', '<redacted>').Trim()
@@ -90,7 +96,7 @@ function Invoke-MbTabNode([string[]]$NodeArgs) {
 function Invoke-MbBumpModule([string]$BumpPath) {
     $outputPath = Join-Path $workRoot 'bump-out.txt'
     $errorPath = Join-Path $workRoot 'bump-err.txt'
-    $nodeProcess = Start-Process -FilePath 'node' -ArgumentList (Format-MbTabArgs @($BumpPath)) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    $nodeProcess = Start-Process -FilePath $MbTabNode -ArgumentList (Format-MbTabArgs @($BumpPath)) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     $combined = (Read-MbTabText $outputPath) + (Read-MbTabText $errorPath)
     Remove-Item -LiteralPath $outputPath, $errorPath -Force -ErrorAction SilentlyContinue
     if ($nodeProcess.ExitCode -ne 0) { throw "layout bump exited $($nodeProcess.ExitCode): $($combined.Trim())" }
@@ -182,9 +188,9 @@ try {
     if (!(Test-Path -LiteralPath $worker)) {
         Push-Location (Join-Path $repoRoot 'service')
         try {
-            & npm ci --no-audit --no-fund
+            & $MbTabNpm ci --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) { throw 'Account worker install failed' }
-            & npx wrangler deploy --dry-run --outdir .build
+            & (Resolve-MbTabExecutable 'npx.cmd') wrangler deploy --dry-run --outdir .build
             if ($LASTEXITCODE -ne 0) { throw 'Account worker bundle failed' }
         } finally { Pop-Location }
     }
@@ -202,7 +208,7 @@ try {
     $rootCertAdded = $true
     [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $accountHost`r`n")
     $stage = 'account service launch'
-    $serviceProcess = Start-Process -FilePath 'node' -ArgumentList (Format-MbTabArgs @((Join-Path $repoRoot 'service/journey/server.mjs'), '--port=443', "--pfx=$pfx", "--pfxpass=$plain", "--state=$statePath")) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $workRoot 'service.log') -RedirectStandardError (Join-Path $workRoot 'service.err.log')
+    $serviceProcess = Start-Process -FilePath $MbTabNode -ArgumentList (Format-MbTabArgs @((Join-Path $repoRoot 'service/journey/server.mjs'), '--port=443', "--pfx=$pfx", "--pfxpass=$plain", "--state=$statePath")) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $workRoot 'service.log') -RedirectStandardError (Join-Path $workRoot 'service.err.log')
     $plain = $null
     $secure.Dispose()
     $ready = $false
