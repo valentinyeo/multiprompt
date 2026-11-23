@@ -212,6 +212,22 @@ test('paint logs distinguish first paint from real content and preserve producti
   assert.equal(parsed.chat.length, 1);
 });
 
+test('main window discovery matches Multi Bot and legacy multiprompt titles', async () => {
+  const { mainWindowNamePatterns, searchMainWindows } = await lib;
+  assert.deepEqual(mainWindowNamePatterns, ['Multi Bot', 'multiprompt v', 'Multibot DEV']);
+  const calls = [];
+  const ids = await searchMainWindows(async (cmd, args) => {
+    calls.push([cmd, args]);
+    if (args[2] === 'Multi Bot') return { stdout: '10485761 10485762\n' };
+    return { stdout: '' };
+  });
+  assert.deepEqual(ids, ['10485761', '10485762']);
+  assert.ok(calls.some(([, args]) => args[2] === 'Multi Bot'));
+  const runSource = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  assert.match(runSource, /searchMainWindows/);
+  assert.doesNotMatch(runSource, /search', '--name', 'multiprompt v'\]/);
+});
+
 test('proc discovery counts only Wine app/collector processes in this prefix, not Node or other runs', async () => {
   const { procSnapshot } = await lib;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-proc-test-'));
@@ -279,7 +295,7 @@ test('browser regression oracle rejects clipped header, split composer, blank lo
   for (const mutate of [g => { g.layout.mic_btn = { ...rect, right: 1000 }; }, g => { delete g.layout.mic_btn; }, g => { g.layout.stop_btn = { ...rect, left: 200 }; }, g => { g.title = { ...rect, left: 700, right: 1000 }; }, g => { g.layout.composer_card = { ...rect, right: 1100 }; }, g => { g.composer = { ...rect, left: 260 }; }]) {
     const g = structuredClone(good); mutate(g); assert.equal(geometryInside(g), false);
   }
-  for (const mutate of [r => { r.switches[2].geometry.browser_foreign = false; }, r => { r.switches[0].geometryInside = false; }, r => { r.switches[0].headerInk = false; }, r => { r.switches[0].composerInk = false; }, r => { r.switches[0].earlyContent = false; r.switches[0].loadingInk = false; }, r => { r.switches[3].contentPaintMs = 5000; }, r => { r.switches[3].earlyContent = false; }]) {
+  for (const mutate of [r => { r.switches[2].geometry.browser_foreign = false; }, r => { r.switches[0].geometryInside = false; }, r => { r.switches[0].headerInk = false; }, r => { r.switches[0].composerInk = false; }, r => { r.switches[0].contentPaintMs = 8000; }, r => { r.switches[3].contentPaintMs = 5000; }, r => { r.switches[3].earlyContent = false; }]) {
     const r = goodRun(); mutate(r); assert.equal(evaluate(r, defaults).pass, false);
   }
 });

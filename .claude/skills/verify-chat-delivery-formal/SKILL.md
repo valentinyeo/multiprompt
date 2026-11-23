@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `ae44ecce0e6e227ebc0e814a5671a1411efebfa0`. [coverage.json](coverage.json) records that full SHA and conservative whole-file hashes. The function list below, not the file hashes, describes the modeled behavior.
+Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` after merging master into the SOFT-3079 nightly rotation fix, which moved the reader's `RUNTIME_GENERATION` into the canonical inner source and raised it to 150. `message_store_transaction`, `message_poll`, `message_poll_locked`, `chatRelayout`, `chatEchoNotSent`, `IGSH_1266_SharedMessageHostTest`, `ChatOutboxEntry` and the delivery model are unchanged. Slash-pill painting, agent-input rewriting, the send command's destination checks and the host start, owner and dispatch path are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
 
 | Source | Covered behavior |
 | --- | --- |

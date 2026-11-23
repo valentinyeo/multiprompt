@@ -293,7 +293,17 @@ try {
         $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
         New-Item -ItemType Directory -Force $env:MP_VERIFY_STATE, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
         $ssh = Join-Path $scratch 'ssh.exe'
-        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
+        if (-not (Get-Command zig -ErrorAction SilentlyContinue)) {
+            $toolchain = Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.16.0'
+            if (-not (Test-Path (Join-Path $toolchain 'zig.exe'))) {
+                $zip = Join-Path $env:RUNNER_TEMP 'picker-zig.zip'
+                Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+                if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+                Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+            }
+            $env:PATH = $toolchain + ';' + $env:PATH
+        }
+        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot 'picker-refresh-ssh.c') -o $ssh
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
         $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; workspace_count = 2; workspaces = @(@{ name = 'Other'; wid = 'verify-other' }, @{ name = 'Example'; wid = 'verify-example' }); tabs = @(

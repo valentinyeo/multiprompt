@@ -120,7 +120,13 @@ Use separate disposable chats for Reset this chat, Resync chat, Fresh start and 
 
 Observable proof: Reset/resync retain the exact unsent draft and never resend old messages. Fresh start and AI switch preserve name, photo, address and readable history while the new provider receives the handover. Deferred restart runs once after the current turn, not during it.
 
-UNREACHABLE until Part B supplies real host lifecycle receipts, at least two authenticated providers and native controls for handover/reset/resync/deferred restart. These are distinct from /clear; do not substitute one for another.
+Switch AI (`SEARCH_CHAT_SWITCH_*` and tab-context Switch AI rows) is covered by the Linux live script `.claude/skills/verify-multiprompt/switch-ai-live.py` against the production agent host. Before each run, `~/.local/bin/vps-state --can-launch worker` must succeed. From the repository root:
+
+```sh
+python3 .claude/skills/verify-multiprompt/switch-ai-live.py
+```
+
+The script starts a throwaway hosted chat, sends a marker, switches Claude→Codex→Pi→Claude using [providers-switch-ai.json](../providers-switch-ai.json) (add Antigravity as a row after SOFT-3050), and after each hop asserts the same name and address, marker in history, exactly one live chat, and a fresh reply from the new provider; it kills every tmux session it created on exit. Reset, resync, fresh start and deferred restart journeys remain UNREACHABLE until native driver controls exist for those rows.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |

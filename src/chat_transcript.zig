@@ -31,6 +31,10 @@ pub const Identity = struct {
         return providerAgentLabel(if (self.agent != 0) self.agent else 1);
     }
 
+    pub fn hasSession(self: Identity) bool {
+        return self.shell_id != 0 and (self.sid[0] != 0 or self.tmux[0] != 0);
+    }
+
     pub fn init(shell_id: u32, host: u8, codex: bool, sid: []const u8, cwd: []const u8) Identity {
         var key = Identity{ .shell_id = shell_id, .host = host, .codex = codex };
         if (sid.len >= key.sid.len or cwd.len >= key.cwd.len) return .{};

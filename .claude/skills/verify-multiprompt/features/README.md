@@ -10,6 +10,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Stop a running reply](chat-stop.md).
 - [Send and queue messages](chat-message-sending.md).
 - [Formal chat delivery](chat-delivery-formal.md).
+- [Formal Switch AI](chat-switch-ai-formal.md).
 - [CI repair receipt](ci-repair-receipt.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).

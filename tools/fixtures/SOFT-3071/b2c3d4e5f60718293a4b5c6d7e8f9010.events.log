@@ -1,0 +1,8 @@
+{"at":1795136400,"event":"start","detail":{"tmux":"live-updated"}}
+{"at":1795136460,"event":"agent_started","detail":{"pid":1202}}
+{"at":1795139700,"event":"restart_now","detail":null}
+{"at":1795139760,"event":"stop","detail":null}
+{"at":1795139784.0,"event":"start","detail":{"tmux":"live-updated"}}
+{"at":1795139820,"event":"agent_started","detail":{"pid":1203}}
+{"at":1795141800,"event":"idle_stop","detail":null}
+{"at":1795141812.0,"event":"stop","detail":null}
