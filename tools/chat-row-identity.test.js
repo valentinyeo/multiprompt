@@ -96,6 +96,23 @@ test "SOFT-2526 normalized idless rows keep their place when source offsets chan
     try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
 }
 
+test "SOFT-2526 a narrow replay cannot move a repeated prompt into the older prompt slot" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "hosted-chat", "hosted-session");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\thosted-session\t0\t200\t11\t0\tclaude\thosted-chat\t2000\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"text\":\"repeat\",\"timestamp\":\"2026-11-07T00:00:01Z\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"user\",\"text\":\"repeat\",\"timestamp\":\"2026-11-07T00:00:02Z\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    const older = h.blocks.items[0].stamp_ms;
+    const newer = h.blocks.items[1].stamp_ms;
+    try h.apply(a, "@mp\t2\thistory\tok\thosted-session\t100\t200\t11\t0\tclaude\thosted-chat\t2000\t\ttail\t100\n" ++
+        "{\"role\":\"user\",\"text\":\"repeat\",\"timestamp\":\"2026-11-07T00:00:02Z\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(older, h.blocks.items[0].stamp_ms);
+    try std.testing.expectEqual(newer, h.blocks.items[1].stamp_ms);
+}
+
 test "SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair" {
     var h: history.History = .{};
     defer h.deinit(std.testing.allocator);
@@ -141,4 +158,8 @@ test('SOFT-2526 identified hosted echo retires pending above its reply', () => {
 
 test('SOFT-2526 normalized idless rows keep their place when source offsets change', () => {
   runZigTest('SOFT-2526 normalized idless rows keep their place when source offsets change');
+});
+
+test('SOFT-2526 a narrow replay cannot move a repeated prompt into the older prompt slot', () => {
+  runZigTest('SOFT-2526 a narrow replay cannot move a repeated prompt into the older prompt slot');
 });

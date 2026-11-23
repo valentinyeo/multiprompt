@@ -452,6 +452,7 @@ pub const History = struct {
         var incoming = std.HashMap(RowIdentity, struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }, RowIdentity.Context, 80).init(scratch);
         var order: std.ArrayList(RowIdentity) = .empty;
         var previous_matches: std.ArrayList(?usize) = .empty;
+        var previous_keys: std.ArrayList(RowIdentity) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
@@ -471,19 +472,25 @@ pub const History = struct {
             const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
             var matched = incoming.getPtr(key);
             if (matched != null and key.id.len == 0 and matched.?.known) matched = null;
-            if (matched == null) {
-                for (order.items) |candidate| {
-                    const entry = incoming.getPtr(candidate).?;
-                    if (!entry.known and key.matchesLegacy(candidate)) {
-                        matched = entry;
-                        break;
-                    }
-                }
-            }
+            try previous_keys.append(scratch, key);
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
             if (matched) |entry| {
                 entry.known = true;
                 shared = true;
+            }
+        }
+        for (0..2) |pass| {
+            for (previous_keys.items, 0..) |key, index| {
+                if (previous_matches.items[index] != null) continue;
+                for (order.items) |candidate| {
+                    const entry = incoming.getPtr(candidate).?;
+                    if (entry.known or !key.matchesLegacy(candidate)) continue;
+                    if (pass == 0 and !std.mem.eql(u8, key.timestamp, candidate.timestamp)) continue;
+                    previous_matches.items[index] = entry.index;
+                    entry.known = true;
+                    shared = true;
+                    break;
+                }
             }
         }
         if (!shared and !std.mem.eql(u8, &self.sid, &previous.sid)) {
@@ -576,7 +583,9 @@ pub const History = struct {
                 if (key.id.len == 0) {
                     h.update(key.timestamp);
                     h.update(std.mem.sliceAsBytes(key.text));
-                    std.hash.autoHash(&h, key.ordinal);
+                    std.hash.autoHash(&h, key.offset);
+                    std.hash.autoHash(&h, key.end);
+                    if (key.end <= key.offset) std.hash.autoHash(&h, key.ordinal);
                 }
                 std.hash.autoHash(&h, key.settlement != null);
                 if (key.settlement) |fact| {
@@ -592,7 +601,9 @@ pub const History = struct {
                 inline for (.{ "role", "id" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
-                if (lhs.id.len == 0 and (lhs.ordinal != rhs.ordinal or !std.mem.eql(u8, lhs.timestamp, rhs.timestamp) or !std.mem.eql(u16, lhs.text, rhs.text))) return false;
+                if (lhs.id.len == 0 and (lhs.offset != rhs.offset or lhs.end != rhs.end or
+                    (lhs.end <= lhs.offset and lhs.ordinal != rhs.ordinal) or
+                    !std.mem.eql(u8, lhs.timestamp, rhs.timestamp) or !std.mem.eql(u16, lhs.text, rhs.text))) return false;
                 if (lhs.settlement) |fact| {
                     if (!std.mem.eql(u8, fact.operation, rhs.settlement.?.operation) or !std.mem.eql(u8, fact.content, rhs.settlement.?.content)) return false;
                 }
