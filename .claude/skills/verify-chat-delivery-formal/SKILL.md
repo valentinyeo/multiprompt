@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Source/model mapping was reviewed at `87f58de868e4645867a2829908902e5fc58fd4ab` for SOFT-2380. Since the previous sync commit, only `src/app_state.zig` changed among the covered files: it adds the optional sidebar view and three palette IDs. `ChatOutboxEntry` is byte-for-byte unchanged, as are every covered delivery function, caller and native probe. The model, decision table, bounds and inherited findings remain unchanged; the whole-file hash now includes those sidebar-only additions.
+Source/model mapping was reviewed for SOFT-2380 at `9dfde896f4127669c8e662428b8c6d73bb5ed6dc` and merged master `7b20b0cc132b10c2563d7d301005c79134faa17a`. `src/app_state.zig` adds only the optional sidebar view and three palette IDs; `ChatOutboxEntry` is byte-for-byte unchanged. SOFT-2524 changes only the reader's outer runtime selection and bundle identity; `message_store_transaction`, `message_poll`, `message_poll_locked` and their callers are unchanged. All other covered files, the native probes, model, decision table, bounds and inherited findings are unchanged. Whole-file hashes include both reviewed changes; drift checks remain deliberate rather than recomputing expected hashes at check time.
 
 | Source | Covered behavior |
 | --- | --- |
