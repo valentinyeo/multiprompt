@@ -28,7 +28,11 @@ function Read-ProofServer([string]$Command, [string]$Name, [int]$DeadlineSeconds
         $process.Dispose()
     }
 }
+$script:proofLastHostsSync = [DateTime]::MinValue
 function Proof-SyncKnownHosts {
+    $now = [DateTime]::UtcNow
+    if (($now - $script:proofLastHostsSync).TotalSeconds -lt 2) { return }
+    $script:proofLastHostsSync = $now
     $knownHosts = Join-Path $scratch 'home/.ssh/known_hosts'
     $scanName = 'shell-known-hosts-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $scan = (Invoke-ServerNative -FilePath "$env:SystemRoot/System32/OpenSSH/ssh-keyscan.exe" -Arguments @('-p', '2222', '-t', 'ed25519', '127.0.0.1') -Evidence $Evidence -Name $scanName).Trim()

@@ -1,0 +1,1 @@
+echo SOFTPASTE-SHELL-PASTE-CTRL-V > /home/mpverify/shell-paste-ctrl-v.txt
