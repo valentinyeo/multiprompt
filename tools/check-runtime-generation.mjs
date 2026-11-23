@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 export const READER_PATH = 'src/chat_history_reader.py';
 const DIRECT_HOST_GENERATION = /(?:generation=RUNTIME_GENERATION|dict\(generation=RUNTIME_GENERATION)/;
@@ -14,9 +15,8 @@ export function hostGenerationGuard(source) {
   return { ok: true, reason: 'host generation guard ok' };
 }
 
-export function run(_baseArg, headArg) {
-  const head = headArg || 'HEAD';
-  const source = execFileSync('git', ['show', `${head}:${READER_PATH}`], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+export function run() {
+  const source = readFileSync(new URL('../src/chat_history_reader.py', import.meta.url), 'utf8');
   const host = hostGenerationGuard(source);
   if (!host.ok) {
     console.error(`runtime fingerprint guard: ${host.reason}`);
