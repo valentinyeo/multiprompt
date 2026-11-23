@@ -642,31 +642,6 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Read the pre-change chat row source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6
-          path: .chat-row-base
-          sparse-checkout: src
-          persist-credentials: false
-      - name: Prove hosted row regressions fail on the identity-only source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        env:
-          CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
-        run: |
-          if ! grep -q 'client_id' .chat-row-base/src/chat_echo.zig; then
-            echo 'Base no longer uses identity-only matching'
-            exit 0
-          fi
-          set +e
-          timeout 180 node --test tools/chat-row-identity.test.js > "$RUNNER_TEMP/chat-row-before.log" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/chat-row-before.log"
-          test "$status" = 1
-          grep -q '^# fail 2$' "$RUNNER_TEMP/chat-row-before.log"
-          grep -q 'TestExpectedEqual' "$RUNNER_TEMP/chat-row-before.log"
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js

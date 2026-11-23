@@ -1798,23 +1798,6 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             }
             if (!appendWideAscii(buf, &pos, "\"")) return null;
         }
-    } else if ((kind == .vps or kind == .vps2) and tmux_session != null) {
-        const host: u8 = if (kind == .vps2) TMUX_HOST_UK else TMUX_HOST_DE;
-        if (!appendSshPrefix(buf, &pos, host, app_state.g_mobile_mode)) return null;
-        if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
-        var attach_buf: [1536]u8 = undefined;
-        const tmux_identity: []const u8 = app_state.g_pending_tmux_identity orelse "";
-        const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
-        for (attach) |c| {
-            if (c == '"') {
-                if (!appendWideAscii(buf, &pos, "\\\"")) return null;
-            } else {
-                if (pos >= buf.len - 1) return null;
-                buf[pos] = c;
-                pos += 1;
-            }
-        }
-        if (!appendWideAscii(buf, &pos, "\"")) return null;
     } else if (startup_cmd) |cmd| {
         const prefix: []const u8 = switch (kind) {
             .pwsh => "pwsh.exe -NoExit -Command \"",
@@ -2022,7 +2005,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         .tmux_host = opened.host,
         .spawn_tick = GetTickCount64(),
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,
@@ -2054,7 +2037,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
-    if ((app_state.shells[idx].chat_view_on or app_state.g_chat_active) and !app_state.g_restoring) {
+    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
         app_state.shells[idx].console_inflight = false;
     } else if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
@@ -2064,62 +2047,6 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         saveSession();
     }
     return true;
-}
-
-pub fn resumeShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
-    if (idx >= app_state.shell_count) return false;
-    const shell_id = app_state.shells[idx].shell_id;
-    if (app_state.shells[idx].process != null or (app_state.shells[idx].native_terminal and @import("native_session.zig").alive(shell_id))) return true;
-    const title_id = if (app_state.shells[idx].title_id != 0) app_state.shells[idx].title_id else app_state.allocateConsoleTitleId() orelse return false;
-    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) {
-        const pending_chat_view = app_state.g_pending_chat_view;
-        return resumeNativeShellAt(idx, kind, tmux_session, shell_id, title_id, pending_chat_view);
-    }
-    return resumeConhostShellAt(idx, kind, tmux_session, cwd, startup_cmd, shell_id, title_id);
-}
-
-fn resumeNativeShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, pending_chat_view: bool) bool {
-    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
-    const native = @import("native_session.zig");
-    const opened = native.open(kind, tmux_session, shell_id, false) orelse return false;
-    app_state.shells[idx].console_inflight = true;
-    app_state.shells[idx].native_terminal = true;
-    app_state.shells[idx].title_id = title_id;
-    app_state.shells[idx].tmux_host = opened.host;
-    app_state.shells[idx].spawn_tick = GetTickCount64();
-    app_state.shells[idx].ssh_reconnect = .{
-        .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
-        .creating_session = creating_session,
-    };
-    if (tmux_session) |session| {
-        const session_len: u32 = @intCast(@min(session.len, app_state.shells[idx].tmux_session.len - 1));
-        if (session_len > 0) {
-            @memcpy(app_state.shells[idx].tmux_session[0..session_len], session[0..session_len]);
-            app_state.shells[idx].tmux_session_len = session_len;
-        }
-    }
-    app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
-    if ((app_state.shells[idx].chat_view_on or app_state.g_chat_active) and !app_state.g_restoring) {
-        app_state.shells[idx].console_inflight = false;
-    } else if (!native.connect(shell_id)) native.ready(shell_id, false);
-    registerShellExitWait(idx);
-    return true;
-}
-
-fn resumeConhostShellAt(idx: u32, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8, shell_id: u32, title_id: u32) bool {
-    _ = cwd;
-    _ = startup_cmd;
-    _ = shell_id;
-    app_state.shells[idx].kind = kind;
-    app_state.shells[idx].title_id = title_id;
-  if (tmux_session) |session| {
-        const session_len: u32 = @intCast(@min(session.len, app_state.shells[idx].tmux_session.len - 1));
-        if (session_len > 0) {
-            @memcpy(app_state.shells[idx].tmux_session[0..session_len], session[0..session_len]);
-            app_state.shells[idx].tmux_session_len = session_len;
-        }
-    }
-    return respawnShellInPlace(idx, false);
 }
 
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
@@ -2328,7 +2255,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .tmux_host = app_state.g_pending_tmux_host,
         .spawn_tick = if (isRemoteShellKind(kind)) GetTickCount64() else 0,
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,

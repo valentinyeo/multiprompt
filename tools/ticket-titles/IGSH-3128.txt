@@ -1,0 +1,1 @@
+Shell keys, copy, paste and scrolling stopped working
