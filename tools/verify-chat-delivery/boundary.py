@@ -1590,6 +1590,16 @@ def serve_reader():
         record("model-host-start.jsonl", result=started)
         if started.get("status") not in ("started", "already"):
             raise RuntimeError("Production host failed to start: " + str(started))
+    if state().get("name") == "antigravity-chats":
+        sid = state()["sid"]
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(enabled=True, provider="claude", sid=sid, tmux="verify-agent", cwd=state()["cwd"],
+                command=[sys.executable, str(Path(__file__).with_name("model-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("antigravity-host-start.jsonl", provider="claude", result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
     if state().get("name") == "recall-handed":
         import hashlib
         sid = state()["sid"]

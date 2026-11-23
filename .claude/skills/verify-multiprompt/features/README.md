@@ -162,6 +162,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.
 - [Composer buttons](composer-buttons.md): one-line and six-line working drafts retain equally round, bottom-aligned attach, microphone and Send controls.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
+- [Antigravity chats](antigravity-chats.md): start a new Antigravity chat from Ctrl+K and switch an existing Claude chat to Antigravity with its row, name and history intact, then read the fixture agent's reply.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
 
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Real remote/provider and authenticated browser paths still need the exact prerequisites in their owning operation recipe; the browser recovery journey deliberately has no extension attached.

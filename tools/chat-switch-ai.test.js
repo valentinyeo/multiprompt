@@ -138,6 +138,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert len(chats) == 1 and chats[0]['provider'] == 'claude' and chats[0]['sid'] == back['sid'], chats
     shown = r['host_paths']('claude', back['sid'])['history'].read_text()
     assert 'OLD-QUESTION' in shown and 'Switched AI: Antigravity to Claude' in shown
+    print('SWITCH_AI_PASS')
 `);
 });
 
