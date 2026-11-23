@@ -1173,10 +1173,22 @@ var g_ssh_resolve_thread = std.atomic.Value(bool).init(false);
 
 fn resolveSshPathWorker(force: bool) void {
     defer g_ssh_resolve_thread.store(false, .release);
-    _ = resolveSshPathInner(force);
+    _ = resolveSshPath(force);
 }
 
-fn resolveSshPathInner(force: bool) bool {
+pub fn resolveSshPath(force: bool) bool {
+    if (@import("ui_thread.zig").busy()) {
+        if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
+        if (!g_ssh_resolve_thread.swap(true, .acq_rel)) {
+            @import("idle_budget.zig").bump(.thread_spawn);
+            const thread = std.Thread.spawn(.{}, resolveSshPathWorker, .{force}) catch {
+                g_ssh_resolve_thread.store(false, .release);
+                return false;
+            };
+            thread.detach();
+        }
+        return false;
+    }
     while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
     defer app_state.g_ssh_mutex.unlock();
     if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
@@ -1232,22 +1244,6 @@ fn resolveSshPathInner(force: bool) bool {
         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SSH_UNAVAILABLE, 0, 0);
     }
     return false;
-}
-
-pub fn resolveSshPath(force: bool) bool {
-    if (@import("ui_thread.zig").busy()) {
-        if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
-        if (!g_ssh_resolve_thread.swap(true, .acq_rel)) {
-            @import("idle_budget.zig").bump(.thread_spawn);
-            const thread = std.Thread.spawn(.{}, resolveSshPathWorker, .{force}) catch {
-                g_ssh_resolve_thread.store(false, .release);
-                return false;
-            };
-            thread.detach();
-        }
-        return false;
-    }
-    return resolveSshPathInner(force);
 }
 
 fn loadSshConfig() void {
