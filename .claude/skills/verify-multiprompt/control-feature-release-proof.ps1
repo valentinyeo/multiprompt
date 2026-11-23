@@ -39,9 +39,9 @@ Save-ReleaseCheck 'SOFT-3053' @{ passed = $true; typed = '/verify-owner'; accept
 
 function Find-ConsoleWindow {
     Wait-Until {
-        $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null)
+        $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal')
         $candidate -ne [IntPtr]::Zero
-    } 'hosted native terminal window' 60
+    } 'visible hosted native terminal window' 60
     return $candidate
 }
 
@@ -100,14 +100,19 @@ function Save-CaretStrip([string]$Name, [string[]]$Frames, [int]$Scale = 6) {
 }
 
 function Measure-CaretBlink([string]$Label) {
-    Doctor
-    Assert-Foreground
-    $shell = Find-ConsoleWindow
-    $snapshot = [VerifyNative]::GuiCaretSnapshot($shell)
-    if ($snapshot.Caret -eq [IntPtr]::Zero -or $snapshot.CaretRect.Right -le $snapshot.CaretRect.Left -or $snapshot.CaretRect.Bottom -le $snapshot.CaretRect.Top) {
-        $snapshot = [VerifyNative]::GuiCaretSnapshot($script:window)
-    }
-    if ($snapshot.Caret -eq [IntPtr]::Zero -or $snapshot.CaretRect.Right -le $snapshot.CaretRect.Left -or $snapshot.CaretRect.Bottom -le $snapshot.CaretRect.Top) { throw "session-caret: no visible console caret for $Label" }
+    $shell = Focus-Console $Label
+    $snapshot = $null
+    Wait-Until {
+        $candidate = [VerifyNative]::GuiCaretSnapshot($shell)
+        if ($candidate.Caret -eq [IntPtr]::Zero -or $candidate.CaretRect.Right -le $candidate.CaretRect.Left -or $candidate.CaretRect.Bottom -le $candidate.CaretRect.Top) {
+            $candidate = [VerifyNative]::GuiCaretSnapshot($script:window)
+        }
+        if ($candidate.Caret -eq [IntPtr]::Zero -or $candidate.CaretRect.Right -le $candidate.CaretRect.Left -or $candidate.CaretRect.Bottom -le $candidate.CaretRect.Top) { return $false }
+        $script:caretCandidate = $candidate
+        return $true
+    } ("visible console caret: " + $Label) 20
+    $snapshot = $script:caretCandidate
+    $script:caretCandidate = $null
     $origin = New-Object VerifyNative+Point
     $origin.X = $snapshot.CaretRect.Left
     $origin.Y = $snapshot.CaretRect.Top

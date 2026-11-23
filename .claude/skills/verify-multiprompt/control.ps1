@@ -405,7 +405,9 @@ try {
             $remoteTabs[1].ccwd = '/home/inne/projects/sample'
         }
         if ($Feature -eq 'chat-still') { foreach ($tab in $remoteTabs) { $tab.cv = $true }; $env:MULTIPROMPT_CHAT_STILL_PROOF = '1' }
-        $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs } -Depth 6
+        $remoteSeed = @{ active_tab = 0; single_window = $false; chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs }
+        if ($Feature -eq 'release-proof') { $remoteSeed.shared_server_connection = $true }
+        $remoteSeedJson = ConvertTo-Json -InputObject $remoteSeed -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
