@@ -35,6 +35,8 @@ One logical chat address, at most two pending switch requests, five successful s
 
 Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
+SOFT-3092 makes the host's atomic publish retry a Windows share violation and answers a failed fresh start with its own reason. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow` and `host_dispatch_switch` are byte-identical to the previous sync commit; `host_write` now publishes through `host_publish`, which performs exactly one `os.replace` off Windows and retries a `PermissionError` only on Windows. Write failure stays outside the switch bound, so only the reader's file hash moved and the sync commit names that fix.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |

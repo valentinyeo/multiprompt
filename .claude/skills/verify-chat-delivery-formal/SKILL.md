@@ -59,6 +59,8 @@ SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. 
 
 SOFT-3092 makes the host's atomic publish retry a Windows share violation and answers a failed fresh start with its own reason. `message_store_transaction`, `message_poll`, `message_poll_locked` and their callers are unchanged; `host_write`, `host_publish`, `host_fresh_archive`, `host_fresh_error`, `host_fresh_request` and `host_accept_client` stay outside the delivery model, like the host start, owner and dispatch path. Only the reader's file hash moved and the sync commit names that fix.
 
+SOFT-3092's merge of `a9411464a` imports master's workspace view fields into `src/app_state.zig`, so that file's whole-file hash moves with the merge commit. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, and the reader hash from the fix above still matches. Bounds, decisions and properties remain unchanged.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
