@@ -1,0 +1,43 @@
+Ticket SOFT-3138 https://app.hypertask.ai/detail/project-2060/3138 (repo valentinyeo/multiprompt, branch soft-3138-dots, this worktree).
+
+Bug: in a normal (never restarted) server-hosted Claude chat tab in the Multiprompt desktop Chat View, after the user sends a message: (1) the three ticking busy dots never appear while the chat works; (2) the chat does reply (visible in its transcript) but the user sees no reply in the Chat View. Expected: dots from send until the turn ends; reply shown below the user's message when it arrives.
+
+ALSO IN SCOPE, likely the same cause: SOFT-3097 https://app.hypertask.ai/detail/project-2060/3097 - in the same chat, replies land ABOVE the user's question. PR 1269 (a revert) merged 11:11Z 23 Nov and ships in v0.28.1900, which the user runs, and the bug is still there, so 1269 did not remove the cause or there is a second cause. Reproduce on v0.28.1900 (tag) with a hosted chat that replies while it is busy (a turn still running when the next message is sent). Use git log/blame of PR 1269 and the chat ordering/reconcile code (pending rows, echo reconciliation, history refresh, row sort key) to find the real cause.
+
+STRONG LEAD (screenshots https://screencast2.com/73HSA.png and https://screencast2.com/Scbje.png): a user message that starts with a /skill command (e.g. '/pstack:correct how can this even happen...') AND was sent with a quoted reply block above it stays stuck at the BOTTOM of the Chat View as a pending row forever; the chat's replies to it and to later messages sort ABOVE it. So a /skill + quote message never reconciles with its echo in the transcript (the echo text differs: skill expansion and/or quote formatting), and the unreconciled pending row keeps the bottom slot and likely also suppresses the busy dots. Check the echo-matching normalisation in chat_echo / chat_send / pending rows for skill-prefixed and quoted messages.
+
+Required repro test (fails before, passes after): send a /skill message with a quote to a busy chat; assert the pending row reconciles exactly once with its echo, and the reply appears below it. Add unit coverage of the echo matcher for skill + quote text, and the busy-chat journey.
+
+If dots + order + missing reply share one cause, fix in one PR titled "SOFT-3097: Replies sit below their question and busy dots show"; otherwise one PR per cause. SOFT-3135 (restarted chats shown as shell tabs) is out of scope. The repo's verify-chat-delivery-formal skill applies when you change chat_echo/chat_send/pending rows: run its TLA+ checks via CI only.
+
+Do:
+1. Read CLAUDE.md, openwiki/index.md, openwiki/architecture/features.md. Find the busy-dots state and the reply refresh path (src/chat_*.zig, src/chat_history_reader.py, live stream/follow mode). Look at recent master commits touching them (git log -30 -- src/chat*).
+2. Find the root cause. Write a failing test first (existing JS/Python/Zig test style in tools/ or src/), then the fix.
+3. Never build or run tests on this server: push the branch and let GitHub CI run. Open ONE PR titled "SOFT-3138: Show busy dots and the reply after a send", body with root cause, fix and a one-line undo, plus a changelog.d/SOFT-3138-busy-dots.md fragment (one plain user sentence). Commit identity: 348741585+software-factory-runners[bot]@users.noreply.github.com, no Co-authored-by lines. No code comments (tools/strip-comments.mjs --check). Do not add status elements around messages; only the three dots.
+4. The repo has a verify-multiprompt skill (.claude/skills/verify-multiprompt/SKILL.md) for Windows-runner journeys; add or extend a journey that sends while the chat is busy and asserts reply order + dots, run it via GitHub Actions only.
+5. Report one line, plus an honest ETA to merge if not done: PR URL + root cause in one sentence, or what blocked you.
+
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
