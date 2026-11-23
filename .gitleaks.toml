@@ -21,6 +21,7 @@ keywords = ["token", "secret", "key", "password"]
 description = "Public deterministic cryptographic vectors, never service credentials"
 regexTarget = "secret"
 regexes = [
+  '''^e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576$''',
   '''^/ZYZhQZidIeSytjbKLOIqgK1lbaq3Bdchyfe0pQdXcw=$''',
   '''^DCA1BJZdQXTT7L1cXnd6Gd13WirAMa0OIOPjFsE1jDM=$''',
   '''^1M0RyVORDep4eafLm8oBTtbAct2564ukkgcdPkZPU3k=$''',

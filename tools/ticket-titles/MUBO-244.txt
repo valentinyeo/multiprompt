@@ -1,0 +1,1 @@
+An uploaded bot photo stays with its chat after a rename
