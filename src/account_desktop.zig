@@ -446,6 +446,30 @@ pub fn accountPush() void {
     };
     startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
 }
+pub fn accountServerPaletteName(slot: u8) []const u8 {
+    const fallbacks = [_][]const u8{ "Server 1", "Server 2", "Server 3" };
+    if (slot >= fallbacks.len) return "Server";
+    if (app_state.g_account_base) |base| {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const parsed = session_layout.parse(arena.allocator(), base) catch null orelse {
+            if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
+                if (host.name.len > 0) return host.name;
+            }
+            return fallbacks[slot];
+        };
+        defer parsed.deinit();
+        if (account_hosts.isRemoved(parsed.value.removed_hosts orelse &.{}, slot)) return "";
+        if (account_hosts.find(parsed.value.hosts orelse &.{}, slot)) |layout_host| {
+            if (layout_host.name.len > 0) return layout_host.name;
+        }
+    }
+    if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
+        if (host.name.len > 0) return host.name;
+    }
+    return fallbacks[slot];
+}
+
 pub fn accountRemoveServer(slot: u8) void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_busy or g_account_key_prompt_active) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

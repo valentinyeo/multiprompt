@@ -2404,13 +2404,13 @@ class HistoryReaderTest(unittest.TestCase):
         server.stdin.flush()
         return server
 
-    def server_request(self, server, query):
+    def server_request(self, server, query, timeout=10):
         line = query if isinstance(query, bytes) else json.dumps(query).encode()
         server.stdin.write(line + b'\n')
         server.stdin.flush()
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
-            self.assertTrue(selector.select(timeout=5), 'reader reply timed out')
+            self.assertTrue(selector.select(timeout=timeout), 'reader reply timed out')
         line = server.stdout.readline()
         self.assertTrue(line.startswith(b'{'), 'reader must keep a framed connection: ' + repr(line))
         reply = json.loads(line)
@@ -5272,7 +5272,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 27)
+        self.assertEqual(len(base), 31)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -5505,6 +5505,55 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
                 time.sleep(0.2)
             self.assertEqual(started.get('status'), 'already', started)
             self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
+
+    def test_SOFT_3060_host_send_wakes_a_stopped_host_and_delivers_once(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        reader.host_stop(self.provider, self.sid, force=True)
+        time.sleep(0.3)
+        sent = reader.host_send(self.provider, self.sid, 'wake line')
+        self.assertIn(sent['status'], ('queued', 'sent'))
+        self.wait_for(lambda: (self.message(sent['id']) or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text, 'wake line'])
+
+    def test_SOFT_3060_a_stopped_host_starts_again_for_the_next_message(self):
+        self.enable()
+        second = 'host_fixture_message_02'
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        reader.host_stop(self.provider, self.sid, force=True)
+        time.sleep(0.3)
+        self.assertFalse(reader.host_owned(self.provider, self.sid))
+        self.seed(token=second, text='after stop')
+        self.dispatch()
+        self.wait_for(lambda: (self.message(second) or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text, 'after stop'])
+
+    def test_SOFT_3060_a_busy_host_that_misses_a_ping_keeps_its_owner(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        with patch.object(reader, 'host_request', return_value=dict(status='timeout')):
+            reader.host_clear_stale(self.provider, self.sid)
+            self.assertTrue(reader.host_owned(self.provider, self.sid))
+            self.assertEqual(reader.host_dispatch_start(self.provider, self.sid).get('status'), 'owned')
+        self.assertEqual(len(self.host_children), 1)
+        self.assertEqual(self.user_lines(), [self.text])
+
+    def test_SOFT_3060_a_stale_owner_whose_pid_is_gone_is_cleared(self):
+        self.enable()
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['owner'], dict(owner='host', pid=99999999, at=time.time()))
+        self.assertFalse(reader.host_alive(self.provider, self.sid))
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertTrue(reader.host_owned(self.provider, self.sid))
+        self.assertEqual(self.user_lines(), [self.text])
 
     def test_host_delivers_once_with_receipt(self):
         self.enable()
