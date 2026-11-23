@@ -3107,6 +3107,49 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     for (starred_layout.tabs, 0..) |tab, ws| try std.testing.expectEqualStrings(starred_layout.workspaces[ws].name, tab.workspace);
 }
 
+pub fn sidebarViewShellVisible(idx: usize) bool {
+    const view = app_state.g_sidebar_view orelse return false;
+    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |*row| {
+        if (row.sid == app_state.shells[idx].shell_id and row.ws < app_state.g_inbox_ws_count and
+            app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
+            return @import("inbox.zig").rowVisibleInSplit(row, view.split(), now_ms);
+    }
+    return false;
+}
+
+pub fn refreshSidebarView() void {
+    const view = app_state.g_sidebar_view orelse return;
+    @import("inbox.zig").publishInboxStateNow();
+    @import("inbox.zig").loadInboxModel();
+    if (app_state.active_shell < app_state.shell_count and sidebarViewShellVisible(app_state.active_shell)) return;
+    var target: ?u32 = null;
+    var best: app_state.InboxRow = .{};
+    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
+        if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd != @intFromPtr(app_state.g_main_hwnd)) continue;
+        if (!@import("inbox.zig").rowVisibleInSplit(&row, view.split(), now_ms)) continue;
+        const idx = @import("inbox.zig").findShellById(row.sid) orelse continue;
+        if (target == null or @import("inbox.zig").rowLessForSplit(view.split(), now_ms, row, best)) {
+            target = idx;
+            best = row;
+        }
+    }
+    if (target) |idx| {
+        if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+    } else {
+        const chat_on = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on else false;
+        @import("chat_composer.zig").closeChatView();
+        if (app_state.active_shell < app_state.shell_count) {
+            app_state.shells[app_state.active_shell].chat_view_on = chat_on;
+            if (app_state.shells[app_state.active_shell].hwnd != null) _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        }
+        app_state.active_shell = app_state.shell_count;
+        hideBrowserFloatingChrome();
+        parkStrayBrowserPanes(null);
+    }
+}
+
 pub fn starredShellVisible(idx: usize) bool {
     const shell = &app_state.shells[idx];
     return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
@@ -3153,7 +3196,7 @@ fn rememberWorkspaceFocus(ws: u8, shell_id: u32, input: app_state.WorkspaceFocus
 }
 
 pub fn captureWorkspaceFocus() void {
-    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.g_sidebar_view != null or app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
     if (app_state.g_single_window and shell.workspace != app_state.g_active_workspace) return;
     const input: app_state.WorkspaceFocus = if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null and
@@ -3224,14 +3267,32 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
 }
 
 pub fn switchToWorkspace(ws_in: u32) void {
+    if (ws_in >= @intFromEnum(@import("workspace_view.zig").Builtin.all) and ws_in <= @import("workspace_view.zig").starred)
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
+    for (@import("workspace_view.zig").builtins) |view| {
+        if (ws_in != @intFromEnum(view)) continue;
+        captureWorkspaceFocus();
+        _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
+        app_state.g_starred_workspace = false;
+        app_state.g_sidebar_view = view;
+        app_state.g_browser_focus_mode = false;
+        app_state.g_inbox_step_context_active = false;
+        app_state.g_sidebar_scroll = 0;
+        refreshSidebarView();
+        focusActiveShell();
+        updateMainWindowTitle();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
     if (!app_state.g_single_window) return;
+    const was_view = app_state.g_sidebar_view != null;
     if (ws_in == @import("workspace_view.zig").starred) {
+        app_state.g_sidebar_view = null;
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
         app_state.g_browser_focus_mode = false;
         app_state.g_starred_workspace = true;
         @import("inbox.zig").loadInboxModel();
-        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
         app_state.g_inbox_step_context_active = false;
         app_state.g_sidebar_scroll = 0;
         for (0..app_state.shell_count) |i| {
@@ -3253,7 +3314,8 @@ pub fn switchToWorkspace(ws_in: u32) void {
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
     captureWorkspaceFocus();
     app_state.g_browser_focus_mode = false;
-    const was_starred = app_state.g_starred_workspace;
+    const was_starred = app_state.g_starred_workspace or was_view;
+    app_state.g_sidebar_view = null;
     app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
     if (ws != app_state.g_active_workspace) {
@@ -3778,6 +3840,7 @@ fn leaveSingleWindowMode() bool {
 
     app_state.g_single_window = false;
     app_state.g_starred_workspace = false;
+    app_state.g_sidebar_view = null;
     setWindowDisplayNameUtf8(active_name_buf[0..active_name_len]);
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
@@ -3828,6 +3891,7 @@ pub fn newWorkspace() void {
     captureWorkspaceFocus();
     _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
     app_state.g_starred_workspace = false;
+    app_state.g_sidebar_view = null;
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;
@@ -4817,7 +4881,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         }
         const slot = slot_map[src_ws];
 
-        const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
+        const tmux_name: ?[]const u8 = if ((tabs[t].kind == .vps or tabs[t].kind == .vps2 or tabs[t].kind == .tmux) and tabs[t].tmux_session_len > 0)
             tabs[t].tmux_session[0..tabs[t].tmux_session_len]
         else
             null;

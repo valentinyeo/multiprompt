@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
+
 SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
 
 SOFT-2525 restores Pi login's one-argument live-reply guard by carrying the checked session and bytes together. Compared with `cc067da0c3d9b2c22b9db957ee1c0c9daff113ab`, all nine covered send functions, the extracted timeout branch and restore guard are byte-identical, and every other recorded file hash is unchanged. Only the send file hash and sync commit move; bounds, decisions, probes and properties remain unchanged.
@@ -54,6 +56,8 @@ SOFT-2524 changes only the outer runtime selection and bundle identity. The cove
 SOFT-2526 carries the existing client ID into history blocks and uses it for pending-row assignment. Native probes and counterexample replays now supply that ID. The one-message TLA+ transition table is unchanged: it assumes an echo belonging to that send. The desktop never uses the legacy text-only assignment path for identified sends. Separate delivery and history regressions cover two identical prompts, rewritten text, late ID metadata, cache replay and id-less history. The reader adds optional `client_id` metadata and persists native aliases in existing attempt bindings; no wire ID, delivery state or database schema changes. Older clients may ignore the extra metadata.
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
+
+SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |
 | --- | --- |

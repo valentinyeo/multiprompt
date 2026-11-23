@@ -202,6 +202,7 @@ const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_RE
 const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -896,6 +897,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
+        app_state.SEARCH_WORKSPACE_ALL_OFFSET => "workspace view all sessions alt shift 1",
+        app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET => "workspace view frequent sessions alt shift 2",
+        app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET => "workspace view favorites sessions alt shift 3",
         SEARCH_GOINBOX_OFFSET => "go to inbox",
         SEARCH_SHOW_FREQUENT_OFFSET => "show frequent split",
         SEARCH_FREQUENT_FIRST_OFFSET => "frequent as first tab",
@@ -1018,6 +1022,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET => "Chat View: Switch AI to Antigravity keep chat name picture address history subscription",
+        SEARCH_CHAT_AUTO_SWITCH_OFFSET => "Chat View: Auto-switch AI when a plan runs out fallback next ai usage limit rate limit quota",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1509,8 +1514,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
     if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return !app_state.g_search_ws_move_mode and !app_state.g_search_workspace_delete_mode;
     switch (target) {
-        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET,
-        SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, app_state.SEARCH_WORKSPACE_ALL_OFFSET, app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET, app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
         else => {},
     }
     if (target == SEARCH_FULLWIDTH_OFFSET) return false;
@@ -1543,7 +1547,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET or target == SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_REOPEN_SERVER_SHELL_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
-        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, app_state.SEARCH_WORKSPACE_ALL_OFFSET, app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET, app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
         SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
         SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
@@ -1888,7 +1892,7 @@ pub fn workspaceColorSlot() ?u8 {
         if (app_state.g_single_window) return null;
         return if (app_state.g_lws_count > 0) 0 else null;
     }
-    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_all_sessions_active) return null;
+    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_sidebar_view != null or app_state.g_all_sessions_active) return null;
     const slot = activeWorkspaceSlot();
     return if (slot < app_state.g_lws_count and slot < app_state.MAX_LWS) slot else null;
 }
@@ -4539,12 +4543,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TOOL_STEPS_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TOOL_STEPS_OFFSET, &[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, false);
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4592,6 +4591,8 @@ pub fn updateSearchResults() void {
         }
     }
 
+    chatPaletteRow(SEARCH_CHAT_AUTO_SWITCH_OFFSET, &[_][]const u8{ "Chat View: Auto-switch AI when a plan runs out", "fallback next ai usage limit rate limit quota ran out of plan" }, true);
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4613,18 +4614,8 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TODO_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_CODE_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TODO_OFFSET, &[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, false);
+    chatPaletteRow(SEARCH_CHAT_COPY_CODE_OFFSET, &[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, false);
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4742,6 +4733,8 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
+
+    @import("workspace_view_ui.zig").appendSearchResults();
 
     if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&.{ "Go to Starred workspace", "favorites", "alt 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -6126,7 +6119,16 @@ fn appendTmuxCacheRows() void {
     }
 }
 
-fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {
+fn chatPaletteRow(id: usize, labels: []const []const u8, needs_live: bool) void {
+    if (!app_state.g_chat_active or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    if (needs_live and !liveChatTab(app_state.active_shell)) return;
+    if (app_state.g_search_result_count >= app_state.g_search_results.len) return;
+    if (!labelsMatchQuery(labels, app_state.g_search_buf[0..app_state.g_search_len])) return;
+    app_state.g_search_results[app_state.g_search_result_count] = id;
+    app_state.g_search_result_count += 1;
+}
+
+pub fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {
     if (query.len == 0) return true;
     for (labels) |label| {
         if (asciiContainsQueryInsensitive(label, query)) return true;

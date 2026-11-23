@@ -54,6 +54,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
+| Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |

@@ -1,0 +1,1 @@
+Chats move to another plan when one runs out
