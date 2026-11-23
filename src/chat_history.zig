@@ -2447,9 +2447,9 @@ test "MUBO-249 delivery evidence parses each settlement row once, not once per c
     var h = History{};
     defer h.deinit(a);
     for (0..1600) |i| {
-        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"text\":\"message {d}\",\"timestamp\":\"2026-10-13T11:06:22.591Z\"}}\n", .{i});
-        defer a.free(row);
-        try h.rows.appendSlice(a, row);
+        const line = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"text\":\"message {d}\",\"timestamp\":\"2026-10-13T11:06:22.591Z\"}}\n", .{i});
+        defer a.free(line);
+        try h.rows.appendSlice(a, line);
         if (i % 8 == 0) {
             const fact = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-13T11:06:23.591Z\",\"settlement\":{{\"operation\":\"enqueue\",\"content\":\"queued {d}\"}}}}\n", .{i});
             defer a.free(fact);
@@ -2482,9 +2482,9 @@ test "MUBO-249 appending positioned rows scans only the new rows, not the whole 
     defer a.free(head);
     try wire.appendSlice(a, head);
     for (0..1600) |i| {
-        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"message {d}\"}}\n", .{ i * 100, (i + 1) * 100, i });
-        defer a.free(row);
-        try wire.appendSlice(a, row);
+        const line = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"message {d}\"}}\n", .{ i * 100, (i + 1) * 100, i });
+        defer a.free(line);
+        try wire.appendSlice(a, line);
     }
     try wire.appendSlice(a, "@@MP_END@@\n");
     var h: History = .{};
