@@ -55,15 +55,17 @@ jobs:
         run: node --test tools/package-symbols.test.mjs
       - name: Test the release workflow keeps its publication gates
         run: node --test tools/release-update-gate.test.mjs
-      - name: Test the runtime generation guard
+      - name: Test the runtime fingerprint guard
         run: node --test tools/check-runtime-generation.test.js
+      - name: Test automatic helper bundle versions
+        run: python3 tools/runtime-fingerprint.test.py -v
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat
         run: node --test tools/chat-send-now.test.js
       - name: Preserve slash skill positions in agent input
         run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
-      - name: Guard the reader runtime generation
+      - name: Guard the reader runtime fingerprint
         env:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}

@@ -1,7 +1,8 @@
 ---------------------------- MODULE Switch ----------------------------
 EXTENDS Naturals, FiniteSets, Sequences
 CONSTANTS RefuseBusy, StopOldOnCommit, CommitAfterStartFail,
-          CarryQueuedMessages, SkipLocatorDelete, Providers, Scenario
+          CarryQueuedMessages, SkipLocatorDelete, CarryIdentity, CarryHistory,
+          Providers, Scenario
 VARIABLES phase, provider, liveCount, identityOk, historyOk, lost, duplicate,
           aiRunning, busy, pendingSwitch, switching, restarted, startOk, sentDuring,
           currentSid, dualLocator
@@ -73,8 +74,8 @@ CommitSwitch == /\ switching
                 /\ switching' = FALSE
                 /\ phase' = "idle"
                 /\ currentSid' = currentSid + 1
-                /\ identityOk' = TRUE
-                /\ historyOk' = TRUE
+                /\ identityOk' = (identityOk /\ CarryIdentity /\ ~SkipLocatorDelete)
+                /\ historyOk' = (historyOk /\ CarryHistory)
                 /\ liveCount' = (IF StopOldOnCommit THEN 1 ELSE 2)
                 /\ pendingSwitch' = 0
                 /\ busy' = FALSE

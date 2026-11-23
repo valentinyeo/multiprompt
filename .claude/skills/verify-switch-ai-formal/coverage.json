@@ -1,7 +1,7 @@
 {
-  "sync_commit": "97c21fee7a1f70f5dd7f5fd94859ce85f44d8d81",
+  "sync_commit": "7b20b0cc132b10c2563d7d301005c79134faa17a",
   "files": {
-    "src/chat_history_reader.py": "a83c6063e240b49aa1f0ed137768f239237891d57a3da7ff3da4f37dadf2e4d4",
+    "src/chat_history_reader.py": "852471d6fd2df8e3217d8ae62430faddf708be753d7012f67c568d04d9537561",
     "tools/chat-switch-ai.test.js": "3d69cbe05762594b36a52f997bb26f20392789777b242f2f35a3f9f90f766d0e"
   },
   "coverage": {

@@ -317,6 +317,47 @@ def cmd_list(args):
     return 0
 
 
+def cmd_whoami(args):
+    send = load_send()
+    tmux = send.own_tmux()
+    if not tmux:
+        raise ValueError("cannot identify this chat; run from inside a Multibot chat")
+    listing = send.zsb("workspace-list")
+    if listing.get("ok") is not True:
+        raise ValueError("cannot read this chat's current name; open the desktop app and retry")
+    tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux]
+    if len(tabs) != 1 or not tabs[0].get("title"):
+        raise ValueError("this chat has no unique named tab on the desktop")
+    tab = tabs[0]
+    provider = os.environ.get("MULTIBOT_PROVIDER")
+    sid = os.environ.get("MULTIBOT_SID")
+    root = send.host_root()
+    paths = [root / (send.host_config_key(provider, sid) + ".config.json")] if provider and sid else sorted(root.glob("*.config.json"))
+    identities = set()
+    for path in paths:
+        config = send.read_json(path)
+        if not config or config.get("tmux") != tmux:
+            continue
+        key = path.name[: -len(".config.json")]
+        state = send.read_json(path.with_name(key + ".state.json")) or {}
+        linked_provider = config.get("provider") or state.get("provider")
+        linked_sid = state.get("sid") or config.get("sid")
+        if not isinstance(linked_provider, str) or not linked_provider or not isinstance(linked_sid, str) or not linked_sid:
+            continue
+        if provider and sid and (linked_provider, linked_sid) != (provider, sid):
+            continue
+        identities.add((linked_provider, linked_sid))
+    if len(identities) != 1:
+        raise ValueError("cannot identify this chat's linked agent session uniquely")
+    provider, sid = identities.pop()
+    identity = dict(name=tab["title"], sid=sid, provider=provider, tmux=tmux, link=send.link_token(tab["title"], tmux))
+    if args.json:
+        print(json.dumps(identity, separators=(",", ":")))
+    else:
+        print("Name: " + identity["name"] + "\nSession ID: " + sid + "\nAgent: " + provider + "\nLink: " + identity["link"])
+    return 0
+
+
 def parse_send(argv):
     workspace = None
     rest = list(argv)
@@ -519,6 +560,8 @@ def parse(argv):
     listing = commands.add_parser("list", help="list live chats (default)")
     listing.add_argument("--json", action="store_true")
     listing.add_argument("--workspace", default=None)
+    identity = commands.add_parser("whoami", help="show this chat's current name, session id and linked agent")
+    identity.add_argument("--json", action="store_true")
     sending = commands.add_parser("send", help="send one message to a chat by app name")
     sending.add_argument("--workspace", default=None)
     sending.add_argument("name", nargs="?")
@@ -544,7 +587,7 @@ def parse(argv):
     ending.add_argument("--force", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
-    if argv[0] not in {"list", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
+    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -567,7 +610,7 @@ def main(argv=None):
         return 2
     command = args.command or "list"
     send = load_send()
-    handlers = dict(list=cmd_list, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
+    handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
                     close=cmd_close, send=cmd_send)
     try:
         if command == "send":

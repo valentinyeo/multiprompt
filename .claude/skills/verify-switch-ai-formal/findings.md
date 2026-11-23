@@ -17,8 +17,16 @@ SOFT-3057 (PR #1208) reordered `host_switch_ai`: it writes the new config, start
 
 - Setting `CommitAfterStartFail` true reproduces the historical failure of `FailedSwitchKeepsOld`.
 - Setting `StopOldOnCommit` false leaves the old agent running next to the new one and fails `OneLiveChat`.
-- Planting the locator-delete no-op fails `OneLiveChat`, and planting the queued-message adoption no-op fails `NoLostOrDuplicate`; `--self-test` proves both through production code.
+- `identityOk` starts true and changes only in `CommitSwitch`: it falls when `CarryIdentity` is false or when the commit leaves two locators for the address. The doubled-chat break, a locator delete turned into a no-op, fails `IdentityStable` with two locators and replay shows them.
+- `historyOk` starts true and falls when `CarryHistory` is false. The lost-chat break, a commit that writes only the divider into the new chat's history, fails `HistoryReadable`, and replay shows the new chat with no earlier rows.
+- Planting the queued-message adoption no-op fails `NoLostOrDuplicate`, and replay shows the message still queued on the old provider and sid after the commit.
+
+`--self-test` proves all three breaks through production code. Each replayed trace must show the symptom its rule names, and the same trace on unbroken source must not show it, so a replay that finishes without reproducing the violation turns the run red.
+
+## Sends during a switch
+
+When a trace sends while a switch runs, the replay queues the marker message before the atomic `host_switch_ai` call, then reports where the marker ends up. On unbroken source the commit adopts it onto the new provider and sid; with adoption broken it stays queued on the old pair and the check reads that as the lost message.
 
 ## Source replay
 
-The check runs isolated Python probes and replays failures through temporary homes with the production `host_switch_ai` body. No tmux, provider CLI or desktop window is started.
+The check runs isolated Python probes and replays failures through temporary homes with the production `host_switch_ai` body, one switch per request because the real call is atomic. No tmux, provider CLI or desktop window is started.
