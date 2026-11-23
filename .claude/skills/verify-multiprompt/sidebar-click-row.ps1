@@ -40,26 +40,23 @@ public static class SidebarRowProof {
         return bands.ToArray();
     }
     public static double Overlap(string pathBefore, string pathAfter, int dx, int top, int bottom) {
-        int width = 150;
-        int height = bottom - top;
-        if (height <= 0) throw new InvalidOperationException("Row band is empty");
         using (var before = new Bitmap(pathBefore))
         using (var after = new Bitmap(pathAfter)) {
-            int matching = 0, beforeInk = 0;
-            for (int x = dx + 20; x < dx + 20 + width; x++) {
-                int countBefore = 0, countAfter = 0;
-                for (int y = top; y < bottom; y++) {
-                    if (Ink(before, x, y)) countBefore++;
-                    if (Ink(after, x, y)) countAfter++;
+            int both = 0, either = 0, beforeInk = 0;
+            for (int y = top; y < bottom; y++) {
+                for (int x = dx + 20; x < dx + 170; x++) {
+                    bool a = Ink(before, x, y);
+                    bool b = Ink(after, x, y);
+                    if (a) beforeInk++;
+                    if (a && b) both++;
+                    if (a || b) either++;
                 }
-                beforeInk += countBefore;
-                if (Math.Abs(countBefore - countAfter) <= 1) matching++;
             }
             if (beforeInk < 60) throw new InvalidOperationException("Row band under the pointer has too little text to compare: " + beforeInk);
-            return 100.0 * matching / width;
+            if (either == 0) return 0.0;
+            return 100.0 * both / either;
         }
     }
-}
 '@
 
 $check = @{ name = 'sidebar-click-row'; passed = $false; boundary = 'Two stand-in tmux tabs on the replaced SSH boundary; real sidebar, real click, real chat reopen.' }
@@ -70,6 +67,11 @@ Wait-Until {
 } 'two saved sessions restored with the first one active' 180
 [void][VerifyNative]::DwmFlush()
 [VerifyNative]::MoveMouseClient($script:window, 900, 420, $false)
+Activate-OwnedFrame
+Wait-Until {
+    $foreground = [VerifyNative]::GetForegroundWindow()
+    $foreground -ne [IntPtr]::Zero -and ($foreground -eq $script:window -or [VerifyNative]::GetAncestor($foreground, 2) -eq $script:window)
+} 'owned app is the foreground window before the sidebar click' 30
 Start-Sleep -Milliseconds 400
 $frame = New-Object VerifyNative+Rect
 $origin = New-Object VerifyNative+Point
@@ -90,6 +92,7 @@ $pointerBefore = [SidebarRowProof]::Cursor()
 Record ('Pointer before click: ' + ($pointerBefore -join ',') + ' client ' + $clickX + ',' + $clickY)
 $activeBefore = (Read-Session).active_tab
 [VerifyNative]::ClickClient($script:window, $clickX, $clickY)
+Snapshot 'action'
 $pointerAfterClick = [SidebarRowProof]::Cursor()
 Record ('Pointer after click: ' + ($pointerAfterClick -join ','))
 Wait-Until { (Read-Session).active_tab -eq 1 } 'clicked sidebar session became the selected chat' 60
@@ -121,6 +124,6 @@ $check.inkOverlap = $overlap
 $check.activeBefore = $activeBefore
 $check.activeAfter = $activeAfter
 $check.screenshots = @('sidebar-row-before.png', 'sidebar-row-after.png')
-if ($overlap -lt 75) { throw ('The clicked sidebar row no longer sits under the pointer: row ink overlap ' + $overlap + '%') }
+if ($overlap -lt 70) { throw ('The clicked sidebar row no longer sits under the pointer: row ink overlap ' + $overlap + '%') }
 $check.passed = $true
 Save-Json $check 'sidebar-row-check.json'
