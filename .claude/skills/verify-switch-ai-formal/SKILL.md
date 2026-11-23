@@ -53,3 +53,5 @@ Every failing trace replays through production `host_switch_ai`, including sends
 ## Read current findings
 
 See [findings.md](findings.md). Do not weaken invariants or edit product code in this verification pull request.
+
+SOFT-1425 adds an optional `bot_picture` request and a palette routing constant. Source comparison at `d288018f27316933c7c19e0d16ef0759006c1fa4` confirms every existing helper function except `serve_request` is unchanged, including the modeled message-store and Switch AI decisions. `ChatOutboxEntry` is unchanged. Only whole-file hashes and this sync record moved; bounds, probes and properties stay unchanged. Hosted CI must still run the existing checks.
