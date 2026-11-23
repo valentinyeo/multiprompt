@@ -138,6 +138,8 @@ test "inne host catalog routing" {
     try std.testing.expectEqual(@as(u8, 2), received_host);
 }
 test "owner catalog routing" {
+    app_state.shells[0].tmux_host = 0;
+    persistent_calls = 0;
     const cwd = "/home/inne/projects/sample";
     @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
     app_state.shells[0].claude_cwd_len = cwd.len;
