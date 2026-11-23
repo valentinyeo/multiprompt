@@ -39,6 +39,7 @@ const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
 const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
+const GetCurrentThreadId = @import("win32.zig").GetCurrentThreadId;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetEnvironmentVariableW = @import("win32.zig").GetEnvironmentVariableW;
 const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
@@ -1138,7 +1139,13 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
+fn uiThreadBusy() bool {
+    const main = app_state.g_main_hwnd orelse return false;
+    return GetCurrentThreadId() == GetWindowThreadProcessId(main, null);
+}
+
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
+    if (uiThreadBusy()) return false;
     if (host >= app_state.g_chat_history_channels.len) return false;
     const lock_deadline = GetTickCount64() + 15_000;
     while (!app_state.g_chat_history_channel_mutex.tryLock()) {
@@ -1430,6 +1437,8 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
 
 var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
+var g_chat_live_preview_shell: u32 = 0;
+var g_chat_live_preview: @import("agent_second_line.zig").Line = .{};
 
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
@@ -1444,8 +1453,16 @@ pub fn chatFileOnReady() void {
             g_chat_live_seen_revision = live_revision;
             active_changed = true;
             chatLiveSyncWorking();
-            preview_changed = true;
-            if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+            const preview = @import("agent_second_line.zig").forShell(app_state.active_shell);
+            if (g_chat_live_preview_shell != live_shell or !std.meta.eql(g_chat_live_preview, preview)) {
+                g_chat_live_preview_shell = live_shell;
+                g_chat_live_preview = preview;
+                preview_changed = true;
+            }
+            if (app_state.g_main_hwnd != null) {
+                const pane = chatViewLayout().pane;
+                _ = InvalidateRect(app_state.g_main_hwnd, &pane, 0);
+            }
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }

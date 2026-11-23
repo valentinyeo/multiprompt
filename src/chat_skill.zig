@@ -35,7 +35,7 @@ pub fn next(text: []const u16, from: usize) ?Range {
         while (start < text.len and std.ascii.isWhitespace(@intCast(@min(text[start], 127)))) : (start += 1) {}
         var end = start;
         while (end < text.len and !std.ascii.isWhitespace(@intCast(@min(text[end], 127)))) : (end += 1) {}
-        if (end > start and (text[start] == '/' or text[start] == '$') and known(text[start..end])) return .{ .start = start, .end = end };
+        if (end > start and ((start == 0 and text[start] == '/') or text[start] == '$') and known(text[start..end])) return .{ .start = start, .end = end };
         start = end;
     }
     return null;
@@ -58,7 +58,7 @@ pub fn paint(dc: w.HANDLE, rect: w.RECT, background: u32) u32 {
     return accent;
 }
 
-test "IGSH-928 composer and history share exact whole skill ranges without changing text" {
+test "SOFT-3086 only a leading slash skill gets a pill" {
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
     const saved = app.g_palette_skills;
     const shells = app.shell_count;
@@ -69,13 +69,14 @@ test "IGSH-928 composer and history share exact whole skill ranges without chang
     var skills = [_]@import("skills.zig").Skill{.{ .name = @constCast("pill-proof"), .description = @constCast(""), .body = @constCast(""), .source = .harness }};
     app.g_palette_skills = &skills;
     app.shell_count = 0;
-    const text = L("normal /pill-proof arguments\n/pill-proof/path /pill /unknown /pill-proof");
+    for ([_][]const u16{ L("normal /pill-proof arguments"), L("normal /pill-proof"), L(" /pill-proof"), L("normal\n/pill-proof"), L("/pill-proof/path") }) |text| {
+        try std.testing.expect(next(text, 0) == null);
+    }
+    const text = L("/pill-proof arguments\n/pill-proof");
     const first = next(text, 0) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), first.start);
     try std.testing.expectEqualSlices(u16, L("/pill-proof"), text[first.start..first.end]);
-    const last = next(text, first.end) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualSlices(u16, L("/pill-proof"), text[last.start..last.end]);
-    try std.testing.expectEqual(text.len, last.end);
-    try std.testing.expect(next(text, last.end) == null);
+    try std.testing.expect(next(text, first.end) == null);
     try std.testing.expect(!known(L("/pill")) and !known(L("/pill-proof/path")) and !known(L("plain")));
 }
 

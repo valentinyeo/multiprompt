@@ -1,0 +1,1 @@
+Agent feedback from any chat is queued for the board when the chat has no board token, and can be filed later with drain.
