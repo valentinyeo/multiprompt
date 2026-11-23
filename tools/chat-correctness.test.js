@@ -18,6 +18,7 @@ function body(text, name) {
 }
 const prelude = `
 const std = @import("std");
+const CHAT_OUTBOX_MSG_CAP = 16384;
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -39,7 +40,7 @@ const CONSOLE_SCREEN_BUFFER_INFO = struct {
     dwCursorPosition: Coord = .{ .y = 1 },
     srWindow: struct { bottom: i16 = 1 } = .{},
 };
-const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, activity: enum { idle, active } = .idle };
+const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 };
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatFileIdentityForShell(_: u32) chat_transcript.Identity { return .{}; }
 fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
@@ -249,6 +250,7 @@ test "correctness unreadable: readable held prompt retries only Enter, readable 
 function run(mode, control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-correctness-'));
   try {
+    require('./fixtures/inline-stubs').writeChatMention(dir);
     copyZig(['chat_echo.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig'], dir);
     const replaced = control && mode === 'newline' ? ['chatArmSendVerify', 'chatSendVerifyTick', 'sendTextToShellVerifiedAt', 'chatPromptStillInInputBox'] :
       control && mode === 'unreadable' ? ['chatSendVerifyTick', 'chatPromptStillInInputBox'] : [];

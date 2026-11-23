@@ -4662,7 +4662,7 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def run_main(self, module, reader_stub, *args):
         import contextlib
         module._reader = reader_stub
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with patch.object(module, 'resolve_destination', side_effect=lambda r, p, s, t: (s, t)), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return module.main(list(args))
 
     def test_IGSH_1900_a_failed_message_makes_mp_send_exit_three_without_wait(self):
@@ -4716,6 +4716,136 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
 
         code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-wait', '--wait', '--timeout', '1')
         self.assertEqual(code, 3)
+
+
+class SOFT_3085_MpSendDestinationTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.module = IGSH_1900_MpSendReportTest().module()
+        self.module._reader = reader
+        self.sid = '11111111-2222-3333-4444-555555555555'
+        self.tmux = 'live-destination'
+        self.bound = patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        self.requests = patch.object(reader, 'message_store_request', side_effect=self.request).start()
+        patch.object(reader, 'host_start', side_effect=AssertionError('must not start a host')).start()
+        self.queries = []
+        self.state = 'accepted'
+
+    def request(self, query):
+        self.queries.append(query)
+        return dict(message=dict(id=query.get('message_id'), state=self.state, receipt=None))
+
+    def host(self, sid=None, alive=True, tmux=None):
+        sid = sid or self.sid
+        paths = reader.host_paths('claude', sid)
+        reader.host_write(paths['config'], dict(enabled=True, provider='claude', sid=sid, tmux=tmux or self.tmux))
+        if alive:
+            reader.host_write(paths['owner'], dict(owner='host', pid=os.getpid()))
+
+    def send(self, sid=None, *flags):
+        import contextlib
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.module.main(['claude', sid or self.sid, 'hello', *flags])
+        return code, out.getvalue(), err.getvalue()
+
+    def refused(self, sid=None, *flags):
+        code, out, err = self.send(sid, *flags)
+        self.assertNotEqual(code, 0)
+        self.assertIn('no live host or pane agent', err)
+        self.assertEqual(out, '')
+        self.assertEqual(self.queries, [])
+        self.assertFalse(reader.message_store_path().exists())
+
+    def test_SOFT_3085_unknown_sid_with_tmux_is_refused_before_submission(self):
+        self.refused(None, '--tmux', self.tmux)
+        self.assertFalse(reader.host_paths('claude', self.sid)['config'].exists())
+
+    def test_SOFT_3085_installed_sender_refuses_an_unknown_sid_without_creating_a_host(self):
+        home = Path(self.temp.name)
+        installed = home / '.multiprompt-runtime/mp-send'
+        installed.parent.mkdir()
+        installed.write_bytes((ROOT / 'src/mp_send.py').read_bytes())
+        tmux = installed.with_name('tmux')
+        tmux.write_text('#!/bin/sh\nexit 1\n')
+        tmux.chmod(0o700)
+        done = subprocess.run([sys.executable, str(installed), '--reader', str(ROOT / 'src/chat_history_reader.py'),
+                               '--tmux', self.tmux, 'claude', self.tmux, 'hello'],
+                              capture_output=True, text=True, timeout=20,
+                              env=dict(os.environ, HOME=str(home), PATH=str(installed.parent)))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, '')
+        self.assertIn('no live host or pane agent', done.stderr)
+        self.assertFalse(reader.message_store_path().exists())
+        self.assertFalse(reader.host_paths('claude', self.tmux)['config'].exists())
+
+    def test_SOFT_3085_dead_host_config_is_not_restarted(self):
+        self.host(alive=False)
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_a_different_pane_sid_is_not_the_requested_chat(self):
+        self.bound.return_value = ('another-session', Path('/unused/transcript'))
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_live_host(self):
+        self.host()
+        code, out, err = self.send(self.tmux, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out.strip(), r'\Amp-[0-9a-f]{32}\Z')
+        self.assertTrue(self.queries)
+        self.assertTrue(all(q['sid'] == self.sid and q['tmux'] == self.tmux for q in self.queries))
+        self.assertFalse(reader.host_paths('claude', self.tmux)['config'].exists())
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_live_host_without_flag(self):
+        self.tmux = 'live.destination'
+        self.host()
+        code, _, err = self.send(self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_pane_agent(self):
+        self.bound.return_value = (self.sid, Path('/unused/transcript'))
+        code, _, err = self.send(self.tmux, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_ambiguous_host_bindings_are_refused(self):
+        self.host()
+        self.host('another-session')
+        self.refused(self.tmux, '--tmux', self.tmux)
+
+    def test_SOFT_3085_host_for_another_terminal_is_refused(self):
+        self.host(tmux='another-terminal')
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_valid_sid_uses_its_host_without_tmux_flag(self):
+        self.host()
+        code, _, err = self.send()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_valid_pane_sid_is_unchanged(self):
+        self.bound.return_value = (self.sid, Path('/unused/transcript'))
+        code, _, err = self.send(None, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_no_handoff_is_not_success(self):
+        self.host()
+        self.state = 'queued'
+        code, _, err = self.send(None, '--tmux', self.tmux, '--timeout', '0')
+        self.assertEqual(code, 4)
+        self.assertIn('timed out', err)
+
+    def test_SOFT_3085_failure_receipt_is_printed_without_wait(self):
+        self.host()
+        self.requests.side_effect = lambda q: dict(message=dict(id=q.get('message_id'), state='failed', receipt='session_unavailable'))
+        code, _, err = self.send(None, '--tmux', self.tmux)
+        self.assertEqual(code, 3)
+        self.assertIn('session_unavailable', err)
 
 
 class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
@@ -7608,43 +7738,19 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertNotIn('message', decision)
         self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
 
-    def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):
+    def test_a_quiet_host_keeps_its_agent_running_past_the_old_idle_limit(self):
         import socket as module
-        path = self.home / 'loop.sock'
+        path = self.home / 'still-here.sock'
         listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
         listener.bind(str(path))
         listener.listen(1)
         self.addCleanup(listener.close)
         read_end, write_end = os.pipe()
         self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            time.sleep(0.2)
-            session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
-            time.sleep(0.8)
-            self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
-            session['parked'].clear()
-            running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_IGSH_1907_a_host_quiet_for_ten_minutes_keeps_its_bot_warm(self):
-        import socket as module
-        path = self.home / 'warm.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        signals = []
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0),
+                                      wait=lambda timeout=None: signals.append('wait'),
+                                      kill=lambda: signals.append('kill'))
         self.addCleanup(agent.stdout.close)
         session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
@@ -7652,49 +7758,13 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         running.start()
         self.addCleanup(stop_fixture_host_loop, self, running, session)
         self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-        session['idle'] = time.time() - 600
-        time.sleep(1.5)
-        self.assertTrue(running.is_alive(), 'a host quiet for ten minutes stopped its bot, so the next message pays a cold start')
-        self.assertEqual([row for row in self.host_events('idle_stop')], [])
         session['idle'] = time.time() - 7200
-        running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'a host quiet for two hours must still stop its bot')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
-        import socket as module
-        path = self.home / 'long-turn.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
-            session['state']['inflight'] = session['inflight']
-            time.sleep(0.5)
-            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
-            for _ in range(6):
-                os.write(write_end, b'x')
-                time.sleep(0.15)
-            self.assertTrue(running.is_alive(), 'an open turn must survive the idle timer while the agent writes output')
-            self.assertEqual([row for row in self.host_events('idle_stop')], [],
-                             'the host must never stop itself while its turn is open')
-            session['turn'], session['inflight'], session['state']['inflight'] = None, None, None
-            running.join(timeout=10)
-        self.assertFalse(running.is_alive(), 'a host quiet after its turn must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-
+        time.sleep(2)
+        self.assertTrue(running.is_alive(), 'a hosted chat with no turn and nothing inflight stopped itself after two quiet hours')
+        self.assertEqual(signals, [], 'the agent process must not be signalled while the chat is quiet')
+        self.assertFalse(agent.stdin.closed, 'the host must keep the agent stdin open while the chat is quiet')
+        self.assertFalse(session['stop'], 'the host must stay up until an explicit stop, fresh start, Switch AI or a crash')
+        self.assertEqual([row for row in self.host_events('idle_stop')], [])
 
 
 class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
