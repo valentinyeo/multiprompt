@@ -42,6 +42,7 @@ test('IGSH-1516 offline end survives stale account layout and rejects an unaccep
   native(`const std = @import("std");
 const Closed = @import("tmux_closed.zig").Closed;
 const SessionIdentity = @import("session_identity.zig").Session;
+const tmux_identity = @import("tmux_identity.zig");
 const Outcome = enum { gone, retry, unsafe };
 const Shell = struct { shell_id: u32 = 7, kind: enum { tmux, vps, vps2, cmd } = .tmux, ai_agent: u8 = 2, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, tmux_host: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0 };
 const app_state = struct {
@@ -51,7 +52,7 @@ const app_state = struct {
     var g_tmux_fetch_tick: u64 = 100;
     const g_main_hwnd: ?*anyopaque = null;
 };
-const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session: []const u8 }; };
+const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session: []const u8, tab_state: ?@import("tab_state.zig").State = null }; };
 var kill_outcome: Outcome = .retry;
 var admitted = true;
 var notices: usize = 0;

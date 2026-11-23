@@ -330,7 +330,7 @@ class MpSessionsTest(unittest.TestCase):
         listed = self.parsed(self.run_sessions("list", "--workspace", "mine", "--json",
                                                MULTIPROMPT_TAB=caller["tmux"]))
         names = {row.get("name") for row in listed}
-        self.assertEqual(names, {"Caller", "Peer"})
+        self.assertEqual(names, {"Anchor", "Caller", "Peer"})
         for row in listed:
             self.assertEqual(row.get("workspace"), "Home")
 

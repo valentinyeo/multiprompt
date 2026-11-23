@@ -168,13 +168,13 @@ def session_catalog(send, listing):
         candidates = [row for row in rows.values() if row["tmux"] == tmux]
         matched = [row for row in candidates if row.get("sid") == sid]
         row = matched[0] if len(matched) == 1 else candidates[0] if len(candidates) == 1 else dict(desktop_state(listing, tmux=tmux), tmux=tmux, tab_open=False)
-        row.update(provider=provider, folder=config.get("cwd"), spawn_name=config.get("spawn_name"))
+        row.update(provider=provider, folder=config.get("cwd"), cwd=config.get("cwd"), spawn_name=config.get("spawn_name"))
         if not row.get("sid"):
             row["sid"] = sid
         row["running"] = config.get("enabled") is True and alive
         row["busy"] = bool(state.get("inflight")) and alive
         if not row.get("name"):
-            row["name"] = names.get(tmux) or config.get("spawn_display") or tmux
+            row["name"] = names.get(tmux) or config.get("spawn_display")
         rows[(row.get("host"), tmux)] = row
     for row in rows.values():
         row.setdefault("in_layout", False if listing.get("ok") else None)
@@ -187,6 +187,7 @@ def session_catalog(send, listing):
         row.setdefault("tab_open", False)
         row.setdefault("running", False)
         row.setdefault("busy", False)
+        row["state"] = "busy" if row["busy"] else "idle" if row["running"] else "stopped"
         row["link"] = send.link_token(row.get("name"), row["tmux"])
     return sorted(rows.values(), key=lambda row: ((row.get("name") or row["tmux"]).casefold(), row["tmux"]))
 
@@ -883,7 +884,7 @@ def main(argv=None):
         print("mp-sessions: " + str(error), file=sys.stderr)
         return 5
     except (OSError, ValueError, KeyError, TypeError) as error:
-        if getattr(args, "json", False):
+        if command in {"open", "close", "move", "pin", "unpin", "archive", "unarchive", "wait", "restore"} and getattr(args, "json", False):
             print(json.dumps(dict(ok=False, error=str(error)), separators=(",", ":")))
         else:
             print("mp-sessions: " + " ".join(str(error).split()), file=sys.stderr)
