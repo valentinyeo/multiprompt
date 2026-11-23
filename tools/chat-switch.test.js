@@ -15,7 +15,7 @@ function paintFirst(text) {
   const chat = switching.slice(chatStart, switching.indexOf('} else if (', chatStart + 1));
   assert.match(chat, /chatDeferTranscriptLoad\(\);[\s\S]*layoutChatControls\(\);/);
   assert.doesNotMatch(chat, /positionActiveBrowser|parkInactiveBrowserPanes|updateBrowserVisibility|refreshChatTranscript/);
-  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript', 'chatFileOnReady']) {
+  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript', 'chatFileOnReadyOrDefer']) {
     assert.match(body(fn, text), /if \(g_chat_browser_swap\.shell_id != 0\) return;/);
   }
   const paint = body('chatTranscriptWndProc', text);
@@ -176,6 +176,7 @@ fn saveSession() void { saves += 1; }
 fn writePaneSessionFileForShell(_: u32) void {}
 fn chatSwitchLogBrowserShown() void {}
 fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0); ready += 1; }
+fn chatFileReadyDeferredFlush() void {}
 fn refreshChatTranscript(_: bool) void { std.debug.assert(g_chat_browser_swap.shell_id == 0); refreshes += 1; }
 `;
   const cases = `
