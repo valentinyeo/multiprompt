@@ -1739,6 +1739,7 @@ pub fn restoreSession() u32 {
         const entries = app_state.g_tmux_closed.entries.items;
         const start = entries.len - @min(entries.len, app_state.MAX_CLOSED_HISTORY);
         for (entries[start..]) |entry| {
+            if (entry.host > 2) continue;
             var name: [64]u16 = @splat(0);
             for (entry.name[0..entry.len], 0..) |c, i| name[i] = c;
             app_state.g_closed_history[app_state.g_closed_count] = .{

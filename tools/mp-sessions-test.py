@@ -39,109 +39,8 @@ if __name__ == "__main__" and sys.argv[1:2] == ["host"]:
         print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
 '''
 
-FAKE_ZSB = r'''#!/usr/bin/env python3
-import json, os, sys
-from pathlib import Path
-with open(os.environ["MP_SESSIONS_TEST_LOG"], "a", encoding="utf-8") as stream:
-    stream.write(json.dumps(["zsb", sys.argv[1:]]) + "\n")
-state_file = os.environ.get("MP_SESSIONS_TEST_STATE_FILE")
-state = {}
-if state_file and os.path.exists(state_file):
-    state = json.loads(open(state_file, encoding="utf-8").read())
-if sys.argv[1] == "workspace-list":
-    listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
-    if state.get("listing"):
-        listing = state["listing"]
-    elif state.get("tabs"):
-        listing["workspaces"][0]["tabs"] = state["tabs"]
-    print(json.dumps(listing))
-elif sys.argv[1] == "session-open":
-    tmux = sys.argv[sys.argv.index("--tmux") + 1]
-    title = sys.argv[sys.argv.index("--name") + 1]
-    host = sys.argv[sys.argv.index("--host") + 1]
-    tab_id = 55
-    if "--workspace" in sys.argv:
-        workspace = sys.argv[sys.argv.index("--workspace") + 1]
-        if workspace == "Home" and not state.get("listing"):
-            state.setdefault("tabs", [])
-            state["tabs"].append(dict(id=tab_id, title=title, host=host, tmux=tmux))
-            Path(state_file).write_text(json.dumps(state), encoding="utf-8")
-            print(json.dumps(dict(ok=True, created=True, tab=tab_id)))
-            raise SystemExit(0)
-        listing = state.get("listing")
-        if listing is None:
-            listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
-        tab_id = state.get("next_tab", 60)
-        state["next_tab"] = tab_id + 1
-        entry = dict(id=tab_id, title=title, host=host, tmux=tmux)
-        if os.environ.get("MP_SESSIONS_TEST_SHELL_TAB") == "1":
-            entry["kind"] = "shell"
-        elif "--kind" in sys.argv:
-            entry["kind"] = sys.argv[sys.argv.index("--kind") + 1]
-        elif tmux.startswith("live-"):
-            entry["kind"] = "chat"
-        placed = False
-        for ws in listing.get("workspaces") or []:
-            if ws.get("name") != workspace:
-                continue
-            if "--after-tab" in sys.argv:
-                after = int(sys.argv[sys.argv.index("--after-tab") + 1])
-                for group in ws.get("groups") or []:
-                    gtabs = group.get("tabs") or []
-                    if any(tab.get("id") == after for tab in gtabs):
-                        index = next(i + 1 for i, tab in enumerate(gtabs) if tab.get("id") == after)
-                        group.setdefault("tabs", []).insert(index, entry)
-                        placed = True
-                        break
-                if not placed:
-                    utabs = ws.setdefault("tabs", [])
-                    index = next((i + 1 for i, tab in enumerate(utabs) if tab.get("id") == after), len(utabs))
-                    utabs.insert(index, entry)
-                    placed = True
-            elif "--group" in sys.argv:
-                group_name = sys.argv[sys.argv.index("--group") + 1]
-                for group in ws.get("groups") or []:
-                    if group.get("name") == group_name:
-                        group.setdefault("tabs", []).append(entry)
-                        placed = True
-                        break
-            if not placed:
-                ws.setdefault("tabs", []).append(entry)
-            break
-        state["listing"] = listing
-    else:
-        state.setdefault("tabs", [])
-        state["tabs"].append(dict(id=tab_id, title=title, host=host, tmux=tmux))
-    Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
-    print(json.dumps(dict(ok=True, created=True, tab=tab_id)))
-elif sys.argv[1] == "session-rename":
-    tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
-    for tab in state.get("tabs", []):
-        if tab["id"] == tab_id:
-            tab["title"] = sys.argv[sys.argv.index("--name") + 1]
-    Path(state_file).write_text(json.dumps(state), encoding="utf-8")
-    print(json.dumps(dict(ok=True)))
-elif sys.argv[1] == "session-close":
-    tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
-    listing = state.get("listing")
-    if listing is None:
-        listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
-    removed = False
-    for ws in listing.get("workspaces") or []:
-        before = len(ws.get("tabs") or [])
-        ws["tabs"] = [tab for tab in (ws.get("tabs") or []) if tab.get("id") != tab_id]
-        removed = removed or len(ws["tabs"]) != before
-        for group in ws.get("groups") or []:
-            before = len(group.get("tabs") or [])
-            group["tabs"] = [tab for tab in (group.get("tabs") or []) if tab.get("id") != tab_id]
-            removed = removed or len(group["tabs"]) != before
-    state["listing"] = listing
-    state["tabs"] = [tab for tab in state.get("tabs", []) if tab.get("id") != tab_id]
-    Path(state_file).write_text(json.dumps(state), encoding="utf-8")
-    print(json.dumps(dict(ok=True, closed=removed, tab=tab_id)))
-else:
-    print(json.dumps(dict(ok=True)))
-'''
+FAKE_ZSB = (ROOT / "tools/fixtures/SOFT-3141/sessions-desktop.py").read_text()
+
 
 LEGACY_SEND = '''
 import os
@@ -379,12 +278,12 @@ class MpSessionsTest(unittest.TestCase):
         enables = [call for call in hosts if call[:2] == ["enable", "claude"]]
         self.assertGreaterEqual(len(enables), 1)
         self.assertGreaterEqual(len([call for call in hosts if call[:2] == ["start", "claude"]]), 1)
-        opened = [call for call in self.events("zsb") if call[0] == "session-open"]
+        opened = [call for call in self.events("zsb") if call[0] == "tab-action"]
         self.assertEqual(len(opened), 1)
 
     def test_SOFT_3055_restart_reuses_sid_for_a_stopped_chat(self):
         started = self.parsed(self.run_sessions("start", "--name", "Ops"))
-        closed = self.parsed(self.run_sessions("close", "Ops"))
+        closed = self.parsed(self.run_sessions("close", "Ops", "--json"))
         self.assertTrue(closed["ok"])
         restarted = self.parsed(self.run_sessions("restart", "Ops"))
         self.assertEqual(restarted["sid"], started["sid"])
@@ -410,17 +309,14 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(second["status"], "already")
         self.assertEqual(len([call for call in self.events("host") if call[:2] == ["restart", "claude"]]), 1)
 
-    def test_SOFT_3055_close_refuses_a_busy_chat(self):
+    def test_SOFT_3141_close_changes_desktop_only_and_preserves_reader_configuration(self):
         started = self.parsed(self.run_sessions("start", "--name", "Busy"))
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        config["enabled"] = True
-        (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
-        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude",
-                                                                       pid=os.getpid(), inflight=dict(id="x"))), encoding="utf-8")
-        refused = self.run_sessions("close", "Busy")
-        self.assertEqual(refused.returncode, 2)
-        self.assertIn("busy", refused.stderr)
+        self.mark_running(started)
+        configs = {path: path.read_text() for path in self.host.glob("*.config.json")}
+        closed = self.parsed(self.run_sessions("close", "Busy", "--json"))
+        self.assertTrue(closed["state"]["closed"])
+        self.assertEqual(configs, {path: path.read_text() for path in self.host.glob("*.config.json")})
+        self.assertFalse(any(call[0] == "stop" for call in self.events("host")))
 
     def test_SOFT_3055_unknown_name_reports_clearly(self):
         missing = self.run_sessions("restart", "No such chat")
@@ -466,166 +362,60 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
 
-    def test_SOFT_3131_close_restart_restores_workspace_group_and_tab_order(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+    def test_SOFT_3131_close_restart_restores_the_one_desktop_record(self):
+        listing = json.loads((ROOT / "tools/fixtures/SOFT-3131/away-listing.json").read_text())
         started = self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual(config.get("spawn_workspace"), "Away")
-        self.assertEqual(config.get("spawn_group"), "Ops")
-        self.mark_running(started)
-        listing_with_chat = json.loads(self.state_file.read_text(encoding="utf-8"))["listing"]
-        listing_after = json.dumps(listing_with_chat)
-        closed = self.parsed(self.run_sessions("close", "Field chat", MP_SESSIONS_TEST_LIST=listing_after))
-        self.assertTrue(closed.get("ok"))
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual(config.get("spawn_workspace"), "Away")
-        self.assertEqual(config.get("spawn_group"), "Ops")
-        self.assertEqual(config.get("spawn_after_tab"), 31)
-        self.assertEqual(config.get("spawn_tab_kind"), "chat")
-        restarted = self.parsed(self.run_sessions("restart", "Field chat", MP_SESSIONS_TEST_LIST=listing_after))
-        self.assertEqual(restarted.get("status"), "restarted")
-        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
-        self.assertIn("Away", reopen)
-        self.assertIn("--after-tab", reopen)
-        self.assertEqual(reopen[reopen.index("--after-tab") + 1], "31")
-        self.assertNotIn("Home", reopen)
-        self.assertIn("--kind", reopen)
-        self.assertEqual(reopen[reopen.index("--kind") + 1], "chat")
-        self.assertEqual([call for call in self.events("zsb") if call[0] == "shell-open"], [])
+                                               MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+        closed = self.parsed(self.run_sessions("close", "Field chat", "--json"))
+        self.assertTrue(closed["state"]["closed"])
+        restarted = self.parsed(self.run_sessions("restart", "Field chat"))
+        self.assertEqual(restarted["sid"], started["sid"])
+        for field in ("host", "workspace", "group", "position", "kind", "sid"):
+            self.assertEqual(restarted["state"][field], closed["state"][field], field)
+        self.assertFalse(restarted["state"]["closed"])
+        for config in self.host.glob("*.config.json"):
+            self.assertFalse(any(key in json.loads(config.read_text()) for key in ("spawn_workspace", "spawn_group", "spawn_after_tab", "spawn_host_name", "spawn_tab_kind")))
 
     def test_SOFT_3131_list_shows_workspace_and_filters_case_insensitively(self):
-        vstack = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "vstack-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Vstack", "--group", "Build",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(vstack)))
-        self.mark_running(started)
-        state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        listing_after = json.dumps(state["listing"])
-        table = self.run_sessions("list", MP_SESSIONS_TEST_LIST=listing_after)
+        listing = json.loads((ROOT / "tools/fixtures/SOFT-3131/vstack-listing.json").read_text())
+        self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Vstack", "--group", "Build",
+                                      MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+        table = self.run_sessions("list")
         self.assertEqual(table.returncode, 0, table.stderr)
         self.assertIn("Vstack", table.stdout)
         self.assertIn("Build", table.stdout)
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual(config.get("spawn_workspace"), "Vstack")
-        self.assertEqual(config.get("spawn_group"), "Build")
-        self.assertEqual(config.get("spawn_after_tab"), 71)
-        filtered = self.parsed(self.run_sessions("list", "--workspace", "vstack", "--json",
-                                                 MP_SESSIONS_TEST_LIST=listing_after))
-        names = {row.get("name") for row in filtered}
-        self.assertIn("Field chat", names)
-        self.assertTrue(all(row.get("workspace") == "Vstack" for row in filtered))
+        filtered = self.parsed(self.run_sessions("list", "--workspace", "vstack", "--json"))
+        self.assertIn("Field chat", {row["name"] for row in filtered})
+        self.assertTrue(all(row["workspace"] == "Vstack" for row in filtered))
 
     def test_SOFT_3131_restart_uses_server_placement_without_close(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Remote chat", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        self.mark_running(started)
-        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
-        listed = self.run_sessions("list", MP_SESSIONS_TEST_LIST=listing_after)
-        self.assertEqual(listed.returncode, 0, listed.stderr)
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual(config.get("spawn_workspace"), "Away")
-        self.assertEqual(config.get("spawn_after_tab"), 31)
-        config["enabled"] = False
-        (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
-        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude")), encoding="utf-8")
-        listing_without = json.loads(listing_after)
-        for ws in listing_without.get("workspaces") or []:
-            for group in ws.get("groups") or []:
-                group["tabs"] = [tab for tab in (group.get("tabs") or []) if tab.get("tmux") != started["tmux"]]
-        restarted = self.parsed(self.run_sessions("restart", "Remote chat",
-                                                  MP_SESSIONS_TEST_LIST=json.dumps(listing_without)))
-        self.assertEqual(restarted.get("status"), "restarted")
-        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
-        self.assertIn("Away", reopen)
-        self.assertIn("--group", reopen)
-        self.assertEqual(reopen[reopen.index("--group") + 1], "Ops")
+        started = self.parsed(self.run_sessions("start", "--name", "Remote chat", "--workspace", "Away"))
+        first = self.parsed(self.run_sessions("restart", "Remote chat"))
+        self.assertEqual(first["state"]["workspace"], "Away")
+        self.assertEqual(first["state"]["sid"], started["sid"])
+        opens = [json.loads(call[1]) for call in self.events("zsb") if call[0] == "tab-action"]
+        self.assertEqual(len(opens), 1)
 
-    def test_SOFT_3131_close_restart_reopens_chat_tab_kind(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Kind chat", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        self.mark_running(started)
-        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
-        self.parsed(self.run_sessions("close", "Kind chat", MP_SESSIONS_TEST_LIST=listing_after))
-        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual(config.get("spawn_tab_kind"), "chat")
-        self.assertEqual(config.get("sid"), started["sid"])
-        restarted = self.parsed(self.run_sessions("restart", "Kind chat", MP_SESSIONS_TEST_LIST=listing_after))
-        self.assertEqual(restarted.get("sid"), started["sid"])
-        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
-        self.assertEqual(reopen[reopen.index("--tmux") + 1], started["tmux"])
-        self.assertEqual(reopen[reopen.index("--kind") + 1], "chat")
+    def test_SOFT_3131_restart_refuses_a_missing_workspace_before_starting_host(self):
+        self.parsed(self.run_sessions("start", "--name", "Gone home", "--workspace", "Away"))
+        self.parsed(self.run_sessions("close", "Gone home", "--json"))
+        state = json.loads(self.state_file.read_text())
+        state["listing"]["workspaces"] = [ws for ws in state["listing"]["workspaces"] if ws["name"] == "Home"]
+        self.state_file.write_text(json.dumps(state))
+        self.log.write_text("")
+        restarted = self.run_sessions("restart", "Gone home")
+        self.assertEqual(restarted.returncode, 2, restarted.stdout)
+        self.assertIn("UnknownWorkspace", restarted.stderr)
+        self.assertEqual(self.events("host"), [])
 
-    def test_SOFT_3131_restart_close_refuse_when_no_workspace_is_visible(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Invisible", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        self.mark_running(started)
-        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        config_before = (self.host / (key + ".config.json")).read_text(encoding="utf-8")
-        no_ws = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "no-workspace-listing.json").read_text(encoding="utf-8"))
-        state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        state["listing"] = no_ws
-        self.state_file.write_text(json.dumps(state), encoding="utf-8")
-        closed = self.run_sessions("close", "Invisible", MP_SESSIONS_TEST_LIST=json.dumps(no_ws))
-        self.assertEqual(closed.returncode, 2, closed.stderr)
-        self.assertIn("no workspace is visible", closed.stderr)
-        self.assertEqual(config_before, (self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-        self.assertEqual([call for call in self.events("zsb") if call[0] == "session-close"], [])
-        self.log.write_text("", encoding="utf-8")
-        state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        state["listing"] = json.loads(listing_after)
-        self.state_file.write_text(json.dumps(state), encoding="utf-8")
-        self.parsed(self.run_sessions("close", "Invisible", MP_SESSIONS_TEST_LIST=listing_after))
-        config_before = (self.host / (key + ".config.json")).read_text(encoding="utf-8")
-        state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        state["listing"] = no_ws
-        self.state_file.write_text(json.dumps(state), encoding="utf-8")
-        restarted = self.run_sessions("restart", "Invisible", MP_SESSIONS_TEST_LIST=json.dumps(no_ws))
-        self.assertEqual(restarted.returncode, 2, restarted.stderr)
-        self.assertIn("no workspace is visible", restarted.stderr)
-        self.assertEqual([call for call in self.events("host") if call[:2] == ["start", "claude"]], [])
-        self.assertEqual(config_before, (self.host / (key + ".config.json")).read_text(encoding="utf-8"))
-
-    def test_SOFT_3131_restart_refuses_a_shell_tab_and_leaves_the_host_stopped(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Shell risk", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        self.mark_running(started)
-        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
-        self.parsed(self.run_sessions("close", "Shell risk", MP_SESSIONS_TEST_LIST=listing_after))
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
-        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude")), encoding="utf-8")
-        restarted = self.run_sessions("restart", "Shell risk", MP_SESSIONS_TEST_LIST=listing_after,
-                                      MP_SESSIONS_TEST_SHELL_TAB="1")
-        self.assertEqual(restarted.returncode, 2, restarted.stderr)
-        self.assertIn("shell tab", restarted.stderr.casefold())
-        host = self.events("host")
-        self.assertIn(["start", "claude", started["sid"]], host)
-        self.assertIn(["stop", "claude", started["sid"]], host)
-        self.assertGreater(host.index(["stop", "claude", started["sid"]]), host.index(["start", "claude", started["sid"]]))
-
-    def test_SOFT_3131_restart_uses_the_front_workspace_when_the_saved_one_is_gone(self):
-        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
-        started = self.parsed(self.run_sessions("start", "--name", "Gone home", "--workspace", "Away",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
-        self.mark_running(started)
-        self.parsed(self.run_sessions("close", "Gone home",
-                                      MP_SESSIONS_TEST_LIST=json.dumps(json.loads(self.state_file.read_text())["listing"])))
-        only_home = dict(ok=True, hosts=["remote-1"], workspaces=[away_listing["workspaces"][0]])
-        state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        state["listing"] = only_home
-        self.state_file.write_text(json.dumps(state), encoding="utf-8")
-        restarted = self.parsed(self.run_sessions("restart", "Gone home", MP_SESSIONS_TEST_LIST=json.dumps(only_home)))
-        self.assertIn("placement_note", restarted)
-        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
-        self.assertIn("Home", reopen)
+    def test_SOFT_3131_restart_refuses_a_shell_reopen_before_starting_host(self):
+        self.parsed(self.run_sessions("start", "--name", "Shell risk"))
+        self.parsed(self.run_sessions("close", "Shell risk", "--json"))
+        self.log.write_text("")
+        restarted = self.run_sessions("restart", "Shell risk", MP_SESSIONS_TEST_SHELL_TAB="1")
+        self.assertEqual(restarted.returncode, 2, restarted.stdout)
+        self.assertIn("did not confirm", restarted.stderr)
+        self.assertEqual(self.events("host"), [])
 
     def test_SOFT_3093_list_json_shows_a_hosted_chat_with_no_terminal(self):
         key = "a" * 32
@@ -640,9 +430,10 @@ class MpSessionsTest(unittest.TestCase):
                         " print('live-other')\nelse:\n sys.exit(1)\n", encoding="utf-8")
         tmux.chmod(0o755)
         rows = self.parsed(self.run_sessions("list", "--json"))
-        self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
-        self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
-                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+        hosted = next(row for row in rows if row["tmux"] == "live-hosted")
+        self.assertEqual(hosted["name"], "Hosted Lead")
+        self.assertEqual(hosted["sid"], "hosted-session")
+        self.assertTrue(hosted["running"])
 
 
 if __name__ == "__main__":

@@ -15,7 +15,13 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
     };
     var identity: @import("ssh_identity.zig").View = .{};
     @import("ssh_identity.zig").view(&identity);
-    const hidden: ?[]const u8 = if (!sidebar.isTabHidden(@intCast(idx))) null else if (shell.inbox_archived and !shell.needs_attention) "waiting" else if (shell.workspace != app.g_active_workspace or app.g_ws_snoozed[shell.workspace]) "workspace" else if (sidebar.findGroupIdx(shell.group_id)) |gi| (if (app.groups[gi].collapsed) "group" else "filter") else "filter";
+    var rows: [app.MAX_ROWS]app.Row = undefined;
+    const row_count = sidebar.layoutRows(&rows);
+    var shown = false;
+    for (rows[0..row_count]) |row| if (row.kind == .tab and row.shell_idx == idx) {
+        shown = true;
+    };
+    const hidden: ?[]const u8 = if (shown) null else if (shell.inbox_archived and !shell.needs_attention) "waiting" else if (shell.workspace != app.g_active_workspace or app.g_ws_snoozed[shell.workspace]) "workspace" else if (sidebar.findGroupIdx(shell.group_id)) |gi| (if (app.groups[gi].collapsed) "group" else "filter") else "filter";
     return .{
         .host = try alloc.dupe(u8, if (host) |slot| console.tmuxSshTarget(slot) else "local"),
         .user = try alloc.dupe(u8, if (host) |slot| identity.table[slot].user.get() else ""),
@@ -35,11 +41,13 @@ pub fn capture(alloc: std.mem.Allocator, idx: usize) !model.State {
 
 pub fn rememberClose(idx: usize) void {
     const shell = &app.shells[idx];
+    var arena: std.heap.ArenaAllocator = .init(a);
+    defer arena.deinit();
+    var state = capture(arena.allocator(), idx) catch return;
+    const host: u8 = if (shell.tmux_session_len == 0) 3 else shell.tmux_host;
+    app.g_tmux_closed.close(a, host, state.tmux) catch return;
     for (app.g_tmux_closed.entries.items) |*entry| {
-        if (!@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len])) continue;
-        var arena: std.heap.ArenaAllocator = .init(a);
-        defer arena.deinit();
-        var state = capture(arena.allocator(), idx) catch return;
+        if (!@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], host, state.tmux)) continue;
         state.closed = true;
         state.visible = false;
         state.hidden_reason = "closed";
@@ -121,7 +129,7 @@ pub fn pcState(out: []u8) usize {
     return response(out, .{ .ok = true, .schema = @as(u32, 1), .hosts = [_][]const u8{ console.tmuxSshTarget(0), console.tmuxSshTarget(1), console.tmuxSshTarget(2), "local" }, .users = [_][]const u8{ identity.table[0].user.get(), identity.table[1].user.get(), identity.table[2].user.get(), "" }, .workspaces = workspaces.items, .tabs = tabs.items });
 }
 
-fn destination(state: model.State) !struct { workspace: u8, group: u32, host: u8 } {
+fn destination(state: model.State) !struct { workspace: u8, group: u32, host: ?u8 } {
     var workspace: ?u8 = null;
     for (0..app.g_lws_count) |i| {
         var buf: [32]u8 = undefined;
@@ -146,7 +154,7 @@ fn destination(state: model.State) !struct { workspace: u8, group: u32, host: u8
     for (0..3) |i| if (std.mem.eql(u8, state.host, console.tmuxSshTarget(@intCast(i)))) {
         host = @intCast(i);
     };
-    return .{ .workspace = ws, .group = group, .host = host orelse return error.UnknownHost };
+    return .{ .workspace = ws, .group = group, .host = if (std.mem.eql(u8, state.host, "local")) null else host orelse return error.UnknownHost };
 }
 
 fn place(idx: u32, workspace: u8, position: u32) u32 {
@@ -192,8 +200,17 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
     const title_len = std.unicode.utf8ToUtf16Le(&title, next.name) catch return failure(out, "invalid_name");
     if (title_len == 0 or title_len > 63) return failure(out, "invalid_name");
     if (next.kind == .chat and next.sid == null and current == null) return failure(out, "chat_session_required");
+    if (dest.host == null and idx == null and !next.closed and !next.archived) {
+        if (!std.mem.startsWith(u8, next.tmux, "shell-")) return failure(out, "invalid_local_identity");
+        const id = std.fmt.parseInt(u32, next.tmux["shell-".len..], 10) catch return failure(out, "invalid_local_identity");
+        if (id == 0 or current == null) return failure(out, "explicit_local_identity_required");
+    }
+    var destination_count: u32 = 0;
+    for (app.shells[0..app.shell_count], 0..) |shell, i| {
+        if (shell.workspace == dest.workspace and (idx == null or idx.? != i)) destination_count += 1;
+    }
+    if (!next.closed and !next.archived and next.position > destination_count) return failure(out, "invalid_position");
     if (idx == null and !next.closed and !next.archived and app.shell_count >= app.MAX_SHELLS) return failure(out, "tab_limit");
-    if (idx != null and !next.closed and !next.archived and next.position >= app.shell_count) return failure(out, "invalid_position");
     if (next.closed or next.archived) {
         if (idx) |i| {
             console.closeBackgroundShell(i);
@@ -209,7 +226,13 @@ pub fn command(argv: []const []const u8, out: []u8) usize {
     } else {
         var live = idx;
         if (live == null) {
-            if (!console.spawnBackgroundTmuxSession(dest.host, next.tmux, dest.workspace)) return failure(out, "spawn_failed");
+            const spawned = if (dest.host) |host| console.spawnBackgroundTmuxSession(host, next.tmux, dest.workspace) else console.spawnBackgroundRemoteShell(0, dest.workspace, .cmd, null);
+            if (!spawned) return failure(out, "spawn_failed");
+            if (dest.host == null) {
+                const id = std.fmt.parseInt(u32, next.tmux["shell-".len..], 10) catch return failure(out, "invalid_local_identity");
+                app.shells[app.shell_count - 1].shell_id = id;
+                app.g_tmux_closed.reopen(3, next.tmux);
+            }
             live = app.shell_count - 1;
         }
         const shell = &app.shells[live.?];

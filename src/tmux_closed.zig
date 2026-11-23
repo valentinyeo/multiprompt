@@ -68,7 +68,7 @@ pub const Closed = struct {
             const host = item.object.get("host") orelse continue;
             const session = item.object.get("session") orelse continue;
             const slot = json_reader.unsigned(host, 256);
-            if (slot > 2 or session != .string or session.string.len > 63) continue;
+            if (slot > 3 or session != .string or session.string.len > 63) continue;
             for (session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }

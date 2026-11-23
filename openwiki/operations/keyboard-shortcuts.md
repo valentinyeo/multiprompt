@@ -245,6 +245,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
+| mb / mp-sessions | Open, close, move, pin, unpin, archive, unarchive, wait or restore a named tab; --json reads back desktop state |
 | Ctrl+K / right-click tab → Bot face / Bot color | Remote faces, colors and pictures sync. |
 | Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |

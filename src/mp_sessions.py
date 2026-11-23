@@ -548,7 +548,7 @@ def cmd_restart(args):
     if state["kind"] != "chat":
         raise ValueError("desktop tab is a shell tab, not chat")
     if state["closed"]:
-        raise ValueError("chat is closed; use open or restore explicitly before restart")
+        state = confirm_open(send, target)
     if state["archived"] or state["waiting"]:
         raise ValueError("chat is hidden; restore it explicitly before restart")
     if target.get("running") and restart_pending(send, provider, sid):
@@ -624,7 +624,7 @@ def parse(argv):
     ending.add_argument("--json", action="store_true")
     for verb in ("pin", "unpin", "archive", "unarchive", "wait", "restore", "open"):
         action = commands.add_parser(verb, help=verb + " a desktop tab with PC-state confirmation")
-        action.add_argument("name", nargs="?" if verb == "open" else None)
+        action.add_argument("name", **({"nargs": "?"} if verb == "open" else {}))
         action.add_argument("--json", action="store_true")
         action.add_argument("--host")
         if verb == "open":
@@ -667,13 +667,17 @@ def main(argv=None):
             tail = argv[1:] if argv and argv[0] == "send" else argv
             return handlers[command](parse_send(tail))
         if command in {"open", "close", "move", "pin", "unpin", "archive", "unarchive", "wait", "restore"}:
+            send = load_send()
             return tab_state_fn("tab_command")(send, args)
         return handlers[command](args)
     except send.RateLimited as error:
         print("mp-sessions: " + str(error), file=sys.stderr)
         return 5
     except (OSError, ValueError, KeyError, TypeError) as error:
-        print("mp-sessions: " + str(error), file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps(dict(ok=False, error=str(error)), separators=(",", ":")))
+        else:
+            print("mp-sessions: " + " ".join(str(error).split()), file=sys.stderr)
         return 2
 
 
