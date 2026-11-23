@@ -1,0 +1,35 @@
+Ticket SOFT-3145 https://app.hypertask.ai/detail/project-2060/3145 (repo valentinyeo/multiprompt, branch soft-3145-exec-bit, this worktree). URGENT outage root cause.
+
+What happened: the shared server runtime install at 16:43 today (the bundled helper runtime under ~/.multiprompt-runtime/, content-hashed files like <sha256>-mp-send plus a symlink mp-send -> that file) wrote the mp-send target with mode 0600 (not executable), so `mp-send` failed with Permission denied in every chat. multibot-feedback from the same install got 0700. reader.py's target is also 0600 (may be fine if it is only run via python3 - check). Older leftover .tmp-* files are 0600 too, suggesting the installer writes via a temp file (mkstemp => 0600) and only some paths set the mode afterwards before rename.
+
+Do:
+1. Read openwiki/operations/chat-shared-runtime.md and find the installer (search src/ and tools/ for the runtime install / helper bundle writer, the .tmp- prefix, mkstemp/NamedTemporaryFile/os.replace/rename, and the list of installed tools incl. mp-send and multibot-feedback). Find why mp-send loses the exec bit.
+2. Fix at the root: every installed file meant to run gets its mode set explicitly (e.g. 0700) before the atomic rename, from one table of tools, never per-file special cases. Also clean up stale .tmp-* files the installer leaves behind if that is in the same code.
+3. Test (fails on current master): after an install into a temp dir, every installed tool listed as executable is executable, and every symlink resolves to an executable file. Add a row to the CLAUDE.md "Rules and what enforces them" table naming the test (keep CLAUDE.md under 80 lines). Do not hand-bump RUNTIME_GENERATION (fingerprint is automatic).
+4. Never build or run tests on this server: push and let CI run. ONE PR titled "SOFT-3145: Installed chat tools are always runnable", body root cause, fix, one-line undo; changelog.d/SOFT-3145-tools-runnable.md (one plain user sentence). Identity 348741585+software-factory-runners[bot]@users.noreply.github.com, no Co-authored-by, no code comments.
+5. Report one line: PR URL + root cause, or the blocker.
+
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
