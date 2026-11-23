@@ -57,6 +57,7 @@ public static class SidebarRowProof {
             return 100.0 * both / either;
         }
     }
+}
 '@
 
 $check = @{ name = 'sidebar-click-row'; passed = $false; boundary = 'Two stand-in tmux tabs on the replaced SSH boundary; real sidebar, real click, real chat reopen.' }
