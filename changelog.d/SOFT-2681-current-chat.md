@@ -1,1 +1,1 @@
-Chats keep their current conversation link when Claude resumes or starts a fresh conversation.
+Chats show the current conversation after Claude resumes or starts fresh, instead of opening an old chat.
