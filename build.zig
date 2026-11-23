@@ -772,7 +772,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_autocomplete_tests.step);
     const chat_skill_owner_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-owner.test.js" });
     vps_test_step.dependOn(&chat_skill_owner_linux_tests.step);
-    const completer_deploy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/completer-deploy.test.js" });
+    const completer_deploy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/completer-deploy.test.js", "tools/completer-slash.test.js" });
     test_step.dependOn(&completer_deploy_tests.step);
     vps_test_step.dependOn(&completer_deploy_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });

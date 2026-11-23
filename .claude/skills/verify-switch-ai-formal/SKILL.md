@@ -35,7 +35,11 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `e11386929a20a51d87f0d91c429a097324c5571b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `237376dd0`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+SOFT-3097 changes only the reader's command reconstruction: `clean_command_markup` drops the mention wire note from `<command-args>` before `command_reply`. The covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions, the recorded provider events, the probes and the decision table are unchanged. Only the reader hash and the sync commit move.
+
+SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |

@@ -124,7 +124,7 @@ pub fn remoteShellCommand(buf: []u8, kind: app_state.ShellKind, tmux_session: ?[
     if (kind != .vps and kind != .vps2 and kind != .tmux) return null;
     var pos: usize = 0;
     if (!appendBytes(buf, &pos, "export ZSB_SESSION=zss-") or !appendDecimal(buf, &pos, shell_id) or !appendBytes(buf, &pos, "; ")) return null;
-    if (tmux_session != null and (kind == .tmux or kind == .vps or kind == .vps2)) {
+    if (kind == .tmux and tmux_session != null) {
         const identity = app_state.g_pending_tmux_identity orelse "";
         if (identity.len > 0) {
             app_state.g_pending_resurrect_len = 0;
