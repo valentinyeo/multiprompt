@@ -2835,3 +2835,16 @@ test('SOFT-2713 group-rail map states the heights the proof measures', () => {
   assert.equal(section[1], header[1], 'Recents must share the expanded header height');
   assert.match(map, /Workspace pills retain their 34-pixel height/);
 });
+
+test('SOFT-3142 mb tab journeys own launch and report journey results', () => {
+  const driver = read(skill + 'control-feature-mb-tab-verbs.ps1');
+  assert.match(driver, /throw "Journey condition not met: \$Description/);
+  assert.match(driver, /\$result \| ConvertTo-Json -Depth 4 \| Set-Content -LiteralPath \(Join-Path \$Evidence 'result\.json'\)/);
+  assert.match(driver, /Save-MbTabShot \(Join-Path \$Evidence 'before\.png'\)/);
+  assert.match(driver, /Save-MbTabShot \(Join-Path \$Evidence 'after\.png'\)/);
+  const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
+  assert.match(physical, /if \(\$Feature -match '\^mb-tab-'\) \{[\s\S]*control-feature-mb-tab-verbs\.ps1/);
+  for (const stem of ['mb-tab-open', 'mb-tab-close', 'mb-tab-layout-sync', 'mb-tab-idempotent']) {
+    assert.match(physical, new RegExp(`'${stem}'`), stem);
+  }
+});
