@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -14,6 +13,8 @@ MARKER = "SOFT-3056-SWITCH-MARKER"
 PROVIDERS_PATH = Path(__file__).resolve().parent / "providers-switch-ai.json"
 DEFAULT_ROUTE = ("claude", "codex", "pi", "claude")
 WAIT_REPLY = 180.0
+WAIT_HOST = 45.0
+START_PAUSE = 3.0
 
 
 def reader_path():
@@ -57,11 +58,27 @@ def history_text(reader, provider, sid):
     return paths["history"].read_text(encoding="utf-8")
 
 
-def wait_reply(reader, provider, sid, tmux, timeout):
-    deadline = time.monotonic() + timeout
-    seen = 0
-    while time.monotonic() < deadline:
+def message_dispatch(reader, provider, sid, tmux):
+    store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux, op="message_dispatch")
+    try:
+        reader.message_store_request(store)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
         reader.message_poll(tmux, provider, sid)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+
+
+def event_seq(reader, provider, sid):
+    return reader.message_events_page(provider, sid, 0).get("seq", 0)
+
+
+def wait_reply(reader, provider, sid, tmux, timeout, seen):
+    deadline = time.monotonic() + timeout
+    history_len = len(history_text(reader, provider, sid))
+    while time.monotonic() < deadline:
+        message_dispatch(reader, provider, sid, tmux)
         page = reader.message_events_page(provider, sid, seen)
         seen = page.get("seq", seen)
         for entry in page.get("events", []):
@@ -69,19 +86,48 @@ def wait_reply(reader, provider, sid, tmux, timeout):
             if event.get("kind") == "text.done":
                 payload = event.get("payload") or {}
                 text = payload.get("text")
-                if isinstance(text, str) and text.strip() and MARKER not in text:
-                    return text.strip()
-        for line in history_text(reader, provider, sid).splitlines():
-            try:
-                row = json.loads(line).get("row") or {}
-            except ValueError:
-                continue
-            if row.get("role") == "assistant" and isinstance(row.get("text"), str):
-                body = row["text"].strip()
-                if body and MARKER not in body and not body.startswith("---"):
-                    return body
-        time.sleep(2.0)
+                if isinstance(text, str) and text.strip():
+                    return text.strip(), seen
+        body = history_text(reader, provider, sid)
+        if len(body) > history_len:
+            for line in body.splitlines()[history_len:]:
+                try:
+                    row = json.loads(line).get("row") or {}
+                except ValueError:
+                    continue
+                if row.get("role") == "assistant" and isinstance(row.get("text"), str):
+                    text = row["text"].strip()
+                    if text and not text.startswith("---"):
+                        return text, seen
+            history_len = len(body)
+        time.sleep(0.5)
     raise RuntimeError("no assistant reply from " + provider)
+
+
+def wait_idle(reader, provider, sid, tmux, timeout):
+    deadline = time.monotonic() + timeout
+    busy = getattr(reader, "host_turn_busy", None)
+    while time.monotonic() < deadline:
+        message_dispatch(reader, provider, sid, tmux)
+        status = run_cli(reader, ["status", provider, sid])
+        inflight = status.get("inflight")
+        if inflight is None and (not callable(busy) or not busy(provider, sid)):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def host_ready(reader, provider, sid, tmux, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        page = reader.message_events_page(provider, sid, 0)
+        for entry in page.get("events", []):
+            event = entry.get("event") or {}
+            if event.get("kind") == "host.status" and (event.get("payload") or {}).get("state") == "ready":
+                return True
+        message_dispatch(reader, provider, sid, tmux)
+        time.sleep(0.5)
+    return False
 
 
 def live_chats(reader, tmux):
@@ -101,9 +147,10 @@ def main():
     reader = load_reader(path)
     tmux = "verify-switch-" + uuid.uuid4().hex[:10]
     sid = str(uuid.uuid4())
-    folder = tempfile.mkdtemp(prefix="switch-ai-live-")
+    folder = str(ROOT)
     state = {"tmux": tmux, "sid": sid, "provider": route[0], "steps": []}
     created = False
+    seen = 0
     try:
         subprocess.run(["tmux", "new-session", "-d", "-s", tmux, "-c", folder], check=True)
         created = True
@@ -113,11 +160,16 @@ def main():
         started = run_cli(reader, ["start", route[0], sid])
         if started.get("status") not in ("started", "already"):
             raise RuntimeError("start failed: " + json.dumps(started))
+        time.sleep(START_PAUSE)
+        host_ready(reader, route[0], sid, tmux, WAIT_HOST)
+        seen = event_seq(reader, route[0], sid)
         run_cli(reader, ["send", route[0], sid, "--text", MARKER + ": reply with one short sentence acknowledging the marker.", "--tmux", tmux])
-        wait_reply(reader, route[0], sid, tmux, WAIT_REPLY)
+        _, seen = wait_reply(reader, route[0], sid, tmux, WAIT_REPLY, seen)
         state["steps"].append(dict(step="seed", provider=route[0], tmux=tmux, chats=len(live_chats(reader, tmux))))
         current_provider, current_sid = route[0], sid
         for target in route[1:]:
+            if not wait_idle(reader, current_provider, current_sid, tmux, WAIT_REPLY):
+                raise RuntimeError("chat still busy before switch to " + target)
             env_before = reader.host_agent_env(current_provider, current_sid)
             switched = run_cli(reader, ["switch-ai", current_provider, current_sid, "--to", target])
             if switched.get("status") != "switched":
@@ -139,8 +191,10 @@ def main():
             if len(chats) != 1 or chats[0]["provider"] != current_provider or chats[0]["sid"] != current_sid:
                 raise RuntimeError("live chat count mismatch: " + json.dumps(chats))
             prompt = "SOFT-3056 follow-up on " + target + ": one short new sentence."
+            host_ready(reader, current_provider, current_sid, tmux, WAIT_HOST)
+            seen = event_seq(reader, current_provider, current_sid)
             run_cli(reader, ["send", current_provider, current_sid, "--text", prompt, "--tmux", tmux])
-            reply_text = wait_reply(reader, current_provider, current_sid, tmux, WAIT_REPLY)
+            reply_text, seen = wait_reply(reader, current_provider, current_sid, tmux, WAIT_REPLY, seen)
             state["steps"].append(dict(step="switch", provider=target, sid=current_sid, reply=reply_text[:120], chats=1))
         state["status"] = "passed"
         print(json.dumps(state, indent=2))
@@ -152,7 +206,6 @@ def main():
             pass
         if created:
             subprocess.run(["tmux", "kill-session", "-t", tmux], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        shutil.rmtree(folder, ignore_errors=True)
 
 
 if __name__ == "__main__":
