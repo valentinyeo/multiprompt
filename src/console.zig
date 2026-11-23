@@ -108,6 +108,7 @@ const themeConsoleBg = @import("themes.zig").themeConsoleBg;
 const themeConsoleFg = @import("themes.zig").themeConsoleFg;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const tabRowH = @import("browser_pane.zig").tabRowH;
+const uiScaled = @import("drawing.zig").uiScaled;
 const DEV_SHELL_COLS = @import("app_state.zig").DEV_SHELL_COLS;
 const DEV_CONSOLE_FONTS = @import("app_state.zig").DEV_CONSOLE_FONTS;
 const DEV_CONSOLE_SIZES = @import("app_state.zig").DEV_CONSOLE_SIZES;
@@ -2947,6 +2948,62 @@ pub fn clampSidebarScroll() void {
     const max_scroll = @max(@as(i32, 0), sidebarContentH() - sidebarVisibleH());
     if (app_state.g_sidebar_scroll > max_scroll) app_state.g_sidebar_scroll = max_scroll;
     if (app_state.g_sidebar_scroll < 0) app_state.g_sidebar_scroll = 0;
+}
+
+fn rectsIntersect(a: RECT, b: RECT) bool {
+    return a.left < b.right and b.left < a.right and a.top < b.bottom and b.top < a.bottom;
+}
+
+pub fn sidebarLastRowScreenRect(last_row_top_logical: i32, row_h: i32, scroll: i32) RECT {
+    const y = last_row_top_logical - scroll;
+    return .{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + row_h };
+}
+
+pub fn sidebarExpandedVersionLabelRect(client: RECT) ?RECT {
+    const icon = RECT{
+        .left = uiScaled(12),
+        .top = @max(0, client.bottom - uiScaled(48)),
+        .right = uiScaled(48),
+        .bottom = client.bottom - uiScaled(12),
+    };
+    return @import("usage_card.zig").versionLabelRect(icon, client.right);
+}
+
+test "MUBO-233 scrolled last sidebar row stays clear of the version label at every scale" {
+    const saved_scale = app_state.g_ui_scale;
+    const saved_hide = app_state.g_hide_sidebar;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    defer {
+        app_state.g_ui_scale = saved_scale;
+        app_state.g_hide_sidebar = saved_hide;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+    }
+    app_state.g_hide_sidebar = false;
+    app_state.g_sidebar_collapsed = false;
+    const client = RECT{ .left = 0, .top = 0, .right = 280, .bottom = 800 };
+    const row_h: i32 = 36;
+    for ([_]u32{ 75, 100, 150, 200 }) |scale| {
+        app_state.g_ui_scale = scale;
+        const last_top = client.bottom - uiScaled(96);
+        const last_bottom_logical = last_top + row_h;
+        const content_h = last_bottom_logical + 4 + BTN_H + 8;
+        const vis_h = @max(@as(i32, 0), client.bottom - sidebarStickyCardSpan());
+        const max_scroll = @max(@as(i32, 0), content_h - vis_h);
+        try std.testing.expect(max_scroll > 0);
+        const label = sidebarExpandedVersionLabelRect(client) orelse {
+            try std.testing.expect(false);
+            return;
+        };
+        for (0..8) |step| {
+            const scroll = @divTrunc(max_scroll * @as(i32, @intCast(step)), 7);
+            const row = sidebarLastRowScreenRect(last_top, row_h, scroll);
+            if (row.bottom <= 0 or row.top >= client.bottom - sidebarStickyCardSpan()) continue;
+            try std.testing.expect(!rectsIntersect(row, label));
+        }
+        const row_at_max = sidebarLastRowScreenRect(last_top, row_h, max_scroll);
+        try std.testing.expect(!rectsIntersect(row_at_max, label));
+        try std.testing.expect(row_at_max.bottom <= client.bottom - sidebarStickyCardSpan());
+    }
 }
 
 pub fn ensureActiveVisible() void {

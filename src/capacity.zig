@@ -239,8 +239,10 @@ fn sidebarAgentSessionBreakdown(host: u8) AgentSessionBreakdown {
 
 pub fn sidebarStickyCardSpan() i32 {
     if (app_state.g_hide_sidebar) return 0;
-    if (!app_state.g_sidebar_collapsed) return 0;
-    return uiScaled(SIDEBAR_STICKY_CARD_COLLAPSED_H) + @import("window_layout.zig").paneGap() + updateCardSpan();
+    if (app_state.g_sidebar_collapsed) {
+        return uiScaled(SIDEBAR_STICKY_CARD_COLLAPSED_H) + @import("window_layout.zig").paneGap() + updateCardSpan();
+    }
+    return uiScaled(48) + updateCardSpan();
 }
 
 pub fn sidebarStickyCardRect() RECT {

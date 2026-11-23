@@ -1,0 +1,1 @@
+The sidebar version label no longer covers the last session row when you scroll to the bottom.
