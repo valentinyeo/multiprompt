@@ -181,28 +181,6 @@ The chat keeps its tmux name, so the registered chat name, picture, sidebar plac
 
 The old AI does not write its own handover yet. The handover comes from the saved history only.
 
-## When a plan runs out
-
-A live chat moves itself to the next AI when its AI reports that the plan is used up.
-The host reads that from the provider's own error event: a Claude result that is an error, a Codex error notification, a Pi turn that stops with an error, or an Antigravity result that is not a success.
-The predicate looks for that provider's usage-limit, rate-limit or quota wording, so ordinary reply text never triggers it.
-
-The turn ends as failed with the reason `usage_limit`.
-The fallback order is Claude, then Codex, then Pi, then Antigravity, saved with the host config as `auto_switch`.
-The order travels with the chat, so a switch keeps it.
-An AI that just ran out is marked empty and skipped for one hour, so a chat never ping-pongs between two empty plans.
-A chat whose every AI is empty stays where it is and says so in one line.
-
-The switch waits for the chat to be idle, then uses the existing Switch AI path in a detached process.
-The old agent's config is disabled and its locator moves before the new AI starts, and the old agent is then stopped, so two AIs never work the same chat.
-The unanswered user message is queued again for the new AI and delivered after the handover is read.
-The divider says `Switched AI automatically: <old> ran out of plan`.
-
-Ctrl+K "Chat View: Auto-switch AI when a plan runs out" toggles this per chat and is on by default.
-There is no dedicated shortcut.
-The setting is `on` in the host config and is accepted while the host is stopped.
-The command-line form is `python3 <reader> host switch-ai <provider> <sid> --to <target>` with the same result; the automatic path adds no new provider or wire field.
-
 ## Saved permission level
 
 The host accepts `set_permission_mode` requests.

@@ -98,11 +98,6 @@ pub const PendingSettings = struct {
 
 pub const SENT_KEYS: usize = 4;
 
-fn stampInt(h: *std.hash.Wyhash, value: u64) void {
-    const copy = value;
-    h.update(std.mem.asBytes(&copy));
-}
-
 pub const Live = struct {
     used: bool = false,
     shell_id: u32 = 0,
@@ -122,7 +117,6 @@ pub const Live = struct {
     settings_known: bool = false,
     ended: ItemStatus = .ok,
     revision: u64 = 0,
-    stamp: u64 = 0,
     parked_at: u64 = 0,
     card_dismissed: bool = false,
     held: bool = false,
@@ -163,54 +157,6 @@ pub const Live = struct {
 
     pub fn touch(self: *Live) void {
         self.revision +%= 1;
-        self.stamp = self.visibleStamp();
-    }
-
-    pub fn touchIfVisible(self: *Live) bool {
-        if (self.visibleStamp() == self.stamp) return false;
-        self.touch();
-        return true;
-    }
-
-    pub fn visibleStamp(self: *const Live) u64 {
-        var h = std.hash.Wyhash.init(0);
-        stampInt(&h, @intFromEnum(self.state));
-        stampInt(&h, @intFromBool(self.held));
-        stampInt(&h, @intFromEnum(self.ended));
-        stampInt(&h, @intFromBool(self.card_dismissed));
-        stampInt(&h, @intFromBool(self.reply_in_history));
-        stampInt(&h, @intFromEnum(self.settings.model));
-        stampInt(&h, @intFromEnum(self.settings.effort));
-        stampInt(&h, @intFromEnum(self.settings.mode));
-        stampInt(&h, @intFromBool(self.settings.applied));
-        stampInt(&h, @intFromBool(self.settings_known));
-        stampInt(&h, @intFromBool(self.request.open));
-        stampInt(&h, @intFromEnum(self.request.kind));
-        h.update(self.request.idSlice());
-        h.update(self.request.titleSlice());
-        stampInt(&h, self.prompt.identity);
-        stampInt(&h, @as(u64, @intCast(self.prompt.count)));
-        for (self.prompt.groups[0..self.prompt.count]) |*group| {
-            stampInt(&h, @as(u64, @intCast(group.question_len)));
-            h.update(std.mem.sliceAsBytes(group.questionSlice()));
-        }
-        for (self.answer_lens, 0..) |len, index| {
-            stampInt(&h, @as(u64, @intCast(len)));
-            h.update(self.answers[index][0..len]);
-        }
-        h.update(self.turn[0..self.turn_len]);
-        h.update(self.sent_id[0..self.sent_id_len]);
-        for (self.sent_keys[0..self.sent_key_count]) |key| stampInt(&h, key);
-        for (self.items.items) |*item| {
-            stampInt(&h, @intFromEnum(item.kind));
-            stampInt(&h, @intFromEnum(item.status));
-            stampInt(&h, @intFromBool(item.done));
-            stampInt(&h, item.key);
-            h.update(item.idSlice());
-            stampInt(&h, @as(u64, @intCast(item.text.items.len)));
-            h.update(item.text.items);
-        }
-        return h.final();
     }
 
     fn itemFor(self: *Live, a: std.mem.Allocator, id: []const u8, kind: ItemKind) !*Item {
@@ -740,7 +686,7 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
         changed = changed or applied;
     }
     if (intOf(root, "next_after")) |after| live.after = @max(live.after, after);
-    if (changed) _ = live.touchIfVisible();
+    if (changed) live.touch();
     return changed;
 }
 
@@ -1913,24 +1859,4 @@ test "SOFT-2418 a live turn is owned only by the message that started it" {
     try std.testing.expect(applyPage(2418, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t\",\"payload\":{\"status\":\"completed\"}}}]}}"));
     try std.testing.expect(!running(2418));
     try std.testing.expect(ownsTurn(2418, "m1"));
-}
-
-test "SOFT-2373 repeated host events leave the live revision alone" {
-    const sid = "11111111-2222-3333-4444-555555552373";
-    _ = begin(2373, 0, sid);
-    defer release(2373);
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{\"message_id\":\"m1\"}}}]}}"));
-    const started = revision(2373);
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}}]}}"));
-    try std.testing.expectEqual(started, revision(2373));
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}}]}}"));
-    try std.testing.expectEqual(started, revision(2373));
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"text.delta\",\"item\":\"m1:text:0\",\"payload\":{\"text\":\"one\"}}}]}}"));
-    try std.testing.expectEqual(started + 1, revision(2373));
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"text.delta\",\"item\":\"m1:text:0\",\"payload\":{\"text\":\"one\"}}}]}}"));
-    try std.testing.expectEqual(started + 1, revision(2373));
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":6,\"event\":{\"kind\":\"text.delta\",\"item\":\"m1:text:0\",\"payload\":{\"text\":\"one more\"}}}]}}"));
-    try std.testing.expectEqual(started + 2, revision(2373));
-    try std.testing.expect(applyPage(2373, sid, "{\"result\":{\"events\":[{\"seq\":7,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"ok\"}}}]}}"));
-    try std.testing.expectEqual(started + 3, revision(2373));
 }

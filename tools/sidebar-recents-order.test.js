@@ -37,13 +37,6 @@ function block(source, start, end) {
   return source.slice(a, b);
 }
 
-test("SOFT-2380 mouse leave cannot re-arm itself and starve workspace clicks", () => {
-  const leave = block(main, "0x02A3 => {", "WM_MOUSEMOVE => {");
-  assert.doesNotMatch(leave, /TrackMouseEvent\(/, "only actual pointer movement may re-arm mouse-leave tracking");
-  const move = block(main, "WM_MOUSEMOVE => {", "WM_LBUTTONUP => {");
-  assert.match(move, /TrackMouseEvent\(/, "moving over the sidebar still starts tracking");
-});
-
 test("A click under the pointer keeps its row in place until the pointer leaves the sidebar", () => {
   const key = between("const FrozenPlace = struct {", "pub inline fn effPinnedTop(");
   assert.match(key, /if \(!g_sidebar_order_frozen or g_frozen_places_len == 0\) return sidebarLiveUseKey\(i\);/, "a thawed sidebar follows the live use key");

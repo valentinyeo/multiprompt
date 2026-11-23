@@ -63,7 +63,7 @@ test('mode choices use host supported values and require a reply', () => {
   }
   assert.doesNotMatch(slash.match(/pub const PermissionMode = enum \{([^}]+)\}/)[1], /\bdefault\b/);
   const worker = send.slice(send.indexOf('fn chatModeThread('), send.indexOf('fn chatModePostResult('));
-  assert.match(worker, /chatHistoryPersistent\(identity, request/);
+  assert.match(worker, /chatHistoryPersistent\(job\.key\.host, job\.key\.shell_id, request/);
   assert.match(worker, /modeReplyOk\(a, response\.items\)/);
   assert.match(worker, /modeRequest\(a, job\.key\.shell_id, job\.key\.provider\(\)/);
   assert.match(send, /std\.Thread\.spawn\(\.\{\}, chatModeThread/);

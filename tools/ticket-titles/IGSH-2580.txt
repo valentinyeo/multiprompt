@@ -1,1 +1,0 @@
-Workspace dropdown: focus highlight does not follow the mouse

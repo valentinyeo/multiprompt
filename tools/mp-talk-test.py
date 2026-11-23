@@ -127,7 +127,7 @@ class ChatsTalkTest(unittest.TestCase):
 
     def test_IGSH_1865_send_refuses_a_chat_that_is_not_live(self):
         gone_sid = "88888888-1111-2222-3333-444444444444"
-        self.chat("k8", "live-gone", gone_sid, 2 ** 22 + 12345, busy=False)
+        self.chat("k8", "live-gone", gone_sid, os.getpid(), busy=False)
         self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Paused Chat", "live-gone": "Gone Chat"})
         done = self.run_tool(MP_SEND, "--to", "Gone Chat", "hello", MULTIPROMPT_TAB="live-alpha")
         self.assertEqual(done.returncode, 2)

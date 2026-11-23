@@ -323,55 +323,6 @@ test('fresh start journey is wired in journey-commands and the verify feature ma
   assert.match(feature, /palette-fresh-start/);
 });
 
-test('a handover turn the agent answers twice still saves one handover and keeps the chat going', () => {
-  python(String.raw`
-import io, json, tempfile
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
-sid = '11111111-2222-4333-8444-555555555555'
-with tempfile.TemporaryDirectory() as directory:
-    r['HOME'] = Path(directory)
-    provider, tmux = 'claude', 'same-chat'
-    config = dict(enabled=True, provider=provider, sid=sid, tmux=tmux, cwd=directory, model='sonnet', face='custom', login='same-agent')
-    paths = r['host_paths'](provider, sid)
-    r['host_write'](paths['config'], config)
-    state = dict(native_session=sid, mode='bypassPermissions')
-    session = dict(state=state)
-    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
-    session['ready'] = True
-    transcript = Path(directory) / 'old.jsonl'
-    transcript.write_text(json.dumps(dict(type='multiprompt_history', row=dict(role='user', text='OLD-CONTEXT-ONLY', id='old-question'))) + '\n')
-    with patch.dict(r, conversation_path=lambda *args: transcript, host_layout_publish_conversation=lambda *args: True):
-        assert r['host_handle_request'](provider, sid, tmux, session, dict(op='fresh_start'))['status'] == 'started'
-        assert state['fresh_start']['phase'] == 'handover'
-        draft = '# Handover\n\n' + 'Keep the board loop armed and read the handover. ' * 130
-        assert r['HOST_EVENT_TEXT_LIMIT'] // 2 < len(draft.encode('utf-8')) < r['HOST_EVENT_TEXT_LIMIT']
-        for index in range(2):
-            r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='assistant', message=dict(id='handover-' + str(index), content=[dict(type='text', text=draft)]))))
-        assert 2 * len(draft.encode('utf-8')) > r['HOST_EVENT_TEXT_LIMIT']
-        r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='result', subtype='success')))
-        fresh = state['fresh_start']
-        assert fresh['phase'] == 'reset', fresh
-        saved = r['host_read'](paths['root'] / fresh['file'])
-        assert saved['text'] == draft.strip(), (len(saved['text']), len(draft))
-        assert r['host_fresh_prepare'](provider, sid, state)
-        assert state['context_session'] != sid and 'native_session' not in state
-        assert r['host_config'](provider, sid) == config and r['host_chat_name'](provider, sid) == tmux
-        stream = io.BytesIO()
-        r['host_session_reset'](session, SimpleNamespace(stdin=stream))
-        session['ready'] = True
-        r['host_fresh_resume'](provider, sid, tmux, session)
-        assert 'Keep the board loop armed' in stream.getvalue().decode()
-    history = paths['history'].read_text()
-    assert 'OLD-CONTEXT-ONLY' in history
-    assert 'Fresh start failed' not in history, history[-400:]
-    if session.get('db') is not None:
-        session['db'].close()
-print('FRESH_START_PASS')
-`);
-});
-
 test('fresh start is discoverable without adding message chrome or changing the target tab', () => {
   const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');

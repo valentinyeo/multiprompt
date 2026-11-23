@@ -39,27 +39,11 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
-
-SOFT-3097 reverts `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6` on top of `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, so pending rows reconcile by exact text again and id-less history rows key on their text. `pickBlock`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch and the restore guard are unchanged from the pre-identity source, and the native probes and replay supply only the text block. The recorded decision table still matches, because it models one exact-text echo. The reader's `client_id` metadata and alias persistence are gone; the covered reader functions are otherwise unchanged. Only the echo, send and reader hashes move, and the sync commit names the base it was reviewed on. Bounds, decisions, mutations and properties remain unchanged.
-
-SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
-
-SOFT-2525 restores Pi login's one-argument live-reply guard by carrying the checked session and bytes together. Compared with `cc067da0c3d9b2c22b9db957ee1c0c9daff113ab`, all nine covered send functions, the extracted timeout branch and restore guard are byte-identical, and every other recorded file hash is unchanged. Only the send file hash and sync commit move; bounds, decisions, probes and properties remain unchanged.
-
-SOFT-2525's merge of `bb75c5de0` preserves the checked-identity send code and imports only the tunnel notification cache fields into `src/app_state.zig`. `ChatOutboxEntry` and every covered decision are unchanged. The merged file hashes match the coverage record; the sync commit now names that master tip. Bounds, probes and properties remain unchanged.
-
-SOFT-2525 reviewed the identity refactor at `6c15433e833a8c962ccc1c8020720c22aef111e0`. All nine covered send functions, the extracted timeout branch and the restore guard are byte-identical to sync commit `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. Only the send file's hash changes. The new request identity checks sit outside the model's fixed-session boundary. Bounds, decisions, properties and mutation checks remain unchanged. Hosted CI reruns the native probes, counterexample replays and both planted breaks.
-
 Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` after merging master into the SOFT-3079 nightly rotation fix, which moved the reader's `RUNTIME_GENERATION` into the canonical inner source and raised it to 150. `message_store_transaction`, `message_poll`, `message_poll_locked`, `chatRelayout`, `chatEchoNotSent`, `IGSH_1266_SharedMessageHostTest`, `ChatOutboxEntry` and the delivery model are unchanged. Slash-pill painting, agent-input rewriting, the send command's destination checks and the host start, owner and dispatch path are outside the delivery model. [coverage.json](coverage.json) records the full source SHA and conservative whole-file hashes. Hosted native replay, mutation checks and inherited decision comparison must still pass. The function list below, not the file hashes, describes the modeled behavior.
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
-
-SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
-
-SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |
 | --- | --- |

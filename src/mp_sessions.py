@@ -11,7 +11,7 @@ from pathlib import Path
 PROVIDERS = ("claude", "codex", "pi", "cursor")
 
 
-def load_send(session_api=True):
+def load_send():
     here = Path(__file__).resolve()
     source = here.with_name("mp_send.py")
     if not source.is_file():
@@ -20,8 +20,6 @@ def load_send(session_api=True):
     spec = importlib.util.spec_from_loader("mp_send", loader)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if session_api and not callable(getattr(module, "zsb", None)):
-        raise ValueError("session commands need a newer mp-send helper; update the desktop app and reconnect")
     return module
 
 
@@ -290,10 +288,10 @@ def live_catalog_rows(send):
 
 
 def cmd_list(args):
+    send = load_send()
+    listing = send.zsb("workspace-list")
     workspace = getattr(args, "workspace", None)
-    send = load_send(session_api=bool(workspace))
     if workspace:
-        listing = send.zsb("workspace-list")
         rows = session_catalog(send, listing)
         caller, mine = caller_mark(send, listing, rows)
         for row in rows:
@@ -309,7 +307,7 @@ def cmd_list(args):
             print(catalog_table(rows))
         return 0
     rows = live_catalog_rows(send)
-    caller = send.own_tmux()
+    caller, mine = caller_mark(send, listing, rows)
     for row in rows:
         row["self"] = caller is not None and row["tmux"] == caller
     if args.json:
@@ -598,6 +596,8 @@ def parse(argv):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        return cmd_list(argparse.Namespace(command="list", json=False, workspace=None))
     if argv == ["--help"] or argv == ["-h"]:
         parse(["--help"])
         return 0
@@ -609,7 +609,7 @@ def main(argv=None):
         print("mp-sessions: " + str(error), file=sys.stderr)
         return 2
     command = args.command or "list"
-    send = load_send(session_api=False)
+    send = load_send()
     handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
                     close=cmd_close, send=cmd_send)
     try:

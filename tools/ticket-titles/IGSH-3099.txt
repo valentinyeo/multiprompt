@@ -1,1 +1,0 @@
-Show the app version beside the telemetry icon

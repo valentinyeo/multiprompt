@@ -286,11 +286,6 @@ def published_names():
     return {tmux: entry["name"] for tmux, entry in known.items() if isinstance(entry, dict) and isinstance(entry.get("name"), str) and entry["name"].strip()}
 
 
-def host_owner_pid(config_path):
-    owner = read_json(config_path.with_name(config_path.name[: -len(".config.json")] + ".owner.json")) or {}
-    return owner.get("pid") if owner.get("owner") == "host" else None
-
-
 def live_chats():
     root = state_root() / "agent-host"
     names = published_names()
@@ -306,23 +301,20 @@ def live_chats():
             continue
         if provider not in PROVIDERS:
             continue
-        hosted = pid_alive(state.get("pid")) or pid_alive(host_owner_pid(config_path))
-        terminal = sessions is None or tmux in sessions
-        if not hosted and not terminal:
+        if sessions is not None and tmux not in sessions:
             continue
         shown = names.get(tmux)
         started = state.get("started") if isinstance(state.get("started"), (int, float)) else 0
-        if hosted:
+        if pid_alive(state.get("pid")):
             row_state = "busy" if state.get("inflight") else "idle"
         else:
             row_state = "stopped"
-        row = dict(name=shown, provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state,
-                   started=started, hosted=hosted, link=link_token(shown, tmux))
-        if tmux not in best or (row["hosted"], row["started"]) >= (best[tmux]["hosted"], best[tmux]["started"]):
+        row = dict(name=shown, provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state, started=started, link=link_token(shown, tmux))
+        if tmux not in best or started >= best[tmux]["started"]:
             best[tmux] = row
     rows = sorted(best.values(), key=lambda row: ((row["name"] or row["tmux"]).casefold(), row["tmux"]))
     for row in rows:
-        del row["started"], row["hosted"]
+        del row["started"]
     return rows
 
 

@@ -664,10 +664,6 @@ jobs:
           status=$?
           set -e
           cat "$RUNNER_TEMP/chat-row-before.log"
-          if [ "$status" = 0 ]; then
-            echo 'Base already passes the hosted row regressions; the red control has nothing left to prove'
-            exit 0
-          fi
           test "$status" = 1
           grep -q '^# fail 2$' "$RUNNER_TEMP/chat-row-before.log"
           grep -q 'TestExpectedEqual' "$RUNNER_TEMP/chat-row-before.log"

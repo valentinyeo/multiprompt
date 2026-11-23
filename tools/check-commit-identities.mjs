@@ -7,16 +7,6 @@ const allowed = new Set([
 ]);
 const [base, head] = process.argv.slice(2);
 
-function isAncestor(baseSha, headSha) {
-  try {
-    execFileSync('git', ['merge-base', '--is-ancestor', baseSha, headSha], { env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' } });
-    return true;
-  } catch (error) {
-    if (error.status === 1) return false;
-    throw error;
-  }
-}
-
 try {
   if (!base || !head) throw new Error('Usage: node tools/check-commit-identities.mjs <base> <head>');
   const git = (...args) => execFileSync('git', args, {
@@ -25,9 +15,6 @@ try {
     env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
   });
   const revisions = [base, head].map(ref => git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`).trim());
-  if (!isAncestor(revisions[0], revisions[1])) {
-    throw new Error(`${base} is not an ancestor of ${head}; the checked range must be only the commits a push adds. Do not rewrite master history.`);
-  }
   const fields = git('log', '--no-use-mailmap', '-z', '--format=%H%x00%ae%x00%ce%x00%B', `${revisions[0]}..${revisions[1]}`).split('\0');
   fields.pop();
   const errors = [];

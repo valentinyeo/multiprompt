@@ -1,1 +1,0 @@
-Server chats list slash commands from the account that runs them, not the login account.
