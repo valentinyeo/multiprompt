@@ -45,6 +45,38 @@ class RuntimeTest(unittest.TestCase):
     def newer(self):
         return SOURCE.replace('END = "@@MP_END@@"', 'END = "@@MP_NEW_END@@"', 1)
 
+    def legacy(self):
+        return (ROOT / 'tools/fixtures/SOFT-2524/legacy-reader.py').read_text()
+
+    def test_install_newer_then_older_leaves_runtime_unchanged(self):
+        first = self.info(self.bundle(self.newer()))
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        snapshot = {path.name: (os.readlink(path) if path.is_symlink() else path.read_bytes())
+                    for path in runtime.iterdir() if path.name != 'lock'}
+        self.assertEqual(self.info(self.legacy()), first)
+        for path in runtime.iterdir():
+            if path.name == 'lock':
+                continue
+            if path.is_symlink():
+                self.assertEqual(os.readlink(path), snapshot[path.name], path.name)
+            else:
+                self.assertEqual(path.read_bytes(), snapshot[path.name], path.name)
+        for name, _file in self.RUNNABLE_TOOLS:
+            self.assertTrue(os.access(runtime / name, os.X_OK), name)
+
+    def test_install_older_then_newer_upgrades(self):
+        old = self.info(self.legacy())
+        upgraded = self.info(self.bundle(self.newer()))
+        self.assertGreater(upgraded['generation'], old['generation'])
+        self.assertEqual(self.info(self.bundle(self.newer())), upgraded)
+
+    def test_equal_generation_install_is_idempotent(self):
+        info = self.info(self.bundle())
+        active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
+        before = active.stat().st_mtime_ns
+        self.assertEqual(self.info(self.bundle()), info)
+        self.assertEqual(active.stat().st_mtime_ns, before)
+
     def test_selection_and_idempotence_across_bootstraps(self):
         first = self.info()
         active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
@@ -159,7 +191,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(reader.is_symlink())
         self.assertEqual(reader.read_text(), (runtime / (info['sha256'] + '.py')).read_text())
 
-    def bundle(self):
+    def bundle(self, reader=SOURCE):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
             ('FEEDBACK_SOURCE', 'src/multibot_feedback.py'),
@@ -171,7 +203,7 @@ class RuntimeTest(unittest.TestCase):
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
         prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
-        return prelude + SOURCE
+        return prelude + reader
 
     def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
         self.info(self.bundle())
