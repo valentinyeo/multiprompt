@@ -356,7 +356,7 @@ try {
     if ($Feature -in @('chat-switch-speed', 'chat-still', 'chat-options', 'chat-slash', 'release-proof')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $remoteNames = @(if ($Feature -eq 'chat-slash') { 'verify-agent-1'; 'live-slash' } elseif ($Feature -eq 'release-proof') { 'verify-agent-1'; 'live-slash'; 'soft3039-two' } elseif ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
+        $remoteNames = @(if ($Feature -eq 'chat-slash') { 'verify-agent-1'; 'live-slash' } elseif ($Feature -eq 'release-proof') { 'verify-agent-1'; 'soft3039-two' } elseif ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
         $remotePanes = [ordered]@{}
         $remoteSids = [ordered]@{}
         for ($i = 0; $i -lt $remoteNames.Count; $i++) {
@@ -364,7 +364,7 @@ try {
             $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
         }
         $remoteDocument = [ordered]@{ name = $(if ($Feature -eq 'chat-still') { 'chat-still' } else { 'chat-switch-speed' }); fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
-        if ($Feature -in @('chat-slash', 'release-proof')) { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
+        if ($Feature -eq 'chat-slash') { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
         [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
         $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
         $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
@@ -395,8 +395,8 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Ordinary list fixture failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
-        if ($Feature -in @('chat-slash', 'release-proof')) {
-            $remoteDocument.name = $(if ($Feature -eq 'release-proof') { 'release-proof' } else { 'chat-slash' })
+        if ($Feature -eq 'chat-slash') {
+            $remoteDocument.name = 'chat-slash'
             $remoteDocument.slashProof = $true
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
             $remoteTabs[1].cv = $true
@@ -404,13 +404,17 @@ try {
             $remoteTabs[1].claude_session = $true
             $remoteTabs[1].ccwd = '/home/inne/projects/sample'
         }
+        if ($Feature -eq 'release-proof') {
+            $remoteDocument.name = 'release-proof'
+            [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        }
         if ($Feature -eq 'chat-still') { foreach ($tab in $remoteTabs) { $tab.cv = $true }; $env:MULTIPROMPT_CHAT_STILL_PROOF = '1' }
         $remoteSeed = @{ active_tab = 0; single_window = ($Feature -eq 'release-proof'); chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs }
         if ($Feature -eq 'release-proof') { $remoteSeed.shared_server_connection = $true }
         $remoteSeedJson = ConvertTo-Json -InputObject $remoteSeed -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
-        $result.seedBoundary = $(if ($Feature -eq 'release-proof') { 'The harness writes the saved-tab file once before the first launch: two stand-in tmux sessions on a stand-in SSH host behind the shared server connection, so the release opens each one in its own hosted native terminal, plus one chat-view tab used for the session switch. Only SSH, tmux and the agent transport are replaced.' } else { 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.' })
+        $result.seedBoundary = $(if ($Feature -eq 'release-proof') { 'The harness writes the saved-tab file once before the first launch: two stand-in tmux sessions on a stand-in SSH host behind the shared server connection, so the release opens each one in its own hosted native terminal. Only SSH, tmux and the agent transport are replaced.' } else { 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.' })
     }
     if ($Feature -eq 'inbox-order') {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'

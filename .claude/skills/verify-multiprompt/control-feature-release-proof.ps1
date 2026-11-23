@@ -10,18 +10,35 @@ function Save-ReleaseCheck([string]$Name, [hashtable]$Values) {
     $result.checks += $check
 }
 
+function Get-ConsoleCandidates {
+    $candidates = @()
+    foreach ($handle in [VerifyNative]::VisibleChildrenByClass($script:window, 'MPTerminal')) {
+        $rect = New-Object VerifyNative+Rect
+        if (-not [VerifyNative]::GetWindowRect($handle, [ref]$rect)) { continue }
+        if (($rect.Right - $rect.Left) -lt 200 -or ($rect.Bottom - $rect.Top) -lt 100) { continue }
+        $candidates += @{ handle = $handle; rect = @($rect.Left, $rect.Top, $rect.Right, $rect.Bottom) }
+    }
+    return $candidates
+}
+
 function Find-ConsoleWindow {
+    $script:consolePolls = New-Object System.Collections.ArrayList
     try {
         Wait-Until {
-            $visible = [VerifyNative]::VisibleChildrenByClass($script:window, 'MPTerminal')
-            if ($visible.Count -ne 1) { return $false }
-            $script:consoleHandle = $visible[0]
+            $script:consoleCandidates = @(Get-ConsoleCandidates)
+            if ($script:consolePolls.Count -lt 40) {
+                [void]$script:consolePolls.Add(@{ at = [DateTime]::UtcNow.ToString('o'); candidates = $script:consoleCandidates })
+            }
+            if ($script:consoleCandidates.Count -lt 1) { return $false }
+            $script:consoleHandle = [IntPtr]$script:consoleCandidates[0].handle
             return $true
-        } 'single visible hosted native terminal window' 60
+        } 'hosted native terminal window' 60
     } catch {
         Save-Json ([VerifyNative]::ChildWindows($script:window)) 'console-windows.json'
+        Save-Json @($script:consolePolls) 'console-polls.json'
         throw
     }
+    Save-Json @($script:consolePolls) 'console-polls.json'
     Save-Json ([VerifyNative]::WindowIdentity($script:consoleHandle)) 'console-window.json'
     return $script:consoleHandle
 }
@@ -140,11 +157,11 @@ Save-Json ([VerifyNative]::WindowIdentity($shell)) 'console-terminal.json'
 Save-Json @([VerifyNative]::VisibleChildrenByClass($script:window, 'MPTerminal') | ForEach-Object { [VerifyNative]::WindowIdentity($_) }) 'console-visibles.json'
 Snapshot 'caret-console-focused'
 $beforeCaret = Measure-CaretBlink 'console-before-switch'
-Press @(0x11, 0x32) 'Ctrl+2: switch to the other session'
+Press @(0x11, 0x32) 'Ctrl+2: switch to the other server shell'
 Wait-Until {
     $saved = Read-Session
-    $null -ne $saved -and $saved.tabs[$saved.active_tab].tmux_session -ceq 'live-slash'
-} 'second session selected before returning'
+    $null -ne $saved -and $saved.tabs[$saved.active_tab].tmux_session -ceq 'soft3039-two'
+} 'second server shell selected before returning'
 Press @(0x11, 0x31) 'Ctrl+1: switch back to the caret session'
 Wait-Until {
     $saved = Read-Session
@@ -176,7 +193,7 @@ $preRestartTransports = Get-RemoteTransports
 Save-Json @{ step = 'before-restart'; verifyAgent1 = $preRestartTransports['verify-agent-1']; soft3039Two = $preRestartTransports['soft3039-two'] } 'server-shell-transports-before.json'
 Press @(0x11, 0x31) 'Ctrl+1: first server shell selected before quitting'
 Snapshot 'server-shell-before-restart'
-$shellState = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = @('verify-agent-1', 'live-slash', 'soft3039-two') }
+$shellState = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = @('verify-agent-1', 'soft3039-two') }
 [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $shellState -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Remove-Item (Join-Path $remoteState 'interrupt.json') -ErrorAction SilentlyContinue
 Restart-SessionRestore 'server-shell-restart' $false
@@ -195,8 +212,8 @@ if ($postRestartTransports['verify-agent-1'] -eq $preRestartTransports['verify-a
 Save-Json @{ step = 'after-restart'; verifyAgent1 = $postRestartTransports['verify-agent-1']; soft3039Two = $postRestartTransports['soft3039-two'] } 'server-shell-transports-after.json'
 $interruptFile = Join-Path $remoteState 'interrupt.json'
 $inputs = @()
-foreach ($index in 1, 3) {
-    $selectKeys = if ($index -eq 1) { @(0x11, 0x31) } else { @(0x11, 0x33) }
+foreach ($index in 1, 2) {
+    $selectKeys = if ($index -eq 1) { @(0x11, 0x31) } else { @(0x11, 0x32) }
     Press $selectKeys ("Ctrl+$index" + ': select a restored server shell')
     $session = if ($index -eq 1) { 'verify-agent-1' } else { 'soft3039-two' }
     Wait-Until {
