@@ -46,11 +46,19 @@ test('CI-owned checks supply exact-head raw findings to the judge and fail close
   const receipt = { workflow: 'chat-delivery-formal.yml', head_sha: head, conclusion: 'success', id: 2, artifact: 'chat-delivery-formal' };
   fs.writeFileSync(path.join(evidence, 'ci-workflows.json'), JSON.stringify([receipt]));
   assert.throws(() => verifier.judgeInputs(dir, evidence), /CI workflow evidence/);
-  fs.writeFileSync(path.join(artifact, 'summary.json'), JSON.stringify({ failures: ['NoFalseNotSent'], mutations_caught: ['NoFalseNotSent'], inherited_from: 'b'.repeat(40) }));
+  for (const failures of [['SingleVisibleCopy'], ['NoFalseNotSent'], ['NoFalseNotSentResume']]) {
+    fs.writeFileSync(path.join(artifact, 'summary.json'), JSON.stringify({ failures, model_only: false, mutations_caught: ['SingleVisibleCopy', 'NoFalseNotSent'], inherited_from: 'b'.repeat(40) }));
+    assert.throws(() => verifier.judgeInputs(dir, evidence), /not a delivery property PASS/);
+  }
+  for (const result of [{ failures: [], model_only: true }, { failures: null, model_only: false }]) {
+    fs.writeFileSync(path.join(artifact, 'summary.json'), JSON.stringify(result));
+    assert.throws(() => verifier.judgeInputs(dir, evidence), /not a delivery property PASS/);
+  }
+  fs.writeFileSync(path.join(artifact, 'summary.json'), JSON.stringify({ failures: [], model_only: false, mutations_caught: ['SingleVisibleCopy', 'NoFalseNotSent'], inherited_from: null }));
   const material = verifier.judgeInputs(dir, evidence);
   assert.match(material, /ci-workflows\.json/);
   assert.match(material, /chat-delivery-formal\/summary\.json/);
-  assert.match(material, /NoFalseNotSent/);
+  assert.match(material, /SingleVisibleCopy/);
   for (const change of [{ head_sha: 'b'.repeat(40) }, { conclusion: 'failure' }, { conclusion: null }, { artifact: 'different' }]) {
     fs.writeFileSync(path.join(evidence, 'ci-workflows.json'), JSON.stringify([{ ...receipt, ...change }]));
     assert.throws(() => verifier.judgeInputs(dir, evidence), /CI workflow evidence/);

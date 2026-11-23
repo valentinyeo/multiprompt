@@ -1789,6 +1789,44 @@ test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" 
     try std.testing.expectEqualSlices(u16, draft, composer_text);
 }
 
+test "delivery: SOFT-3125 restart preserves a possible send and reconciles one copy" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("delayed accepted request");
+    for ([_][]const u8{ "", "queued", "sent" }) |phase| {
+        clear();
+        try enqueue(text, .sending);
+        g_chat_outbox.items[0].message_v1 = true;
+        @memcpy(g_chat_outbox.items[0].message_phase[0..phase.len], phase);
+        try std.testing.expect(saveChatOutbox());
+        try reload();
+        try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+        const entry = g_chat_outbox.items[0];
+        try std.testing.expectEqual(ChatEchoState.queued, entry.state);
+        try std.testing.expect(entry.write_started);
+        try std.testing.expect(!chat_echo.showsNotSent(true, entry.state, phase, entry.sent_tick_ms, 601500));
+        transcript(text, 2000);
+        chatEchoMatchActive();
+        try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+        try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    }
+}
+test "delivery: SOFT-3125 a delayed receipt is not a send failure" {
+    defer clear();
+    for ([_]ChatEchoState{ .queued, .sending }) |state| {
+        clear();
+        try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("accepted without receipt"), state);
+        g_chat_outbox.items[0].message_v1 = true;
+        g_chat_outbox.items[0].write_started = true;
+        shells[0].disconnected = true;
+        fake_now_ms = 601500;
+        chatOutboxTick();
+        const entry = g_chat_outbox.items[0];
+        try std.testing.expectEqual(ChatEchoState.queued, entry.state);
+        try std.testing.expect(entry.write_started);
+        try std.testing.expect(!chat_echo.showsNotSent(true, entry.state, "", entry.sent_tick_ms, fake_now_ms));
+        try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    }
+}
 test "delivery: IGSH-1010 cancellation survives restart without retry or terminal writes" {
     defer clear();
     const json = "{\\"version\\":2,\\"queues\\":[{\\"key\\":\\"test\\",\\"messages\\":[{\\"t\\":\\"cancelled prompt\\",\\"s\\":4,\\"x\\":1,\\"held\\":1,\\"qid\\":77}]}]}";
@@ -2270,7 +2308,7 @@ test('composer always persists through the same outbox before delivery', () => {
 test('IGSH-1847 a message that was not sent is sent again under a new wire id', () => {
   assert.match(body('chatEchoSendAgain'), /message_replaces/);
   assert.match(body('chatEchoSendAgain'), /desktop-\{x:0>16\}\{x:0>16\}/);
-  assert.match(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
+  assert.doesNotMatch(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
   assert.match(body('chatRelayout'), /e\.state == \.not_sent/);
 });
 

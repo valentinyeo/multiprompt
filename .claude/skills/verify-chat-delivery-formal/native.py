@@ -64,20 +64,33 @@ const ChatOutboxEntry = struct {
     try std.testing.expectEqual(@as(?usize, null), picked[1]);
     var queued = ChatOutboxEntry{};
     var sending = ChatOutboxEntry{ .state = .sending };
-    try std.testing.expect(timeout(&queued, 601000));
+    try std.testing.expect(!timeout(&queued, 601000));
     try std.testing.expect(timeout(&sending, 601000));
     var empty_phase = ChatOutboxEntry{ .state = .sending };
     restoreEntry(&empty_phase);
+    var load_queued = ChatOutboxEntry{};
+    var load_sending = ChatOutboxEntry{ .state = .sending };
+    for ([_]*ChatOutboxEntry{ &load_queued, &load_sending }) |entry| {
+        @memcpy(entry.message_phase[0..4], "sent");
+        restoreEntry(entry);
+        try std.testing.expect(entry.write_started);
+    }
+    var unsent = ChatOutboxEntry{ .write_started = false };
+    restoreEntry(&unsent);
+    try std.testing.expect(!unsent.write_started);
+    try std.testing.expect(!chatEchoWaitsOnTranscript(unsent));
+    try std.testing.expect(empty_phase.write_started);
+    try std.testing.expectEqual(chat_echo.OutboxState.queued, empty_phase.state);
     std.debug.print("FORMAL {{\\\"Reconciles\\\":{},\\\"ReconcilesUnwritten\\\":{},\\\"LoadQueued\\\":\\\"{s}\\\",\\\"LoadSending\\\":\\\"{s}\\\",\\\"ShowQueuedOld\\\":{},\\\"ShowNotSent\\\":{},\\\"ShowDelivered\\\":{},\\\"CanSendQueued\\\":{},\\\"CanSendWritten\\\":{},\\\"TimeoutQueued\\\":\\\"{s}\\\",\\\"TimeoutSending\\\":\\\"{s}\\\",\\\"LoadEmpty\\\":\\\"{s}\\\",\\\"LoadEmptyWritten\\\":{}}}\\n", .{
         chatEchoWaitsOnTranscript(.{}) and picked[0] != null,
         chatEchoWaitsOnTranscript(.{ .write_started = false }) and picked[0] != null,
-        @tagName(chat_echo.stateOnLoad(0, true)),
-        @tagName(chat_echo.stateOnLoad(1, true)),
+        @tagName(load_queued.state),
+        @tagName(load_sending.state),
         chat_echo.showsNotSent(true, .queued, "sent", 1000, 601000),
         chat_echo.showsNotSent(true, .not_sent, "sent", 1000, 1001),
         chat_echo.showsNotSent(true, .delivered, "accepted", 1000, 1001),
         chat_echo.mayType(.queued, false, false, false),
-        chat_echo.mayType(.queued, true, false, false),
+        chat_echo.v1NeedsResubmit(true, true, "sent", .queued),
         @tagName(queued.state),
         @tagName(sending.state),
         @tagName(empty_phase.state),

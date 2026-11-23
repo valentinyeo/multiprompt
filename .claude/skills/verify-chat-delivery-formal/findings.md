@@ -1,8 +1,20 @@
 # Chat delivery counterexamples
 
-The goal is one visible copy per sent message, with no false **Not sent** copy. The unchanged source at `9dd167dad7dde81749519038b0bcc5866c6deebb` violates both promises in the bounded model.
+The goal is one visible copy per sent message, with no false **Not sent** copy. The baseline source at `9dd167dad7dde81749519038b0bcc5866c6deebb` violated both promises in the bounded model. The paths below are retained regression evidence, not current PASS claims.
 
 These are production-decision counterexamples, not captured Windows screens. Native acceptance, store confirmation, client receipts and transcript arrival are separate events. Each shortest path must replay through production decisions and the real isolated message store before it is accepted as a finding.
+
+## SOFT-3125 corrections
+
+All three traces describe real desktop bugs, not impossible model actions.
+
+- `SingleVisibleCopy`: empty-phase restore cleared `write_started`, excluding a possible successful send from transcript reconciliation. Restore now retains the saved reservation. A genuinely unwritten queued entry stays unwritten.
+- `NoFalseNotSent`: elapsed time made an unconfirmed host send `.not_sent`, and the label separately treated age as failure. An abandoned sending operation now returns to `.queued` for same-wire recovery; elapsed time alone never shows **Not sent**. Explicit failures still do.
+- `NoFalseNotSentResume`: `stateOnLoad` conservatively loaded a written send as `.not_sent`, and the v1 parser failed to override that state for `queued`/`sent` phases. The parser now restores every unconfirmed v1 phase as `.queued`, preserving its reservation and wire ID. Legacy terminal restore remains unchanged.
+
+The native table now measures the complete parser guard for nonempty phases, rather than the intermediate `stateOnLoad` result. It includes `v1NeedsResubmit`, already used by production, and the model permits that same-wire request after restart. These mapping updates follow the code; they do not delete an event or weaken either property. The host still refuses a replacement for an accepted send.
+
+The failure waiver is removed. Each head finding returns exit 1 even after successful mutations and replay; the independent verifier rejects an inherited delivery summary with failures.
 
 ## Timeout without the acceptance receipt
 
@@ -48,7 +60,7 @@ The resume-only /statechart report checks the same invariant with the timeout ac
 
 The empty-phase requeue avoids a false **Not sent** label, but `chatEchoWaitsOnTranscript` returns false when `write_started`, `channel_sent` and `channel_pending` are all false. `chatEchoAssignForKey` then excludes the restored entry before matching. The ordinary user block and pending row remain eligible for layout. A later resubmit or receipt may repair the display; the earlier duplicate is the violation.
 
-These three source decisions are filed separately as [SOFT-2724](https://app.hypertask.ai/detail/project-2060/2724), [SOFT-2725](https://app.hypertask.ai/detail/project-2060/2725) and [SOFT-2726](https://app.hypertask.ai/detail/project-2060/2726). Do not duplicate those tickets, weaken the invariants or change product code in this verification PR.
+These three source decisions are filed separately as [SOFT-2724](https://app.hypertask.ai/detail/project-2060/2724), [SOFT-2725](https://app.hypertask.ai/detail/project-2060/2725) and [SOFT-2726](https://app.hypertask.ai/detail/project-2060/2726). SOFT-3125 repairs these decisions without changing the invariants.
 
 ## PR 1095 verifier routing investigation
 
@@ -64,7 +76,7 @@ The correction is explicit [formal-check ownership](../verify-multiprompt/featur
 
 The check retains generated Zig source, compiler output, per-action state/phase/write assertions and real temporary SQLite store replay. The fixture supplies a synthetic native queue event, transcript and terminal-send boundary. The real connector must confirm the native acceptance. Replaying the original accepted wire ID must be idempotent, and replacing an accepted row must be refused. No provider, SSH connection or desktop window is run.
 
-`--self-test` first checks a reliable control with no restart or timeout. It plants a missing reconciliation decision in real source and requires two visible copies. It separately plants a delivered-message failure label and requires a false failure. Both mutations run in that same passing control, so existing findings cannot satisfy the mutation test. Both must replay. Restoring the original source must return to all three original findings.
+`--self-test` first checks a reliable control with no restart or timeout. It plants a missing reconciliation decision in real source and requires two visible copies. It separately plants a delivered-message failure label and requires a false failure. Both mutations run in that same passing control, so existing findings cannot satisfy the mutation test. Both must replay. Restoring source must reproduce its exact pre-mutation results, whether those results pass or fail.
 
 The full graph exceeds /statechart's 500-state chart budget, so its all-events chart shows bug paths only. The resume-only report reaches 170 states. The charts hide steps that leave their visible labels unchanged, including some receipt and store-confirmation steps. They do not prove all strings, multiple native consumptions, stale sessions, assistant replies or Windows painting. Read the scope in `SKILL.md`.
 

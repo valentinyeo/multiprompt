@@ -7,6 +7,8 @@ description: Check desktop chat sends, outbox recovery, echo reconciliation and 
 
 Each sent message must have exactly one visible copy and must never show **Not sent** after the agent accepted it. Duplicate copies invite duplicate sends. A false failure tells the user to repeat work the agent already received.
 
+SOFT-3125 fixes the three recorded production counterexamples. Timeout now leaves uncertain host sends queued, and v1 restore preserves a possible write while requeuing unconfirmed phases. The native table reads the complete extracted restore guard for both nonempty and empty phases. It also includes the existing same-wire resubmit path, rather than treating a write reservation as an absolute send prohibition. No invariant is weakened.
+
 ## Run
 
 From the repository root, with Python 3.12, Java 21 and Zig 0.16.0 available, run:
@@ -33,7 +35,7 @@ The failure depends on whether an acceptance receipt or saved chat arrives befor
 - One retained terminal-backed Claude chat, a fixed session identity and at most one native acceptance. Receipts may be arbitrarily delayed or absent. The app's local outbox save succeeds. Host writes are transactional and wire IDs do not collide.
 - Host dispatch, native acceptance and store confirmation are separate steps. The acceptance receipt and transcript may arrive independently. The transcript contains one exact-text user block newer than the send anchor.
 - Transcript installation and echo reconciliation are one UI-thread action, before painting. A written pending bubble should be replaced by that user block. Unwritten restored entries are checked separately. The native probe also checks two identical pending texts cannot claim the same block.
-- The timeout action includes the production outbox timeout branch. Restart applies `stateOnLoad` and the parser's empty-phase requeue guard. Retry covers rejection of an already accepted host row and aged replacement. Early unaccepted rejection, two native consumptions and live-stream row projections are outside this bound. External connection and process lifecycle events remain modeled boundaries.
+- The timeout action includes the production outbox timeout branch. Restart applies `stateOnLoad` and the parser's v1 unconfirmed-phase restore guard. Retry covers rejection of an already accepted host row and aged replacement. Early unaccepted rejection, two native consumptions and live-stream row projections are outside this bound. External connection and process lifecycle events remain modeled boundaries.
 
 No liveness is claimed when a connection can stay down forever. This does not verify all strings, allocation or disk failures, full serialization, event pagination, scheduling, cancellation, session rotation, stale-session callbacks, provider restarts, Codex/Pi, assistant reply formatting, rendering pixels or Android. SOFT-2688's three assistant forms and SOFT-2681's stale session are motivating adjacent problems, not covered proofs. Use their real app journeys for those cases.
 
@@ -83,10 +85,10 @@ Both counterexamples must replay through the changed production decisions. The o
 
 ## Read current findings
 
-The current source violates `NoFalseNotSent` through timeout and restart, and `SingleVisibleCopy` after an empty-phase restart. [findings.md](findings.md) contains the /statechart paths and code mapping. Keep those findings; do not weaken the invariant to make the job green. For a modeling error, identify the impossible action or mismatching source operation and fix the model. For a real bug, file each counterexample separately and keep its trace and native replay.
+The baseline violated `NoFalseNotSent` through timeout and restart, and `SingleVisibleCopy` after an empty-phase restart. [findings.md](findings.md) retains the /statechart paths, source mapping and SOFT-3125 corrections. Every head finding is a failure, even if the same finding exists on base. Never weaken an invariant to make the job green.
 
 The [formal feature map](../verify-multiprompt/features/chat-delivery-formal.md) owns this skill and its workflow. The independent PR verifier requires the exact-head formal CI run and reads its raw summary, rather than substituting a nearest-name Windows journey.
 
-The CI command adds `--inherit-from <base>`. Existing findings can return exit 0 only after both mutations and every native replay finish, and only if the production decision table compiled from that base is identical to this head's table. The table is the model's whole input from production, so equal tables mean equal findings. `summary.json` still lists all failures and the base SHA. Default runs still return exit 1. A decision that differs from base, drift and replay errors never inherit. This classifies a PR's pre-existing bugs without calling them passes, and it does not stop a PR that edits a guarded file without changing any decision.
+The CI command runs `--self-test` without an inheritance waiver. Any property failure returns exit 1 after replay and mutation checks. `summary.json` always reports `inherited_from: null`. The PR verifier rejects a delivery summary containing failures, including old summaries with a non-null inherited base. Source drift, tool errors and incomplete replay remain exit 2. `test_check.py` covers each property's failure exit and removal of the waiver. CI also retains pstack /statechart reports for all three generated configs; a manual `baseline_run` input can chart an earlier run's raw traces alongside this head.
 
 After a source change that did not recheck this model, use pstack /maintain-formal-verification-skill.

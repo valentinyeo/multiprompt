@@ -42,7 +42,7 @@ const ChatOutboxEntry = struct {
             if action == "Send":
                 source += "    pending = true; entry.state = .queued;\n"
             elif action == "Submit":
-                source += "    try std.testing.expect(chat_echo.mayType(entry.state, entry.write_started, false, false));\n    entry.state = .sending; entry.write_started = true;\n"
+                source += "    try std.testing.expect(chat_echo.mayType(entry.state, entry.write_started, false, false) or chat_echo.v1NeedsResubmit(true, entry.write_started, std.mem.sliceTo(&entry.message_phase, 0), entry.state));\n    entry.state = .sending; entry.write_started = true;\n"
             elif action == "Receipt":
                 source += f'    receipt(&entry, "{values["host"]}"); entry.write_started = true;\n'
                 source += f'    @memset(&entry.message_phase, 0); @memcpy(entry.message_phase[0..{len(values["phase"])}], "{values["phase"]}");\n'

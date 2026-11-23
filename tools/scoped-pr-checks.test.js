@@ -90,7 +90,8 @@ test('formal delivery PR checks stay bounded, source-filtered and Linux-only', (
   const formal = workflow.split('\n  formal:\n')[1].split('\n  comment-review:')[0];
   assert.match(formal, /runs-on: ubuntu-latest/);
   assert.match(formal, /timeout-minutes: 10/);
-  assert.match(formal, /check\.py --self-test --inherit-from/);
+  assert.match(formal, /check\.py --self-test --output/);
+  assert.doesNotMatch(formal, /--inherit-from/);
   assert.doesNotMatch(workflow, /windows-latest|uses: .*verify\.yml/);
   assert.match(workflow.split('\n  comment-review:\n')[1], /if: github.event_name == 'workflow_dispatch'/);
 });

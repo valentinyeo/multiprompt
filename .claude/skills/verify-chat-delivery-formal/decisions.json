@@ -1,15 +1,15 @@
 {
   "Reconciles": true,
-  "LoadQueued": "not_sent",
-  "LoadSending": "not_sent",
-  "ShowQueuedOld": true,
+  "LoadQueued": "queued",
+  "LoadSending": "queued",
+  "ShowQueuedOld": false,
   "ShowNotSent": true,
   "ShowDelivered": false,
   "CanSendQueued": true,
-  "CanSendWritten": false,
-  "TimeoutQueued": "not_sent",
-  "TimeoutSending": "not_sent",
+  "CanSendWritten": true,
+  "TimeoutQueued": "queued",
+  "TimeoutSending": "queued",
   "LoadEmpty": "queued",
-  "LoadEmptyWritten": false,
+  "LoadEmptyWritten": true,
   "ReconcilesUnwritten": false
 }

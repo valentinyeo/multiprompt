@@ -16,7 +16,8 @@ Send == /\ state = "empty"
         /\ UNCHANGED <<nativeAccepted, phase, written, host, transcript, age, restarted, retried,
                         submitted, wire, hostWires, connected>>
 Submit == /\ pending /\ connected /\ ~submitted
-          /\ IF written THEN CanSendWritten ELSE state = "queued" /\ CanSendQueued
+          /\ IF written THEN state \in {"queued", "sending"} /\ phase \in {"empty", "queued", "sent"} /\ CanSendWritten
+                        ELSE state = "queued" /\ CanSendQueued
           /\ state' = "sending" /\ written' = TRUE /\ submitted' = TRUE
           /\ UNCHANGED <<nativeAccepted, phase, pending, host, transcript, age, restarted, retried,
                           wire, hostWires, connected>>
@@ -57,7 +58,7 @@ Resume == /\ Scenario # "reliable" /\ pending /\ ~restarted /\ written
                         [] state = "queued" -> LoadQueued
                         [] OTHER -> state
           /\ written' = IF phase = "empty" THEN LoadEmptyWritten ELSE written
-          /\ submitted' = IF phase = "empty" THEN FALSE ELSE submitted
+          /\ submitted' = FALSE
           /\ UNCHANGED <<nativeAccepted, phase, pending, host, transcript, age, retried,
                           wire, hostWires, connected>>
 Echo == /\ connected /\ nativeAccepted /\ (~transcript \/ pending)

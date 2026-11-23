@@ -19,4 +19,6 @@ The PR selector owns these files through `CI workflow:`, not a nearest desktop n
 
 ## Gotchas
 
-The three current source findings are SOFT-2724, SOFT-2725 and SOFT-2726. They remain findings even when the CI job classifies them as inherited. The base's production decision table must equal this head's table, and native replay, both mutations and restoration must still run. A guarded file may change as long as no decision changes. No UI journey or binary hash certifies this model.
+SOFT-3125 fixes the three baseline source findings SOFT-2724, SOFT-2725 and SOFT-2726. Every finding on the current head fails CI, even if inherited. Native replay, both planted mutations and restoration still run. The independent verifier rejects raw delivery summaries with failures or model-only evidence. No UI journey or binary hash certifies this model.
+
+The workflow retains pstack /statechart output for all-events and resume-only configs. Its optional manual `baseline_run` input downloads earlier raw delivery evidence and charts those paths too. It does not waive their findings or rerun a failed check to get a pass.

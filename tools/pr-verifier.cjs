@@ -664,7 +664,10 @@ function judgeInputs(outDir, evidenceDir) {
         const receipt = receipts.find(item => item.workflow === workflow && item.artifact === artifact && item.head_sha === pr.headRefOid && item.conclusion === 'success');
         const summary = path.join(evidenceDir, artifact, 'summary.json');
         if (!receipt || !fs.existsSync(summary) || !fs.statSync(summary).size) throw new Error(`CI workflow evidence missing or stale: ${workflow}`);
-        JSON.parse(fs.readFileSync(summary, 'utf8'));
+        const result = JSON.parse(fs.readFileSync(summary, 'utf8'));
+        if (workflow === 'chat-delivery-formal.yml' && (!Array.isArray(result.failures) || result.failures.length || result.model_only !== false)) {
+          throw new Error('CI workflow evidence is not a delivery property PASS on this head');
+        }
         parts.push(`### evidence/${artifact}/summary.json\n${readCapped(summary)}`);
       }
     }

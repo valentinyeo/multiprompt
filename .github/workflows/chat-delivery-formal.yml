@@ -22,6 +22,11 @@ on:
       - '.claude/skills/verify-multiprompt/features/chat-delivery-formal.md'
       - '.github/workflows/chat-delivery-formal.yml'
   workflow_dispatch:
+    inputs:
+      baseline_run:
+        description: Optional earlier delivery-formal run to chart beside this head
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -34,6 +39,9 @@ jobs:
   formal:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -48,7 +56,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Check the scoped PR policy and feature-map contract
-        run: node --test tools/scoped-pr-checks.test.js tools/verify-reconnect.test.js
+        run: |
+          timeout 120s node --test tools/scoped-pr-checks.test.js tools/verify-reconnect.test.js tools/pr-verifier-ci.test.js
+          timeout 60s python3 -m unittest discover -s .claude/skills/verify-chat-delivery-formal -p 'test_*.py'
       - name: Install the production decision replay compiler
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
@@ -56,9 +66,36 @@ jobs:
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Check delivery, replay findings and catch planted production breaks
+        run: timeout 360s python3 .claude/skills/verify-chat-delivery-formal/check.py --self-test --output "$RUNNER_TEMP/delivery-formal"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: always()
+        with:
+          repository: cursor/plugins
+          ref: 2f87c854fe3e2fcda44ca86b46ede35aad3c46b7
+          path: pstack
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: always()
+        with:
+          node-version: 22
+      - name: Fetch optional earlier traces
+        if: always() && inputs.baseline_run != ''
         env:
-          BASE: ${{ github.event.pull_request.base.sha || 'origin/master' }}
-        run: python3 .claude/skills/verify-chat-delivery-formal/check.py --self-test --inherit-from "$BASE" --output "$RUNNER_TEMP/delivery-formal"
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+        run: gh run download "$BASELINE_RUN" --repo "${{ github.repository }}" --name chat-delivery-formal --dir "$RUNNER_TEMP/delivery-formal/baseline"
+      - name: Read all-events and resume results with pstack statechart
+        if: always()
+        run: |
+          export TLA2TOOLS="$HOME/.cache/chat-delivery-formal/tla2tools-1.7.4.jar"
+          for current in "$RUNNER_TEMP/delivery-formal/current" "$RUNNER_TEMP/delivery-formal/baseline/current"; do
+            if [ ! -d "$current" ]; then continue; fi
+            for rule in SingleVisibleCopy NoFalseNotSent NoFalseNotSentResume; do
+              status=0
+              timeout 90s pstack/pstack/skills/statechart/scripts/statechart "$current/Delivery.tla" --config "$current/$rule.cfg" --view "$current/view.mjs" --out "$current/chart-$rule" || status=$?
+              if [ "$status" -gt 1 ]; then exit "$status"; fi
+            done
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

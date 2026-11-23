@@ -101,15 +101,6 @@ def check(values, output, reliable=False):
     return results
 
 
-def base_tables(baseline, output):
-    with tempfile.TemporaryDirectory(prefix="delivery-base-") as directory:
-        root = pathlib.Path(directory)
-        (root / "src").mkdir()
-        for source in ("src/chat_echo.zig", "src/chat_send.zig"):
-            (root / source).write_bytes(subprocess.check_output(["git", "show", baseline + ":" + source], cwd=ROOT))
-        return tables(root, output)
-
-
 def self_test(root, output):
     reliable = check(json.loads((HERE / "decisions.json").read_text()), output / "reliable-control", reliable=True)
     if any(result["status"] != "PASS" for result in reliable.values()):
@@ -144,10 +135,9 @@ def main():
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("/tmp/chat-delivery-formal"))
     parser.add_argument("--model-only", action="store_true")
     parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--inherit-from", default="")
     args = parser.parse_args()
-    if args.model_only and (args.self_test or args.inherit_from):
-        parser.error("model-only cannot prove mutations, native replay or inherited findings")
+    if args.model_only and args.self_test:
+        parser.error("model-only cannot prove mutations or native replay")
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError("Use a new or empty output directory")
@@ -168,21 +158,11 @@ def main():
             raise ValueError("Original source did not return to its starting result")
         replay(ROOT, restored_results, output / "restored-replay")
     failures = [rule for rule in RULES if results[rule]["status"] == "FAIL"]
-    inherited = None
-    if failures and args.inherit_from:
-        if not mutations:
-            raise ValueError("Inherited findings require --self-test")
-        baseline = subprocess.check_output(["git", "rev-parse", args.inherit_from], cwd=ROOT, text=True).strip()
-        before = base_tables(baseline, output / "inherited-native")
-        differing = sorted(name for name in values if before.get(name) != values[name])
-        if differing:
-            raise ValueError("Base source decides differently: " + ", ".join(differing))
-        inherited = baseline
     summary = {"source_sync": record["sync_commit"], "model_only": args.model_only,
-               "failures": failures, "mutations_caught": mutations, "inherited_from": inherited}
+               "failures": failures, "mutations_caught": mutations, "inherited_from": None}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
-    return 1 if failures and not inherited else 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

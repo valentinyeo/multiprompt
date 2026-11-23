@@ -1267,14 +1267,9 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and
                             chat_echo.v1PhaseUnconfirmed(std.mem.sliceTo(&entry.message_phase, 0)))
                         {
-                            if (entry.message_phase[0] == 0) {
-                                entry.state = .queued;
-                                entry.write_started = false;
-                                entry.channel_sent = false;
-                            } else {
-                                entry.write_started = true;
-                                entry.channel_sent = false;
-                            }
+                            entry.state = .queued;
+                            entry.write_started = entry.write_started or entry.message_phase[0] != 0;
+                            entry.channel_sent = false;
                         }
                         const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
                         const saved_ms = if (entry.anchor.sent_ms > 0) entry.anchor.sent_ms else entry.anchor.after_ms;
@@ -3089,9 +3084,8 @@ pub fn chatOutboxTick() void {
                 entry.channel_pending = false;
                 changed = true;
             }
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, send_job_active, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS)) {
-                entry.state = .not_sent;
-                entry.retryable = true;
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, send_job_active, entry.sent_tick_ms, now_ms)) {
+                entry.state = .queued;
                 changed = true;
             }
             continue;
