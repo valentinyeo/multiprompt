@@ -1442,51 +1442,11 @@ const resetSidebarDrag = @import("sidebar_input.zig").resetSidebarDrag;
 const sidebarDragValid = @import("sidebar_input.zig").sidebarDragValid;
 const clearSelectionForClick = @import("sidebar_input.zig").clearSelectionForClick;
 
-fn showPickRepoFailure(saving_folder: bool) void {
-    const palette = @import("command_palette.zig");
-    if (palette.g_pick_repo_offline) {
-        showHeaderNoticeAscii("Pick repo: server is offline", 4000, true);
-        return;
-    }
-    if (saving_folder) {
-        showHeaderNoticeAscii("Set workspace folder: could not save", 4000, true);
-        return;
-    }
-    if (palette.g_pick_row_gone) {
-        showHeaderNoticeAscii("Pick repo: that row is gone; open the list again", 4000, true);
-        return;
-    }
-    switch (palette.g_start_fail) {
-        .capacity => {},
-        .launch_command => showHeaderNoticeAscii("Pick repo: that folder path cannot start a session", 5000, true),
-        .spawn_shell => showHeaderNoticeAscii("Pick repo: the new tab did not start", 5000, true),
-        .none => showHeaderNoticeAscii("Pick repo: nothing started", 4000, true),
-    }
-}
+const showPickRepoFailure = @import("window_actions.zig").showPickRepoFailure;
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("window_actions.zig").openNewRoom;
 
-fn browserFocusHotkey() void {
-    const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
-    if (pane_foreground) {
-        if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
-        cancelPendingNativeBrowserFocus();
-        app_state.g_chat_browser_handoff_until = 0;
-        app_state.g_browser_focus_mode = false;
-        app_state.g_shell_focused = true;
-        @import("focus.zig").focusActiveShellFromBrowserInput();
-    } else {
-        _ = SetForegroundWindow(app_state.g_main_hwnd);
-        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0);
-    }
-}
+const browserFocusHotkey = @import("window_actions.zig").browserFocusHotkey;
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }

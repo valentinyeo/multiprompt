@@ -1,6 +1,6 @@
 {
   "src/browser_pane.zig": 6395,
-  "src/chat_render.zig": 9101,
+  "src/chat_render.zig": 9044,
   "src/command_palette.zig": 6742,
-  "src/main.zig": 10247
+  "src/main.zig": 10207
 }
