@@ -16,7 +16,8 @@ test('SOFT and IGSH identify the same board ticket while HYCI stays distinct', (
     assert.equal(fragmentTicketId(`changelog.d/${id}-x.md`), 'IGSH-2489');
   }
   assert.deepEqual(parseTicketId('HYCI-2489'), { id: 'HYCI-2489', prefix: 'HYCI', number: '2489', boardId: 11514 });
-  assert.deepEqual(ticketIds('SOFT-2489, IGSH-2489 and HYCI-2489'), ['IGSH-2489', 'HYCI-2489']);
+  assert.deepEqual(parseTicketId('MUBO-172'), { id: 'MUBO-172', prefix: 'MUBO', number: '172', boardId: 13734 });
+  assert.deepEqual(ticketIds('SOFT-2489, IGSH-2489, HYCI-2489 and MUBO-172'), ['IGSH-2489', 'HYCI-2489', 'MUBO-172']);
 });
 
 test('ticket parsing rejects malformed IDs and unsafe fragment names', () => {

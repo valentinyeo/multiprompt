@@ -1,0 +1,1 @@
+Switch a chat's permission mode from Multi Bot

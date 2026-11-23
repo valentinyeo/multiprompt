@@ -17,7 +17,7 @@ pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
 pub const Model = enum { unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra };
 pub const Effort = enum { unknown, low, medium, high };
-pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
+pub const Mode = enum { unknown, manual, acceptEdits, auto, plan, bypassPermissions };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
 pub const RequestKind = enum { approval, question, plan };
 pub const Decision = enum { accept, accept_for_session, decline, cancel };
@@ -803,6 +803,9 @@ pub fn settings(shell_id: u32) ?Settings {
     defer mutex.unlock();
     for (&slots) |*live| {
         if (live.used and live.shell_id == shell_id) return live.settings;
+    }
+    for (&parked) |*kept| {
+        if (kept.used and kept.shell_id == shell_id) return kept.settings;
     }
     return null;
 }
@@ -1762,6 +1765,10 @@ test "IGSH-1861 host settings carry the permission mode" {
     try std.testing.expect(try applyValue(&live, std.testing.allocator, 1, event.value));
     try std.testing.expectEqual(Mode.bypassPermissions, live.settings.mode);
     try std.testing.expectEqual(Model.unknown, live.settings.model);
+    const auto_event = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"kind\":\"host.settings\",\"payload\":{\"model\":\"\",\"effort\":\"low\",\"mode\":\"auto\",\"applied\":true}}", .{});
+    defer auto_event.deinit();
+    try std.testing.expect(try applyValue(&live, std.testing.allocator, 2, auto_event.value));
+    try std.testing.expectEqual(Mode.auto, live.settings.mode);
 }
 
 test "host settings belong to a live session and survive turns" {

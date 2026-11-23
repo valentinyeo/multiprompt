@@ -3934,13 +3934,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     };
                     if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
                 },
-                .mode_ask, .mode_edits, .mode_plan, .mode_bypass => {
-                    const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
-                        .mode_ask => .manual,
-                        .mode_edits => .acceptEdits,
-                        .mode_plan => .plan,
-                        else => .bypassPermissions,
-                    };
+                .mode_ask, .mode_edits, .mode_auto, .mode_plan, .mode_bypass => {
+                    const mode = plus_menu.permissionMode(item);
                     if (!@import("chat_send.zig").chatModeSelect(mode)) showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
                 },
             }
@@ -5571,8 +5566,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET or target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) {
-                    const mode: @import("chat_slash.zig").PermissionMode = if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET) .plan else if (target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET) .manual else if (target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) .bypassPermissions else .acceptEdits;
+                if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET or target == app_state.SEARCH_CHAT_MODE_AUTO_OFFSET or target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) {
+                    const mode = @import("chat_mode.zig").paletteMode(target);
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
@@ -7549,7 +7544,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or target == app_state.SEARCH_TABCTX_MODE_BYPASS or target == app_state.SEARCH_TABCTX_MODE_AUTO or target == app_state.SEARCH_TABCTX_MODE_DEFAULT or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7581,6 +7576,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("command_palette.zig").startFreshChat(ti);
                         } else if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI) {
                             _ = @import("command_palette.zig").startSwitchAi(ti, if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) 1 else if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) 2 else 3);
+                        } else if (@import("chat_mode.zig").isTabctxMode(target)) {
+                            _ = @import("chat_send.zig").chatModeSelectForShell(ti, @import("chat_mode.zig").tabctxMode(target));
                         } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
                             _ = @import("chat_send.zig").chatRestartAi(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {

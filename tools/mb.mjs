@@ -20,6 +20,7 @@ commands:
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
   manual <name> on|off [--host N]
+  mode <name> bypass|auto|default [--host N]
   settings <frequent|favorites|all|frequent_first> on|off
   pull [--json]
   workspace list
@@ -772,6 +773,59 @@ const star = (ctx, flags) => setTabBool(ctx, flags, 'favorite', 'favorite', 'sta
 const mute = (ctx, flags) => setTabBool(ctx, flags, 'muted', 'muted', 'mute');
 const manual = (ctx, flags) => setTabBool(ctx, flags, 'manual', null, 'manual');
 
+const MODE_WIRE = { bypass: 'bypassPermissions', auto: 'auto', default: 'default' };
+function canonicalMode(value) {
+  if (value === 'bypassPermissions' || value === 'bypass') return 'bypass';
+  if (value === 'auto') return 'auto';
+  if (value === 'default' || value === 'manual') return 'default';
+  return '';
+}
+
+function runtimeJson(ctx, args, input) {
+  let result;
+  try { result = ctx.runtime(args, input); } catch { throw new Failure('host operation failed'); }
+  if (!result || result.status !== 0) throw new Failure('host operation failed');
+  const lines = String(result.stdout || '').trim().split('\n').filter(Boolean);
+  if (!lines.length) throw new Failure('invalid host response');
+  try { return JSON.parse(lines.at(-1)); } catch { throw new Failure('invalid host response'); }
+}
+
+async function modeCommand(ctx, flags) {
+  if (flags._.length !== 2) throw new Failure('mode needs <name> bypass|auto|default');
+  const target = clean(flags._[0]);
+  const wanted = clean(flags._[1]).toLowerCase();
+  const wire = MODE_WIRE[wanted];
+  if (!wire) throw new Failure('mode needs <name> bypass|auto|default');
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const { data } = await readLayout(ctx);
+  const tab = choose(data.layout, target, host);
+  const listed = runtimeJson(ctx, ['host', 'list']);
+  const chats = Array.isArray(listed?.chats) ? listed.chats : [];
+  const matches = tab
+    ? chats.filter(chat => String(chat.name || '').toLowerCase() === tab.tmux_session.toLowerCase())
+    : chats.filter(chat => String(chat.name || '').toLowerCase() === target.toLowerCase() || String(chat.sid || '') === target);
+  if (matches.length === 0) throw new Failure(`no live chat ${target}`);
+  if (matches.length > 1) throw new Failure(`ambiguous chat ${target}`);
+  const chat = matches[0];
+  if (chat.provider !== 'claude') throw new Failure(`permission mode does not apply to ${chat.provider || 'this'} chats`);
+  const before = runtimeJson(ctx, ['host', 'status', chat.provider, chat.sid]);
+  if (before?.status !== 'ok') throw new Failure(`could not read chat status for ${target}`);
+  if (before.alive !== true) throw new Failure(`${target} is not running`);
+  if (canonicalMode(before.permission_mode) === wanted) {
+    ctx.out(`already mode ${wanted} ${target}`);
+    return;
+  }
+  const reply = runtimeJson(ctx, ['--serve'], JSON.stringify({ id: 1, op: 'set_permission_mode', provider: chat.provider, sid: chat.sid, mode: wire }) + '\n');
+  const result = reply?.result || reply;
+  if (result?.status !== 'ok') throw new Failure(`could not change permission mode: ${result?.reason || result?.status || 'failed'}`);
+  const after = runtimeJson(ctx, ['host', 'status', chat.provider, chat.sid]);
+  if (after?.status !== 'ok' || after.alive !== true) throw new Failure(`${target} is not running after permission mode change`);
+  if (after.sid !== chat.sid) throw new Failure(`chat session changed while switching permission mode for ${target}`);
+  const actual = canonicalMode(after.permission_mode);
+  if (actual !== wanted) throw new Failure(`permission mode did not stick: ${target} is ${actual || after.permission_mode || 'unknown'}`);
+  ctx.out(`mode ${wanted} ${target}`);
+}
+
 const SETTING_KEYS = ['frequent', 'favorites', 'all', 'frequent_first'];
 const SETTING_DEFAULTS = { frequent: true, favorites: true, all: true, frequent_first: true };
 
@@ -828,7 +882,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, mode: modeCommand, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

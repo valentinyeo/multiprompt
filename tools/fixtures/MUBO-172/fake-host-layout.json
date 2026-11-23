@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "revision": 1,
+  "workspaces": [
+    {
+      "name": "Work"
+    }
+  ],
+  "tabs": [
+    {
+      "kind": "tmux",
+      "name": "Alpha",
+      "tmux_session": "live-claude-1",
+      "tmux_host": 0,
+      "workspace": "Work"
+    },
+    {
+      "kind": "tmux",
+      "name": "Beta",
+      "tmux_session": "live-codex-1",
+      "tmux_host": 0,
+      "workspace": "Work"
+    },
+    {
+      "kind": "tmux",
+      "name": "Stopped",
+      "tmux_session": "live-claude-stopped",
+      "tmux_host": 0,
+      "workspace": "Work"
+    }
+  ]
+}

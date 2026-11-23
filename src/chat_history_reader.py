@@ -2772,9 +2772,9 @@ HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'h
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
-HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
+HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'default', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
-HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
+HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'auto', 'bypassPermissions', 'default', 'manual'))
 HOST_NIGHTLY_HOUR = 4
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
@@ -3080,7 +3080,8 @@ def host_chats(include_terminal=False):
         except OSError:
             continue
         chats.append(dict(provider=provider, sid=sid, name=name, cwd=host_cwd(provider, sid),
-                          activity=activity, visible=config.get("spawn_mode") != "headless"))
+                          activity=activity, visible=config.get("spawn_mode") != "headless",
+                          permission_mode=host_permission_mode(provider, sid, state)))
     return chats
 
 
@@ -3323,6 +3324,8 @@ def host_reply(query):
         if operation == "set_permission_mode":
             if mode not in HOST_PERMISSION_MODES:
                 return dict(status="refused", reason="invalid_permission_mode")
+            if provider == "codex" and mode == "auto":
+                return dict(status="refused", reason="unsupported_permission_mode")
             key = "permission_mode"
             value = mode
         else:
@@ -3771,7 +3774,7 @@ def host_model_name(value):
     return match.group(1) if match else ""
 
 
-HOST_MODE_NAMES = dict(default="manual", manual="manual", acceptEdits="acceptEdits", plan="plan", bypassPermissions="bypassPermissions")
+HOST_MODE_NAMES = dict(default="manual", manual="manual", acceptEdits="acceptEdits", auto="auto", plan="plan", bypassPermissions="bypassPermissions")
 
 
 def host_permission_mode(provider, sid, state=None):
@@ -5941,6 +5944,8 @@ def host_codex_interrupt(provider, sid, session):
 
 
 def host_codex_set_mode(provider, sid, session, mode):
+    if mode == "auto":
+        return host_refuse("unsupported_permission_mode")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
     approval, sandbox = host_codex_policy(session)
@@ -6738,7 +6743,8 @@ def host_status(provider, sid):
                 native_session=state.get("native_session"), inflight=inflight.get("id") if inflight else None,
                 accepted=inflight.get("accepted") if inflight else None, written=len(written),
                 backoff=round(host_backoff(provider, sid), 3), events=host_log_tail(provider, sid),
-                command=config.get("command") if isinstance(config.get("command"), list) else None)
+                command=config.get("command") if isinstance(config.get("command"), list) else None,
+                permission_mode=host_permission_mode(provider, sid))
 
 
 def host_cli(argv):

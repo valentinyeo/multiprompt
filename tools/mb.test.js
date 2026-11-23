@@ -92,7 +92,7 @@ test('help lists style, workspace color, and roster apply', async () => {
   const lines = [];
   assert.equal(await run(['help'], { out: line => lines.push(line), err() {} }), 0);
   const help = lines.join('\n');
-  for (const word of ['list', 'open', 'close', 'rename', 'move', 'style', 'star', 'mute', 'manual', 'settings', 'pull', '--face', '--color', '--photo', 'workspace color', 'group create', 'roster apply', '--dry-run']) assert.match(help, new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const word of ['list', 'open', 'close', 'rename', 'move', 'style', 'star', 'mute', 'manual', 'mode', 'settings', 'pull', '--face', '--color', '--photo', 'workspace color', 'group create', 'roster apply', '--dry-run']) assert.match(help, new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(await run([], { out() {}, err() {} }), 2);
 });
 
@@ -393,4 +393,58 @@ test('star is refused when the service has no favorite feature', async () => {
   assert.match(refused.errors[0], /does not support favorite/);
   assert.equal(box.puts.length, 0);
   rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('mode switches Claude idempotently with read-back and refuses Codex', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mb-mode-unit-'));
+  const layout = { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [
+    { kind: 'tmux', name: 'Alpha', tmux_session: 'live-a', tmux_host: 0, workspace: 'Work' },
+    { kind: 'tmux', name: 'Beta', tmux_session: 'live-b', tmux_host: 0, workspace: 'Work' }
+  ] };
+  const chats = [
+    { provider: 'claude', sid: 'sid-a', name: 'live-a', alive: true, permission_mode: 'bypassPermissions' },
+    { provider: 'codex', sid: 'sid-b', name: 'live-b', alive: true, permission_mode: 'manual' }
+  ];
+  let setCalls = 0;
+  let lie = false;
+  const fetch = async () => ({ status: 200, headers: { get: () => 'groups' }, json: async () => ({ revision: 1, layout }) });
+  const runtime = (args, input) => {
+    if (args[0] === 'host' && args[1] === 'list') return { status: 0, stdout: JSON.stringify({ chats }) + '\n' };
+    if (args[0] === 'host' && args[1] === 'status') {
+      const chat = chats.find(item => item.provider === args[2] && item.sid === args[3]);
+      return { status: 0, stdout: JSON.stringify({ status: 'ok', ...chat }) + '\n' };
+    }
+    if (args[0] === '--serve') {
+      const req = JSON.parse(String(input || '').trim());
+      setCalls += 1;
+      const chat = chats.find(item => item.provider === req.provider && item.sid === req.sid);
+      if (!lie && chat) chat.permission_mode = req.mode === 'default' ? 'manual' : req.mode;
+      return { status: 0, stdout: JSON.stringify({ id: req.id, result: { status: 'ok' } }) + '\n' };
+    }
+    return { status: 1, stdout: '' };
+  };
+  const exec = async argv => {
+    const lines = [], errors = [];
+    const code = await run(argv, { env: { MULTIPROMPT_KEY: 'k', MULTIPROMPT_URL: 'http://layout.test', HOME: dir }, out: l => lines.push(l), err: l => errors.push(l), fetch, runtime, ownerPath: join(dir, 'owners.json') });
+    return { code, lines, errors };
+  };
+  try {
+    const first = await exec(['mode', 'Alpha', 'auto']);
+    assert.equal(first.code, 0, text(first));
+    assert.equal(setCalls, 1);
+    const second = await exec(['mode', 'Alpha', 'auto']);
+    assert.equal(second.code, 0, text(second));
+    assert.match(second.lines[0], /^already mode auto/);
+    assert.equal(setCalls, 1);
+    const codex = await exec(['mode', 'Beta', 'auto']);
+    assert.equal(codex.code, 1);
+    assert.match(codex.errors[0], /codex/i);
+    assert.equal(setCalls, 1);
+    lie = true;
+    const stuck = await exec(['mode', 'Alpha', 'default']);
+    assert.equal(stuck.code, 1);
+    assert.match(stuck.errors[0], /did not stick/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -77,7 +77,7 @@ Run the command once per shell runner. Three runners can share one workspace and
 
 ## One roster command
 
-`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
+`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb mode <chat> bypass|auto|default` switches a running Claude chat's permission mode in place and verifies it by reading back host status. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
 
 These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (pin, lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
 

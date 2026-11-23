@@ -16,7 +16,7 @@ const L = startup.L;
 const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
+pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_auto, mode_plan, mode_bypass };
 const ITEM_COUNT = std.meta.tags(Item).len;
 
 const Section = struct { title: ?[]const u8, items: []const Item };
@@ -26,8 +26,18 @@ const sections = [_]Section{
     .{ .title = "Model", .items = &.{ .model_opus, .model_sonnet, .model_haiku, .model_fable } },
     .{ .title = "Model", .items = &.{ .model_sol, .model_terra, .model_luna, .model_astra } },
     .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high } },
-    .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass } },
+    .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_auto, .mode_plan, .mode_bypass } },
 };
+
+pub fn permissionMode(item: Item) @import("chat_slash.zig").PermissionMode {
+    return switch (item) {
+        .mode_ask => .manual,
+        .mode_edits => .acceptEdits,
+        .mode_auto => .auto,
+        .mode_plan => .plan,
+        else => .bypassPermissions,
+    };
+}
 
 pub const State = struct {
     shown: [ITEM_COUNT]bool = @splat(false),
@@ -51,6 +61,7 @@ fn label(item: Item) []const u8 {
         .effort_high => "High",
         .mode_ask => "Ask",
         .mode_edits => "Accept edits",
+        .mode_auto => "Auto",
         .mode_plan => "Plan",
         .mode_bypass => "Bypass",
     };
@@ -265,9 +276,10 @@ fn snapshot(state: *State) void {
     }
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
     if (std.mem.eql(u8, identity.provider(), "claude") and chat_send.chatModePickerAvailable()) {
-        for ([_]Item{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
+        for ([_]Item{ .mode_ask, .mode_edits, .mode_auto, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
         state.active[@intFromEnum(Item.mode_ask)] = selected.mode == .manual;
         state.active[@intFromEnum(Item.mode_edits)] = selected.mode == .acceptEdits;
+        state.active[@intFromEnum(Item.mode_auto)] = selected.mode == .auto;
         state.active[@intFromEnum(Item.mode_plan)] = selected.mode == .plan;
         state.active[@intFromEnum(Item.mode_bypass)] = selected.mode == .bypassPermissions;
     }

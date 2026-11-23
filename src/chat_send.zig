@@ -411,23 +411,22 @@ pub fn chatModeCapturePicker() void {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
     if (@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len])) return;
-    chat_mode_picker_key = chatFileIdentityForShell(app_state.active_shell);
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    if (!std.mem.eql(u8, key.provider(), "claude")) return;
+    chat_mode_picker_key = key;
 }
 
 pub fn chatModePickerAvailable() bool {
     return chat_mode_picker_key.shell_id != 0;
 }
 
-pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
-    const key = chat_mode_picker_key;
-    const index = @import("inbox.zig").findShellById(key.shell_id) orelse return false;
-    if (key.sid[0] == 0 or !std.meta.eql(key, chatFileIdentityForShell(index))) return false;
+fn startChatModeJob(key: @import("chat_transcript.zig").Identity, mode: @import("chat_slash.zig").PermissionMode, command: @import("chat_slash.zig").Route) bool {
     if (chat_mode_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
     const job = std.heap.page_allocator.create(ChatModeJob) catch {
         chat_mode_busy.store(false, .release);
         return false;
     };
-    job.* = .{ .key = key, .mode = mode, .command = chat_mode_picker_command };
+    job.* = .{ .key = key, .mode = mode, .command = command };
     const thread = std.Thread.spawn(.{}, chatModeThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
         chat_mode_busy.store(false, .release);
@@ -435,6 +434,26 @@ pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
     };
     thread.detach();
     return true;
+}
+
+pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+    const key = chat_mode_picker_key;
+    const index = @import("inbox.zig").findShellById(key.shell_id) orelse return false;
+    if (key.sid[0] == 0 or !std.meta.eql(key, chatFileIdentityForShell(index))) return false;
+    return startChatModeJob(key, mode, chat_mode_picker_command);
+}
+
+pub fn chatModeSelectForShell(shell_index: u32, mode: @import("chat_slash.zig").PermissionMode) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[shell_index];
+    if (@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len])) return false;
+    const key = chatFileIdentityForShell(shell_index);
+    if (!std.mem.eql(u8, key.provider(), "claude") or key.sid[0] == 0) return false;
+    if (startChatModeJob(key, mode, .send)) return true;
+    const failed = std.heap.page_allocator.create(ChatModeJob) catch return false;
+    failed.* = .{ .key = key, .mode = mode, .command = .send, .ok = false };
+    chatModePostResult(failed);
+    return false;
 }
 
 fn chatModeThread(job: *ChatModeJob) void {
@@ -467,8 +486,9 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
         showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
         return;
     }
-    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and std.meta.eql(job.key, chatFileIdentityForShell(app_state.active_shell))) {
-        if (job.command != .send and app_state.g_chat_composer_hwnd != null) {
+    const same_active = app_state.g_chat_active and app_state.active_shell < app_state.shell_count and std.meta.eql(job.key, chatFileIdentityForShell(app_state.active_shell));
+    if (same_active or job.command == .send) {
+        if (same_active and job.command != .send and app_state.g_chat_composer_hwnd != null) {
             var text: [16384]u16 = undefined;
             const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
             if (len > 0 and @import("chat_slash.zig").route(true, text[0..@intCast(len)]) == job.command) {
@@ -480,6 +500,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
         const text: []const u8 = switch (job.mode) {
             .manual => "Ask on",
             .acceptEdits => "Accept edits on",
+            .auto => "Auto on",
             .plan => "Plan on",
             .bypassPermissions => "Bypass on",
         };

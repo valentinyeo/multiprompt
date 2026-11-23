@@ -219,10 +219,6 @@ const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXP
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
-const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
-const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
-const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
-const SEARCH_CHAT_MODE_BYPASS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_BYPASS_OFFSET;
 const SEARCH_CHAT_PLUS_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_PLUS_MENU_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
@@ -753,6 +749,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) return "Switch AI to Claude keep chat name picture address history";
     if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) return "Switch AI to Codex keep chat name picture address history";
     if (target == app_state.SEARCH_TABCTX_SWITCH_PI) return "Switch AI to Pi keep chat name picture address history";
+    if (@import("chat_mode.zig").tabctxSearchText(target)) |label| return label;
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -1027,10 +1024,11 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FOCUS_MESSAGES_OFFSET => "chat view focus messages keyboard up down enter options reply copy delete cancel waiting",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
-        SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
-        SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
-        SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
-        SEARCH_CHAT_MODE_BYPASS_OFFSET => "chat permission mode: bypass",
+        app_state.SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
+        app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
+        app_state.SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
+        app_state.SEARCH_CHAT_MODE_AUTO_OFFSET => "chat permission mode: auto",
+        app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET => "chat permission mode: bypass",
         SEARCH_CHAT_PLUS_MENU_OFFSET => "Chat View: Plus Menu attach file model effort permission level",
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
@@ -1536,7 +1534,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
     if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
     if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
-    if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET or target == SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
+    if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET or target == app_state.SEARCH_CHAT_MODE_AUTO_OFFSET or target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_REOPEN_SERVER_SHELL_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, app_state.SEARCH_WORKSPACE_ALL_OFFSET, app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET, app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
@@ -4742,15 +4740,13 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
         const query = app_state.g_search_buf[0..app_state.g_search_len];
         for ([_]struct { target: usize, label: []const u8 }{
-            .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
-            .{ .target = SEARCH_CHAT_MODE_MANUAL_OFFSET, .label = "chat permission mode: ask" },
-            .{ .target = SEARCH_CHAT_MODE_EDITS_OFFSET, .label = "chat permission mode: accept edits" },
-            .{ .target = SEARCH_CHAT_MODE_BYPASS_OFFSET, .label = "chat permission mode: bypass" },
+            .{ .target = app_state.SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
+            .{ .target = app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET, .label = "chat permission mode: ask default" },
+            .{ .target = app_state.SEARCH_CHAT_MODE_EDITS_OFFSET, .label = "chat permission mode: accept edits" },
+            .{ .target = app_state.SEARCH_CHAT_MODE_AUTO_OFFSET, .label = "chat permission mode: auto" },
+            .{ .target = app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET, .label = "chat permission mode: bypass" },
         }) |row| {
-            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-            if (!labelsMatchQuery(&.{ row.label, "permissions" }, query)) continue;
-            app_state.g_search_results[app_state.g_search_result_count] = row.target;
-            app_state.g_search_result_count += 1;
+            if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ row.label, "permissions" }, query)) { app_state.g_search_results[app_state.g_search_result_count] = row.target; app_state.g_search_result_count += 1; }
         }
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
@@ -5900,6 +5896,9 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
             app_state.g_search_result_count += 1;
         }
     }
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.shells[tc_idx.?].ai_agent == 1) for ([_]struct { target: usize, label: []const u8 }{ .{ .target = app_state.SEARCH_TABCTX_MODE_BYPASS, .label = "Permission mode: Bypass" }, .{ .target = app_state.SEARCH_TABCTX_MODE_AUTO, .label = "Permission mode: Auto" }, .{ .target = app_state.SEARCH_TABCTX_MODE_DEFAULT, .label = "Permission mode: Default" } }) |row| {
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or labelsMatchQuery(&.{ row.label, "permissions", "mode" }, app_state.g_search_buf[0..app_state.g_search_len]))) { app_state.g_search_results[app_state.g_search_result_count] = row.target; app_state.g_search_result_count += 1; }
+    };
     if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
     {

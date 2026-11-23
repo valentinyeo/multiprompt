@@ -387,7 +387,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Up / Down / Enter in Chat View", .b = "Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box", .header = false },
     .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
-    .{ .a = "/plan or /permissions in live chat, or Ctrl+K -> Chat View: Plus Menu", .b = "Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first", .header = false },
+    .{ .a = "/plan or /permissions in live chat, Ctrl+K -> Chat permission mode, or right-click tab", .b = "Switch a Claude chat between Bypass, Auto, Default (Ask), Accept edits, or Plan without losing the conversation; /plan selects Plan first", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Plus Menu\"", .b = "Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },

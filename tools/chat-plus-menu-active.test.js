@@ -25,7 +25,7 @@ test('IGSH-1861 every row group gets an active row from live data', () => {
   assert.match(plus, /modelFromStatus\(status\)/);
   assert.match(plus, /chatHistoryEntry\(session\.chatFileIdentity\(\)\)/);
   const live = read('src/chat_live.zig');
-  assert.match(live, /pub const Mode = enum \{ unknown, manual, acceptEdits, plan, bypassPermissions \}/);
+  assert.match(live, /pub const Mode = enum \{ unknown, manual, acceptEdits, auto, plan, bypassPermissions \}/);
   assert.match(live, /\.mode = std\.meta\.stringToEnum\(Mode, strOf\(payload, "mode"\)\) orelse \.unknown/);
 });
 

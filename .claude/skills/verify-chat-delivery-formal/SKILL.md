@@ -65,6 +65,8 @@ SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` ass
 
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
+MUBO-172 adds Claude permission-mode switching (`bypassPermissions`, `auto`, `default`) via Ctrl+K, tab context menu, Plus menu, and `mb mode`: four new routing constants in `src/app_state.zig`, `chatModeSelectForShell` and `auto` notice handling in `src/chat_send.zig`, and `auto`/`default` persistence, Codex `auto` refusal, and `permission_mode` read-back in `src/chat_history_reader.py`. `ChatOutboxEntry`, all nine covered send/outbox functions, `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes and `decisions.json` are unchanged. Only the `app_state.zig`, `chat_send.zig` and `chat_history_reader.py` hashes move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one echo, with skill tokens allowed to change position. These execute unchanged in native probes. |
