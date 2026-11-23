@@ -121,6 +121,7 @@ test "explicit other server and local shell do not inherit the chat folder" {
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.ifError(result.error);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const current = body('src/console.zig', 'spawnShellFromMenuIndex')
       .replaceAll('@import("capacity.zig").remoteHostForShell', 'remoteHostForShell')
