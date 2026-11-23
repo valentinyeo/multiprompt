@@ -47,6 +47,16 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   assert.match(driver, /pc_state_pr1312/);
   assert.match(driver, /function Invoke-MbTabStandInNode/);
   assert.match(driver, /src\/mp_zsb\.sh/);
+  assert.match(driver, /function Resolve-MbTabZsbPath/);
+  assert.match(driver, /function Build-MbTabZsbProbeArgv/);
+  assert.match(driver, /function New-MbTabStandInProcessStartInfo/);
+  assert.match(driver, /\.stdout\.txt/);
+  assert.match(driver, /\.stderr\.txt/);
+  assert.match(driver, /\.cmdline\.txt/);
+  assert.match(driver, /\.exit\.txt/);
+  assert.doesNotMatch(driver, /Start-Process -FilePath \$script:MbTabBash -ArgumentList @\('--noprofile', '--norc', '-c'/);
+  assert.match(driver, /return @\(\$script:MbTabZsbPath\) \+ @\(\$ZsbArgs\)/);
+  assert.match(driver, /'probe' \+ \$script:MbTabZsbOrdinal/);
   const { touchedJourneys } = require('./touched-journeys.cjs');
   const picked = touchedJourneys(['src/session_layout_sync.zig'], path.join(root, skill, 'features'));
   assert.deepEqual(picked.features, ['mb-tab-layout-sync']);

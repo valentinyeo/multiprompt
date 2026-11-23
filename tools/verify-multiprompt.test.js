@@ -2844,6 +2844,9 @@ test('SOFT-3142 mb tab journeys own launch and report journey results', () => {
   assert.match(driver, /Save-MbTabShot \(Join-Path \$Evidence 'after\.png'\)/);
   assert.match(driver, /Initialize-MbTabStandIn/);
   assert.match(driver, /Assert-MbTabZsbBeforeVerb/);
+  assert.match(driver, /Build-MbTabZsbProbeArgv/);
+  assert.match(driver, /Resolve-MbTabZsbPath/);
+  assert.doesNotMatch(driver, /export HOME='/);
   const physical = fs.readFileSync(path.join(root, skill + 'control.ps1'), 'utf8');
   assert.match(physical, /if \(\$Feature -match '\^mb-tab-'\) \{[\s\S]*control-feature-mb-tab-verbs\.ps1/);
   for (const stem of ['mb-tab-open', 'mb-tab-close', 'mb-tab-layout-sync', 'mb-tab-idempotent']) {
