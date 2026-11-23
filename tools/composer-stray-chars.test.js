@@ -20,10 +20,9 @@ test('SOFT-2459 transcript draft parsing uses composer input filtering', () => {
 
 test('SOFT-2459 dictation live posts and paste insertions sanitize wide text', () => {
   assert.match(read('src/voice.zig'), /chat_composer_input\.zig"\)\.filter16\(&dictation_live_slot/);
-  const render = read('src/chat_render.zig');
-  assert.match(render, /filter16\(&clean, text, true\)/);
-  assert.match(render, /chatComposerPasteFiltered/);
-  assert.match(read('src/chat_composer.zig'), /chatComposerPasteFiltered\(\)/);
+  const composer = read('src/chat_composer.zig');
+  assert.match(composer, /filter16\(&clean, clip\[0\.\.len\], true\)/);
+  assert.match(composer, /chatComposerPasteFiltered\(\)/);
 });
 
 test('SOFT-2459 box draft capture strips stray escape sequences', () => {
@@ -31,7 +30,7 @@ test('SOFT-2459 box draft capture strips stray escape sequences', () => {
 });
 
 test('SOFT-2459 zig unit tests strip ESC, BOM and zero-width characters', () => {
-  const zig = spawnSync('zig', ['test', 'src/chat_composer_input.zig', '--test-filter', 'SOFT-2459'], {
+  const zig = spawnSync(process.env.ZIG || 'zig', ['test', 'src/chat_composer_input.zig', '--test-filter', 'SOFT-2459'], {
     cwd: root,
     encoding: 'utf8',
     timeout: 120000,

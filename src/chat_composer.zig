@@ -1899,6 +1899,17 @@ fn chatComposerEnterSends() void {
     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_SEND, 0, 0);
 }
 
+fn chatComposerPasteFiltered() bool {
+    if (app_state.g_chat_composer_hwnd == null or !@import("room_frontend.zig").privateActionsAllowed()) return false;
+    var clip: [16384]u16 = undefined;
+    const len = @import("clipboard.zig").readClipboardTextWithRetry(&clip);
+    if (len == 0) return false;
+    var clean: [16384]u16 = undefined;
+    const n = @import("chat_composer_input.zig").filter16(&clean, clip[0..len], true);
+    if (n == 0) return false;
+    return @import("chat_render.zig").chatComposerInsertAtCaret(clean[0..n]) != null;
+}
+
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
     if (app_state.g_chat_ac.open and (msg == WM_KEYDOWN or msg == 0x0102)) list_input.skills.keyboard();
     const down = @as(i16, @bitCast(@as(u16, 0x8000)));
@@ -1909,7 +1920,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     }
     if (msg == 0x0102 and wp == 0x01) return 0;
     if (chatImagePasteIntercept(msg, wp)) return 0;
-    if (msg == 0x0302 and @import("chat_render.zig").chatComposerPasteFiltered()) return 0;
+    if (msg == 0x0302 and chatComposerPasteFiltered()) return 0;
     if (msg == WM_KEYDOWN and chatCopyCodeKeyDown(wp)) {
         chatCopyLatestCode();
         return 0;
