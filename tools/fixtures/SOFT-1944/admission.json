@@ -1,0 +1,123 @@
+{
+  "data": {
+    "repository": {
+      "deleteBranchOnMerge": true,
+      "pullRequest": {
+        "number": 42,
+        "title": "SOFT-1945: Keep the window open",
+        "state": "OPEN",
+        "updatedAt": "2026-11-20T10:00:00Z",
+        "isDraft": false,
+        "isCrossRepository": false,
+        "baseRefName": "master",
+        "headRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "reviewDecision": "APPROVED",
+        "mergeable": "MERGEABLE",
+        "labels": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        },
+        "id": "PR_fixture",
+        "author": {
+          "login": "valentinyeo"
+        },
+        "headRefName": "feature",
+        "baseRef": {
+          "target": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "changedFiles": 1,
+        "files": {
+          "nodes": [
+            {
+              "path": "README.md",
+              "changeType": "MODIFIED"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "totalCount": 1
+        },
+        "headRef": {
+          "compare": {
+            "aheadBy": 0,
+            "baseTarget": {
+              "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "headTarget": {
+              "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "statusCheckRollup": {
+                  "id": "ROLL_fixture",
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "no-comments",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "extension-version",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "secret-scan",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "ledger-guard",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "click-through",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "completedAt": "2026-11-20T10:30:00Z"
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

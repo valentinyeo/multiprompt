@@ -1,0 +1,99 @@
+name: Release timer
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report decisions without merges, closures, board writes or model calls
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - .github/workflows/release-timer.yml
+      - tools/release-timer*
+      - tools/automerge-admit*
+      - tools/fixtures/SOFT-1944/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-timer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove the timer rules and dry run
+        run: timeout 120 node --test tools/release-timer.test.js tools/automerge-admit-run.test.js
+
+  monitor:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    needs: rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Check whether board updates are available
+        id: board
+        env:
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+        run: |
+          if [ -n "$HYPERTASK_AGENT_TOKEN" ]; then echo 'available=true' >> "$GITHUB_OUTPUT"; fi
+      - name: Install the existing official Hypertask CLI
+        if: steps.board.outputs.available == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          base=https://github.com/hypertask-ai/cli/releases/download/v0.2.53
+          curl --fail --location --silent --show-error "$base/checksums.txt" -o checksums.txt
+          curl --fail --location --silent --show-error "$base/hypertask-linux-x86_64" -o hypertask-linux-x86_64
+          grep -E '^[a-fA-F0-9]{64}  \*?hypertask-linux-x86_64$' checksums.txt | sha256sum --check --strict
+          install -m 755 hypertask-linux-x86_64 "$RUNNER_TEMP/hypertask"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Check releases and idle pull requests
+        id: timer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          timeout 600 node tools/release-timer.js "${args[@]}"
+      - name: Ask a cheap model only about a broken release
+        id: diagnosis
+        if: ${{ !cancelled() && steps.timer.outputs.broken == 'true' }}
+        uses: valentinyeo/token-ladder/.github/actions/ladder-call@main
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          request-file: release-timer-request.json
+          purpose: release-timer
+      - name: Keep the release diagnosis in the summary
+        if: ${{ !cancelled() && steps.diagnosis.outcome == 'success' }}
+        env:
+          ANSWER_FILE: ${{ steps.diagnosis.outputs.answer-file }}
+        run: |
+          printf '\n## Release diagnosis\n\n' >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.choices[0].message.content' "$ANSWER_FILE" >> "$GITHUB_STEP_SUMMARY"

@@ -4,12 +4,12 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const pageInfo = 'pageInfo { hasNextPage endCursor }';
-const checkFields = '__typename ... on CheckRun { name status conclusion } ... on StatusContext { context state }';
+const checkFields = '__typename ... on CheckRun { name status conclusion startedAt completedAt } ... on StatusContext { context state createdAt }';
 const query = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     deleteBranchOnMerge
     pullRequest(number: $number) {
-      id number state isDraft isCrossRepository title author { login __typename } baseRefName headRefName headRefOid baseRef { target { oid } } mergeable changedFiles
+      id number state isDraft isCrossRepository title updatedAt reviewDecision author { login __typename } baseRefName headRefName headRefOid baseRef { target { oid } } mergeable changedFiles
       labels(first: 100) { nodes { name } ${pageInfo} }
       files(first: 100) { nodes { path changeType } totalCount ${pageInfo} }
       headRef { compare(headRef: "master") { aheadBy baseTarget { oid } headTarget { oid } } }
@@ -89,6 +89,7 @@ function main() {
     console.log(`source run=${run.id} PR=${number} head=${expectedHead}`);
   } else if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
     number = Number(event.inputs?.pull_request);
+    expectedHead = event.inputs?.expected_head;
     dryRun = event.inputs?.dry_run !== 'false';
   } else {
     console.log('skip (unsupported event)');
@@ -105,6 +106,11 @@ function main() {
     console.log(`#${number}: skip (stale completed check)`);
     return;
   }
+  if (event.inputs?.idle_before && (pr.reviewDecision !== 'APPROVED'
+    || !(Date.parse(pr.updatedAt) <= Date.parse(event.inputs.idle_before)))) {
+    console.log(`#${number}: skip (approval or idle time changed)`);
+    return;
+  }
   const commit = pr.commits?.nodes?.[0]?.commit;
   const comparison = pr.headRef?.compare;
   const baseOid = pr.baseRef?.target?.oid;
@@ -116,6 +122,11 @@ function main() {
   const labels = complete(pr.labels, pr.id, 'PullRequest', 'labels', 'name');
   const rollup = commit.statusCheckRollup;
   const checks = rollup ? complete(rollup.contexts, rollup.id, 'StatusCheckRollup', 'contexts', checkFields) : [];
+  if (event.inputs?.idle_before && checks.some(check => [check.startedAt, check.completedAt, check.createdAt]
+    .filter(Boolean).some(value => !(Date.parse(value) <= Date.parse(event.inputs.idle_before))))) {
+    console.log(`#${number}: skip (checks were active within the last hour)`);
+    return;
+  }
   if (!Array.isArray(pr.files?.nodes) || typeof pr.files.pageInfo?.hasNextPage !== 'boolean') throw new Error('incomplete PR files');
   const fileFallback = pr.files.pageInfo.hasNextPage || pr.files.nodes.some(file => ['RENAMED', 'COPIED'].includes(file.changeType));
   let files;

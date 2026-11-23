@@ -1,0 +1,27 @@
+{
+  "now": "2026-11-20T12:00:00Z",
+  "master": { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pushedAt": "2026-11-20T11:00:00Z" },
+  "release": { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tag": "v0.28.1800", "publishedAt": "2026-11-20T11:30:00Z" },
+  "releaseRuns": [
+    { "id": 500, "path": ".github/workflows/auto-release.yml", "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": "2026-11-20T11:01:00Z", "conclusion": "success", "html_url": "https://github.com/valentinyeo/multiprompt/actions/runs/500" }
+  ],
+  "pulls": [
+    {
+      "number": 42,
+      "title": "SOFT-1945: Keep the window open",
+      "state": "OPEN",
+      "updatedAt": "2026-11-20T10:00:00Z",
+      "isDraft": false,
+      "isCrossRepository": false,
+      "baseRefName": "master",
+      "headRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reviewDecision": "APPROVED",
+      "mergeable": "MERGEABLE",
+      "labels": [],
+      "statusCheckRollup": [
+        { "__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS", "completedAt": "2026-11-20T10:30:00Z" },
+        { "__typename": "StatusContext", "context": "external", "state": "SUCCESS", "createdAt": "2026-11-20T10:00:00Z" }
+      ]
+    }
+  ]
+}
