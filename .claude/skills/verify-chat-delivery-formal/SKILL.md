@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-3055 reviewed `6c2a3eb1239bbfc510c405f17b08a2901a2a4bd0`. Only the outer installer changed in the covered reader file. The entire canonical inner reader is byte-identical to the recorded source at `070f3d56bd3b5ada8864584a8606b3b9a30d90d5` and to the PR base. All other recorded file hashes match. Bounds, decisions, probes, mutations and properties remain unchanged; hosted CI reruns them against the refreshed source hash.
+
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 
 SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
