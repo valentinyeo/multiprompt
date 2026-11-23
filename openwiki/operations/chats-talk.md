@@ -30,7 +30,7 @@ mp-sessions health
 mp-sessions health --json
 ```
 
-`mp-sessions list` and `mp-sessions health` read the desktop's current sidebar report. Both show visibility and its reason, Waiting, pinning, the chat's workspace, the workspace on screen, and the selected sidebar view. Visibility means membership in the sidebar's rendered row list, not whether the row is scrolled into the viewport. Waiting uses the same flag as All Sessions; it is not inferred from a missing sidebar row. Archived sessions come from the desktop's archive inventory.
+`mp-sessions list` and `mp-sessions health` read the desktop's current sidebar report. Both show visibility and its reason, Waiting, pinning, the chat's workspace, the workspace on screen, and the selected sidebar view. Visibility means membership in the sidebar's rendered row list, not whether the row is scrolled into the viewport. Waiting uses the same flag as All Sessions; it is not inferred from a missing sidebar row. Archived sessions come from the desktop's archive inventory. Tab and archive matches use this server's host slot (`MULTIPROMPT_HOST`, default zero), so another server's namesake cannot supply the visibility state.
 
 Both JSON outputs add `in_layout`, `visible`, `hidden_reason`, `waiting`, `pinned`, `archived`, `user_hidden`, `active_workspace` and `sidebar_view`. Unknown desktop state is `null`, not `false`. Older desktops report `desktop visibility unavailable`; an offline desktop reports `desktop offline`. Older helper bundles can still list chats without the desktop API. These additive diagnostic fields do not change saved layouts, chat delivery, or Android sync.
 

@@ -108,6 +108,19 @@ def enable_args(provider, sid, folder, tmux):
     return command
 
 
+def desktop_host(listing):
+    hosts = listing.get("hosts") or []
+    slot = host_slot()
+    return hosts[slot] if slot < len(hosts) else None
+
+
+def desktop_tabs(send, listing):
+    host = desktop_host(listing)
+    for workspace, group, tab in send.iter_tabs(listing):
+        if host is None or tab.get("host") == host:
+            yield workspace, group, tab
+
+
 def desktop_state(listing, tab=None, tmux=None):
     if tab and isinstance(tab.get("tab_state"), dict):
         tab = dict(tab, **tab["tab_state"])
@@ -115,7 +128,8 @@ def desktop_state(listing, tab=None, tmux=None):
     active = listing.get("active_workspace")
     if active is None and online:
         active = next((ws.get("name") for ws in listing.get("workspaces", []) if ws.get("active")), None)
-    archived = online and tab is None and any(entry.get("tmux") == tmux for entry in listing.get("archived_sessions", []))
+    archived = online and tab is None and any(entry.get("tmux") == tmux and entry.get("host") == desktop_host(listing)
+                                             for entry in listing.get("archived_sessions", []))
     if not online:
         visible, reason = None, "desktop offline"
     elif archived:
@@ -138,7 +152,7 @@ def session_catalog(send, listing):
     names = send.published_names()
     rows = {}
     if listing.get("ok"):
-        for workspace, group, tab in send.iter_tabs(listing):
+        for workspace, group, tab in desktop_tabs(send, listing):
             tmux = tab.get("tmux")
             if not isinstance(tmux, str):
                 continue
@@ -152,6 +166,8 @@ def session_catalog(send, listing):
             row["in_layout"] = True
             rows[(row.get("host"), tmux)] = row
         for state in listing.get("closed_tabs") or []:
+            if desktop_host(listing) is not None and state.get("host") != desktop_host(listing):
+                continue
             rows.setdefault((state["host"], state["tmux"]), dict(state, tab_open=False))
     for path in sorted(send.host_root().glob("*.config.json")):
         config = send.read_json(path)
@@ -361,20 +377,18 @@ def session_message(send, target, text, sender=None):
     return dict(name=target.get("name"), tmux=tmux, sid=sid, id=message.get("id"), state=state)
 
 
-def live_table_rows(send):
+def live_table_rows(send, listing):
     rows = []
+    tabs = {tab.get("tmux"): (workspace, group, tab) for workspace, group, tab in desktop_tabs(send, listing)} if listing.get("ok") is True else {}
     for chat in send.live_chats():
-        rows.append(dict(
-            name=chat.get("name"),
-            link=chat.get("link"),
-            tmux=chat["tmux"],
-            sid=chat["sid"],
-            provider=chat.get("provider"),
-            workspace="",
-            group="",
-            busy=chat.get("state") == "busy",
-            running=chat.get("state") != "stopped",
-        ))
+        workspace, group, tab = tabs.get(chat["tmux"], (None, None, None))
+        row = dict(chat, workspace=workspace, group=group,
+                   busy=chat.get("state") == "busy", running=chat.get("state") != "stopped",
+                   **desktop_state(listing, tab, chat["tmux"]))
+        if tab is not None:
+            row["name"] = tab.get("title") or chat.get("name")
+            row["link"] = send.link_token(row["name"], chat["tmux"])
+        rows.append(row)
     return rows
 
 
@@ -386,7 +400,7 @@ def cmd_list(args):
         rows = session_catalog(send, listing)
         caller, mine = caller_mark(send, listing, rows)
     else:
-        rows = live_table_rows(send)
+        rows = live_table_rows(send, listing)
         caller = send.own_tmux()
         mine = None
     for row in rows:
@@ -636,7 +650,7 @@ def _last_reply_time(reader, send, provider, sid, folder, tmux):
 def _desktop_tab(send, listing, tmux):
     if listing.get("ok") is not True:
         return None, "UNKNOWN desktop offline"
-    tab = send.find_tab(listing, tmux)[2]
+    tab = next((tab for workspace, group, tab in desktop_tabs(send, listing) if tab.get("tmux") == tmux), None)
     if tab is None:
         return None, None
     cv = tab.get("cv")

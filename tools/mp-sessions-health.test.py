@@ -212,6 +212,12 @@ class MpSessionsHealthTest(unittest.TestCase):
                 self.assertIn("ON SCREEN", table.stdout)
                 if state["hidden_reason"]:
                     self.assertIn("hidden: " + state["hidden_reason"], table.stdout)
+                text = self.run_visibility("health", env)
+                self.assertEqual(text.returncode, int(state["broken"]), text.stderr + text.stdout)
+                self.assertIn("waiting=" + ("yes" if state["waiting"] else "no"), text.stdout)
+                self.assertIn("pinned=" + ("yes" if state["pinned"] else "no"), text.stdout)
+                self.assertIn("workspace=Yeo UX", text.stdout)
+                self.assertIn("on screen=Yeo UX", text.stdout)
 
     def test_SOFT_3140_offline_and_older_desktops_do_not_claim_visibility(self):
         report = json.loads((FIXTURE / "listing-healthy.json").read_text())
@@ -224,6 +230,25 @@ class MpSessionsHealthTest(unittest.TestCase):
                 self.assertIsNone(row["visible"])
                 self.assertEqual(row["hidden_reason"], reason)
                 self.assertEqual(row["in_layout"], in_layout)
+
+    def test_SOFT_3140_visibility_belongs_to_this_server_not_a_namesake(self):
+        report = json.loads((ROOT / "tools/fixtures/SOFT-3140/other-host.json").read_text())
+        env = self.visibility_env(report)
+        for command, status in (("list", 0), ("health", 1)):
+            done = self.run_visibility(command, env, "--json")
+            self.assertEqual(done.returncode, status, done.stderr + done.stdout)
+            rows = json.loads(done.stdout)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], "Design chat")
+            self.assertEqual(rows[0]["workspace"], "Yeo UX")
+            self.assertFalse(rows[0]["visible"])
+            self.assertFalse(rows[0]["pinned"])
+        report["workspaces"][1]["tabs"] = []
+        done = self.run_visibility("list", self.visibility_env(report), "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        row = json.loads(done.stdout)[0]
+        self.assertEqual(row["hidden_reason"], "not in layout")
+        self.assertIsNot(row["archived"], True)
 
     def test_SOFT_3140_archived_chat_outside_layout_is_reported_as_archived(self):
         report = json.loads((FIXTURE / "listing-healthy.json").read_text())
