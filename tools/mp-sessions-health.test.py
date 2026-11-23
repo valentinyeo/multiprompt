@@ -157,6 +157,85 @@ class MpSessionsHealthTest(unittest.TestCase):
         self.assertIn("OK", done.stdout)
         self.assertNotIn("BROKEN", done.stdout)
 
+    def visibility_env(self, report=None):
+        self.seed_chat("live-healthy", "healthy-sid", "listing-healthy.json")
+        fixture = ROOT / "tools/fixtures/SOFT-3140/yeo-ux-missing.json"
+        env = self.env(str(fixture), STUB_SID="healthy-sid")
+        if report is not None:
+            zsb = self.bin / "zsb"
+            zsb.write_text("#!" + sys.executable + "\nprint(" + repr(json.dumps(report)) + ")\n", encoding="utf-8")
+        return env
+
+    def run_visibility(self, command, env, *flags):
+        return subprocess.run([sys.executable, str(MP_SESSIONS), command, *flags],
+                              capture_output=True, text=True, env=env, cwd=str(self.work), timeout=30)
+
+    def test_SOFT_3140_yeo_ux_chat_in_layout_but_missing_from_sidebar_is_broken(self):
+        env = self.visibility_env()
+        for flags in (("--json",), ()):
+            done = self.run_visibility("health", env, *flags)
+            self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
+            if flags:
+                row = json.loads(done.stdout)[0]
+                self.assertEqual(row["status"], "BROKEN hidden: not in sidebar layout")
+                self.assertEqual(row["workspace"], "Yeo UX")
+                self.assertEqual(row["active_workspace"], "Yeo UX")
+                self.assertTrue(row["in_layout"])
+                self.assertFalse(row["visible"])
+                self.assertFalse(row["waiting"])
+            else:
+                self.assertIn("BROKEN hidden: not in sidebar layout", done.stdout)
+
+    def test_SOFT_3140_list_and_health_report_the_same_desktop_state(self):
+        fixture = ROOT / "tools/fixtures/SOFT-3140"
+        report = json.loads((fixture / "yeo-ux-missing.json").read_text())
+        for state in json.loads((fixture / "states.json").read_text()):
+            with self.subTest(state=state):
+                tab = report["workspaces"][0]["tabs"][0]
+                tab.update({key: value for key, value in state.items() if key != "broken"})
+                env = self.visibility_env(report)
+                listed = self.run_visibility("list", env, "--json")
+                self.assertEqual(listed.returncode, 0, listed.stderr)
+                healthy = self.run_visibility("health", env, "--json")
+                self.assertEqual(healthy.returncode, int(state["broken"]), healthy.stderr + healthy.stdout)
+                for row in (json.loads(listed.stdout)[0], json.loads(healthy.stdout)[0]):
+                    for field in ("visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden"):
+                        self.assertEqual(row[field], state[field], field)
+                    self.assertEqual(row["active_workspace"], "Yeo UX")
+                    self.assertEqual(row["sidebar_view"], "Yeo UX")
+                    self.assertTrue(row["in_layout"])
+                table = self.run_visibility("list", env)
+                self.assertEqual(table.returncode, 0, table.stderr)
+                self.assertIn("VISIBILITY", table.stdout)
+                self.assertIn("WAITING", table.stdout)
+                self.assertIn("PINNED", table.stdout)
+                self.assertIn("ON SCREEN", table.stdout)
+                if state["hidden_reason"]:
+                    self.assertIn("hidden: " + state["hidden_reason"], table.stdout)
+
+    def test_SOFT_3140_offline_and_older_desktops_do_not_claim_visibility(self):
+        report = json.loads((FIXTURE / "listing-healthy.json").read_text())
+        for listing, reason, in_layout in ((report, "desktop visibility unavailable", True),
+                                          ({"ok": False}, "desktop offline", None)):
+            with self.subTest(reason=reason):
+                done = self.run_visibility("list", self.visibility_env(listing), "--json")
+                self.assertEqual(done.returncode, 0, done.stderr)
+                row = json.loads(done.stdout)[0]
+                self.assertIsNone(row["visible"])
+                self.assertEqual(row["hidden_reason"], reason)
+                self.assertEqual(row["in_layout"], in_layout)
+
+    def test_SOFT_3140_missing_tab_is_not_confused_with_hidden_sidebar_row(self):
+        report = json.loads((FIXTURE / "listing-healthy.json").read_text())
+        report["workspaces"][0]["tabs"] = []
+        env = self.visibility_env(report)
+        done = self.run_visibility("list", env, "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        row = json.loads(done.stdout)[0]
+        self.assertFalse(row["in_layout"])
+        self.assertFalse(row["visible"])
+        self.assertEqual(row["hidden_reason"], "not in layout")
+
 
 if __name__ == "__main__":
     unittest.main()
