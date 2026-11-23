@@ -1,13 +1,13 @@
 {
-  "sync_commit": "f6e7a8c303fba674f5a95c52e3387029e96e13f1",
+  "sync_commit": "5dfa4c43ef101a31d4d94d3bfa127197709a4465",
   "files": {
     "src/chat_echo.zig": "019be07e5c0102e75e112b1c7000a2fa20191e5622fdfec2b147cd75434e968f",
     "src/chat_send.zig": "e1b78367e1d92a174100d1dad4d062c5a21f7d1f4bcb126b5eaae88a2940f606",
     "src/chat_render.zig": "79e01100dcb8d3123a5b51137efc2e163ffa06a1e7e4d87049f8bbeb9dfc0590",
-    "src/chat_history_reader.py": "3c955c3d32b8554ef1b4287a90003e9aeaa8cbeab9a04ca5bf19d6a26e0ffa90",
+    "src/chat_history_reader.py": "3d55b188a8c6a6ced0b52c07147c3aa539fbbd7d3d0e5c9096a753967da956df",
     "src/app_state.zig": "3dea903f21c9d2ed266d9a79edddad4c20d7679ff9f82d1347d509101f3b2beb",
     "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",
-    "tools/chat-history-reader-test.py": "39cc4dca6e31b958e15a59ea0823afd994e72f9cc3dbfe7f62c9e368ec3f8638",
+    "tools/chat-history-reader-test.py": "ac5a54a82a7e232084196a176cb1f2a390e1440bd753558e1be559e5e2d0a2d3",
     "tools/multibot-feedback-test.py": "b7a26553ff1648413356bd2369e917b28bc6d283dbbdfe1c280124e11a688404"
   },
   "coverage": {
