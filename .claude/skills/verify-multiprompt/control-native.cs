@@ -234,7 +234,6 @@ public static class VerifyNative {
     }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr value);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     delegate bool EnumChildProc(IntPtr hwnd, IntPtr value);
     public static IntPtr FirstVisibleChild(IntPtr parent, string className) {
         IntPtr found = IntPtr.Zero;
