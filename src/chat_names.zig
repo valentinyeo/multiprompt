@@ -10,7 +10,8 @@ pub const Entry = struct { name: []const u8, tmux: []const u8, sid: []const u8 }
 var last_hash: [host_slots]std.atomic.Value(u64) = @splat(std.atomic.Value(u64).init(0));
 var in_flight = std.atomic.Value(bool).init(false);
 
-const Job = struct { host: u8, body: []u8 };
+const Host = @import("session_identity.zig").Host;
+const Job = struct { host: Host, body: []u8 };
 
 pub fn payload(a: std.mem.Allocator, host: u8, entries: []const Entry) ?[]u8 {
     return std.json.Stringify.valueAlloc(a, .{ .op = "chat_names", .id = request_id, .host = host, .names = entries }, .{}) catch null;
@@ -25,8 +26,8 @@ fn publishThread(job: *Job) void {
     }
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    if (!@import("chat_session.zig").chatHistoryPersistent(job.host, request_id, job.body, 4096, &response, null)) {
-        last_hash[job.host].store(0, .release);
+    if (!@import("chat_session.zig").chatHostPersistent(job.host, job.body, 4096, &response)) {
+        last_hash[job.host.index()].store(0, .release);
     }
 }
 
@@ -60,7 +61,7 @@ pub fn publishIfChanged() void {
             a.free(body);
             return;
         };
-        job.* = .{ .host = host, .body = body };
+        job.* = .{ .host = Host.fromIndex(host) orelse unreachable, .body = body };
         last_hash[host].store(hash, .release);
         in_flight.store(true, .release);
         const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, publishThread, .{job}) catch {

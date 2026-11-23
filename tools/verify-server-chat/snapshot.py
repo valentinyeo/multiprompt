@@ -16,4 +16,5 @@ for state in sorted((home / '.local/state/multiprompt/agent-host').glob('*.state
     if isinstance(saved, dict) and saved.get('provider') == 'claude':
         host = saved
         break
-print(json.dumps(dict(tables=tables, inputs=[json.loads(line) for line in inputs.read_text().splitlines()], host=host)))
+context = (host.get('native_session') or host.get('context_session') or host['sid']) if host else None
+print(json.dumps(dict(tables=tables, inputs=[json.loads(line) for line in inputs.read_text().splitlines()], host=host, context_session=context)))

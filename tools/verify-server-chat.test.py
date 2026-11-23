@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import runpy
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,32 @@ class ProviderTest(unittest.TestCase):
                 transcripts = list((Path(home) / '.claude/projects').glob('*/*.jsonl'))
                 self.assertEqual(len(transcripts), 1)
                 self.assertEqual(transcripts[0].parent.name, folder)
+
+    def test_snapshot_reports_the_effective_host_context(self):
+        sid = 'a1b2c3d4-2567-4000-8000-000000002567'
+        for state, expected in ((dict(sid=sid), sid),
+                                (dict(sid=sid, native_session='initial'), 'initial'),
+                                (dict(sid=sid, context_session='cleared'), 'cleared'),
+                                (dict(sid=sid, native_session='current', context_session='old'), 'current'),
+                                (None, None)):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as home:
+                root = Path(home)
+                store = root / '.local/state/multiprompt/shared-messages/store.sqlite3'
+                store.parent.mkdir(parents=True)
+                with sqlite3.connect(store) as db:
+                    for table in ('message_chats', 'message_resets', 'shared_messages'):
+                        db.execute('CREATE TABLE ' + table + ' (id TEXT)')
+                (root / 'provider-input.jsonl').write_text('')
+                if state is not None:
+                    hosts = root / '.local/state/multiprompt/agent-host'
+                    hosts.mkdir(parents=True)
+                    (hosts / 'fixture.state.json').write_text(json.dumps(dict(state, provider='claude', agent_pid=42)))
+                with patch.object(Path, 'home', return_value=root), patch('builtins.print') as output:
+                    runpy.run_path(str(ROOT / 'tools/verify-server-chat/snapshot.py'))
+                snapshot = json.loads(output.call_args.args[0])
+                self.assertEqual(snapshot['context_session'], expected)
+                if state is not None:
+                    self.assertEqual(snapshot['host']['agent_pid'], 42)
 
     def test_wsl_path_arguments_survive_the_windows_shell_boundary(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')

@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -380,6 +381,7 @@ test('worker uses existing persistent reader and background settlement uses pure
 test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'question-wire-'));
   try {
+    copyZig(['session_identity.zig'], dir);
     const worker = body('chatQuestionTmuxThread')
       .replaceAll('@import("chat_transcript.zig").Identity', 'Identity')
       .replaceAll('@import("chat_options.zig").MAX_OPTIONS', 'MAX_OPTIONS')
@@ -387,11 +389,15 @@ test('IGSH-1063 question worker sends numeric key arrays through the reader prot
     const harness = String.raw`
 const std = @import("std");
 const MAX_OPTIONS = 4;
-const Identity = struct { host: u8 = 0, shell_id: u32 = 7, tmux: [8:0]u8 = "term-1\x00\x00".* };
+const Identity = struct {
+    host: u8 = 0, shell_id: u32 = 7, sid: [40]u8 = @splat(0), tmux: [64]u8 = "term-1".* ++ @as([58]u8, @splat(0)),
+    pub fn provider(_: @This()) []const u8 { return "claude"; }
+    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
+};
 var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
 var recorded: std.ArrayList(u8) = .empty;
 fn debugLog(_: []const u8) void {}
-fn chatHistoryPersistent(_: u8, _: u32, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
+fn chatHistoryPersistent(_: @import("session_identity.zig").Session, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
     recorded.appendSlice(std.testing.allocator, query) catch unreachable;
     wire.appendSlice(std.heap.page_allocator, "@mp\t7\tquestion\tok\t-\t0\n") catch unreachable;
     return true;
@@ -417,6 +423,79 @@ test "question keys are numbers, operation and target remain strings" {
 `;
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness + worker);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-fno-llvm', '-fno-lld'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, JSON.stringify(result));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SOFT-2420 clear uses a checked session and refused restart clears only its own badge', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clear-server-wire-'));
+  try {
+    copyZig(['session_identity.zig'], dir);
+    const functions = ['chatTmuxSendClear', 'chatClearStore', 'chatClearNotice', 'chatRestartAiRefused'].map(body).join('\n')
+      .replaceAll('app_state.', '')
+      .replaceAll('@import("chat_session.zig").chatHistoryPersistent', 'chatHistoryPersistent')
+      .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
+      .replaceAll('@import("win32.zig").LPARAM', 'isize')
+      .replaceAll('@import("win32.zig").LRESULT', 'isize');
+    const harness = String.raw`
+const std = @import("std");
+const Identity = struct {
+    host: u8 = 1, shell_id: u32 = 7, sid: [40]u8 = @splat(0), tmux: [64]u8 = "term-1".* ++ @as([58]u8, @splat(0)),
+    pub fn provider(_: @This()) []const u8 { return "claude"; }
+    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
+};
+const ChatTmuxSendJob = struct { key: Identity = .{}, written: bool = false, rejected: bool = false, clear_notice: [96]u8 = @splat(0), clear_notice_len: u8 = 0 };
+var reply: []const u8 = "@mp\t9\tsend\tok\t-\t0\n";
+var connected = true;
+var requests: usize = 0;
+var shells = [_]struct { ai_restart_tick: u64 = 123, ai_stopped: bool = true }{ .{}, .{} };
+const g_main_hwnd: ?*anyopaque = null;
+var notices: usize = 0;
+fn InvalidateRect(_: ?*anyopaque, _: ?*const anyopaque, _: u32) i32 { return 1; }
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
+fn findShellById(id: u32) ?usize { return if (id == 7) 0 else null; }
+fn debugLog(_: []const u8) void {}
+fn chatHistoryPersistent(identity: @import("session_identity.zig").Session, query: []const u8, _: usize, wire: *std.ArrayList(u8), written: ?*bool) bool {
+    std.testing.expectEqual(@as(u8, 1), identity.host.index()) catch unreachable;
+    std.testing.expectEqual(@as(?u32, 9), identity.requestId(query)) catch unreachable;
+    const parsed = std.json.parseFromSlice(struct { op: []const u8, text: []const u8 }, std.testing.allocator, query, .{ .ignore_unknown_fields = true }) catch unreachable;
+    defer parsed.deinit();
+    std.testing.expectEqualStrings("send", parsed.value.op) catch unreachable;
+    std.testing.expectEqualStrings("/clear", parsed.value.text) catch unreachable;
+    requests += 1;
+    written.?.* = true;
+    wire.appendSlice(std.testing.allocator, reply) catch unreachable;
+    return connected;
+}
+test "clear sends the control request and preserves refusal or connection evidence" {
+    var job = ChatTmuxSendJob{};
+    chatTmuxSendClear(&job, 9, std.testing.allocator);
+    try std.testing.expect(job.written and !job.rejected);
+    try std.testing.expectEqual(@as(u8, 0), job.clear_notice_len);
+    reply = "@mp\t9\tsend\terror\tchat_busy\t0\n";
+    chatTmuxSendClear(&job, 9, std.testing.allocator);
+    try std.testing.expect(job.rejected);
+    try std.testing.expectEqualStrings("Wait for this reply to finish, then clear the chat.", job.clear_notice[0..job.clear_notice_len]);
+    connected = false;
+    chatTmuxSendClear(&job, 9, std.testing.allocator);
+    try std.testing.expect(job.rejected);
+    try std.testing.expectEqualStrings("Could not clear this chat. Check the connection and try again", job.clear_notice[0..job.clear_notice_len]);
+    try std.testing.expectEqual(@as(usize, 3), requests);
+}
+test "refused restart clears the addressed badge on the UI thread" {
+    const notice = try std.heap.page_allocator.dupeZ(u8, "still running");
+    const wp = @as(usize, 8) | (@as(usize, 1) << 32);
+    try std.testing.expectEqual(@as(isize, 0), chatRestartAiRefused(wp, @bitCast(@intFromPtr(notice.ptr))));
+    try std.testing.expectEqual(@as(u64, 0), shells[0].ai_restart_tick);
+    try std.testing.expect(!shells[0].ai_stopped);
+    try std.testing.expectEqual(@as(u64, 123), shells[1].ai_restart_tick);
+    try std.testing.expectEqual(@as(usize, 1), notices);
+    try std.testing.expectEqual(@as(isize, 0), chatRestartAiRefused(0, 0));
+}
+`;
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, harness + functions);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-fno-llvm', '-fno-lld'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, JSON.stringify(result));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

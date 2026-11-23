@@ -514,10 +514,6 @@ fn reload() !void {
     loadChatOutbox();
 }
 
-fn ownedTranscript(text: []const u16, stamp: i64, index: usize) void {
-    transcript(text, stamp);
-    g_chat_blocks[0].client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[index].message_wire_id, 0));
-}
 fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_hash +%= 1;
     g_chat_capture = text;
@@ -650,7 +646,7 @@ test "delivery: IGSH-1102 confirming one source message never confirms its times
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("yes");
     try enqueue(text, .delivered);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     g_chat_blocks[0].message_id = 1;
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
@@ -671,7 +667,7 @@ test "delivery: IGSH-1102 same-millisecond accepted messages clear without retra
     for (texts, 0..) |text, i| {
         const start = history_entry.history.text.items.len;
         try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
-        try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = start, .len = text.len, .stamp_ms = 2000, .message_id = i + 1, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[i].message_wire_id, 0)) });
+        try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = start, .len = text.len, .stamp_ms = 2000, .message_id = i + 1 });
     }
     history_entry.history.revision += 1;
     chatTmuxSettle();
@@ -687,20 +683,20 @@ test "delivery: IGSH-1102 repeated intent needs distinct source messages even at
     try enqueue(text, .delivered);
     for (g_chat_outbox.items) |*entry| entry.channel_sent = true;
     try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
-    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 1, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0)) });
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 1 });
     history_entry.history.revision += 1;
     chatTmuxSettle();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     history_entry.history.revision += 1;
     chatTmuxSettle();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
-    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 2, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0)) });
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 2 });
     history_entry.history.revision += 1;
     chatTmuxSettle();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
-test "delivery: SOFT-2526 merged text without client ids cannot consume two sends" {
+test "delivery: IGSH-1102 distinct intents merged into one source message both confirm" {
     defer clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered);
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .delivered);
@@ -710,7 +706,7 @@ test "delivery: SOFT-2526 merged text without client ids cannot consume two send
     try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = merged.len, .stamp_ms = 2000, .message_id = 1 });
     history_entry.history.revision += 1;
     chatTmuxSettle();
-    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: IGSH-1102 restart preserves equal-timestamp anchor and rejects backfill" {
@@ -727,7 +723,7 @@ test "delivery: IGSH-1102 restart preserves equal-timestamp anchor and rejects b
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     g_chat_blocks[0].message_id = 2;
-    g_chat_blocks[1] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 3, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0)) };
+    g_chat_blocks[1] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 3 };
     g_chat_block_count = 2;
     g_chat_last_hash +%= 1;
     chatEchoMatchActive();
@@ -754,7 +750,7 @@ test "delivery: IGSH-442 busy channel waits past both budgets without retransmis
         }
     }
     try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
-    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0)) });
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000 });
     history_entry.history.revision += 1;
     chatTmuxSettle();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
@@ -830,7 +826,7 @@ test "delivery: channel transcript retirement retains one-to-one repeat assignme
     try enqueue(text, .delivered);
     for (g_chat_outbox.items) |*entry| { entry.channel_sent = true; entry.channel_sent_ms = 2000; }
     try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
-    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0)) });
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000 });
     chatTmuxSettle();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
@@ -854,7 +850,7 @@ test "delivery: busy then idle, restart queued, type once, transcript replaces p
     try reload(); // restart while send verification is still running
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
     try std.testing.expect(!chatOutboxTrySendEntry(0, 0));
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("https://screencast2.com/a3CKb.png"), 2000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("https://screencast2.com/a3CKb.png"), 2000);
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try reload();
@@ -890,7 +886,7 @@ test "delivery: repeats survive old history, even if an untyped queue has a newe
     try std.testing.expect(saveChatOutbox());
     try reload();
     try std.testing.expectEqual(@as(usize, 3), g_chat_outbox.items.len);
-    ownedTranscript(yes, 2000, 0);
+    transcript(yes, 2000);
     chatEchoMatchActive(); // Only the oldest actually written intent confirms.
     try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
     try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
@@ -939,7 +935,7 @@ test "delivery: aged unconfirmed messages remain recoverable without transcript 
 test "delivery: unchanged refreshes cache reconciliation, revision and expiry changes still run" {
     defer clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("not represented"), .queued);
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("another prompt"), 2000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("another prompt"), 2000);
     const before = reconcile_passes;
     for (0..1000) |_| chatEchoMatchActive();
     try std.testing.expectEqual(before + 1, reconcile_passes);
@@ -967,7 +963,7 @@ test "delivery: refused real slash command is retryable and a later matching blo
     try std.testing.expect(g_chat_outbox.items[0].retryable);
     try reload();
     try std.testing.expect(g_chat_outbox.items[0].retryable);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
@@ -996,7 +992,7 @@ test "delivery: busy idle grace needs a fresh transcript, matches win, idle alon
     chatEchoMatchActive();
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
     try std.testing.expect(!g_chat_outbox.items[0].write_started);
-    ownedTranscript(text, 27000, 0);
+    transcript(text, 27000);
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
@@ -1028,11 +1024,9 @@ test "delivery: midturn queued attachment and merged normal block win over refus
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("also review the offer");
     try enqueue(text, .delivered);
-    @memset(&g_chat_outbox.items[0].message_wire_id, 0);
-    @memcpy(g_chat_outbox.items[0].message_wire_id[0..15], "desktop-midturn");
     shells[0].activity = .active;
     chatEchoMatchActive();
-    try history_entry.history.apply(std.heap.page_allocator, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t100\\t9\\t0\\tclaude\\t-\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"2026-10-13T11:06:22.591Z\\",\\"settlement\\":{\\"operation\\":\\"enqueue\\",\\"content\\":\\"also review the offer\\"}}\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"2026-10-13T11:06:59.442Z\\",\\"settlement\\":{\\"operation\\":\\"remove\\",\\"content\\":\\"also review the offer\\"}}\\n{\\"role\\":\\"user\\",\\"client_id\\":\\"desktop-midturn\\",\\"text\\":\\"also review the offer\\",\\"timestamp\\":\\"2026-10-13T11:06:59.443Z\\"}\\n@@MP_END@@\\n", 1, chat_transcript.Identity.init(1, 0, false, "sid", ""));
+    try history_entry.history.apply(std.heap.page_allocator, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t100\\t9\\t0\\tclaude\\t-\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"2026-10-13T11:06:22.591Z\\",\\"settlement\\":{\\"operation\\":\\"enqueue\\",\\"content\\":\\"also review the offer\\"}}\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"2026-10-13T11:06:59.442Z\\",\\"settlement\\":{\\"operation\\":\\"remove\\",\\"content\\":\\"also review the offer\\"}}\\n{\\"role\\":\\"user\\",\\"text\\":\\"also review the offer\\",\\"timestamp\\":\\"2026-10-13T11:06:59.443Z\\"}\\n@@MP_END@@\\n", 1, chat_transcript.Identity.init(1, 0, false, "sid", ""));
     const h = &history_entry.history;
     g_chat_capture = h.text.items;
     g_chat_last_len = h.text.items.len;
@@ -1049,7 +1043,7 @@ test "delivery: midturn queued attachment and merged normal block win over refus
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try enqueue(text, .delivered);
     g_chat_outbox.items[0].anchor.after_ms = 1000;
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("start here\\n\\nalso review the offer"), 40000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("start here\\n\\nalso review the offer"), 40000);
     fake_now_ms = 700000;
     fake_loaded_ms = fake_now_ms;
     chatEchoMatchActive();
@@ -1063,7 +1057,7 @@ test "delivery: legacy delivered entries without a timestamp cannot stay queued 
     try std.testing.expect(g_chat_outbox.items[0].retryable);
     transcript(std.unicode.utf8ToUtf16LeStringLiteral("legacy stuck"), 100);
     chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
 test "delivery: restored delivered outbox preserves its deadline and keeps late matching" {
     defer clear();
@@ -1078,7 +1072,7 @@ test "delivery: restored delivered outbox preserves its deadline and keeps late 
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
     try std.testing.expect(g_chat_outbox.items[0].write_started);
     try std.testing.expect(g_chat_outbox.items[0].retryable);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
@@ -1088,7 +1082,7 @@ test "delivery: cache round trip preserves timestamp and matches beyond 256 bloc
     const key = chat_transcript.Identity.init(1, 0, false, "sid", "/repo");
     var h = chat_history.History{};
     defer h.deinit(a);
-    const row = "{\\\"role\\\":\\\"user\\\",\\\"client_id\\\":\\\"desktop-cache\\\",\\\"timestamp\\\":\\\"2026-10-12T18:00:00Z\\\",\\\"text\\\":\\\"hello  world\\\"}\\n";
+    const row = "{\\\"role\\\":\\\"user\\\",\\\"timestamp\\\":\\\"2026-10-12T18:00:00Z\\\",\\\"text\\\":\\\"hello  world\\\"}\\n";
     const wire = "@mp\\t7\\thistory\\tok\\tsid\\t0\\t100\\t4\\t0\\tclaude\\t-\\n" ++ row ++ "@@MP_END@@\\n";
     try h.apply(a, wire, 7, key);
     const disk = try h.encode(a, key);
@@ -1096,8 +1090,6 @@ test "delivery: cache round trip preserves timestamp and matches beyond 256 bloc
     var restored = try chat_history.History.decode(a, disk, key);
     defer restored.deinit(a);
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("hello\\nworld "), .not_sent);
-    @memset(&g_chat_outbox.items[0].message_wire_id, 0);
-    @memcpy(g_chat_outbox.items[0].message_wire_id[0..13], "desktop-cache");
     g_chat_outbox.items[0].anchor = .{ .after_ms = chat_echo.stampMs("2026-10-12T17:59:00Z") };
     g_chat_capture = restored.text.items;
     g_chat_last_len = restored.text.items.len;
@@ -1163,7 +1155,7 @@ test "delivery: IGSH-1859 Remove clears a Not sent message tied to an older sess
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
-test "delivery: SOFT-2526 merged text never replaces the missing client ids" {
+test "delivery: IGSH-1859 a message the agent merged into a later turn stops showing Not sent" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/b.png  too much text everywhere ");
     const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\\n\\nhttps://example.com/b.png  too much text everywhere \\n\\nhttps://example.com/c.png one more note");
@@ -1182,8 +1174,8 @@ test "delivery: SOFT-2526 merged text never replaces the missing client ids" {
     try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
     transcript(merged, 160_000);
     chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(usize, 0), g_chat_confirmed.items.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 2), g_chat_confirmed.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: IGSH-1828 Cancel and Delete take back a handed-off waiting message" {
@@ -1209,7 +1201,7 @@ test "delivery: IGSH-442 Send again never writes a transcript-confirmed message"
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("already arrived");
     try enqueue(text, .not_sent);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     input_held = true;
     chatEchoSendAgain(g_chat_outbox.items[0].id);
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
@@ -1274,13 +1266,13 @@ test "ISSUE-501 reattach flushes FIFO exactly once through confirmed outbox stat
     try std.testing.expectEqual(@as(usize, 1), writes);
     g_chat_outbox.items[0].state = .delivered;
     g_chat_verify_echo_id = 0;
-    ownedTranscript(first, 2000, 0);
+    transcript(first, 2000);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), writes);
     try std.testing.expectEqualSlices(u16, &.{ 'f', 's' }, written_order[0..writes]);
     g_chat_outbox.items[0].state = .delivered;
     g_chat_verify_echo_id = 0;
-    ownedTranscript(second, 3000, 0);
+    transcript(second, 3000);
     chatOutboxTick();
     sshReconnectOk(0);
     try std.testing.expectEqual(@as(usize, 2), writes);
@@ -1357,7 +1349,7 @@ test "ISSUE-460 Send again preserves late matching anchors and persists its own 
     try reload();
     try std.testing.expectEqual(deadline, g_chat_outbox.items[0].expires_ms);
     try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     shells[0].activity = .idle;
     input_idle = true;
     chatOutboxTick();
@@ -1403,7 +1395,7 @@ test "ISSUE-460 queued evidence releases the next connected message into Claude 
     g_chat_outbox.items[0].transcript_queued = true;
     try std.testing.expect(chatOutboxTrySendEntry(0, 1));
     try std.testing.expectEqual(@as(usize, 1), writes + channel_starts);
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000);
     chatOutboxTick();
     try std.testing.expectEqualSlices(u16, &.{'s'}, written_order[0..writes]);
 }
@@ -1522,7 +1514,7 @@ test "ISSUE-460 busy channel sends first immediately then confirms in order (IGS
     g_chat_outbox.items[0].transcript_queued = true;
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), channel_starts);
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), channel_starts);
 }
@@ -1658,11 +1650,11 @@ test "ISSUE-460 two messages buffer while busy and reach the session in order" {
     g_chat_outbox.items[0].state = .delivered;
     g_chat_verify_echo_id = 0;
     try std.testing.expect(chatOutboxTrySendEntry(0, 1));
-    ownedTranscript(first, 2000, 0);
+    transcript(first, 2000);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), writes);
     try std.testing.expectEqualSlices(u16, &.{ 'f', 's' }, written_order[0..writes]);
-    ownedTranscript(second, 3000, 0);
+    transcript(second, 3000);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
@@ -1688,10 +1680,10 @@ test "ISSUE-460 v2 persist restore preserves two queued intents and written evid
     g_chat_outbox.items[0].state = .delivered;
     g_chat_verify_echo_id = 0;
     try std.testing.expect(chatOutboxTrySendEntry(0, 1));
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("first queued request"), 1792579619000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("first queued request"), 1792579619000);
     chatOutboxTick();
     try std.testing.expectEqualSlices(u16, &.{ 'f', 's' }, written_order[0..writes]);
-    ownedTranscript(std.unicode.utf8ToUtf16LeStringLiteral("second queued request"), 1792579620000, 0);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("second queued request"), 1792579620000);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
@@ -1721,7 +1713,7 @@ test "ISSUE-460 late echo after Send again never duplicates the write" {
     input_idle = false;
     chatEchoSendAgain(g_chat_outbox.items[0].id);
     try std.testing.expectEqual(@as(usize, 0), writes);
-    ownedTranscript(text, 2000, 0);
+    transcript(text, 2000);
     shells[0].activity = .idle;
     input_idle = true;
     chatOutboxTick();
@@ -1770,7 +1762,7 @@ test "ISSUE-460 both saved laptop entries stay failed until positive background 
     test_outbox_key = "tmux:1:projects";
     const text = g_chat_outbox.items[1].text;
     try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
-    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 1792579619000, .client_id = chat_markdown.rowKey(std.mem.sliceTo(&g_chat_outbox.items[1].message_wire_id, 0)) });
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 1792579619000 });
     history_entry.history.revision += 1;
     history_entry.loaded_ms = fake_now_ms;
     chatOutboxTick();
@@ -2133,7 +2125,7 @@ function runHarness(control = false) {
     require('./fixtures/inline-stubs').writeChatMention(dir);
     if (control === true) {
       const file = path.join(dir, 'chat_history.zig');
-      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('block.client_id = client_id;', 'block.client_id = client_id & 0;'));
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = [...names, 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
       .replaceAll('@import("chat_session.zig").chatSettingsPending', 'chatSettingsPending')
@@ -2249,7 +2241,7 @@ test('correctness repeats and unreadable: executed production outbox, write rese
   const result = runHarness();
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
-test('cache client-id oracle rejects the actual integration omission (positive control)', () => {
+test('cache timestamp oracle rejects the actual integration omission (positive control)', () => {
   const result = runHarness(true);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 0, found 1/);

@@ -119,7 +119,7 @@ try {
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
     $opened = Server-Snapshot 'open-server'
-    $contextBefore = $opened.host.context_session
+    $contextBefore = $opened.context_session
     $agentBefore = $opened.host.agent_pid
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' })) {
         Send-Line $case.text
@@ -131,7 +131,7 @@ try {
     $beforeClear = Server-Snapshot 'before-clear'
     $sidBefore = @($beforeClear.inputs)[-1].sid
     Send-Line '/clear'
-    [void](Wait-For 'host starts a new AI session' { $now = Server-Snapshot 'clear-server'; $now.host.context_session -and $now.host.context_session -ne $contextBefore -and $now.host.agent_pid -ne $agentBefore })
+    [void](Wait-For 'host starts a new AI session' { $now = Server-Snapshot 'clear-server'; $now.context_session -and $now.context_session -ne $contextBefore -and $now.host.agent_pid -ne $agentBefore })
     $cleared = Server-Snapshot 'clear-server'
     if (@($cleared.inputs | Where-Object { $_.text.Trim() -ceq '/clear' }).Count -ne 0) { throw 'The clear reached the AI as a message' }
     [void](Wait-For 'cleared chat shows the divider' { (Copy-Chat 'clear-copied').Contains('Chat cleared') } 30)

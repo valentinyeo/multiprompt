@@ -17,13 +17,19 @@ def tick(source):
     body = function(source, "chatOutboxTick")
     start = body.index("            if (chat_echo.v1SendingAbandoned(")
     end = body.index("\n            }", start) + len("\n            }")
-    return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n" + body[start:end] + "\n    return changed;\n}\n"
+    fragment = body[start:end]
+    prefix = "    const send_job_active = false;\n" if "send_job_active" in fragment else ""
+    return "fn timeout(entry: *ChatOutboxEntry, now_ms: i64) bool {\n    var changed = false;\n" + prefix + fragment + "\n    return changed;\n}\n"
 
 
 def load(source):
     body = function(source, "chatOutboxParseJson")
-    start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
-    end = body.index("\n                        }", start) + len("\n                        }")
+    if "v1PhaseUnconfirmed" in body:
+        start = body.index("                        if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and")
+        end = body.index("                        const now_ms = chat_echo.fileTimeToUnixMs", start)
+    else:
+        start = body.index("                        if (entry.message_v1 and entry.message_phase[0] == 0")
+        end = body.index("\n                        }", start) + len("\n                        }")
     return "fn restoreEntry(entry: *ChatOutboxEntry) void {\n    entry.state = chat_echo.stateOnLoad(@intFromEnum(entry.state), entry.write_started);\n" + body[start:end] + "\n}\n"
 
 
@@ -47,16 +53,11 @@ const ChatOutboxEntry = struct {
     source += function(send, "chatEchoWaitsOnTranscript") + "\n" + tick(send) + load(send)
     source += '''test "formal source decisions" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("synthetic delivery probe");
-    var block: [1]chat_echo.UserBlock = undefined;
-    block[0] = .{ .text = text, .stamp_ms = 200, .message_id = 1 };
+    const block = [_]chat_echo.UserBlock{.{ .text = text, .stamp_ms = 200, .message_id = 1 }};
     var pending = [_]chat_echo.Pending{
         .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } },
         .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 100 } },
     };
-    if (@hasField(chat_echo.Pending, "client_id")) {
-        for (&pending) |*p| p.client_id = 1;
-        block[0].client_id = 1;
-    }
     var picked: [2]?usize = undefined;
     chat_echo.assign(&pending, &block, false, &.{}, &picked);
     try std.testing.expectEqual(@as(?usize, 0), picked[0]);

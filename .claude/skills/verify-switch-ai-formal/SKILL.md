@@ -33,7 +33,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `dccfffcfff2b87949b51d5e9deaecf5120a8ce1a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+[coverage.json](coverage.json) records the source/model sync commit and full-file hashes. SOFT-2420 preserves master's covered switch functions and adds a separate Claude clear operation. After reviewing that boundary, regenerate records with `python3 tools/refresh-formal-coverage.py --sync-commit <reviewed-commit> <coverage.json>`. Hosted CI checks native decisions, replay and mutations. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 | Source | Covered behavior |
 | --- | --- |

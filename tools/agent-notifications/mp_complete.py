@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -157,6 +158,16 @@ def answer_as_owner(line, cwd, supplied):
         if answer is not None:
             return answer
     return None
+
+
+def cross_owner_chat(cwd, supplied):
+    candidates = [cwd]
+    if supplied not in (None, "-") and str(supplied) != str(cwd):
+        candidates.append(supplied)
+    for candidate in candidates:
+        if owner_for_cwd(candidate, HOME) is not None:
+            return True
+    return False
 
 
 def project_and_plugins(cwd, settings):
@@ -747,6 +758,9 @@ def request(line):
         answer = answer_as_owner(line, cwd, fields[4])
         if answer is not None:
             return answer
+        if cross_owner_chat(cwd, fields[4]):
+            header = ["@mp", rid, op, "error", clean(str(cwd), 700), "0"]
+            return "\n".join(("\t".join(header), END, ""))
     if op == "ping":
         status, rows = "ok", []
     elif op == "files":
@@ -769,6 +783,54 @@ def request(line):
     return "\n".join(("\t".join(header), *clean_rows, END, ""))
 
 
+def stop_servers(destination):
+    stopped = 0
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return 0
+    try:
+        target = os.path.realpath(destination)
+    except OSError:
+        return 0
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid in (os.getpid(), os.getppid()):
+            continue
+        try:
+            fields = (entry / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        args = [field.decode("utf-8", "replace") for field in fields if field]
+        if "--serve" not in args or target not in [os.path.realpath(arg) for arg in args if arg.endswith(".py")]:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+        stopped += 1
+    return stopped
+
+
+def sync(destination):
+    source = Path(__file__).read_bytes()
+    current = destination.read_bytes() if destination.is_file() else b""
+    if current != source:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".next")
+        temporary.write_bytes(source)
+        os.replace(temporary, destination)
+        print("installed " + str(destination) + " stopped=" + str(stop_servers(destination)))
+    else:
+        print("current " + str(destination))
+    if str(Path(__file__)) != str(destination):
+        try:
+            Path(__file__).unlink()
+        except OSError:
+            pass
+
+
 def main():
     if sys.argv[1:3] == ["--warm", "claude"]:
         warm()
@@ -782,6 +844,11 @@ def main():
         if not session.startswith("mp-ac-test-") or not TOKEN.fullmatch(session) or agent not in ("claude", "codex"):
             raise SystemExit("harvest requires a scratch session and claude or codex")
         subprocess.run(["bash", str(Path(__file__).with_name("harvest_tui.sh")), session, agent], check=True, timeout=45)
+    elif sys.argv[1:2] == ["--sync"] and len(sys.argv) == 3:
+        try:
+            sync(Path(sys.argv[2]))
+        except OSError as error:
+            raise SystemExit("sync failed: " + str(error))
     elif sys.argv[1:2] == ["--serve"]:
         for line in sys.stdin:
             try:
@@ -790,7 +857,7 @@ def main():
                 sys.stdout.write("@mp\t0\tping\terror\t-\t0\n" + END + "\n")
             sys.stdout.flush()
     else:
-        raise SystemExit("usage: mp_complete.py --serve | --once base64 | --warm claude | --harvest scratch-session agent")
+        raise SystemExit("usage: mp_complete.py --serve | --once base64 | --warm claude | --harvest scratch-session agent | --sync destination")
 
 
 if __name__ == "__main__":
