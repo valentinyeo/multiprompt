@@ -186,22 +186,13 @@ function Get-RemoteTransports {
 Wait-Until {
     $live = Get-RemoteTransports
     @($live.Keys | Where-Object { $_ -ceq 'verify-agent-1' }).Count -eq 1 -and
-        @($live.Keys | Where-Object { $_ -ceq 'live-slash' }).Count -eq 1
-} 'both server shells attached to their saved sessions before restart' 60
+        @($live.Keys | Where-Object { $_ -ceq 'soft3039-two' }).Count -eq 1
+} 'both plain server shells attached to their saved sessions before restart' 60
 $preRestartTransports = Get-RemoteTransports
-Save-Json @{ step = 'before-restart'; verifyAgent1 = $preRestartTransports['verify-agent-1']; liveSlash = $preRestartTransports['live-slash'] } 'server-shell-transports-before.json'
-Press @(0x11, 0x32) 'Ctrl+2: close Chat View before quitting'
-$saved = Read-Session
-if ($saved.tabs[$saved.active_tab].cv -eq $true) {
-    Press @(0x12, 0x43) 'Alt+C: show the second server shell console before quitting'
-    Wait-Until {
-        $state = Read-Session
-        $state.tabs[$state.active_tab].cv -ne $true
-    } 'second server shell console visible before quitting'
-}
+Save-Json @{ step = 'before-restart'; verifyAgent1 = $preRestartTransports['verify-agent-1']; soft3039Two = $preRestartTransports['soft3039-two'] } 'server-shell-transports-before.json'
 Press @(0x11, 0x31) 'Ctrl+1: first server shell selected before quitting'
 Snapshot 'server-shell-before-restart'
-$shellState = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = @('verify-agent-1', 'live-slash') }
+$shellState = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = @('verify-agent-1', 'live-slash', 'soft3039-two') }
 [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $shellState -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Remove-Item (Join-Path $remoteState 'interrupt.json') -ErrorAction SilentlyContinue
 Restart-SessionRestore 'server-shell-restart' $false
@@ -209,21 +200,21 @@ Wait-Until {
     $state = Read-Session
     $null -ne $state -and @($state.tabs).Count -ge 2 -and
         @($state.tabs | Where-Object { $_.tmux_session -ceq 'verify-agent-1' }).Count -eq 1 -and
-        @($state.tabs | Where-Object { $_.tmux_session -ceq 'live-slash' }).Count -eq 1
-} 'both saved server shell tabs restored after restart' 60
+        @($state.tabs | Where-Object { $_.tmux_session -ceq 'soft3039-two' }).Count -eq 1
+} 'both saved plain server shell tabs restored after restart' 60
 Wait-Until {
     $live = Get-RemoteTransports
-    @($live.Keys | Where-Object { $_ -ceq 'verify-agent-1' }).Count -eq 1 -and @($live.Keys | Where-Object { $_ -ceq 'live-slash' }).Count -eq 1
+    @($live.Keys | Where-Object { $_ -ceq 'verify-agent-1' }).Count -eq 1 -and @($live.Keys | Where-Object { $_ -ceq 'soft3039-two' }).Count -eq 1
 } 'both restored server shells attached to their saved sessions after restart' 90
 $postRestartTransports = Get-RemoteTransports
-if ($postRestartTransports['verify-agent-1'] -eq $preRestartTransports['verify-agent-1'] -or $postRestartTransports['live-slash'] -eq $preRestartTransports['live-slash']) { throw 'Restored server shells reused the pre-restart transports' }
-Save-Json @{ step = 'after-restart'; verifyAgent1 = $postRestartTransports['verify-agent-1']; liveSlash = $postRestartTransports['live-slash'] } 'server-shell-transports-after.json'
+if ($postRestartTransports['verify-agent-1'] -eq $preRestartTransports['verify-agent-1'] -or $postRestartTransports['soft3039-two'] -eq $preRestartTransports['soft3039-two']) { throw 'Restored server shells reused the pre-restart transports' }
+Save-Json @{ step = 'after-restart'; verifyAgent1 = $postRestartTransports['verify-agent-1']; soft3039Two = $postRestartTransports['soft3039-two'] } 'server-shell-transports-after.json'
 $interruptFile = Join-Path $remoteState 'interrupt.json'
 $inputs = @()
-foreach ($index in 1, 2) {
-    $selectKeys = if ($index -eq 1) { @(0x11, 0x31) } else { @(0x11, 0x32) }
+foreach ($index in 1, 3) {
+    $selectKeys = if ($index -eq 1) { @(0x11, 0x31) } else { @(0x11, 0x33) }
     Press $selectKeys ("Ctrl+$index" + ': select a restored server shell')
-    $session = if ($index -eq 1) { 'verify-agent-1' } else { 'live-slash' }
+    $session = if ($index -eq 1) { 'verify-agent-1' } else { 'soft3039-two' }
     Wait-Until {
         $state = Read-Session
         $null -ne $state -and $state.tabs[$state.active_tab].tmux_session -ceq $session
