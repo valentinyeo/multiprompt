@@ -66,7 +66,7 @@ test('pure parser tests are wired and existing Alt+C discovers automatic formatt
 
 test('copy has button, keyboard, native-control fallback, palette label/results/draw/click and documentation', () => {
   assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362/);
-  assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block/);
+  assert.match(src, /SEARCH_CHAT_COPY_CODE_OFFSET => "copy latest code block chat view copy latest code block/);
   assert.match(src, /g_search_results\[g_search_result_count\] = SEARCH_CHAT_COPY_CODE_OFFSET/);
   assert.match(src, /else if \(is_chat_copy\)/);
   assert.match(src, /if \(target == SEARCH_CHAT_COPY_CODE_OFFSET\)/);
@@ -109,13 +109,13 @@ test('copy palette offset is exclusive in the complete draw classification chain
 
 test('file attachment and inline image previews ship on every surface (issue)', () => {
   assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET: usize = 6372/);
-  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file/);
+  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "attach file chat view attach file/);
   assert.match(src, /is_chat_copy or is_chat_attach or/);
-  assert.match(src, /L\("Chat View: Attach File"\)/);
+  assert.match(src, /L\("Attach file"\)/);
   assert.match(src, /target == SEARCH_CHAT_ATTACH_OFFSET/);
   assert.match(src, /\.a = "\+ button \/ Ctrl\+V in Chat View"/);
   assert.match(docs, /\+ button \/ Ctrl\+V in Chat View/);
-  assert.match(docs, /Chat View: Attach File/);
+  assert.match(docs, /Ctrl\+K has `Attach file`/);
   assert.ok(build.includes('src/chat_image.zig'));
   assert.ok(build.includes('comdlg32'));
   assert.match(body('chatButtonAt'), /attach_btn/);
@@ -133,10 +133,10 @@ test('tool lines toggle before links and selection and expose all palette surfac
   assert.match(body('chatToolAt'), /role != \.tool/);
   assert.match(body('chatToggleAllTools'), /block\.role == \.tool[^]*?block\.tool_open = open/);
   assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
-  assert.match(src, /SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps/);
+  assert.match(src, /SEARCH_CHAT_TOOL_STEPS_OFFSET => "open or fold tool steps chat view open or fold all tool steps/);
   assert.match(src, /target == SEARCH_CHAT_TOOL_STEPS_OFFSET/);
-  assert.match(src, /L\("Chat View: Open or fold all tool steps"\)/);
-  assert.match(docs, /Chat View: Open or fold all tool steps/);
+  assert.match(src, /L\("Open or fold tool steps"\)/);
+  assert.match(docs, /Ctrl\+K "Open or fold tool steps"/);
 });
 
 

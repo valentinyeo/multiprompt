@@ -8,7 +8,7 @@ test('command browse is reachable from keyboard, palette, and F1', () => {
   assert.match(src, /CHAT_AC_ENTER_SENDS = false/);
   assert.match(src, /0xBF => true/);
   assert.match(src, /chatAcOpenBrowse\(\)/);
-  assert.match(src, /Chat View: Insert Command or Skill\.\.\./);
+  assert.match(src, /insert command or skill chat view insert command or skill/);
   assert.match(src, /\.a = "Ctrl\+\/ in Chat View"/);
   assert.match(docs, /Ctrl\+\/ in Chat View/);
 });

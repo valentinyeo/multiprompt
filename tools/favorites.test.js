@@ -75,14 +75,14 @@ test('Favorites split follows Frequent and ALL by default and shares configured 
 });
 
 test('keyboard, palette, context, F1 and wiki expose the same favorite action', () => {
-  for (const literal of ['WM_APP_FAVORITE_TOGGLE', 'SEARCH_FAVORITE_OFFSET', 'SEARCH_TABCTX_FAVORITE', 'L("Favorite: Toggle")', 'L(ui_words.tab_context_unfavorite)', 'L(ui_words.tab_context_favorite)', 'L("on  Alt+S")', 'L("off  Alt+S")', 'toggleFavorite(ti);', '.a = "Alt+S", .b = "Favorite or unfavorite this session"']) assert.ok(source.includes(literal), literal);
+  for (const literal of ['WM_APP_FAVORITE_TOGGLE', 'SEARCH_FAVORITE_OFFSET', 'SEARCH_TABCTX_FAVORITE', 'L("Favorite")', 'L(ui_words.tab_context_unfavorite)', 'L(ui_words.tab_context_favorite)', 'L("on  Alt+S")', 'L("off  Alt+S")', 'toggleFavorite(ti);', '.a = "Alt+S", .b = "Favorite or unfavorite this session"']) assert.ok(source.includes(literal), literal);
   assert.match(source, /target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE/);
   const hook = between('fn keyboardHookProc(', 'fn pointOverActiveShell(');
   assert.ok(hook.indexOf("kb.vkCode == 0x53 and foregroundIsOurs()") < hook.indexOf('if (g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus())'));
   assert.match(hook, /claimBrowserFocusPress\(true, &g_favorite_chord_held\)/);
   assert.match(hook, /WM_APP_TOGGLE_INBOX/);
   assert.doesNotMatch(hook, /PostMessageW\(g_main_hwnd, WM_APP_WEBVIEW2_TOGGLE/);
-  assert.ok(wiki.includes('`Favorite: Toggle`') && wiki.includes('`Favorite` / `Unfavorite`') && wiki.includes('`★ Favorites`'));
+  assert.ok(wiki.includes('Ctrl+K has `Favorite`') && wiki.includes('`★ Favorites`'));
 });
 
 

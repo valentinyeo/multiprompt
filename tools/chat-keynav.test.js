@@ -81,9 +81,9 @@ test('SOFT-2489 Shift+G twice consumes the second character, clears the first an
 });
 
 test('SOFT-2489 palette and documented GG share the existing newest-message routing ID', () => {
-  assert.match(read('src/command_palette.zig'), /SEARCH_CHAT_NEWEST_OFFSET => "Jump to newest message/);
+  assert.match(read('src/command_palette.zig'), /SEARCH_CHAT_NEWEST_OFFSET => "scroll to newest message jump to newest message/);
   assert.match(read('src/command_palette.zig'), /labelsMatchQuery\(&\[_\]\[\]const u8\{ "Jump to newest message"[^]*?= SEARCH_CHAT_NEWEST_OFFSET;/);
-  assert.match(read('src/sidebar.zig'), /is_chat_newest\) L\("Jump to newest message"\)/);
+  assert.match(read('src/sidebar.zig'), /is_chat_newest\) L\("Scroll to newest message"\)/);
   assert.match(read('src/main.zig'), /target == SEARCH_CHAT_NEWEST_OFFSET[^]*?chatJumpToNewest\(\)/);
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
     assert.match(read(file), /Shift\+G twice \/ End \/ Ctrl\+K/);

@@ -9,6 +9,11 @@ pub const faces = [_][]const u8{
     words.bot_face_headphones, words.bot_face_profile, words.bot_face_corner_peek, words.bot_face_grill,
     words.bot_face_hang,
 };
+pub const face_aliases = [_][]const u8{
+    "", "", "", "", "", "", "", "", "", "", "", "", "",
+    "Circle dots", "Square squares", "Squircle happy", "Wide dashes",
+    "Tall one eye", "Circle wink", "Square dots", "Squircle dashes",
+};
 pub const colors = [_][]const u8{
     words.settings_color_auto, words.bot_color_sage, words.bot_color_clay, words.bot_color_sand,
     words.bot_color_mist, words.bot_color_lilac, words.bot_color_rose, words.bot_color_mint, words.bot_color_white,

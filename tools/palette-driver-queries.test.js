@@ -43,9 +43,9 @@ test('every chat view command a Windows driver types still has a producer in the
     for (const query of typedQueries(read(file))) {
       if (!/^chat view /i.test(query)) continue;
       const lower = query.toLowerCase();
-      const entry = labels.find(item => item.label.toLowerCase().startsWith(lower));
+      const entry = labels.find(item => item.label.toLowerCase().includes(lower));
       if (!entry) {
-        missing.push(`${file}: no palette label starts with "${query}"`);
+        missing.push(`${file}: no palette label or alias contains "${query}"`);
         continue;
       }
       checked.push(query);

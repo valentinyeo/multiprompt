@@ -31,7 +31,7 @@ test('SOFT-2355 typing del ranks Delete session first and Ctrl+Shift+W deletes t
   const shortcuts = read('src/shortcuts.zig');
   const table = palette.slice(palette.indexOf('pub const chat_actions ='), palette.indexOf('pub fn chatActionLabel('));
   const labels = [...table.matchAll(/SEARCH_TABCTX_END_TMUX, \.label = "([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(labels, ['Delete session']);
+  assert.deepEqual(labels, ['Delete chat']);
   assert.equal(matchRank('Delete session', 'del'), matchRank('delete workspace', 'del'));
   assert.equal(matchRank('Delete session', 'del'), 3);
   assert.ok(prefersDeleteSession('del'));
@@ -53,8 +53,8 @@ test('SOFT-2355 typing del ranks Delete session first and Ctrl+Shift+W deletes t
   assert.match(hook, /\.delete_session =>[^\n]*WM_APP_CLOSE_SESSION/);
   assert.doesNotMatch(hook, /WM_APP_QUIT_ALL/);
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+W", \.b = "Delete the current session/);
-  assert.match(shortcuts, /\.a = "Ctrl\+K -> Delete session"/);
-  assert.match(shortcuts, /\.a = "Ctrl\+K -> Quit multi bot", \.b = "Quit the app/);
+  assert.match(shortcuts, /\.a = "Ctrl\+K -> Delete chat"/);
+  assert.match(shortcuts, /\.a = "Ctrl\+K -> Quit Multi Bot", \.b = "Quit the app/);
   assert.doesNotMatch(shortcuts, /Ctrl\+Shift\+W", \.b = "Quit the app/);
 
   const main = read('src/main.zig');
@@ -62,5 +62,5 @@ test('SOFT-2355 typing del ranks Delete session first and Ctrl+Shift+W deletes t
   assert.match(quit, /quitAllZigShellWindows\(hwnd\)/);
   const sidebar = read('src/sidebar.zig');
   assert.match(sidebar, /result_idx == SEARCH_TABCTX_END_TMUX[\s\S]{0,500}L\("Ctrl\+Shift\+W"\)/);
-  assert.match(read('src/ui_words.zon'), /\.palette_quit = "Quit multi bot"/);
+  assert.match(read('src/ui_words.zon'), /\.palette_quit = "Quit Multi Bot"/);
 });

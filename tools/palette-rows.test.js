@@ -124,9 +124,9 @@ test('bounded comparisons and switch ranges cover intermediate row offsets', () 
 test('ISSUE-265 Stop is painted, searchable and dispatched for the exact context tab', () => {
   assert.match(state, /pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;/);
   assert.match(palette, /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_CHAT_STOP/);
-  assert.match(palette, /target == SEARCH_TABCTX_CHAT_STOP\) return "chat view stop the agent interrupt escape"/);
+  assert.match(palette, /target == SEARCH_TABCTX_CHAT_STOP\) return "stop agent chat view stop the agent interrupt escape"/);
   assert.match(sidebar, /result_idx == SEARCH_TABCTX_CHAT_STOP\) L\(ui_words\.tab_context_chat_stop_agent\)/);
-  assert.match(read('src/ui_words.zon'), /\.tab_context_chat_stop_agent = "Chat View: Stop the agent"/);
+  assert.match(read('src/ui_words.zon'), /\.tab_context_chat_stop_agent = "Stop agent"/);
   assert.match(confirm, /target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE\) or target == SEARCH_TABCTX_CHAT_STOP or/);
   assert.match(confirm, /target == SEARCH_TABCTX_CHAT_STOP\) \{\s*_ = @import\("chat_send.zig"\).chatStopAgent\(ti\)/);
 });
@@ -147,7 +147,7 @@ test('ISSUE-266 permission actions have all three surfaces and exact context dis
     assert.ok(value < workspaceDelete || value >= workspaceDelete + maxWorkspaces, "Permission commands must not use workspace deletion row IDs");
     assert.match(palette, new RegExp(`g_search_results\\[app_state.g_search_result_count\\] = ${offset};`));
     assert.match(palette, new RegExp(`g_search_results\\[app_state.g_search_result_count\\] = SEARCH_TABCTX_CHAT_${tag};`));
-    assert.ok(sidebar.includes(`L("Chat View: ${label}")`));
+    assert.ok(sidebar.includes(`L("${label}")`));
     assert.match(confirm, new RegExp(`target == SEARCH_TABCTX_CHAT_${tag}\\) \\{\\s*_ = @import\\("chat_send.zig"\\).chatPermissionAnswer\\(ti, \\.${action}\\)`));
     assert.ok(shortcuts.includes(`Alt+${key} in Chat View`));
   }
@@ -218,4 +218,19 @@ test('IGSH-1081 Reconnect is named consistently in Ctrl+K and tab actions', () =
   assert.match(main, /if \(target == SEARCH_RECONNECT_OFFSET\) \{[^]*?WM_APP_RECONNECT/);
   assert.doesNotMatch(palette, /g_search_results\[[^\]]+\] = SEARCH_RECONNECT_OFFSET/);
   assert.doesNotMatch(palette, /g_search_results\[[^\]]+\] = SEARCH_TABCTX_RECONNECT/);
+});
+
+test('SOFT-1970 renamed labels replace the old wording on both palette surfaces', () => {
+  const words = read('src/ui_words.zon');
+  const display = sidebar + words;
+  const cases = [...palette.matchAll(/\.target = SEARCH_\w+, \.old = "([^"]+)", \.label = "([^"]+)"/g)];
+  assert.ok(cases.length >= 40, 'the native search regression covers the approved command names');
+  for (const [, old, label] of cases) {
+    assert.ok(display.includes(`"${label}"`), `missing displayed name ${label}`);
+    assert.ok(!display.includes(`"${old}"`), `old name still displayed: ${old}`);
+  }
+  assert.ok(display.includes('"Clear unsent messages"'));
+  assert.ok(!display.includes('"Chat View: Discard Unsent Messages"'));
+  assert.match(palette, /for \(cases\) \|row\|[^]*?updateSearchResults\(\);[^]*?row\.target/);
+  assert.match(palette, /face_aliases\[i\]/);
 });

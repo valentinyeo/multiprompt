@@ -1,0 +1,1 @@
+Ctrl+K: rename 45 commands with old names
