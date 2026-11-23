@@ -152,6 +152,7 @@ const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const fetchAcPersistent = @import("vps.zig").fetchAcPersistent;
 const sshOneShotCaptureInput = @import("vps.zig").sshOneShotCaptureInput;
 const TMUX_HOST_DE = @import("app_state.zig").TMUX_HOST_DE;
+const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
@@ -1321,25 +1322,94 @@ pub fn chatAcRequest(slot_index: usize) void {
     thread.detach();
 }
 
+const AC_SYNC_SHIM = @embedFile("completer_sync_shim.py");
+const AC_COMPLETER_SOURCE = @embedFile("mp_complete.py");
+const AC_SYNC_RETRY_MS: u64 = 60_000;
+
+comptime {
+    if (std.base64.standard.Encoder.calcSize(AC_SYNC_SHIM.len) > 2048) @compileError("completer_sync_shim.py no longer fits one ssh command");
+}
+
+var g_ac_sync_started = [_]std.atomic.Value(bool){ std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false) };
+var g_ac_sync_done = [_]std.atomic.Value(bool){ std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false) };
+var g_ac_sync_retry = [_]std.atomic.Value(u64){ std.atomic.Value(u64).init(0), std.atomic.Value(u64).init(0), std.atomic.Value(u64).init(0) };
+
+fn acSyncCommand(host: u8, out: *[4096]u8) ?[]const u8 {
+    var encoded_buf: [2048]u8 = undefined;
+    const encoded = std.base64.standard.Encoder.encode(&encoded_buf, AC_SYNC_SHIM);
+    var pos: usize = 0;
+    if (!appendSshExe(out, &pos)) return null;
+    const tail = std.fmt.bufPrint(out[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} python3 -c 'import base64,sys;exec(base64.b64decode(sys.argv[2]))' ~/.local/share/zigshell/mp_complete.py {s}", .{ tmuxSshTarget(host), encoded }) catch return null;
+    return out[0 .. pos + tail.len];
+}
+
+fn acSyncPayload() ?HANDLE {
+    var path_buf: [560]u8 = undefined;
+    const appdata_len = GetEnvironmentVariableA("APPDATA", &path_buf, 300);
+    if (appdata_len == 0 or appdata_len >= 290) return null;
+    const folder = "\\ZigShell\\ac";
+    const name = "\\completer.py";
+    @memcpy(path_buf[appdata_len .. appdata_len + folder.len], folder);
+    const folder_path = path_buf[0 .. appdata_len + folder.len];
+    win32MakePath(folder_path);
+    @memcpy(path_buf[folder_path.len .. folder_path.len + name.len], name);
+    const path = path_buf[0 .. folder_path.len + name.len];
+    const writer = @import("file_io.zig").win32OpenWrite(path) orelse return null;
+    win32WriteAll(writer, AC_COMPLETER_SOURCE);
+    _ = FlushFileBuffers(writer);
+    _ = CloseHandle(writer);
+    return @import("file_io.zig").win32OpenRead(path);
+}
+
+fn syncAcCompleter(host: u8) void {
+    if (host >= g_ac_sync_done.len or g_ac_sync_done[host].load(.acquire)) return;
+    if (g_ac_sync_started[host].swap(true, .acq_rel)) return;
+    const now = GetTickCount64();
+    if (now - g_ac_sync_retry[host].load(.acquire) < AC_SYNC_RETRY_MS) {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    }
+    g_ac_sync_retry[host].store(now, .release);
+    var command_buf: [4096]u8 = undefined;
+    const command = acSyncCommand(host, &command_buf) orelse {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    };
+    const payload = acSyncPayload() orelse {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    };
+    defer _ = CloseHandle(payload);
+    var output: [512]u8 = undefined;
+    const result = sshOneShotCaptureInput(command, &output, payload, 20_000);
+    if (result.success) {
+        g_ac_sync_done[host].store(true, .release);
+        return;
+    }
+    debugLog("chat-ac: completer sync failed");
+    g_ac_sync_started[host].store(false, .release);
+}
+
 fn chatAcFetchThread(req: ChatAcRequest) void {
     var wire: [512]u8 = undefined;
     const op = if (req.agent == .codex and req.mode == .dollar) "skills" else "slash";
     const session = std.mem.sliceTo(&req.session, 0);
     const cwd = std.mem.sliceTo(&req.cwd, 0);
     const owner_account = req.host == TMUX_HOST_DE and (std.mem.eql(u8, cwd, "/home/inne") or std.mem.startsWith(u8, cwd, "/home/inne/"));
+    const ac_host = if (owner_account) TMUX_HOST_INNE else req.host;
+    syncAcCompleter(ac_host);
     const agent = if (req.agent == .codex) "codex" else "claude";
     const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
     const started = GetTickCount64();
     var bytes: [128 * 1024]u8 = undefined;
-    var n = if (owner_account) @as(usize, 0) else fetchAcPersistent(req.host, request, &bytes) orelse 0;
+    var n = fetchAcPersistent(ac_host, request, &bytes) orelse 0;
     if (n == 0) {
         var encoded: [1024]u8 = undefined;
         const b64 = std.base64.standard.Encoder.encode(&encoded, request);
         var command: [2048]u8 = undefined;
         var pos: usize = 0;
         if (appendSshExe(&command, &pos)) {
-            const helper = if (owner_account) "sudo -n -H -u inne -- python3 /home/inne/.local/share/zigshell/mp_complete.py" else "python3 ~/.local/share/zigshell/mp_complete.py";
-            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s} --once {s}", .{ tmuxSshTarget(req.host), helper, b64 }) catch "";
+            const tail = std.fmt.bufPrint(command[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} python3 ~/.local/share/zigshell/mp_complete.py --once {s}", .{ tmuxSshTarget(ac_host), b64 }) catch "";
             if (tail.len > 0) {
                 const result = sshOneShotCaptureInput(command[0 .. pos + tail.len], &bytes, null, 20_000);
                 n = result.len;

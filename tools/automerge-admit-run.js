@@ -9,7 +9,7 @@ const query = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     deleteBranchOnMerge
     pullRequest(number: $number) {
-      id number state isDraft isCrossRepository author { login __typename } baseRefName headRefName headRefOid baseRef { target { oid } } mergeable changedFiles
+      id number state isDraft isCrossRepository title author { login __typename } baseRefName headRefName headRefOid baseRef { target { oid } } mergeable changedFiles
       labels(first: 100) { nodes { name } ${pageInfo} }
       files(first: 100) { nodes { path changeType } totalCount ${pageInfo} }
       headRef { compare(headRef: "master") { aheadBy baseTarget { oid } headTarget { oid } } }
@@ -48,6 +48,23 @@ function complete(connection, id, type, field, fields) {
     nodes.push(...connection.nodes);
   }
   return nodes;
+}
+
+function pullRequestCommits(repo, number) {
+  const pages = JSON.parse(gh('api', `repos/${repo}/pulls/${number}/commits?per_page=100`, '--paginate', '--slurp'));
+  if (!Array.isArray(pages) || !pages.every(Array.isArray)) throw new Error('invalid REST commits');
+  return pages.flat();
+}
+
+const coauthorLine = /^\s*co-authored-by\s*:/i;
+
+function squashBody(commits) {
+  return commits
+    .map(entry => (typeof entry?.commit?.message === 'string' ? entry.commit.message : null))
+    .filter(message => message !== null)
+    .map(message => message.split(/\r?\n/).filter(line => !coauthorLine.test(line)).join('\n').trim())
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function main() {
@@ -135,11 +152,14 @@ function main() {
     console.log('dry-run: no merge or dispatch');
     return;
   }
-  const merged = graphql(`mutation($id: ID!, $head: GitObjectID!) {
-    mergePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH }) {
+  if (!pr.title?.trim()) throw new Error('missing PR title for the squash commit');
+  const body = squashBody(pullRequestCommits(repo, number));
+  if (!body) throw new Error('no commit message to build the squash commit from');
+  const merged = graphql(`mutation($id: ID!, $head: GitObjectID!, $headline: String!, $body: String!) {
+    mergePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH, commitHeadline: $headline, commitBody: $body }) {
       pullRequest { number merged mergeCommit { oid } }
     }
-  }`, { id: pr.id, head: pr.headRefOid }).mergePullRequest?.pullRequest;
+  }`, { id: pr.id, head: pr.headRefOid, headline: pr.title.trim(), body }).mergePullRequest?.pullRequest;
   if (merged?.number !== number || merged.merged !== true || !/^[0-9a-f]{40}$/.test(merged.mergeCommit?.oid || '')) throw new Error('merge was not confirmed');
   console.log(`#${number}: merged ${merged.mergeCommit.oid}`);
   for (const workflow of ['test.yml', 'no-comments.yml', 'gitleaks.yml']) gh('workflow', 'run', workflow, '-R', repo, '--ref', 'master');

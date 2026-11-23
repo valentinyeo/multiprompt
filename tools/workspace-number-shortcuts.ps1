@@ -92,8 +92,8 @@ try {
     Select-Number 3 'Other second' 'second'
     Press @(0x12, 0x31) 'Alt+1 -> Starred'
     [void](Wait-For 'Starred selected' { $s = Session; $null -ne $s -and $s.PSObject.Properties['starred_view'] -and $s.starred_view })
-    Select-Number 1 'First recent' 'starred'
-    Select-Number 3 'Pinned first' 'starred'
+    Select-Number 3 'Second recent' 'starred'
+    Select-Number 1 'Pinned first' 'starred'
     Press @(0x11, 0x39) 'Starred Ctrl+9 -> unchanged'
     $until = [DateTime]::UtcNow.AddMilliseconds(1000)
     [void](Wait-For 'missing Starred position leaves selection unchanged' { if (-not (Selected 'Pinned first')) { throw 'Missing Starred position changed selection' }; [DateTime]::UtcNow -ge $until })

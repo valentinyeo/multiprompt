@@ -19,7 +19,7 @@ test('IGSH-1266 a hosted tab message is submitted to the host and never typed in
 test('IGSH-1266 a first hosted message survives a reconnecting channel', () => {
   const send = read('src/chat_send.zig');
   const submit = send.slice(send.indexOf('fn chatTmuxSendThread('), send.indexOf('fn chatMessageReduce('));
-  assert.ok(submit.includes('chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)'),
+  assert.ok(submit.includes('chatHistoryPersistent(job.key.checked() orelse return, query, 65536, &response, &job.written)'),
     'the submit still runs on the persistent channel first');
   assert.doesNotMatch(submit, /chatHistorySendForced/);
   assert.match(send, /history\.send_next_tick = GetTickCount64\(\) \+ chatMessageSyncRetryDelayMs\(history\.send_retry_step\)/);

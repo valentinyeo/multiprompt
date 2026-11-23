@@ -116,6 +116,53 @@ class MpSendTest(unittest.TestCase):
         self.assertEqual(chats[tmux]["state"], "stopped")
         self.assertEqual(chats[tmux]["name"], "Paused Lead")
 
+    def hosted_fixture(self, tmux, sid, name, pid, physical=()):
+        host = self.home / ".local/state/multiprompt/agent-host"
+        host.mkdir(parents=True, exist_ok=True)
+        key = "k" + str(len(list(host.glob("*.config.json"))))
+        (host / (key + ".config.json")).write_text(json.dumps(dict(cwd="/work/x", enabled=True, tmux=tmux)))
+        (host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider="claude", started=1.0)))
+        names = self.home / ".local/state/multiprompt/chat-names.json"
+        known = json.loads(names.read_text()) if names.is_file() else {}
+        known[tmux] = dict(name=name, at=1.0)
+        names.write_text(json.dumps(known))
+        bin_dir = self.home / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        tmux_sh = bin_dir / "tmux"
+        tmux_sh.write_text("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf '%s\\n' " + " ".join(physical) +
+                           "; exit 0; fi\nexit 1\n")
+        tmux_sh.chmod(0o755)
+        return dict(HOME=str(self.home), PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+
+    def test_SOFT_3093_a_hosted_chat_without_a_terminal_is_listed(self):
+        module = load_mp_send()
+        env = self.hosted_fixture("live-no-terminal", SID, "Hosted Lead", os.getpid(), physical=("live-other",))
+        with patch.dict(os.environ, env):
+            chats = {row["tmux"]: row for row in module.live_chats()}
+        self.assertIn("live-no-terminal", chats)
+        self.assertEqual(chats["live-no-terminal"]["name"], "Hosted Lead")
+        self.assertEqual(chats["live-no-terminal"]["state"], "idle")
+        self.assertEqual(chats["live-no-terminal"]["sid"], SID)
+        self.assertEqual(chats["live-no-terminal"]["cwd"], "/work/x")
+
+    def test_SOFT_3093_a_terminal_chat_without_a_host_is_listed(self):
+        module = load_mp_send()
+        env = self.hosted_fixture("live-pane", "22222222-3333-4444-5555-666666666666", "Pane Lead", 99999999,
+                                  physical=("live-pane",))
+        with patch.dict(os.environ, env):
+            chats = {row["tmux"]: row for row in module.live_chats()}
+        self.assertIn("live-pane", chats)
+        self.assertEqual(chats["live-pane"]["name"], "Pane Lead")
+        self.assertEqual(chats["live-pane"]["state"], "stopped")
+
+    def test_SOFT_3093_a_chat_with_no_host_and_no_terminal_is_left_out(self):
+        module = load_mp_send()
+        env = self.hosted_fixture("live-gone", "33333333-4444-5555-6666-777777777777", "Gone Lead", 99999999,
+                                  physical=("live-other",))
+        with patch.dict(os.environ, env):
+            chats = {row["tmux"]: row for row in module.live_chats()}
+        self.assertNotIn("live-gone", chats)
+
     def test_IGSH_1266_installed_runtime_reader_is_preferred(self):
         runtime = self.home / ".multiprompt-runtime"
         runtime.mkdir(mode=0o700)
