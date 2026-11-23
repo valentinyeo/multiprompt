@@ -121,7 +121,7 @@ class ClaudeStreamSession:
             "--output-format", "stream-json",
             "--verbose",
             "--model", model,
-            "--disallowedTools", "Bash,Edit,Write,Glob,Grep,WebFetch,WebSearch,Agent,NotebookEdit",
+            "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Agent,NotebookEdit",
             "--append-system-prompt", append_prompt,
         ]
         if extra_args:

@@ -218,38 +218,40 @@ TURNS_BY_SKILL = {
     "pospeak": POSPEAK_TURNS,
 }
 
-POSPEAK_FORBIDDEN_WORDS = (
-    "verifyemailtoken",
-    "sqlite",
-    "sqlite_busy",
-    "json-rpc",
-    "race condition",
-    "middleware",
-    "deadlock",
-    "mutex",
-    "stack trace",
-    "stderr",
-    "sigpipe",
-    "websocket",
-    "gitleaks",
-    "oauth",
-    "regex",
-    "compare-and-swap",
-    "idempotency",
-    "dereference",
-    "null pointer",
-    "host_claude_write",
-    "manifest.json",
-    "bridge.js",
-    "chat_history_reader.py",
-    "chat_render.zig",
-    "sidebar.zig",
-    "verify.ts",
-    "acme",
-    "http-01",
-    "updated_at",
-    "oom",
-    "wal ",
+POSPEAK_FORBIDDEN_PATTERNS = tuple(
+    (label, re.compile(pattern, re.IGNORECASE))
+    for label, pattern in (
+        ("verifyEmailToken", r"\bverifyEmailToken\b"),
+        ("SQLite", r"\bsqlite(?:_busy)?\b"),
+        ("JSON-RPC", r"\bjson-rpc\b"),
+        ("race condition", r"\brace condition\b"),
+        ("middleware", r"\bmiddleware\b"),
+        ("deadlock", r"\bdeadlock\b"),
+        ("mutex", r"\bmutex\b"),
+        ("stack trace", r"\bstack trace\b"),
+        ("stderr", r"\bstderr\b"),
+        ("SIGPIPE", r"\bsigpipe\b"),
+        ("WebSocket", r"\bwebsocket\b"),
+        ("gitleaks", r"\bgitleaks\b"),
+        ("OAuth", r"\boauth\b"),
+        ("regex", r"\bregex\b"),
+        ("compare-and-swap", r"\bcompare-and-swap\b"),
+        ("idempotency", r"\bidempotency\b"),
+        ("dereference", r"\bdereference\b"),
+        ("null pointer", r"\bnull pointer\b"),
+        ("host_claude_write", r"\bhost_claude_write\b"),
+        ("manifest.json", r"\bmanifest\.json\b"),
+        ("bridge.js", r"\bbridge\.js\b"),
+        ("chat_history_reader.py", r"\bchat_history_reader\.py\b"),
+        ("chat_render.zig", r"\bchat_render\.zig\b"),
+        ("sidebar.zig", r"\bsidebar\.zig\b"),
+        ("verify.ts", r"\bverify\.ts\b"),
+        ("ACME", r"\bacme\b"),
+        ("HTTP-01", r"\bhttp-01\b"),
+        ("updated_at", r"\bupdated_at\b"),
+        ("OOM", r"\boom\b"),
+        ("WAL", r"\bwal\b"),
+    )
 )
 
 FILE_PATH_RE = re.compile(r"\b[a-zA-Z0-9_.-]+/[a-zA-Z0-9_./-]+\.[a-z]{1,4}\b")
@@ -280,8 +282,7 @@ def check_pospeak(reply, pinned):
     has_next_line = any(re.match(r"^(?:\*\*)?next\s*:", line, re.IGNORECASE) for line in lines[-3:])
     word_count = len(text.split())
     concise = 5 <= word_count <= 130
-    lower = text.lower()
-    jargon_hits = [w.strip() for w in POSPEAK_FORBIDDEN_WORDS if w in lower]
+    jargon_hits = [label for label, pat in POSPEAK_FORBIDDEN_PATTERNS if pat.search(text)]
     if "`" in text:
         jargon_hits.append("backtick")
     if FILE_PATH_RE.search(text):

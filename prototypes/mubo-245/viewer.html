@@ -349,9 +349,19 @@ function renderOption(opt) {
   const unpinPass = (cs.unpin_pass || 0) + (ps.unpin_pass || 0);
   const unpinTotal = (cs.unpin_total || 0) + (ps.unpin_total || 0);
   const avgMs = Math.round(((cs.avg_turn_ms || 0) + (ps.avg_turn_ms || 0)) / 2);
-  const avgIn = Math.round(((cs.avg_input_tokens || 0) + (ps.avg_input_tokens || 0)) / 2);
+  const avgCacheCreate = Math.round(((cs.avg_cache_creation_tokens || 0) + (ps.avg_cache_creation_tokens || 0)) / 2);
   const avgCacheR = Math.round(((cs.avg_cache_read_tokens || 0) + (ps.avg_cache_read_tokens || 0)) / 2);
   const totalCost = ((cs.total_cost_usd || 0) + (ps.total_cost_usd || 0)).toFixed(4);
+  let extraLine = "";
+  if (opt === "a" && cs.isolation_result) {
+    extraLine = `Per-chat isolation (2nd sid in same cwd): ${cs.isolation_result.passed ? "PASS" : "FAIL"} (reply="${cs.isolation_result.reply}")`;
+  } else if (opt === "b") {
+    extraLine = `Native transcript markers written: ${(cs.transcript_marker_hits || 0) + (ps.transcript_marker_hits || 0)} (reader must strip on load)`;
+  } else if (opt === "c") {
+    const stuck = cs.option_c_unpin_stuck_check ? (cs.option_c_unpin_stuck_check.remained_stuck_without_restart ? "STUCK without restart" : "cleared") : "n/a";
+    const styleFlag = (data.probe || {}).has_output_style_flag ? "flag exists" : "no --output-style CLI flag (settings-only)";
+    extraLine = `Unpin check: ${stuck}; outputStyle: ${styleFlag}`;
+  }
   const samplePos = pickTurns(pospeak.turns, [1, 11, 20, 21]);
   const sampleCan = pickTurns(canary.turns, [1, 10, 11, 20, 21]);
   const previewTurn = samplePos[0] || { ui_prompt: "Explain verifyEmailToken JWT exp bug...", reply: "**Login links expired early.** ..." };
@@ -386,14 +396,15 @@ function renderOption(opt) {
       <div class="mono"><b>Unpin:</b> ${esc(meta.unpin)}</div>
       <div class="mono"><b>Codex / other providers:</b> ${esc(meta.codex)}</div>
       <div class="mono"><b>Transcript hygiene:</b> ${esc(meta.wire)}</div>
+      <div class="mono"><b>Empirical probe:</b> ${esc(extraLine)}</div>
     </div>
     <div class="card">
       <h2>${esc(meta.title)} — Live Windows Claude Code Proof (Model: ${esc(data.model || "haiku")})</h2>
       <div class="metrics">
         <div class="metric"><div class="k">Pinned Pass (T1-20)</div><div class="v" style="color:${pinnedPass === pinnedTotal && pinnedTotal > 0 ? 'var(--green)' : 'var(--amber)'}">${pinnedPass}/${pinnedTotal}</div><div class="s">Canary ${cs.pinned_pass||0}/${cs.pinned_total||0} · Pospeak ${ps.pinned_pass||0}/${ps.pinned_total||0}</div></div>
-        <div class="metric"><div class="k">Unpin Clean (T21-22)</div><div class="v">${unpinPass}/${unpinTotal}</div><div class="s">${opt === 'c' ? `Restart ${ps.unpin_restart_ms || cs.unpin_restart_ms || 0}ms` : 'Zero restart'}</div></div>
+        <div class="metric"><div class="k">Unpin Clean (T21-22)</div><div class="v" style="color:${unpinPass === unpinTotal && unpinTotal > 0 ? 'var(--green)' : 'var(--amber)'}">${unpinPass}/${unpinTotal}</div><div class="s">${opt === 'c' ? `Restart ${ps.unpin_restart_ms || cs.unpin_restart_ms || 0}ms` : 'Zero restart'}</div></div>
         <div class="metric"><div class="k">Avg Turn Latency</div><div class="v">${avgMs} ms</div><div class="s">${opt === 'a' ? `Hook avg ${cs.avg_hook_ms || 0}ms` : `Restart ${cs.restart_ms || 0}ms`}</div></div>
-        <div class="metric"><div class="k">Tokens / Turn (avg)</div><div class="v">${avgIn} in</div><div class="s">${avgCacheR} cache read · $${totalCost}</div></div>
+        <div class="metric"><div class="k">New Cache Tok/Turn</div><div class="v">${avgCacheCreate}</div><div class="s">${avgCacheR} cache read · $${totalCost}</div></div>
         <div class="metric"><div class="k">Transcript Markers</div><div class="v">${(cs.transcript_marker_hits || 0) + (ps.transcript_marker_hits || 0)}</div><div class="s">${opt === 'b' ? 'Needs strip on read' : 'Native transcript clean'}</div></div>
       </div>
       <div class="heatmap-wrap">

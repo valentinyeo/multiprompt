@@ -26,10 +26,10 @@ def main():
         canary_summary = ((data.get("skills") or {}).get("pinned-canary") or {}).get("summary") or {}
         lines = [
             f"=== OPTION {opt.upper()} ===",
-            f"pinned-canary: {canary_summary.get('pinned_pass')}/{canary_summary.get('pinned_total')} pinned, "
-            f"{canary_summary.get('unpin_pass')}/{canary_summary.get('unpin_total')} unpinned",
-            f"pospeak deterministic: {summary.get('pinned_pass')}/{summary.get('pinned_total')} pinned, "
-            f"{summary.get('unpin_pass')}/{summary.get('unpin_total')} unpinned",
+            f"pinned-canary: pinned_pass={canary_summary.get('pinned_pass')}/{canary_summary.get('pinned_total')} (expected PINNED), "
+            f"unpin_pass={canary_summary.get('unpin_pass')}/{canary_summary.get('unpin_total')} (expected NO PINNED after unpin)",
+            f"pospeak deterministic: pinned_pass={summary.get('pinned_pass')}/{summary.get('pinned_total')}, "
+            f"unpin_pass={summary.get('unpin_pass')}/{summary.get('unpin_total')}",
         ]
         for turn in turns:
             if turn.get("turn") in SAMPLE_TURNS:
@@ -58,7 +58,7 @@ def main():
             {"role": "system", "content": "Return compact valid JSON only. No markdown fences."},
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": 900,
+        "max_tokens": 3500,
     }
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
