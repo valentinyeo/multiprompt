@@ -5875,10 +5875,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
         app_state.g_search_result_count += 1;
     }
-
-    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
         app_state.g_search_result_count += 1;
     }
