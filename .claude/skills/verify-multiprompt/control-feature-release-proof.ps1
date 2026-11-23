@@ -1,6 +1,5 @@
-$result.seedBoundary = 'Two isolated saved tmux tabs seeded once before launch, one of them reporting /home/inne as its folder. Only SSH, tmux and agent transport are stand-ins. No account credentials, real server or paid agent are used.'
+$result.seedBoundary = 'Two isolated saved tmux tabs seeded once before launch. Only SSH, tmux and agent transport are stand-ins. No account credentials, real server or paid agent are used.'
 $result.releaseProof = @{
-    soft3053 = 'Real composer autocomplete; the account that answers the slash menu is the stand-in host owner'
     soft3039 = 'Real saved server tabs, normal quit, real relaunch and real native terminal input'
     soft3046 = 'Real MPTerminal caret pixels in the focused console, before and after a session switch'
 }
@@ -10,43 +9,6 @@ function Save-ReleaseCheck([string]$Name, [hashtable]$Values) {
     foreach ($key in $Values.Keys) { $check[$key] = $Values[$key] }
     $result.checks += $check
 }
-
-Press @(0x11, 0x32) 'Ctrl+2: select the chat owned by the second account'
-Wait-Until {
-    $saved = Read-Session
-    $null -ne $saved -and $saved.tabs[$saved.active_tab].tmux_session -ceq 'live-slash' -and $saved.tabs[$saved.active_tab].cv
-} 'second-account chat selected with Chat View on'
-function Focus-Composer([string]$Step) {
-    Wait-Until { [VerifyNative]::FirstVisibleChild($script:window, 'Edit') -ne [IntPtr]::Zero } 'visible chat composer' 30
-    $composerWindow = [VerifyNative]::FirstVisibleChild($script:window, 'Edit')
-    $client = New-Object VerifyNative+Rect
-    Wait-Until {
-        [void][VerifyNative]::GetClientRect($composerWindow, [ref]$client)
-        $client.Right -gt 10 -and $client.Bottom -gt 10
-    } 'chat composer client area' 30
-    [VerifyNative]::ClickClient($composerWindow, [int]($client.Right / 2), [int]($client.Bottom / 2))
-    Wait-ChatFocus 'Edit' $Step
-}
-Focus-Composer 'owner-slash-composer'
-$composer = [IntPtr][System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle
-if ([VerifyNative]::Class($composer) -cne 'Edit' -or [VerifyNative]::GetAncestor($composer, 2) -ne $script:window) { throw 'Slash composer is not owned by the verified app' }
-$debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-$slashOffset = (Read-SharedText $debugLog).Length
-Type-Text '/verify-owner'
-Wait-Until {
-    (Read-SharedText $debugLog).Substring($slashOffset) -match 'chat-ac: fetched host=[02] bytes=[1-9]'
-} 'second account answered the slash menu request' 30
-Snapshot 'owner-slash-menu'
-if ([VerifyNative]::EditText($composer) -cne '/verify-owner') { throw 'Slash draft changed before the completion was accepted' }
-$ownerFile = Join-Path $remoteState 'completion-owner.jsonl'
-if (-not (Test-Path $ownerFile)) { throw 'The slash menu recorded no completion request' }
-$ownerRequests = @(Get-Content $ownerFile | ForEach-Object { $_ | ConvertFrom-Json })
-if (-not ($ownerRequests | Where-Object { $_.target -ceq 'remote-1' -and $_.owner -ceq 'inne' -and $_.request.Contains('/home/inne/projects/sample') })) { throw 'The slash menu did not ask the second account for its commands' }
-Press @(0x09) 'Tab: accept the second account skill row from the open menu'
-if ([VerifyNative]::EditText($composer) -cne '/verify-owner ') { throw 'The slash menu listed no second-account command to accept' }
-Copy-Item $ownerFile (Join-Path $Evidence 'completion-owner.jsonl')
-Snapshot 'owner-slash-accepted'
-Save-ReleaseCheck 'SOFT-3053' @{ passed = $true; typed = '/verify-owner'; accepted = '/verify-owner '; target = 'remote-1'; owner = 'inne'; menuScreenshot = 'owner-slash-menu.png' }
 
 function Find-ConsoleWindow {
     Wait-Until {

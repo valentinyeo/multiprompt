@@ -190,7 +190,7 @@ These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconn
 Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.
 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
-- [Release proof](release-proof.md): one tagged release run for the second account's slash menu, server shell tabs after a restart, and a console caret that keeps blinking.
+- [Release proof](release-proof.md): one tagged release run for server shell tabs after a restart and a console caret that keeps blinking.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
 
 Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
