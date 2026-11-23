@@ -1,75 +1,66 @@
 Add-Type @'
 using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Runtime.InteropServices;
-public static class SidebarRowCursor {
+public static class SidebarRowProof {
     [StructLayout(LayoutKind.Sequential)]
-    public struct Point { public int X; public int Y; }
+    public struct CursorPoint { public int X; public int Y; }
     [DllImport("user32.dll")]
-    public static extern bool GetCursorPos(out Point point);
-    public static int[] Now() {
-        Point point;
+    static extern bool GetCursorPos(out CursorPoint point);
+    public static int[] Cursor() {
+        CursorPoint point;
         if (!GetCursorPos(out point)) return new int[] { -1, -1 };
         return new int[] { point.X, point.Y };
     }
+    static bool Ink(Bitmap image, int x, int y) {
+        Color color = image.GetPixel(x, y);
+        return color.R > 200 && color.G > 200 && color.B > 200;
+    }
+    public static int[][] Bands(string path, int dx, int top, int bottom) {
+        var bands = new List<int[]>();
+        int openTop = -1, openBottom = -1;
+        using (var image = new Bitmap(path)) {
+            if (bottom > image.Height - 1) bottom = image.Height - 1;
+            for (int y = top; y < bottom; y++) {
+                bool ink = false;
+                for (int x = dx + 20; x < dx + 170 && x < image.Width; x++) {
+                    if (Ink(image, x, y)) { ink = true; break; }
+                }
+                if (ink) {
+                    if (openTop < 0) openTop = y;
+                    openBottom = y;
+                } else if (openTop >= 0) {
+                    if (openBottom - openTop >= 6) bands.Add(new int[] { openTop, openBottom });
+                    openTop = -1;
+                }
+            }
+            if (openTop >= 0 && openBottom - openTop >= 6) bands.Add(new int[] { openTop, openBottom });
+        }
+        return bands.ToArray();
+    }
+    public static double Overlap(string pathBefore, string pathAfter, int dx, int top, int bottom) {
+        int width = 150;
+        int height = bottom - top;
+        if (height <= 0) throw new InvalidOperationException("Row band is empty");
+        using (var before = new Bitmap(pathBefore))
+        using (var after = new Bitmap(pathAfter)) {
+            int matching = 0, beforeInk = 0;
+            for (int x = dx + 20; x < dx + 20 + width; x++) {
+                int countBefore = 0, countAfter = 0;
+                for (int y = top; y < bottom; y++) {
+                    if (Ink(before, x, y)) countBefore++;
+                    if (Ink(after, x, y)) countAfter++;
+                }
+                beforeInk += countBefore;
+                if (Math.Abs(countBefore - countAfter) <= 1) matching++;
+            }
+            if (beforeInk < 60) throw new InvalidOperationException("Row band under the pointer has too little text to compare: " + beforeInk);
+            return 100.0 * matching / width;
+        }
+    }
 }
 '@
-
-function Get-SidebarBands([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bottom) {
-    $bitmap = [Drawing.Bitmap]::new($Path)
-    try {
-        $bands = @()
-        $open = $null
-        for ($y = $Top; $y -lt $Bottom -and $y -lt $bitmap.Height; $y++) {
-            $min = 255
-            $max = 0
-            for ($x = $Dx + 20; $x -lt $Dx + 170 -and $x -lt $bitmap.Width; $x++) {
-                $color = $bitmap.GetPixel($x, $y)
-                $lum = [int](($color.R + $color.G + $color.B) / 3)
-                if ($lum -lt $min) { $min = $lum }
-                if ($lum -gt $max) { $max = $lum }
-            }
-            $ink = ($max - $min) -gt 60
-            if ($ink) {
-                if ($null -eq $open) { $open = @{ top = $y; bottom = $y } } else { $open.bottom = $y }
-            } elseif ($null -ne $open) {
-                if (($open.bottom - $open.top) -ge 9) { $bands += , $open }
-                $open = $null
-            }
-        }
-        if ($null -ne $open -and ($open.bottom - $open.top) -ge 9) { $bands += , $open }
-        return $bands
-    } finally { $bitmap.Dispose() }
-}
-
-function Get-BandSignature([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bottom) {
-    $bitmap = [Drawing.Bitmap]::new($Path)
-    try {
-        $min = 255
-        $max = 0
-        for ($y = $Top; $y -lt $Bottom; $y++) {
-            for ($x = $Dx + 20; $x -lt $Dx + 170; $x++) {
-                $color = $bitmap.GetPixel($x, $y)
-                $lum = [int](($color.R + $color.G + $color.B) / 3)
-                if ($lum -lt $min) { $min = $lum }
-                if ($lum -gt $max) { $max = $lum }
-            }
-        }
-        $threshold = $min + [int](($max - $min) * 0.55)
-        $signature = ''
-        $total = 0
-        for ($x = $Dx + 20; $x -lt $Dx + 170; $x++) {
-            $n = 0
-            for ($y = $Top; $y -lt $Bottom; $y++) {
-                $color = $bitmap.GetPixel($x, $y)
-                $lum = [int](($color.R + $color.G + $color.B) / 3)
-                if ($lum -ge $threshold) { $n++ }
-            }
-            $total += $n
-            $signature += [char](48 + [Math]::Min($n, 9))
-        }
-        return @{ signature = $signature; ink = $total }
-    } finally { $bitmap.Dispose() }
-}
 
 $check = @{ name = 'sidebar-click-row'; passed = $false; boundary = 'Two stand-in tmux tabs on the replaced SSH boundary; real sidebar, real click, real chat reopen.' }
 $result.checks += $check
@@ -86,63 +77,50 @@ if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [Ve
 $dx = $origin.X - $frame.Left
 $dy = $origin.Y - $frame.Top
 WindowShot 'sidebar-row-locate'
-$bands = Get-SidebarBands (Join-Path $Evidence 'sidebar-row-locate.png') $dx $dy ($dy + 90) ([Math]::Min($dy + 430, $frame.Bottom - $frame.Top - 110))
-if ($bands.Count -lt 2) { throw ('Sidebar shows fewer than two session rows: ' + $bands.Count) }
+$bands = [SidebarRowProof]::Bands((Join-Path $Evidence 'sidebar-row-locate.png'), $dx, ($dy + 90), ($dy + 340))
+if ($null -eq $bands -or $bands.Count -lt 2) { throw ('Sidebar session rows not found above the status card: ' + $(if ($null -eq $bands) { 0 } else { $bands.Count })) }
 $row = $bands[$bands.Count - 1]
 $clickX = $dx + 85
-$clickY = [int](($row.top + $row.bottom) / 2)
-Record ("Pointer target: sidebar row at client $clickX,$clickY spanning $($row.top)..$($row.bottom)")
+$clickY = [int](($row[0] + $row[1]) / 2)
+Record ("Pointer target: sidebar row at client $clickX,$clickY spanning $($row[0])..$($row[1])")
 [VerifyNative]::MoveMouseClient($script:window, $clickX, $clickY, $false)
 Start-Sleep -Milliseconds 500
 WindowShot 'sidebar-row-before'
-$pointerBefore = [SidebarRowCursor]::Now()
+$pointerBefore = [SidebarRowProof]::Cursor()
 Record ('Pointer before click: ' + ($pointerBefore -join ',') + ' client ' + $clickX + ',' + $clickY)
-$stateBefore = Read-Session
+$activeBefore = (Read-Session).active_tab
 [VerifyNative]::ClickClient($script:window, $clickX, $clickY)
-$pointerAfterClick = [SidebarRowCursor]::Now()
+$pointerAfterClick = [SidebarRowProof]::Cursor()
 Record ('Pointer after click: ' + ($pointerAfterClick -join ','))
-Wait-Until {
-    $state = Read-Session
-    $null -ne $state -and $state.active_tab -eq 1
-} 'clicked sidebar session became the selected chat' 60
-Start-Sleep -Milliseconds 1500
+Wait-Until { (Read-Session).active_tab -eq 1 } 'clicked sidebar session became the selected chat' 60
+Start-Sleep -Milliseconds 2000
 WindowShot 'sidebar-row-after'
-$pointerAfter = [SidebarRowCursor]::Now()
+$pointerAfter = [SidebarRowProof]::Cursor()
 if ($pointerAfter[0] -ne $pointerBefore[0] -or $pointerAfter[1] -ne $pointerBefore[1]) { throw ('Pointer moved during the click proof: ' + ($pointerBefore -join ',') + ' to ' + ($pointerAfter -join ',')) }
-$bandTop = $row.top
-$bandBottom = $row.bottom
-$rowBeforeSignature = Get-BandSignature (Join-Path $Evidence 'sidebar-row-before.png') $dx $dy $bandTop $bandBottom
-$rowAfterSignature = Get-BandSignature (Join-Path $Evidence 'sidebar-row-after.png') $dx $dy $bandTop $bandBottom
-if ($rowBeforeSignature.ink -lt 60) { throw ('The row band under the pointer has too little text to compare: ' + $rowBeforeSignature.ink) }
-$matching = 0
-for ($i = 0; $i -lt $rowBeforeSignature.signature.Length; $i++) {
-    if ([Math]::Abs([int]$rowBeforeSignature.signature[$i] - [int]$rowAfterSignature.signature[$i]) -le 1) { $matching++ }
-}
-$overlap = [Math]::Round(100.0 * $matching / $rowBeforeSignature.signature.Length, 1)
+$overlap = [Math]::Round([SidebarRowProof]::Overlap((Join-Path $Evidence 'sidebar-row-before.png'), (Join-Path $Evidence 'sidebar-row-after.png'), $dx, $row[0], $row[1]), 1)
+$activeAfter = (Read-Session).active_tab
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $trace = if (Test-Path $log) { Read-SharedText $log } else { '' }
-$reopens = ([regex]::Matches($trace, 'respawnShellInPlace ok kind=')).Count + ([regex]::Matches($trace, 'ssh-reconnect|reconnect-ok|switchToShell: 1 -> 0')).Count
+$reopens = ([regex]::Matches($trace, 'respawnShellInPlace ok kind=')).Count + ([regex]::Matches($trace, 'ssh-reconnect|reconnect-ok')).Count
 Snapshot 'after'
 Save-Json @{
     pointerBefore = $pointerBefore
     pointerAfterClick = $pointerAfterClick
     pointerAfter = $pointerAfter
-    target = @{ clientX = $clickX; clientY = $clickY; bandTop = $bandTop; bandBottom = $bandBottom }
-    clickX = $clickX
-    clickY = $clickY
-    clickPoint = @($clickX + $origin.X - $frame.Left, $clickY + $origin.Y - $frame.Top)
+    clickClient = @($clickX, $clickY)
+    clickScreen = @(($clickX + $dx), ($clickY + $dy))
+    band = @($row[0], $row[1])
     inkOverlap = $overlap
-    inkBefore = $rowBeforeSignature.ink
-    inkAfter = $rowAfterSignature.ink
-    activeBefore = $stateBefore.active_tab
-    activeAfter = (Read-Session).active_tab
+    activeBefore = $activeBefore
+    activeAfter = $activeAfter
     reopenLogLines = $reopens
+    screenshots = @('sidebar-row-before.png', 'sidebar-row-after.png')
 } 'sidebar-row.json'
 $check.pointer = $pointerAfter
 $check.inkOverlap = $overlap
-$check.activeBefore = $stateBefore.active_tab
-$check.activeAfter = (Read-Session).active_tab
+$check.activeBefore = $activeBefore
+$check.activeAfter = $activeAfter
 $check.screenshots = @('sidebar-row-before.png', 'sidebar-row-after.png')
-if ($overlap -lt 70) { throw ('The clicked sidebar row no longer sits under the pointer: ink overlap ' + $overlap + '%') }
+if ($overlap -lt 75) { throw ('The clicked sidebar row no longer sits under the pointer: row ink overlap ' + $overlap + '%') }
 $check.passed = $true
 Save-Json $check 'sidebar-row-check.json'
