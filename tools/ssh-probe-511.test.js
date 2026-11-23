@@ -245,7 +245,7 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
   const respawn = body('respawnShellInPlace', read('console.zig'));
   assert.doesNotMatch(respawn, /ssh_reconnect\.(?:ever_healthy|restored_session|gone_results) =/);
   assert.match(body('start', reconnect), /self\.healthy_attach = false/);
-  assert.match(body('preserveFailedRemoteSavedTab', read('session.zig')), /shell\.ssh_reconnect\.restored_session = tab\.kind == \.tmux/);
+  assert.match(body('preserveFailedRemoteSavedTab', read('session.zig')), /shell\.ssh_reconnect\.restored_session = tab\.tmux_session_len > 0/);
   assert.match(body('applyServerLayout', read('account_desktop.zig')), /shell\.ssh_reconnect\.restored_session = tab\.tmux_session\.len > 0/);
   assert.match(body('spawnShellWithSession', read('console.zig')), /const creating_session = kind == \.tmux and \(app_state\.g_pending_resurrect_len > 0 or app_state\.g_pending_tmux_cmd_len > 0\)/);
   assert.match(body('spawnShellWithSession', read('console.zig')), /\.creating_session = creating_session/);
