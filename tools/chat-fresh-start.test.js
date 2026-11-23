@@ -227,7 +227,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Prepare a fresh start' in old.stdin.getvalue().decode()
     sent = new.stdin.getvalue().decode()
     assert 'Finish the saved draft.' in sent and 'Still the same address' in sent
-    assert r['host_config'](provider, sid) == config
+    assert r['host_config'](provider, sid) == dict(config, native_session=state['context_session'])
     history = paths['history'].read_text()
     assert history.index('Fresh start') < history.index('Read the handover.')
     session['db'].close()

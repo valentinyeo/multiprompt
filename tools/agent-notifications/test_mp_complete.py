@@ -128,6 +128,18 @@ class Completion(unittest.TestCase):
             self.assertIn("@mp\t11\tslash\terror\t", result)
             self.assertNotIn("@@MP_END@@\n", result.split("\n")[1:2])
 
+    def test_folder_skills_use_a_mtime_cache(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+            with patch.object(complete, "HOME", Path(home)):
+                project = Path(repo)
+                skill = project / ".claude/skills/verify-multiprompt/SKILL.md"
+                skill.parent.mkdir(parents=True)
+                skill.write_text("---\nname: verify-multiprompt\ndescription: check\n---\n", encoding="utf-8")
+                complete.PROJECT_SCAN_CACHE.clear()
+                rows = complete.project_and_plugins(project, {})
+                self.assertIn("verify-multiprompt", [row[1] for row in rows])
+                self.assertIn(str(project), complete.PROJECT_SCAN_CACHE)
+
     def test_only_current_enabled_plugin_is_scanned(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
             home = Path(tmp)
