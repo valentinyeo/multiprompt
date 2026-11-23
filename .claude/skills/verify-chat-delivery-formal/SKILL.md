@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-SOFT-3083 regenerates coverage after merging master `e11386929a20a51d87f0d91c429a097324c5571b`. Every covered reader function is AST-identical to that master, and all covered files except the reader and feedback test are byte-identical. Feedback-context publication is outside the modeled delivery path; the feedback test remains an import dependency. The merged native probes, replay and model are unchanged from master.
+SOFT-3083 regenerates coverage after merging master and after `host_reap_agent` clears gone PIDs. Every covered reader function is AST-identical to master; all other covered files except the reader and hosted reader test are byte-identical. Feedback-context publication, host reap and the new reap regression test are outside the modeled delivery path. The merged native probes, replay and model are unchanged from master.
 
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 

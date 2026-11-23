@@ -33,9 +33,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last confirmed source/model sync commit is `e11386929a20a51d87f0d91c429a097324c5571b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last confirmed source/model sync commit is `aad01be6743c0e9544b9b7e278abd61ec087ffd8`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
-SOFT-3083 regenerates coverage after merging that master. Every covered reader function is AST-identical to master, and `tools/chat-switch-ai.test.js` is byte-identical. The feedback-context publication is outside the modeled switch path.
+SOFT-3083 regenerates coverage after merging that master and after `host_reap_agent` clears gone PIDs. Every covered reader function is AST-identical to master, and `tools/chat-switch-ai.test.js` is byte-identical. Feedback-context publication and host reap are outside the modeled switch path.
 
 | Source | Covered behavior |
 | --- | --- |
