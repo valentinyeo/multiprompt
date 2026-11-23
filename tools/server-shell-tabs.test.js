@@ -22,6 +22,17 @@ test('SOFT-3128 remote shell reads use a bounded local process wait', () => {
   assert.match(setup, /function Read-ProofServer/);
   assert.match(setup, /WaitForExit\(\$DeadlineSeconds \* 1000\)/);
   assert.match(setup, /BatchMode=yes/);
+  assert.match(setup, /function Proof-SyncKnownHosts/);
+});
+
+test('SOFT-3128 paste, interrupt and restore wait on visible shell evidence', () => {
+  assert.match(journey, /Proof-SyncKnownHosts/);
+  assert.match(journey, /pasted the command onto the shell prompt/);
+  assert.match(journey, /Proof-VisibleContains \$marker/);
+  assert.match(journey, /the running proof command painted output in the shell/);
+  assert.match(journey, /SOFT3001 INTERRUPTED/);
+  assert.match(journey, /the restored tmux tab shows a terminal window/);
+  assert.match(fs.readFileSync(root('.claude/skills/verify-multiprompt/server-shell-release-fixture.py'), 'utf8'), /mouse', 'off'/);
 });
 
 test('SOFT-3128 every wait in the journey names a step and uses an explicit timeout', () => {

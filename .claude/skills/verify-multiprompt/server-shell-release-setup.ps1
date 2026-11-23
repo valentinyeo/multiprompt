@@ -28,6 +28,19 @@ function Read-ProofServer([string]$Command, [string]$Name, [int]$DeadlineSeconds
         $process.Dispose()
     }
 }
+function Proof-SyncKnownHosts {
+    $knownHosts = Join-Path $scratch 'home/.ssh/known_hosts'
+    $scanName = 'shell-known-hosts-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $scan = (Invoke-ServerNative -FilePath "$env:SystemRoot/System32/OpenSSH/ssh-keyscan.exe" -Arguments @('-p', '2222', '-t', 'ed25519', '127.0.0.1') -Evidence $Evidence -Name $scanName).Trim()
+    $lines = @($scan -split "`n" | Where-Object { $_.Trim() })
+    if ($lines.Count -eq 0) { throw 'host key scan returned no entries for the runner server' }
+    New-Item -ItemType Directory -Force (Split-Path $knownHosts) | Out-Null
+    [IO.File]::WriteAllText($knownHosts, ($lines -join "`n") + "`n")
+    New-Item -ItemType Directory -Force "$env:USERPROFILE/.ssh" -ErrorAction SilentlyContinue | Out-Null
+    [IO.File]::WriteAllText("$env:USERPROFILE/.ssh/known_hosts", ($lines -join "`n") + "`n")
+    Save-Json @{ knownHosts = $knownHosts; lines = $lines.Count; at = [DateTime]::UtcNow.ToString('o') } 'shell-known-hosts.json'
+}
+
 $fixture = "$serverProofRepo/.claude/skills/verify-multiprompt/server-shell-release-fixture.py"
 $fixtureResult = Read-ProofServer "python3 $fixture $serverProofRepo" 'shell-fixture'
 Save-Json ($fixtureResult | ConvertFrom-Json) 'shell-fixture.json'
