@@ -1,0 +1,1 @@
+Mentions in a grey waiting message cannot be clicked

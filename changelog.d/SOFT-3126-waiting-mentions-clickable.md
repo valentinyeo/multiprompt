@@ -1,0 +1,1 @@
+Waiting messages let you open @session mentions and links the same way as sent messages.

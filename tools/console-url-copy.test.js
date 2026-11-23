@@ -44,7 +44,7 @@ test("Chat View paints, hovers, and opens links through the shell-link route", (
   const end = source.indexOf("fn ensureChatTranscriptClassRegistered(", start);
   const handler = source.slice(start, end);
   assert.match(handler, /WM_MOUSEMOVE => \{[\s\S]*chatTranscriptLinkAt\(hwnd, GET_X\(lp\), GET_Y\(lp\)\)/);
-  assert.match(handler, /WM_LBUTTONDOWN => \{[\s\S]*if \(chatTranscriptLinkAt[\s\S]*openClickedLink\(g_chat_capture\[link.start\.\.link.end\]\)/);
+  assert.match(handler, /WM_LBUTTONDOWN => \{[\s\S]*if \(chatTranscriptLinkAt[\s\S]*chatClickedLinkText\(link\)\) \|url\| openClickedLink\(url\)/);
   assert.match(source, /chatFlowBlock\(hdc, text, block, text_rc, true/);
   assert.match(source, /return chatFlowText\(hdc, text, area, block.role == \.code/);
   assert.match(source, /customColorOr\("link"/);

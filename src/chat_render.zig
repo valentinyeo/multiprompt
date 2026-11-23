@@ -5155,6 +5155,85 @@ test "IGSH-567 mixed sent and pending ranges copy across bubbles in both directi
     }
 }
 
+test "SOFT-3126 a waiting row still hit-tests @session mentions like a settled row" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("@Peer Chat is still working");
+    var pending: [text.len]u16 = text[0..text.len].*;
+    const old_outbox = app_state.g_chat_outbox;
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    const old_echo_ids = app_state.g_chat_echo_layout_ids;
+    const old_left = app_state.g_chat_content_left;
+    const old_scroll = app_state.g_chat_scroll_y;
+    const count = app_state.shell_count;
+    const active = app_state.active_shell;
+    const Snap = struct {
+        name: [64]u16,
+        name_len: u32,
+        tmux_session: [64]u8,
+        tmux_session_len: u32,
+        chat_view_on: bool,
+    };
+    var prior: [2]Snap = undefined;
+    for (0..2) |i| prior[i] = .{
+        .name = app_state.shells[i].name,
+        .name_len = app_state.shells[i].name_len,
+        .tmux_session = app_state.shells[i].tmux_session,
+        .tmux_session_len = app_state.shells[i].tmux_session_len,
+        .chat_view_on = app_state.shells[i].chat_view_on,
+    };
+    app_state.g_chat_outbox = .empty;
+    app_state.g_chat_echo_layout_count = 1;
+    app_state.g_chat_echo_layout_ids[0] = 3126;
+    app_state.g_chat_echo_layout[0] = .{ .left = 80, .top = 200, .right = 480, .bottom = 400 };
+    app_state.g_chat_content_left = 80;
+    app_state.g_chat_scroll_y = 50;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_block_count = 0;
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_outbox = old_outbox;
+        app_state.g_chat_echo_layout_count = old_echo_count;
+        app_state.g_chat_echo_layout_ids = old_echo_ids;
+        app_state.g_chat_content_left = old_left;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        app_state.shell_count = count;
+        app_state.active_shell = active;
+        for (0..2) |i| {
+            app_state.shells[i].name = prior[i].name;
+            app_state.shells[i].name_len = prior[i].name_len;
+            app_state.shells[i].tmux_session = prior[i].tmux_session;
+            app_state.shells[i].tmux_session_len = prior[i].tmux_session_len;
+            app_state.shells[i].chat_view_on = prior[i].chat_view_on;
+        }
+        chatSelectionClear();
+    }
+    const set = struct {
+        fn chat(index: u32, name: []const u8, session: []const u8, view: bool) void {
+            const shell = &app_state.shells[index];
+            shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, name) catch 0);
+            @memset(&shell.tmux_session, 0);
+            @memcpy(shell.tmux_session[0..session.len], session);
+            shell.tmux_session_len = @intCast(session.len);
+            shell.chat_view_on = view;
+        }
+    };
+    app_state.shell_count = 2;
+    set.chat(0, "Home", "live-here", true);
+    set.chat(1, "Peer Chat", "live-peer", true);
+    app_state.active_shell = 0;
+    try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 3126, .text = &pending, .state = .queued, .channel_pending = true });
+    try std.testing.expectEqual(@as(?usize, 0), chatTranscriptSelectionBlockAt(160));
+    const x = 81 + uiScaled(CHAT_BUBBLE_PAD) + 2;
+    const y = 151 + uiScaled(CHAT_BUBBLE_PAD) + 2;
+    const link = chatTranscriptLinkAt(null, x, y) orelse return error.TestUnexpectedResult;
+    const mention = chatClickedLinkText(link) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, w("Peer Chat"), mention);
+    try std.testing.expect(openTmuxLink(mention));
+    try std.testing.expectEqual(@as(u32, 1), app_state.active_shell);
+}
+
 test "Chat View word and block selection use display ranges" {
     const sample_z = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} hello world");
     const buf = sample_z[0..sample_z.len];
@@ -5164,11 +5243,11 @@ test "Chat View word and block selection use display ranges" {
 }
 
 fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
-    const index = chatTranscriptBlockAtPoint(y) orelse return null;
-    const block = app_state.g_chat_blocks[index];
+    const index = chatTranscriptSelectionBlockAt(y) orelse return null;
+    const display = chatSelectionDisplay(index) orelse return null;
+    const block = display.block;
     if (block.role == .tool) return null;
-    const display = chatDisplayForIndex(index) orelse return null;
-    var area = app_state.g_chat_layout_rects[index];
+    var area = chatSelectionRect(index);
     area.left += app_state.g_chat_content_left;
     area.right += app_state.g_chat_content_left;
     area.top -= app_state.g_chat_scroll_y;
@@ -5200,9 +5279,23 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
     const dc = GetDC(hwnd);
     if (dc == null) return null;
     defer _ = ReleaseDC(hwnd, dc);
-    const body = display.slice(start);
+    const mapped = display.mapped();
+    const body = mapped.slice(start);
     if (block.role == .user) return chatFlowText(dc, body.text, area, false, false, .{ .x = x, .y = y }, body.offset, null, body.source_map, true);
     return chatFlowBlock(dc, body.text, block, area, false, .{ .x = x, .y = y }, body.offset, null);
+}
+
+fn chatClickedLinkText(link: link_detect.Range) ?[]const u16 {
+    if (link.start < chat_hit.pending_selection_base) {
+        if (link.end <= app_state.g_chat_last_len) return app_state.g_chat_capture[link.start..link.end];
+        return null;
+    }
+    for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+        const sel = chatSelectionDisplay(i) orelse continue;
+        const end = sel.start + sel.text.len;
+        if (link.start >= sel.start and link.end <= end) return sel.text[link.start - sel.start .. link.end - sel.start];
+    }
+    return null;
 }
 
 fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
@@ -5895,11 +5988,11 @@ pub fn chatSelectionMenu() void {
 fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_index: ?usize, selection_offer: bool) LRESULT {
     if (!chatMenuEligible(hwnd)) return 0;
     const keyboard_block = if (keyboard_index) |index| (if (index < app_state.g_chat_block_count) keyboard_index else null) else null;
-    const link_text: ?[]u16 = if (keyboard_index != null) null else if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
-        std.heap.page_allocator.dupe(u16, text) catch {
+    const link_text: ?[]u16 = if (keyboard_index != null) null else if (chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp))) |range|
+        if (chatClickedLinkText(range)) |text| std.heap.page_allocator.dupe(u16, text) catch {
             showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
             return 0;
-        }
+        } else null
     else
         null;
     defer if (link_text) |text| std.heap.page_allocator.free(text);
@@ -6517,7 +6610,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 return 0;
             }
             if (chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp))) |link| {
-                openClickedLink(app_state.g_chat_capture[link.start..link.end]);
+                if (chatClickedLinkText(link)) |url| openClickedLink(url);
                 return 0;
             }
             chatTranscriptMouseDown(hwnd, GET_X(lp), GET_Y(lp));
@@ -6627,7 +6720,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 return 0;
             }
             if (chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp))) |link| {
-                openClickedLink(app_state.g_chat_capture[link.start..link.end]);
+                if (chatClickedLinkText(link)) |url| openClickedLink(url);
                 return 0;
             }
             if (chatDoubleClickThumbs(hwnd, GET_X(lp), GET_Y(lp))) return 0;
