@@ -3810,6 +3810,10 @@ pub fn chatImagePasteIntercept(msg: UINT, wp: WPARAM) bool {
 
 pub fn chatComposerInsertAtCaret(text: []const u16) ?u32 {
     const composer = app_state.g_chat_composer_hwnd orelse return null;
+    var clean: [SHOT_PASTE_URL_CAP + 4]u16 = undefined;
+    const cleaned_len = @import("chat_composer_input.zig").filter16(&clean, text, true);
+    if (cleaned_len == 0) return null;
+    const filtered = clean[0..cleaned_len];
     var sel_start: u32 = 0;
     var sel_end: u32 = 0;
     _ = SendMessageW(composer, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
@@ -3817,12 +3821,21 @@ pub fn chatComposerInsertAtCaret(text: []const u16) ?u32 {
     const got_i = GetWindowTextW(composer, &current, @intCast(current.len));
     const got: usize = if (got_i > 0) @intCast(got_i) else 0;
     var out: [SHOT_PASTE_URL_CAP + 4]u16 = undefined;
-    const insert = chat_image_insert.plan(current[0..got], sel_start, sel_end, text, &out) orelse return null;
+    const insert = chat_image_insert.plan(current[0..got], sel_start, sel_end, filtered, &out) orelse return null;
     _ = SendMessageW(composer, 0x00B1, insert.start, @intCast(insert.end));
     _ = SendMessageW(composer, 0x00C2, 1, @bitCast(@intFromPtr(&out)));
     _ = SendMessageW(composer, 0x00B1, insert.caret, @intCast(insert.caret));
     _ = SendMessageW(composer, 0x00B7, 0, 0);
     return @intCast(insert.caret);
+}
+
+pub fn chatComposerPasteFiltered() bool {
+    if (app_state.g_chat_composer_hwnd == null or !@import("room_frontend.zig").privateActionsAllowed()) return false;
+    if (chatClipboardHasImageOnly()) return false;
+    var clip: [16384]u16 = undefined;
+    const len = @import("clipboard.zig").readClipboardTextWithRetry(&clip);
+    if (len == 0) return false;
+    return chatComposerInsertAtCaret(clip[0..len]) != null;
 }
 
 pub fn chatInsertBrowserTabUrl() void {

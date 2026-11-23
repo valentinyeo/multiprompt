@@ -2523,8 +2523,12 @@ fn dictationLivePost(epoch: u32, text: []const u8) void {
     }
     @memcpy(dictation_live_text[0..text.len], text);
     dictation_live_text_len = text.len;
-    const converted = MultiByteToWideChar(CP_UTF8, 0, text.ptr, @intCast(text.len), @ptrCast(&dictation_live_slot), @intCast(dictation_live_slot.len));
-    dictation_live_slot_len = if (converted > 0) @intCast(converted) else 0;
+    var scratch: [dictation_live.text_cap]u16 = undefined;
+    const converted = MultiByteToWideChar(CP_UTF8, 0, text.ptr, @intCast(text.len), @ptrCast(&scratch), @intCast(scratch.len));
+    dictation_live_slot_len = if (converted > 0)
+        @import("chat_composer_input.zig").filter16(&dictation_live_slot, scratch[0..@intCast(converted)], true)
+    else
+        0;
     const posted = dictation_live_slot_len > 0;
     dictation_live_mutex.unlock();
     if (!posted or app_state.g_main_hwnd == null) return;

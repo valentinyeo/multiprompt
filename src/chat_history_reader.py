@@ -1559,7 +1559,8 @@ def box_draft_text(shown):
     visible = [item for row in kept for item in row]
     if dimmed and len("".join(char for char, _dim, _inverse in visible).strip()) <= 1 and all(inverse for _char, _dim, inverse in visible):
         return ""
-    return "\n".join("".join(char for char, _dim, _inverse in row).rstrip() for row in kept).rstrip()
+    draft = "\n".join("".join(char for char, _dim, _inverse in row).rstrip() for row in kept).rstrip()
+    return ANSI.sub("", draft)
 
 
 def box_draft(target):

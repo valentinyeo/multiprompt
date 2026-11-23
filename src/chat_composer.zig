@@ -1909,6 +1909,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     }
     if (msg == 0x0102 and wp == 0x01) return 0;
     if (chatImagePasteIntercept(msg, wp)) return 0;
+    if (msg == 0x0302 and @import("chat_render.zig").chatComposerPasteFiltered()) return 0;
     if (msg == WM_KEYDOWN and chatCopyCodeKeyDown(wp)) {
         chatCopyLatestCode();
         return 0;

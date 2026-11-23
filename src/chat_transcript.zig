@@ -122,19 +122,7 @@ fn statusText(out: []u16, text: []const u8) usize {
 }
 
 fn keepText(out: []u16, text: []const u8, keep_newlines: bool) usize {
-    var view = std.unicode.Utf8View.init(text) catch return 0;
-    var it = view.iterator();
-    var n: usize = 0;
-    while (it.nextCodepoint()) |cp| {
-        if (n + @as(usize, if (cp > 0xFFFF) 2 else 1) > out.len) break;
-        if (cp > 0xFFFF) {
-            out[n] = @intCast(0xD800 + ((cp - 0x10000) >> 10));
-            n += 1;
-            out[n] = @intCast(0xDC00 + ((cp - 0x10000) & 0x3FF));
-        } else out[n] = if (cp == '\n' and keep_newlines) '\n' else if (cp < 32) ' ' else @intCast(cp);
-        n += 1;
-    }
-    return n;
+    return @import("chat_composer_input.zig").filterUtf8To16(out, text, keep_newlines);
 }
 
 fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {

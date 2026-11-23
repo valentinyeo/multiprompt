@@ -1,0 +1,1 @@
+The Chat View message box no longer shows stray box symbols from hidden control characters in synced drafts, dictation, or paste.

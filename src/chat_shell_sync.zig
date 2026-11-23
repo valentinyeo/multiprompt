@@ -145,8 +145,10 @@ pub fn isBlankDraft(text: []const u16) bool {
 }
 
 pub fn toComposer(out: []u16, text: []const u16) usize {
+    var stage: [chat_transcript.DRAFT_TEXT]u16 = undefined;
+    const kept = @import("chat_composer_input.zig").filter16(stage[0..], text, true);
     var n: usize = 0;
-    for (text) |c| {
+    for (stage[0..kept]) |c| {
         if (c == '\n') {
             if (n + 2 > out.len) break;
             out[n] = '\r';
