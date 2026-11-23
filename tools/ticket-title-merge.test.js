@@ -17,7 +17,9 @@ test('the title catalog is one file per ticket and nothing else', () => {
   const dir = path.join(root, 'tools/ticket-titles');
   assert.ok(fs.statSync(dir).isDirectory(), 'catalog is a directory');
   for (const name of fs.readdirSync(dir)) {
-    assert.match(name, /^(?:IGSH|HYCI)-[1-9]\d*\.txt$/);
+    const { parseTicketId } = require('./ticket-id.js');
+    const ticket = name.endsWith('.txt') && parseTicketId(name.slice(0, -4));
+    assert.equal(name, `${ticket?.id}.txt`);
     assert.ok(holdsOneTitleLine(fs.readFileSync(path.join(dir, name), 'utf8')), `${name} holds one title line`);
   }
 });

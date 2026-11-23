@@ -30,3 +30,12 @@ test('ticket parsing rejects malformed IDs and unsafe fragment names', () => {
   }
   assert.deepEqual(ticketIds('XSOFT-2489 SOFT-2489x foo-SOFT-2489 SOFT-0'), []);
 });
+
+
+test('MUBO-244 release fragments retain the Multiprompt board identity', () => {
+  const { parseTicketId, canonicalTicketId, fragmentTicketId, ticketIds } = load();
+  assert.deepEqual(parseTicketId('MUBO-244'), { id: 'MUBO-244', prefix: 'MUBO', number: '244', boardId: 13734 });
+  assert.equal(canonicalTicketId('MUBO-244'), 'MUBO-244');
+  assert.equal(fragmentTicketId('changelog.d/MUBO-244-photo-follows-chat.md'), 'MUBO-244');
+  assert.deepEqual(ticketIds('MUBO-244 and SOFT-244'), ['MUBO-244', 'IGSH-244']);
+});

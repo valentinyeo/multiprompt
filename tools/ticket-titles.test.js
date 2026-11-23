@@ -78,3 +78,12 @@ test('a board 2060 ticket renumbered to SOFT still resolves under its IGSH id', 
   const wrong = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-1921', title: 'Other' }] }) });
   await assert.rejects(resolveTicketTitles(['IGSH-1920'], {}, 'token', wrong), /Unresolved title for IGSH-1920/);
 });
+
+
+test('MUBO-244 titles resolve only from the Multiprompt board', async () => {
+  const { resolveTicketTitles } = await load();
+  const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 13734, ticketNumber: 'MUBO-244', title: 'Photos stay with their chats' }] }) });
+  assert.deepEqual(await resolveTicketTitles(['MUBO-244'], {}, 'token', request), { 'MUBO-244': 'Photos stay with their chats' });
+  const wrong = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-244', title: 'Another ticket' }] }) });
+  await assert.rejects(resolveTicketTitles(['MUBO-244'], {}, 'token', wrong), /Unresolved title for MUBO-244/);
+});
