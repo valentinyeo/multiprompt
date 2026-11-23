@@ -1095,7 +1095,7 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const feedback = @embedFile("multibot_feedback.py");
     const helper = @embedFile("mp_helper.py");
     const shell = @embedFile("mp_shell.py");
-    const sessions = @embedFile("mp_tab_state.py") ++ "\n" ++ @embedFile("mp_sessions_health.py") ++ "\n" ++ @embedFile("mp_sessions.py");
+    const sessions = @embedFile("mp_tab_state.py") ++ "\n" ++ @embedFile("mp_sessions.py");
     const layout = @embedFile("mp_layout.mjs");
     const mp_fresh = @embedFile("mp_fresh.py");
     const zsb = @embedFile("mp_zsb.sh");
