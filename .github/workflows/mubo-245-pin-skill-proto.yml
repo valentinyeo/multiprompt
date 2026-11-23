@@ -10,16 +10,22 @@ on:
         description: Claude Code model for the 22-turn prototype runs
         type: string
         default: haiku
+      reuse_run_id:
+        description: Optional existing run ID to reuse mubo-245-option-* artifacts from
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: mubo-245-pin-skill-proto-${{ github.ref }}
-  cancel-in-progress: true
+  group: mubo-245-pin-skill-proto-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   proto:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.reuse_run_id == '' }}
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
@@ -72,10 +78,20 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Download current run artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reuse_run_id == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: mubo-245-option-*
           path: collected
+      - name: Download reused prototype artifacts
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.reuse_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id || '45276071018' }}
+        run: |
+          mkdir -p collected
+          gh run download "$REUSE_RUN_ID" -R "$GITHUB_REPOSITORY" -p "mubo-245-option-*" -D collected
       - name: Normalize downloaded directories
         run: |
           mkdir -p normalized
@@ -132,10 +148,29 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Download current run artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reuse_run_id == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: mubo-245-*
           path: collected
+      - name: Download reused prototype artifacts
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.reuse_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id || '45276071018' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force collected | Out-Null
+          gh run download $env:REUSE_RUN_ID -R $env:GITHUB_REPOSITORY -p "mubo-245-option-*" -D collected
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download reused artifacts from $env:REUSE_RUN_ID" }
+      - name: Download judge artifact
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.reuse_run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: mubo-245-judge
+          path: collected/mubo-245-judge
       - name: Render HTML report and capture Windows screenshots
         shell: pwsh
         run: |
