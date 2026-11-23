@@ -24,7 +24,7 @@ jobs:
           - side: parent
             sha: 407338e086259e8bf198071335a77f6eb81b566b
           - side: head
-            sha: 065db60dbdafad09f800fb8a737023825af211dc
+            sha: ddcad34d7f248980f351aa568134d470352c0043
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
