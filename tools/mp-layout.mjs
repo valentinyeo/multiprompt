@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
+const BUNDLED_READER = new URL('reader.py', import.meta.url);
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const USAGE = `usage: mp-layout <command> [options]
 
@@ -353,7 +354,7 @@ export async function run(argv, overrides = {}) {
       lock: overrides.lock || spawnLock,
       mockFolder: Boolean(overrides.resolveFolder),
       resolveFolder: overrides.resolveFolder || (value => { const folder = realpathSync(value); if (!statSync(folder).isDirectory()) throw new Error(); return folder; }),
-      runtime: overrides.runtime || ((args, input) => spawnSync('python3', [env.MULTIPROMPT_READER || join(env.HOME, '.multiprompt-runtime/reader.py'), ...args], { input, encoding: 'utf8', timeout: 30000, env: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }, maxBuffer: 1048576 })),
+      runtime: overrides.runtime || ((args, input) => spawnSync('python3', [env.MULTIPROMPT_READER || (existsSync(BUNDLED_READER) ? realpathSync(fileURLToPath(BUNDLED_READER)) : join(env.HOME, '.multiprompt-runtime/reader.py')), ...args], { input, encoding: 'utf8', timeout: 30000, env: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }, maxBuffer: 1048576 })),
       tmux: overrides.tmux || (args => spawnSync('tmux', args, { ...(command === 'spawn' ? { timeout: 5000 } : {}), stdio: command === 'spawn' && args[0] === 'display-message' ? ['ignore', 'pipe', 'ignore'] : 'ignore', encoding: 'utf8', ...(command === 'spawn' ? { env: { HOME: env.HOME, PATH: env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' } } : {}) }))
     };
     const commands = { list, 'create-section': createSection, move, open, spawn: spawnSession };

@@ -62,6 +62,8 @@ jobs:
         run: node --test tools/check-runtime-generation.test.js
       - name: Test automatic helper bundle versions
         run: python3 tools/runtime-fingerprint.test.py -v
+      - name: Test atomic runtime tool-set installs
+        run: timeout 120 node --test tools/runtime-install.test.js
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat
@@ -594,7 +596,7 @@ jobs:
   build-windows:
     name: build-windows (${{ matrix.arch }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -654,6 +656,9 @@ jobs:
       - name: Build release executables for arm64
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
         run: zig build -Dtarget=aarch64-windows-gnu --summary all
+      - name: Cross-compile the runtime bundle for Windows x64
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu
       - name: Prepare throwaway update-test signing key
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der

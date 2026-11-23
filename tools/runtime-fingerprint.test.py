@@ -53,7 +53,7 @@ class RuntimeFingerprintTest(unittest.TestCase):
         for body in (b'print(1)\n', b'print(2)\n'):
             source = 'MP_SEND_SOURCE = ' + repr(base64.b64encode(body).decode()) + '\n' + SOURCE
             versions.append(self.info(source))
-            self.assertEqual((runtime / 'mp-send').read_bytes(), body)
+            self.assertEqual((runtime / 'current/mp-send').read_bytes(), body)
         self.assertNotEqual(versions[0]['sha256'], versions[1]['sha256'])
 
     def test_connector_map_order_does_not_change_the_fingerprint(self):
@@ -68,13 +68,19 @@ class RuntimeFingerprintTest(unittest.TestCase):
         self.assertEqual(self.info(sources[high]), infos[high])
         self.assertEqual(self.info(sources[low]), infos[low])
 
-    def test_legacy_loader_upgrades_and_cannot_downgrade_the_reader(self):
+    def test_legacy_loader_upgrades_then_fails_closed_without_downgrading(self):
         legacy = (ROOT / 'tools/fixtures/SOFT-2524/legacy-reader.py').read_text()
         old = self.info(legacy)
         current = self.info()
         self.assertGreater(current['generation'], old['generation'])
         self.assertNotEqual(current['sha256'], old['sha256'])
-        self.assertEqual(self.info(legacy), current)
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        before = (runtime / 'current').readlink()
+        payload = base64.b64encode(legacy.encode()).decode() + '\n' + json.dumps(dict(id=1, op='engine_info')) + '\n'
+        result = subprocess.run([sys.executable, '-u', '-c', BOOTSTRAP, '--serve'], input=payload, text=True, capture_output=True, env=self.env, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((runtime / 'current').readlink(), before)
+        self.assertEqual(json.loads((runtime / 'active.json').read_text()), current)
 
     def test_app_version_is_not_part_of_the_bundle_identity(self):
         first = self.info("MULTIBOT_APP_VERSION = '0.28.1'\n" + SOURCE)

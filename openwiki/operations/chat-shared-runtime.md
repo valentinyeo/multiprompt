@@ -18,15 +18,27 @@
 - The full SHA-256 fingerprint, not integer ordering, decides whether a runtime differs.
 - A lock serializes selection.
 - Readers use owner-only permissions.
-- Each reader is stored as `<sha256>.py`.
-- Publishing syncs a temporary file.
-- An atomic rename publishes it.
-- Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
-- Fingerprinted launchers replace a different selection with their own bundle.
-- Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
-- Identical bundles keep the existing selection without rewriting its metadata.
+- Each reader is stored as `<sha256>.py` with mode `0600`.
+- Each executable tool is staged under a temporary name in its bundle directory.
+- Its mode is set to `0700` before writing, flushing and fsyncing its complete contents.
+- Rename publishes the content-addressed `<sha256>-<tool>` file.
+- Temporary symlinks are renamed over their destinations; no live link is unlinked first.
+- A bundle contains every tool, its reader link, `build.json`, and `active.json`.
+- The manifests are written last; the bundle directory is fsynced and renamed before selection.
+- Stable command links resolve through `current/entry.py`. This executable selects one immutable directory and execs the requested tool there, so Python's `__file__` cannot drift across cutover.
+- Reader, manifest and `.mjs` module links resolve through `current/<name>`.
+- One atomic `current` link replacement selects the complete set, including its manifests.
+- The parent directory is fsynced after each link replacement and bundle rename.
+- Session tools resolve sibling helpers inside their immutable bundle. The sender, fresh-start and layout tools pin their reader there too.
+- `build.json` carries the desktop's three-part app release version, independent of the content fingerprint.
+- Lower release versions, including unstamped clients after a stamped install, keep the installed reader and tools and log the refusal to stderr.
+- Equal release versions may select a different fingerprint for development builds. Identical version/fingerprint pairs leave the installed manifests untouched.
+- Migration first snapshots the existing tools behind `current`, redirects entry links to that unchanged snapshot, then selects the new set once.
+- An interrupted migration can resume; failures before cutover leave the prior set selected.
+- `active.json` remains protocol 1 with the same fields, but is now a symlink through `current`.
+- Unpatched desktop and Android loaders refuse that symlink with their existing `O_NOFOLLOW` guard. They fail closed instead of overwriting newer tools and must upgrade to this loader.
+- Existing reader processes and normal manifest readers remain compatible. No database or message-wire schema changes.
 - Unsafe, corrupt or malformed selections still fail closed.
-- Unsafe files and corrupt readers fail closed.
 
 ## Requests
 

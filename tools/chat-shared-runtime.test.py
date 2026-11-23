@@ -129,7 +129,7 @@ class RuntimeTest(unittest.TestCase):
         self.info(source)
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-send'
         self.assertTrue(published.is_symlink())
-        self.assertEqual(published.read_text(), body)
+        self.assertEqual((published.parent / 'current' / published.name).read_text(), body)
         self.assertTrue(os.access(published, os.X_OK))
 
     def test_zsb_ships_inside_the_runtime_as_an_executable_copy(self):
@@ -138,7 +138,7 @@ class RuntimeTest(unittest.TestCase):
         self.info(source)
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-zsb'
         self.assertTrue(published.is_symlink())
-        self.assertEqual(published.read_text(), body)
+        self.assertEqual((published.parent / 'current' / published.name).read_text(), body)
         self.assertTrue(os.access(published, os.X_OK))
         self.assertFalse((Path(self.home.name) / '.multiprompt-runtime' / 'zsb').exists())
 
@@ -146,7 +146,8 @@ class RuntimeTest(unittest.TestCase):
         info = self.info()
         reader = Path(self.home.name) / '.multiprompt-runtime' / 'reader.py'
         self.assertTrue(reader.is_symlink())
-        self.assertEqual(os.readlink(reader), info['sha256'] + '.py')
+        self.assertEqual(os.readlink(reader), 'current/reader.py')
+        self.assertEqual(reader.resolve().name, info['sha256'] + '.py')
 
     def test_hand_copied_reader_is_repaired(self):
         info = self.info()
@@ -184,9 +185,9 @@ class RuntimeTest(unittest.TestCase):
         for name, file in (('mp-sessions', 'src/mp_sessions.py'), ('mp-layout', 'src/mp_layout.mjs')):
             published = runtime / name
             self.assertTrue(published.is_symlink(), name)
-            self.assertEqual(published.read_text(), (ROOT / file).read_text(), name)
+            self.assertEqual((runtime / 'current' / name).read_text(), (ROOT / file).read_text(), name)
             self.assertTrue(os.access(published, os.X_OK), name)
-        self.assertTrue(os.readlink(runtime / 'mp-layout').endswith('.mjs'), 'node must see the module extension')
+        self.assertEqual((runtime / 'current/mp-layout').resolve().suffix, '.mjs', 'node must see the module extension')
 
     def test_published_mp_sessions_lists_chats_from_the_runtime_copy(self):
         self.info(self.bundle())

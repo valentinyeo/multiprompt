@@ -8666,6 +8666,7 @@ READER_SOURCE = 'RUNTIME_GENERATION = ' + str(RUNTIME_GENERATION) + '\n' + _runt
 
 if __name__ == '__main__':
     import base64 as _base64
+    import errno as _errno
     import fcntl
     import hashlib as _hashlib
     import json as _json
@@ -8710,103 +8711,108 @@ if __name__ == '__main__':
                             return stream.read(limit + 1)
                     finally:
                         _os.close(fd)
-                def publish(name, data):
-                    fd, path = _tempfile.mkstemp(prefix='.tmp-', dir=_os.path.join(home, '.multiprompt-runtime'))
+                runtime_root = _os.path.join(home, '.multiprompt-runtime')
+
+                def publish(folder, name, data, mode=0o600):
+                    fd, path = _tempfile.mkstemp(prefix='.tmp-', dir=folder)
                     try:
                         with _os.fdopen(fd, 'wb') as stream:
+                            _os.fchmod(stream.fileno(), mode)
                             stream.write(data)
                             stream.flush()
                             _os.fsync(stream.fileno())
-                        _os.replace(path, name, dst_dir_fd=directory)
-                        _os.fsync(directory)
+                        _os.replace(path, _os.path.join(folder, name))
                     finally:
                         if _os.path.exists(path):
                             _os.unlink(path)
-                runtime_root = _os.path.join(home, '.multiprompt-runtime')
 
-                def relink(name, target):
-                    path = _os.path.join(runtime_root, name)
+                def relink(folder, name, target):
+                    path = _os.path.join(folder, name)
                     try:
-                        _os.unlink(path)
-                    except FileNotFoundError:
-                        pass
-                    _os.symlink(target, path)
-
-                def publish_named_tool(name, payload):
-                    digest = _hashlib.sha256(payload).hexdigest()
-                    stem = digest + '-' + name
-                    publish(stem, payload)
-                    relink(name, stem)
-                    return stem
-
-                def publish_tools(data):
-                    try:
-                        reader_digest = _hashlib.sha256(data).hexdigest()
-                        publish(reader_digest + '.py', data)
-                        relink('reader.py', reader_digest + '.py')
+                        if _os.readlink(path) == target:
+                            return
                     except OSError:
                         pass
-                    mp_send_source = globals().get('MP_SEND_SOURCE')
-                    if isinstance(mp_send_source, str) and mp_send_source:
+                    with _tempfile.TemporaryDirectory(prefix='.link-', dir=folder) as temporary:
+                        link = _os.path.join(temporary, 'link')
+                        _os.symlink(target, link)
+                        _os.replace(link, path)
+                    fd = _os.open(folder, _os.O_RDONLY | _os.O_DIRECTORY | _os.O_NOFOLLOW)
+                    try:
+                        _os.fsync(fd)
+                    finally:
+                        _os.close(fd)
+
+                def stage_tools(payloads, active, version, migrating=False):
+                    with _tempfile.TemporaryDirectory(prefix='.stage-', dir=runtime_root) as folder:
+                        entry = (b'#!/usr/bin/env python3\nimport os, sys\n'
+                                 b'folder = os.path.dirname(os.path.realpath(__file__))\n'
+                                 b'target = os.path.join(folder, os.path.basename(sys.argv[0]))\n'
+                                 b'os.execv(target, [target, *sys.argv[1:]])\n')
+                        stem = _hashlib.sha256(entry).hexdigest() + '-entry.py'
+                        publish(folder, stem, entry, 0o700)
+                        relink(folder, 'entry.py', stem)
+                        for name, payload in payloads.items():
+                            stem = _hashlib.sha256(payload).hexdigest() + '-' + name
+                            publish(folder, stem, payload, 0o700)
+                            relink(folder, name, stem)
+                        if 'mp-layout.mjs' in payloads:
+                            relink(folder, 'mp-layout', 'mp-layout.mjs')
+                        relink(folder, 'reader.py', '../' + active['sha256'] + '.py')
+                        publish(folder, 'build.json', _json.dumps(dict(version=version, migrating=migrating)).encode())
+                        publish(folder, 'active.json', _json.dumps(active, separators=(',', ':')).encode())
+                        fd = _os.open(folder, _os.O_RDONLY | _os.O_DIRECTORY | _os.O_NOFOLLOW)
                         try:
-                            published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
-                        except (ValueError, OSError):
-                            pass
-                    feedback_source = globals().get('FEEDBACK_SOURCE')
-                    if isinstance(feedback_source, str) and feedback_source:
-                        try:
-                            publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
-                            _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    helper_source = globals().get('MP_HELPER_SOURCE')
-                    if isinstance(helper_source, str) and helper_source:
-                        try:
-                            publish_named_tool('mp-helper', _base64.b64decode(helper_source))
-                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    shell_source = globals().get('MP_SHELL_SOURCE')
-                    if isinstance(shell_source, str) and shell_source:
-                        try:
-                            publish_named_tool('mp-shell', _base64.b64decode(shell_source))
-                            _os.chmod('mp-shell', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    sessions_source = globals().get('MP_SESSIONS_SOURCE')
-                    if isinstance(sessions_source, str) and sessions_source:
-                        try:
-                            publish_named_tool('mp-sessions', _base64.b64decode(sessions_source))
-                            _os.chmod('mp-sessions', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    layout_source = globals().get('MP_LAYOUT_SOURCE')
-                    if isinstance(layout_source, str) and layout_source:
-                        try:
-                            relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
-                            _os.chmod('mp-layout', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    fresh_source = globals().get('MP_FRESH_SOURCE')
-                    if isinstance(fresh_source, str) and fresh_source:
-                        try:
-                            published = publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
-                        except (ValueError, OSError):
-                            pass
-                    zsb_source = globals().get('ZSB_SOURCE')
-                    if isinstance(zsb_source, str) and zsb_source:
-                        try:
-                            publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
-                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
+                            _os.fsync(fd)
+                        finally:
+                            _os.close(fd)
+                        name = 'set-' + active['sha256'] + '-' + _os.path.basename(folder)[7:]
+                        _os.rename(folder, _os.path.join(runtime_root, name))
+                        _os.fsync(directory)
+                        return name
+
+                tools = {'mp-send': 'MP_SEND_SOURCE', 'multibot-feedback': 'FEEDBACK_SOURCE',
+                         'mp-helper': 'MP_HELPER_SOURCE', 'mp-shell': 'MP_SHELL_SOURCE',
+                         'mp-sessions': 'MP_SESSIONS_SOURCE', 'mp-layout.mjs': 'MP_LAYOUT_SOURCE',
+                         'mp-fresh': 'MP_FRESH_SOURCE', 'mp-zsb': 'ZSB_SOURCE'}
+                aliases = {name: 'current/entry.py' for name in (*tools, 'mp-layout')}
+                aliases.update({name: 'current/' + name for name in ('mp-layout.mjs', 'reader.py', 'active.json')})
+                version_text = globals().get('MULTIBOT_APP_VERSION', '0.0.0')
+                parts = version_text.split('.') if isinstance(version_text, str) else []
+                if len(parts) != 3 or any(not p.isascii() or not p.isdecimal() for p in parts):
+                    raise ValueError('invalid runtime build version')
+                version = [int(p) for p in parts]
+                try:
+                    current = _os.readlink('current', dir_fd=directory)
+                except FileNotFoundError:
+                    current = None
+                if current is not None and (not current.startswith('set-') or
+                        any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in current)):
+                    raise ValueError('invalid runtime bundle')
+                if current is not None:
+                    try:
+                        manifest_link = _os.readlink('active.json', dir_fd=directory)
+                    except FileNotFoundError:
+                        manifest_link = 'current/active.json'
+                    except OSError as error:
+                        if error.errno != _errno.EINVAL:
+                            raise
+                        manifest_link = 'current/active.json'
+                    if manifest_link != 'current/active.json':
+                        raise ValueError('invalid runtime manifest link')
+                    selected = _os.open(current, _os.O_RDONLY | _os.O_DIRECTORY | _os.O_NOFOLLOW, dir_fd=directory)
+                    try:
+                        check(selected, 0o700)
+                    finally:
+                        _os.close(selected)
                 missing = object()
                 try:
-                    active = _json.loads(read('active.json', 4096))
+                    active = _json.loads(read(current + '/active.json' if current else 'active.json', 4096))
                 except FileNotFoundError:
+                    if current is not None:
+                        raise ValueError('incomplete runtime bundle')
                     active = missing
+                installed_version = [0, 0, 0]
                 if active is not missing:
                     if (not isinstance(active, dict) or set(active) != {'protocol', 'generation', 'sha256'} or
                             type(active['protocol']) is not int or active['protocol'] != 1 or
@@ -8817,19 +8823,58 @@ if __name__ == '__main__':
                     installed = read(active['sha256'] + '.py', 4 * 1024 * 1024)
                     if _hashlib.sha256(installed).hexdigest() != active['sha256']:
                         raise ValueError('corrupt runtime')
-                    if active['sha256'] == digest:
-                        publish_tools(installed)
-                        return installed, active
+                    if current is not None:
+                        build = _json.loads(read(current + '/build.json', 4096))
+                        installed_version = build.get('version') if isinstance(build, dict) else None
+                        if (not isinstance(installed_version, list) or len(installed_version) != 3 or
+                                any(type(p) is not int or p < 0 for p in installed_version)):
+                            raise ValueError('invalid installed runtime version')
+                        if version < installed_version:
+                            print('runtime sync: refusing older build ' + version_text + '; installed ' +
+                                  '.'.join(map(str, installed_version)), file=_sys.stderr)
+                        if not build.get('migrating') and (version < installed_version or
+                                (version == installed_version and active['sha256'] == digest)):
+                            for name, target in aliases.items():
+                                if _os.path.lexists(_os.path.join(runtime_root, current, name)):
+                                    relink(runtime_root, name, target)
+                            return installed, active
+                if current is None:
+                    previous = {}
+                    for name in tools:
+                        path = _os.path.join(runtime_root, name)
+                        try:
+                            with open(path, 'rb') as stream:
+                                payload = stream.read(4 * 1024 * 1024 + 1)
+                        except FileNotFoundError:
+                            continue
+                        if len(payload) > 4 * 1024 * 1024:
+                            raise ValueError('invalid legacy tool')
+                        previous[name] = payload
+                    if active is missing:
+                        active = dict(protocol=1, generation=generation, sha256=digest)
+                        publish(runtime_root, digest + '.py', source)
+                    current = stage_tools(previous, active, installed_version, migrating=True)
+                    relink(runtime_root, 'current', current)
+                    for name, target in aliases.items():
+                        relink(runtime_root, name, target)
                 try:
                     installed = read(digest + '.py', 4 * 1024 * 1024)
                 except FileNotFoundError:
-                    publish(digest + '.py', source)
+                    publish(runtime_root, digest + '.py', source)
+                    _os.fsync(directory)
                 else:
                     if installed != source:
                         raise ValueError('corrupt runtime')
+                payloads = {}
+                for name, key in tools.items():
+                    value = globals().get(key)
+                    if isinstance(value, str) and value:
+                        payloads[name] = _base64.b64decode(value, validate=True)
                 active = dict(protocol=1, generation=generation, sha256=digest)
-                publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
-                publish_tools(source)
+                bundle = stage_tools(payloads, active, version)
+                for name, target in aliases.items():
+                    relink(runtime_root, name, target)
+                relink(runtime_root, 'current', bundle)
                 return source, active
             finally:
                 _os.close(lock)

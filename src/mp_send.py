@@ -40,6 +40,9 @@ def runtime_dir():
 
 
 def _runtime_reader():
+    bundled = Path(__file__).resolve().with_name("reader.py")
+    if bundled.is_file():
+        return bundled.resolve()
     try:
         active = json.loads((runtime_dir() / "active.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

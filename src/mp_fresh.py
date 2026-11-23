@@ -12,6 +12,9 @@ def reader_path():
     configured = os.environ.get("MULTIPROMPT_READER_SOURCE")
     if configured:
         return Path(configured)
+    bundled = Path(__file__).resolve().with_name("reader.py")
+    if bundled.is_file():
+        return bundled.resolve()
     runtime = Path.home() / ".multiprompt-runtime"
     try:
         active = __import__("json").loads((runtime / "active.json").read_text(encoding="utf-8"))
