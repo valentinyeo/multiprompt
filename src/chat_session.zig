@@ -2045,6 +2045,22 @@ pub fn chatSwitchBrowserTick() void {
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     if (app_state.g_chat_browser_swap.shell_id == 0 or app_state.g_chat_browser_swap.shell_id != shell_id) return;
     if (app_state.g_chat_switch_preparing or !chatViewOwnsInput() or app_state.g_edit_hwnd != null or app_state.g_popup_menu_active) {
+        const blocked_at = GetTickCount64();
+        var held: [192]u8 = undefined;
+        const line = std.fmt.bufPrint(&held, "[switch] paint held shell={d} preparing={} owns={} edit={} menu={} held_ms={d}", .{
+            shell_id,
+            app_state.g_chat_switch_preparing,
+            chatViewOwnsInput(),
+            app_state.g_edit_hwnd != null,
+            app_state.g_popup_menu_active,
+            blocked_at -| app_state.g_chat_browser_swap.requested_at,
+        }) catch "[switch] paint held";
+        debugLog(line);
+        if (app_state.g_chat_browser_swap.held(blocked_at)) {
+            app_state.g_chat_browser_swap.cancel();
+            chatFileReadyDeferredFlush();
+            return;
+        }
         _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, chat_switch.paint_deadline_ms, null);
         return;
     }

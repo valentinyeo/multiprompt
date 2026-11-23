@@ -268,6 +268,21 @@ test "browserless switches save selection immediately without another queued wri
     try std.testing.expectEqual(@as(usize, 2), saves);
     shells[0].browser_enabled = false;
 }
+test "a switch paint held by an overlay past the hold deadline is abandoned so chat content can load" {
+    shells[0].shell_id = 7;
+    g_chat_active = true;
+    g_edit_hwnd = null;
+    g_all_sessions_active = true;
+    test_now = 9000;
+    g_chat_browser_swap.request(7, 9000);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(u32), 7, g_chat_browser_swap.shell_id);
+    test_now = 12000;
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(u32), 0, g_chat_browser_swap.shell_id);
+    try std.testing.expectEqual(@as(usize), 0, reveals);
+    g_all_sessions_active = false;
+}
 `;
   try {
     copyZig(['chat_switch.zig', 'switch_step.zig'], dir);

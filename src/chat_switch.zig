@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const paint_deadline_ms = 300;
+pub const hold_deadline_ms = 3000;
 
 pub const Pending = struct {
     shell_id: u32 = 0,
@@ -16,6 +17,10 @@ pub const Pending = struct {
     pub fn overdue(self: Pending, shell_id: u32, now: u64) bool {
         return self.shell_id != 0 and self.shell_id == shell_id and !self.painted and
             now -| self.requested_at >= paint_deadline_ms;
+    }
+
+    pub fn held(self: Pending, now: u64) bool {
+        return self.shell_id != 0 and !self.painted and now -| self.requested_at >= hold_deadline_ms;
     }
 
     pub fn didPaint(self: *Pending, shell_id: u32) bool {
@@ -113,6 +118,17 @@ test "a switch whose paint never arrives is released after the deadline" {
     try std.testing.expect(!pending.overdue(7, 1301));
     try std.testing.expect(pending.take(7));
     try std.testing.expect(!pending.overdue(7, 1400));
+}
+
+test "a switch paint held past its hold deadline is released" {
+    var pending = Pending{};
+    pending.request(7, 1000);
+    try std.testing.expect(!pending.held(3999));
+    try std.testing.expect(pending.held(4000));
+    _ = pending.didPaint(7);
+    try std.testing.expect(!pending.held(4000));
+    pending.cancel();
+    try std.testing.expect(!pending.held(4000));
 }
 
 test "replacement and cancellation cannot inherit an expired paint deadline" {
