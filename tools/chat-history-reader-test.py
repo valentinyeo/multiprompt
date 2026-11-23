@@ -5272,7 +5272,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 31)
+        self.assertEqual(len(base), 32)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -5883,6 +5883,22 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         state["agent_pid"] = decoy.pid
         reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
         self.assertFalse(reader.host_reap_agent(self.provider, self.sid), "only this chat's headless agent may be killed")
+
+    def test_SOFT_3083_host_reap_clears_a_recorded_pid_that_is_already_gone(self):
+        fixture = ROOT / 'tools/fixtures/SOFT-3083/dead-agent-record.json'
+        record = json.loads(fixture.read_text())
+        self.enable()
+        orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                                   "--print", "--session-id", self.sid])
+        self.addCleanup(stop_fixture_process, orphan)
+        state = reader.host_session_state(self.provider, self.sid)
+        state["agent_pid"] = orphan.pid
+        reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
+        orphan.kill()
+        orphan.wait(timeout=10)
+        self.assertEqual(record['scenario'], 'recorded pid gone before host reap')
+        self.assertTrue(reader.host_reap_agent(self.provider, self.sid))
+        self.assertIsNone(reader.host_agent_recorded_pid(self.provider, self.sid))
 
     def test_host_cli_status_and_disable(self):
         self.enable()

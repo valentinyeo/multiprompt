@@ -3931,14 +3931,29 @@ def host_agent_orphan(provider, sid, pid):
 
 def host_reap_agent(provider, sid):
     pid = host_agent_recorded_pid(provider, sid)
-    if pid is None or not host_agent_orphan(provider, sid, pid):
+    if pid is None:
         return False
     if host_owned(provider, sid):
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        state = host_session_state(provider, sid)
+        if state.get("agent_pid") == pid:
+            state.pop("agent_pid", None)
+            host_write(host_paths(provider, sid)["state"], state)
+        host_log(provider, sid, "agent_reaped", dict(pid=pid, gone=True))
+        return True
+    if not host_agent_orphan(provider, sid, pid):
         return False
     try:
         os.kill(pid, 9)
     except OSError:
         pass
+    state = host_session_state(provider, sid)
+    if state.get("agent_pid") == pid:
+        state.pop("agent_pid", None)
+        host_write(host_paths(provider, sid)["state"], state)
     host_log(provider, sid, "agent_reaped", dict(pid=pid))
     return True
 

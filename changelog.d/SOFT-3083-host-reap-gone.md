@@ -1,0 +1,1 @@
+A stopped server chat clears a recorded agent process even when that process has already exited.
