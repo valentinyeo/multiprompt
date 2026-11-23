@@ -42,6 +42,15 @@ function Find-MbTab($state) {
     return @($state.tabs | Where-Object { (Get-MbTabProperty $_ 'tmux_session') -ceq $MbTabSession })[0]
 }
 
+function Find-MbTabClosed($state) {
+    if ($null -eq $state -or $null -eq $state.PSObject.Properties['closed_tmux']) { return $null }
+    return @($state.closed_tmux | Where-Object { $_.session -ceq $MbTabSession })[0]
+}
+
+function Assert-MbTabVerbLine([string]$Verb, [string]$Line) {
+    if ($Line -notmatch "^$Verb\s") { throw "$Verb output unexpected: $Line" }
+}
+
 function Read-MbTabText([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { return '' }
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
@@ -125,11 +134,13 @@ function Save-MbTabShot([string]$Path) {
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 
+$MbTabOpenArgs = @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0')
+
 function Ensure-MbTabOpen() {
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
     try {
-        $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
-        if ($line -notmatch 'opened|already open') { throw "open did not publish the tab: $line" }
+        $line = Invoke-MbTabNode $MbTabOpenArgs
+        Assert-MbTabVerbLine 'open' $line
     } finally { Remove-Item Env:\MULTIPROMPT_KEY -ErrorAction SilentlyContinue }
     Wait-MbTab 'imported tab' { $null -ne (Find-MbTab (Read-MbTabSession)) }
 }
@@ -225,8 +236,8 @@ try {
     $stage = $MbTabVerb
     switch ($MbTabVerb) {
         'open' {
-            $line = Invoke-MbTabNode @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
-            if ($line -notmatch 'opened') { throw "open did not publish the tab: $line" }
+            $line = Invoke-MbTabNode $MbTabOpenArgs
+            Assert-MbTabVerbLine 'open' $line
             Wait-MbTab 'open tab visible' {
                 $state = Read-MbTabSession
                 $tab = Find-MbTab $state
@@ -237,13 +248,13 @@ try {
         'close' {
             Ensure-MbTabOpen
             $line = Invoke-MbTabNode @('close', $MbTabSession, '--host', '0')
-            if ($line -notmatch 'closed') { throw "close did not remove the tab: $line" }
+            Assert-MbTabVerbLine 'close' $line
             Assert-MbTabPresent $false 'closed tab absent'
         }
         'move' {
             Ensure-MbTabOpen
             $line = Invoke-MbTabNode @('move', $MbTabSession, '--workspace', $MbTabOther, '--host', '0')
-            if ($line -notmatch 'moved|already moved') { throw "move did not change workspace: $line" }
+            Assert-MbTabVerbLine 'move' $line
             Wait-MbTab 'moved workspace' {
                 $state = Read-MbTabSession
                 $tab = Find-MbTab $state
@@ -253,7 +264,8 @@ try {
         }
         'pin' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('pin', $MbTabSession, 'on', '--host', '0')
+            $line = Invoke-MbTabNode @('pin', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'pin' $line
             Wait-MbTab 'pinned tab' {
                 $t = Find-MbTab (Read-MbTabSession)
                 return $null -ne $t -and (Get-MbTabProperty $t 'pinned_top') -eq $true
@@ -261,8 +273,9 @@ try {
         }
         'unpin' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('pin', $MbTabSession, 'on', '--host', '0')
-            Invoke-MbTabNode @('pin', $MbTabSession, 'off', '--host', '0')
+            Assert-MbTabVerbLine 'pin' (Invoke-MbTabNode @('pin', $MbTabSession, '--host', '0'))
+            $line = Invoke-MbTabNode @('unpin', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'unpin' $line
             Wait-MbTab 'unpinned tab' {
                 $t = Find-MbTab (Read-MbTabSession)
                 return $null -ne $t -and (Get-MbTabProperty $t 'pinned_top') -ne $true
@@ -270,24 +283,25 @@ try {
         }
         'archive' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('archive', $MbTabSession, '--host', '0')
-            Wait-MbTab 'archived tab' {
-                $t = Find-MbTab (Read-MbTabSession)
-                return $null -ne $t -and (Get-MbTabProperty $t 'inbox_archived') -eq $true
-            }
+            $line = Invoke-MbTabNode @('archive', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'archive' $line
+            Assert-MbTabPresent $false 'archived tab absent from sidebar'
+            Wait-MbTab 'archived tombstone' { $null -ne (Find-MbTabClosed (Read-MbTabSession)) }
         }
         'unarchive' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('archive', $MbTabSession, '--host', '0')
-            Invoke-MbTabNode @('unarchive', $MbTabSession, '--host', '0')
-            Wait-MbTab 'unarchived tab' {
-                $t = Find-MbTab (Read-MbTabSession)
-                return $null -ne $t -and (Get-MbTabProperty $t 'inbox_archived') -ne $true
-            }
+            Assert-MbTabVerbLine 'archive' (Invoke-MbTabNode @('archive', $MbTabSession, '--host', '0'))
+            Assert-MbTabPresent $false 'archived tab absent before unarchive'
+            $line = Invoke-MbTabNode @('unarchive', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'unarchive' $line
+            $line = Invoke-MbTabNode @('restore', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'restore' $line
+            Wait-MbTab 'restored tab' { $null -ne (Find-MbTab (Read-MbTabSession)) }
         }
         'wait' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('wait', $MbTabSession, 'on', '--host', '0')
+            $line = Invoke-MbTabNode @('wait', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'wait' $line
             Wait-MbTab 'waiting tab' {
                 $t = Find-MbTab (Read-MbTabSession)
                 return $null -ne $t -and (Get-MbTabProperty $t 'inbox_archived') -eq $true -and (Get-MbTabProperty $t 'needs_attention') -ne $true
@@ -295,8 +309,9 @@ try {
         }
         'restore' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('wait', $MbTabSession, 'on', '--host', '0')
-            Invoke-MbTabNode @('restore', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'wait' (Invoke-MbTabNode @('wait', $MbTabSession, '--host', '0'))
+            $line = Invoke-MbTabNode @('restore', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'restore' $line
             Wait-MbTab 'restored tab' {
                 $t = Find-MbTab (Read-MbTabSession)
                 return $null -ne $t -and (Get-MbTabProperty $t 'inbox_archived') -ne $true
@@ -304,7 +319,7 @@ try {
         }
         'layout-sync' {
             Ensure-MbTabOpen
-            Invoke-MbTabNode @('close', $MbTabSession, '--host', '0')
+            Assert-MbTabVerbLine 'close' (Invoke-MbTabNode @('close', $MbTabSession, '--host', '0'))
             Assert-MbTabPresent $false 'closed before layout sync'
             Bump-MbTabLayout
             Assert-MbTabPresent $false 'still closed after layout sync'

@@ -11,7 +11,7 @@ Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprom
 
 ## How to get to it (user POV)
 
-- Publish a shell tab into workspace Multiprompt with `mb open`.
+- Publish a shell tab into workspace Multiprompt with `mb open --kind shell --tmux <name> --title <title> --workspace Multiprompt --host 0` (prints `open <title>`).
 
 ## Driving it with control.ps1
 

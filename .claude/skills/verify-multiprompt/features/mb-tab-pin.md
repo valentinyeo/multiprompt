@@ -1,6 +1,6 @@
 # Mb tab pin
 
-Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-pin.md, src/sidebar.zig
+Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-pin.md, src/tab_state.zig, src/sidebar.zig
 
 ## Sub-features
 
@@ -11,7 +11,7 @@ Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-fea
 
 ## How to get to it (user POV)
 
-- Pin the proof tab with `mb pin on`.
+- Pin the proof tab with `mb pin` (prints `pin <title>`).
 
 ## Driving it with control.ps1
 

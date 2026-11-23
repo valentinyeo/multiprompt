@@ -1,17 +1,17 @@
 # Mb tab archive
 
-Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-archive.md, src/sidebar.zig, src/session.zig
+Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-archive.md, src/tab_state.zig, src/session.zig
 
 ## Sub-features
 
 - Mocked account login, two workspaces, and one proof shell tab published without local tmux.
 - `mb archive` runs on the Windows runner with admin layout credentials.
-- The tab has `inbox_archived` in `session.json`.
+- The tab leaves live `tabs` and appears under `closed_tmux` in `session.json`.
 - Before and after desktop screenshots, session snapshots and `result.json` in the journey artifact.
 
 ## How to get to it (user POV)
 
-- Archive the proof tab with `mb archive`.
+- Archive the proof tab with `mb archive` (prints `archive <title>`).
 
 ## Driving it with control.ps1
 

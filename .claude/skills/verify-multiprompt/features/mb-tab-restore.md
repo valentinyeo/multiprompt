@@ -1,6 +1,6 @@
 # Mb tab restore
 
-Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-restore.md, src/sidebar.zig, src/session.zig
+Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-restore.md, src/tab_state.zig, src/sidebar.zig, src/session.zig
 
 ## Sub-features
 
@@ -11,7 +11,7 @@ Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-fea
 
 ## How to get to it (user POV)
 
-- Restore the proof tab from Waiting with `mb restore`.
+- Restore the proof tab from Waiting with `mb restore` (prints `restore <title>`).
 
 ## Driving it with control.ps1
 

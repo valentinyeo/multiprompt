@@ -1,17 +1,17 @@
 # Mb tab unarchive
 
-Source files: tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-unarchive.md, src/sidebar.zig, src/session.zig
+Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprompt/control-feature-mb-tab-verbs.ps1, .claude/skills/verify-multiprompt/features/mb-tab-unarchive.md, src/tab_state.zig, src/session.zig
 
 ## Sub-features
 
 - Mocked account login, two workspaces, and one proof shell tab published without local tmux.
 - `mb unarchive` runs on the Windows runner with admin layout credentials.
-- The tab no longer has `inbox_archived`.
+- After `mb unarchive` and `mb restore`, the proof tab is live in `session.json` again.
 - Before and after desktop screenshots, session snapshots and `result.json` in the journey artifact.
 
 ## How to get to it (user POV)
 
-- Restore the proof tab from archive with `mb unarchive`.
+- Clear the archived tombstone with `mb unarchive`, then reopen it with `mb restore`.
 
 ## Driving it with control.ps1
 
