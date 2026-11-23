@@ -1,0 +1,5 @@
+{"at":1795147200,"event":"start","detail":{"tmux":"verify-removed"}}
+{"at":1795147260,"event":"agent_started","detail":{"pid":1205}}
+{"at":1795147320,"event":"turn_done","detail":{"id":null,"subtype":"success"}}
+{"at":1795147380,"event":"stop","detail":null}
+{"at":1795147392.0,"event":"disabled","detail":null}

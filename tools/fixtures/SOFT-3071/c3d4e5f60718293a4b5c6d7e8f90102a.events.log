@@ -1,0 +1,4 @@
+{"at":1795143600,"event":"start","detail":{"tmux":"live-silent"}}
+{"at":1795143660,"event":"agent_started","detail":{"pid":1204}}
+{"at":1795144800,"event":"turn_done","detail":{"id":"mp-0123456789abcdef0123456789abcdef","subtype":"success"}}
+{"at":1795144830.0,"event":"stop","detail":null}
