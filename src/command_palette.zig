@@ -282,7 +282,6 @@ const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_AL
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
-const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_IN_PLACE;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
 const SEARCH_TABCTX_GOOGLE_SIGNIN = @import("app_state.zig").SEARCH_TABCTX_GOOGLE_SIGNIN;
@@ -528,7 +527,6 @@ const RESTART_HOSTS = 3;
 const RestartChatJob = struct {
     all: bool = false,
     fresh: bool = false,
-    in_place: bool = false,
     switch_to: u8 = 0,
     count: u8 = 0,
     identities: [RESTART_HOSTS]SessionIdentity = undefined,
@@ -750,7 +748,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target == SEARCH_TABCTX_CHAT_RESTART_AI) return "chat view restart the ai agent stopped claude resume";
-    if (target == SEARCH_TABCTX_CHAT_RESTART_IN_PLACE) return "chat view restart this chat in place login settings resume";
+    if (target == app_state.SEARCH_TABCTX_CHAT_RESTART_IN_PLACE) return "chat view restart this chat in place login settings resume";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
     if (target == app_state.SEARCH_TABCTX_FRESH_START) return "Fresh start handover clear context same chat picture address";
     if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) return "Switch AI to Claude keep chat name picture address history";
@@ -2887,7 +2885,7 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
 }
 
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
-    if (job.switch_to != 0) {
+    if (job.switch_to >= 1 and job.switch_to <= 3) {
         const parsed = std.json.parseFromSlice(SwitchEnvelope, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
             restartChatNotice("Switch AI failed: the server did not answer");
             return;
@@ -2923,11 +2921,11 @@ fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
     const restarted = if (job.all) agent_host.restartAllAnswered(body) and !waiting and !nothing else agent_host.restartedReply(body);
     const restarting = !job.all and agent_host.restartingReply(body);
     if (restarted) {
-        restartChatNotice(if (job.in_place) "Chat restarted in place" else if (job.all) "Every idle live chat restarted on the newest version" else "Chat restarted on the newest version");
+        restartChatNotice(if (job.all) "Every idle live chat restarted on the newest version" else "Chat restarted on the newest version");
     } else if (waiting) {
-        restartChatNotice(if (job.in_place) "Chat restarts in place when this reply ends" else if (job.all) "Live chats restart when their replies end" else "Chat restarts when this reply ends");
+        restartChatNotice(if (job.all) "Live chats restart when their replies end" else "Chat restarts when this reply ends");
     } else if (restarting) {
-        restartChatNotice(if (job.in_place) "Chat is restarting in place" else "Chat is restarting on the newest version");
+        restartChatNotice("Chat is restarting on the newest version");
     } else if (nothing) {
         restartChatNotice("No live chat was running to restart");
     } else if (agent_host.restartRefusedReply(body)) {
@@ -2952,7 +2950,7 @@ fn restartChatThread(job: *RestartChatJob) void {
         }
     } else {
         const identity = job.identities[0];
-        const request = if (job.switch_to != 0)
+        const request = if (job.switch_to >= 1 and job.switch_to <= 3)
             switchAiRequest(&buf, identity, switchAiName(job.switch_to)) orelse return
         else if (job.fresh)
             std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ identity.owner, identity.host.index(), identity.provider(), std.mem.sliceTo(&identity.sid, 0) }) catch return
@@ -2961,35 +2959,30 @@ fn restartChatThread(job: *RestartChatJob) void {
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
         if (!@import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null)) {
-            restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+            restartChatNotice(if (job.switch_to >= 1 and job.switch_to <= 3) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
             return;
         }
         answered = true;
         restartChatReply(job, response.items);
     }
-    if (!answered) restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+    if (!answered) restartChatNotice(if (job.switch_to >= 1 and job.switch_to <= 3) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
 }
 
-pub fn startRestartChat(all: bool) bool {
-    return startChatJob(all, false, 0, app_state.active_shell, false);
-}
-
-pub fn startRestartChatInPlace(tab: u32) bool {
-    return startChatJob(false, false, 0, tab, true);
-}
+pub fn startRestartChat(all: bool) bool { return startChatJob(all, false, 0, app_state.active_shell); }
+pub fn startRestartChatOnTab(tab: u32) bool { return startChatJob(false, false, 4, tab); }
 
 pub fn startSwitchAi(tab: u32, target: u8) bool {
     if (target < 1 or target > 3) return false;
-    return startChatJob(false, false, target, tab, false);
+    return startChatJob(false, false, target, tab);
 }
 
 pub fn startFreshChat(tab: u32) bool {
-    return startChatJob(false, true, 0, tab, false);
+    return startChatJob(false, true, 0, tab);
 }
 
-fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32, in_place: bool) bool {
+fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
     const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
-    job.* = .{ .all = all, .fresh = fresh, .in_place = in_place, .switch_to = switch_to };
+    job.* = .{ .all = all, .fresh = fresh, .switch_to = switch_to };
     if (all) {
         for (0..app_state.shell_count) |i| {
             if (job.count >= RESTART_HOSTS) break;
@@ -5887,17 +5880,12 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
         app_state.g_search_result_count += 1;
     }
-
-    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
         app_state.g_search_result_count += 1;
     }
-    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").tab_context_chat_restart_in_place, "login", "settings", "resume", "running" }, app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESTART_IN_PLACE;
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or labelsMatchQuery(&.{ @import("ui_words.zon").tab_context_chat_restart_in_place, "login", "settings", "resume", "running" }, app_state.g_search_buf[0..app_state.g_search_len]))) {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_CHAT_RESTART_IN_PLACE;
         app_state.g_search_result_count += 1;
     }
     const switch_tab_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
