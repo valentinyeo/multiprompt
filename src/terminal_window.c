@@ -11,7 +11,11 @@ typedef struct {
     HWND hwnd;
     MPTerminal *model;
     MPTerminalResize resize;
+    MPTerminalOutput output;
     void *user;
+    char *batch;
+    size_t batch_used, batch_capacity;
+    int batching;
     HFONT fonts[16];
     int width, height, rows, cols, scroll, wheel;
     int anchor, end, selecting, selected;
@@ -24,6 +28,33 @@ typedef struct {
 } TerminalWindow;
 
 typedef struct { TerminalWindow *window; int attached; } Creation;
+
+#define BATCH_CHUNK 262144
+
+static void relay(const char *bytes, size_t length, void *context) {
+    TerminalWindow *t = context;
+    if (!t->batching) { t->output(bytes, length, t->user); return; }
+    if (t->batch_used + length > t->batch_capacity) {
+        size_t capacity = t->batch_capacity ? t->batch_capacity : 4096;
+        while (capacity < t->batch_used + length) capacity *= 2;
+        char *grown = realloc(t->batch, capacity);
+        if (!grown) { t->output(bytes, length, t->user); return; }
+        t->batch = grown;
+        t->batch_capacity = capacity;
+    }
+    memcpy(t->batch + t->batch_used, bytes, length);
+    t->batch_used += length;
+}
+
+static void flush_batch(TerminalWindow *t) {
+    t->batching = 0;
+    for (size_t at = 0; at < t->batch_used; at += BATCH_CHUNK) {
+        size_t length = t->batch_used - at;
+        if (length > BATCH_CHUNK) length = BATCH_CHUNK;
+        t->output(t->batch + at, length, t->user);
+    }
+    t->batch_used = 0;
+}
 
 static TerminalWindow *get(HWND hwnd) { return (TerminalWindow *)GetWindowLongPtrW(hwnd, GWLP_USERDATA); }
 static int clamp(int value, int lo, int hi) { return value < lo ? lo : value > hi ? hi : value; }
@@ -288,6 +319,7 @@ void mp_terminal_window_paste(HWND hwnd) {
     const WCHAR *text = memory ? GlobalLock(memory) : NULL;
     size_t count = memory ? GlobalSize(memory) / sizeof(WCHAR) : 0;
     if (text) {
+        t->batching = 1;
         mp_terminal_paste(t->model, 1);
         for (size_t i = 0; i < count && text[i]; i++) {
             WCHAR value = text[i];
@@ -296,6 +328,7 @@ void mp_terminal_window_paste(HWND hwnd) {
         }
         if (t->surrogate) { t->surrogate = 0; input(t, 0xfffd, 0); }
         mp_terminal_paste(t->model, 0);
+        flush_batch(t);
         GlobalUnlock(memory);
     }
     CloseClipboard();
@@ -420,7 +453,11 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
                 SetCapture(hwnd);
             } else if (t->selecting) {
                 t->end = index;
-                if (message == WM_LBUTTONUP) { t->selecting = 0; ReleaseCapture(); }
+                if (message == WM_LBUTTONUP) {
+                    t->selecting = 0;
+                    if (t->anchor == t->end) t->selected = 0;
+                    ReleaseCapture();
+                }
             } else return 0;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
@@ -448,6 +485,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             mp_terminal_free(t->model);
             for (int i = 0; i < 16; i++) if (t->fonts[i]) DeleteObject(t->fonts[i]);
+            free(t->batch);
             free(t);
             return DefWindowProcW(hwnd, message, wp, lp);
     }
@@ -468,7 +506,8 @@ HWND mp_terminal_window_new(HWND parent, const LOGFONTW *font, uint32_t fg, uint
     t->caret_x = t->caret_y = -1;
     t->rows = 24; t->cols = 80;
     t->resize = on_resize; t->user = user; t->background = bg;
-    t->model = mp_terminal_new(t->rows, t->cols, output, user);
+    t->output = output;
+    t->model = mp_terminal_new(t->rows, t->cols, relay, t);
     if (!t->model) { free(t); return NULL; }
     Creation creation = {t, 0};
     HWND hwnd = CreateWindowExW(0, CLASS_NAME, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, NULL, wc.hInstance, &creation);

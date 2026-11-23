@@ -174,6 +174,7 @@ void mp_terminal_key(MPTerminal *t, int key, int modifiers) {
 
 void mp_terminal_char(MPTerminal *t, uint32_t value, int modifiers) {
     if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) value = 0xfffd;
+    if (value < 0x20 || value == 0x7f) modifiers &= ~VTERM_MOD_CTRL;
     vterm_keyboard_unichar(t->terminal, value, (VTermModifier)(modifiers & VTERM_ALL_MODS_MASK));
 }
 
