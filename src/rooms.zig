@@ -210,13 +210,16 @@ pub const Controller = struct {
         job.cancelled.store(true, .release);
         if (job.thread) |thread| {
             if (@import("ui_thread.zig").busy()) {
-                const ptr = job;
                 self.job = null;
                 if (self.journal_lock) |*guard| guard.deinit();
                 self.journal_lock = null;
                 @import("idle_budget.zig").bump(.thread_spawn);
-                const worker = std.Thread.spawn(.{}, roomJobCleanup, .{ ptr, thread }) catch {
-                    thread.detach();
+                const worker = std.Thread.spawn(.{}, roomJobCleanup, .{ job, thread }) catch {
+                    thread.join();
+                    allocator.free(job.request);
+                    allocator.free(job.output);
+                    allocator.destroy(job);
+                    return;
                 };
                 worker.detach();
                 return;
