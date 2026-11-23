@@ -1765,3 +1765,25 @@ test('IGSH-1890 Favorites groups sync between desktops and stay hidden from clie
   const rejected = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: after.revision, layout: { ...after.layout, tabs: [{ ...after.layout.tabs[0], starred_group: 'x'.repeat(65) }, after.layout.tabs[1]] } }) });
   assert.equal(rejected.status, 400);
 });
+
+
+test('MUBO-244 the chat photo remains readable after changing host and tab name', async () => {
+  const { token } = await enroll();
+  const sid = '11111111-2222-4333-8444-555555555555';
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
+  const path = '/v1/bot-photos/e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576';
+  const headers = { ...auth(token), 'X-Layout-Features': 'bot_photo,csid,bot_appearance' };
+  const seeded = { ...layout, tabs: [{ ...layout.tabs[0], csid: sid, face: 7 }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(seeded), 'owner@example.com').run();
+  const uploaded = await request(path, { method: 'PUT', headers, body: JSON.stringify({ png }) });
+  assert.equal(uploaded.status, 200);
+  const photo = (await uploaded.json()).photo;
+  const current = await (await request('/v1/layout', { headers })).json();
+  const restored = { ...current.layout, tabs: [{ ...layout.tabs[0], tmux_session: 'live-' + sid.replaceAll('-', ''), tmux_host: 1 }] };
+  const renamed = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: current.revision, layout: restored }) });
+  assert.equal(renamed.status, 200);
+  const after = await renamed.json();
+  assert.equal(after.layout.tabs[0].photo, photo);
+  assert.equal(after.layout.tabs[0].face, 7);
+  assert.deepEqual(await (await request(path, { headers })).json(), { png });
+});

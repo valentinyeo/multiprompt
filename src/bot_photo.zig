@@ -390,3 +390,23 @@ pub fn shutdown() void {
     if (token != 0) GdiplusShutdown(token);
     token = 0;
 }
+
+
+test "MUBO-244 photo identity follows a chat recreated under another tab and host" {
+    const sid = "11111111-2222-4333-8444-555555555555";
+    var original = state.empty_shell;
+    original.kind = .tmux;
+    @memcpy(original.tmux_session[0..10], "old-runner");
+    original.tmux_session_len = 10;
+    @memcpy(original.claude_sid[0..sid.len], sid);
+    original.claude_sid_len = sid.len;
+    const before = key(&original).?;
+    var restored = state.empty_shell;
+    restored.kind = .tmux;
+    restored.tmux_host = 1;
+    const alias = "live-11111111222243338444555555555555";
+    @memcpy(restored.tmux_session[0..alias.len], alias);
+    restored.tmux_session_len = alias.len;
+    try std.testing.expectEqualSlices(u8, &before, &key(&restored).?);
+    try std.testing.expectEqualStrings("e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576", &std.fmt.bytesToHex(before, .lower));
+}

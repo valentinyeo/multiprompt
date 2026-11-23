@@ -82,7 +82,7 @@ function harness(options = {}) {
     try { owners = JSON.parse(readFileSync(ownerPath, 'utf8')); } catch { owners = null; }
     return { code, lines, errors, puts, revision: () => revision, layout, tmux, runtime, sessions, panes, owners };
   };
-  return { call, dir, layout, puts, panes, sessions, tmux };
+  return { call, dir, layout, puts, panes, sessions, tmux, photos };
 }
 
 const text = result => [...result.lines, ...result.errors].join('\n');
@@ -393,4 +393,32 @@ test('star is refused when the service has no favorite feature', async () => {
   assert.match(refused.errors[0], /does not support favorite/);
   assert.equal(box.puts.length, 0);
   rmSync(box.dir, { recursive: true, force: true });
+});
+
+
+test('MUBO-244 an uploaded photo follows a chat recreated on another host', async () => {
+  const sid = '11111111-2222-4333-8444-555555555555';
+  const chatKey = 'e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576';
+  const box = harness({ layout: { schema: 1, workspaces: [{ name: 'Work' }], tabs: [
+    { kind: 'tmux', name: 'Runner', tmux_session: 'old-runner', tmux_host: 0, workspace: 'Work', csid: sid }
+  ] } });
+  try {
+    const photo = join(box.dir, 'face.png');
+    writeFileSync(photo, PNG);
+    const first = await box.call(['style', 'Runner', '--photo', photo]);
+    assert.equal(first.code, 0, text(first));
+    assert.equal(box.photos.get(chatKey), PNG.toString('base64'));
+    assert.equal(box.photos.size, 2);
+    const legacyKey = [...box.photos.keys()].find(key => key !== chatKey);
+    box.layout.tabs[0] = { kind: 'tmux', name: 'Restored', tmux_session: 'live-' + sid.replaceAll('-', ''), tmux_host: 1, workspace: 'Work' };
+    const restored = await box.call(['style', 'Restored', '--photo', photo]);
+    assert.equal(restored.code, 0, text(restored));
+    assert.equal(box.photos.get(chatKey), PNG.toString('base64'));
+    assert.equal(box.photos.get(legacyKey), PNG.toString('base64'));
+    assert.equal(box.photos.size, 3);
+    const writes = box.puts.length;
+    const repeated = await box.call(['style', 'Restored', '--photo', photo]);
+    assert.equal(repeated.code, 0, text(repeated));
+    assert.equal(box.puts.length, writes);
+  } finally { rmSync(box.dir, { recursive: true, force: true }); }
 });

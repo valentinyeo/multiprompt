@@ -353,3 +353,25 @@ test "IGSH-1192 every robot retains fractional rounded-square edges at 100 and 1
         try std.testing.expect(w.WriteFile(file, bmp.ptr, @intCast(bmp.len), &written, null) != 0 and written == bmp.len);
     }
 }
+
+
+test "MUBO-244 default and chosen faces follow the chat instead of its tab name" {
+    const sid = "11111111-2222-4333-8444-555555555555";
+    var original = state.empty_shell;
+    original.kind = .tmux;
+    @memcpy(original.tmux_session[0..10], "old-runner");
+    original.tmux_session_len = 10;
+    @memcpy(original.claude_sid[0..sid.len], sid);
+    original.claude_sid_len = sid.len;
+    var restored = state.empty_shell;
+    restored.kind = .tmux;
+    restored.tmux_host = 1;
+    const alias = "live-11111111222243338444555555555555";
+    @memcpy(restored.tmux_session[0..alias.len], alias);
+    restored.tmux_session_len = alias.len;
+    try std.testing.expectEqual(forShell(&original), forShell(&restored));
+    original.face = 7;
+    restored.face = 7;
+    try std.testing.expectEqual(@as(u8, 7), forShell(&restored).face);
+    try std.testing.expectEqual(forShell(&original), forShell(&restored));
+}
