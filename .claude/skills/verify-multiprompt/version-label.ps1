@@ -21,10 +21,10 @@ function Assert-VersionLabel([string]$Name) {
     $left = $offsetX + [int][Math]::Floor($geometry.icon.right * $scale)
     $top = $offsetY + $client.Bottom - [int][Math]::Floor($geometry.icon.topInset * $scale)
     $sidebarRight = $offsetX + [int][Math]::Floor($sidebar.sidebar_width * $scale)
-    $width = $sidebarRight - $left
+    $width = $sidebarRight - $left - 1
     $height = [int][Math]::Floor($geometry.icon.height * $scale)
     $paddingLeft = [int][Math]::Floor(8 * $scale)
-    $paddingRight = [int][Math]::Floor(12 * $scale)
+    $paddingRight = [int][Math]::Floor(12 * $scale) - 1
     $fontHeight = [int][Math]::Floor(12 * $scale)
     $fontPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../src/fonts/IBMPlexSans-Regular.ttf'))
     $ink = if ($Name -eq 'version-dark') { 138 } else { 105 }
@@ -37,6 +37,7 @@ function Assert-VersionLabel([string]$Name) {
     $controls = @(
         @{ name = 'telemetry'; bounds = New-Object Drawing.Rectangle(($offsetX + [int][Math]::Floor($geometry.icon.left * $scale)), $top, ([int][Math]::Floor($geometry.icon.width * $scale)), $height) }
         @{ name = 'sidebar-controls'; bounds = New-Object Drawing.Rectangle($offsetX, $offsetY, ($sidebarRight - $offsetX), ($top - $offsetY)) }
+        @{ name = 'sidebar-divider'; bounds = New-Object Drawing.Rectangle(($sidebarRight - 1), $offsetY, 1, $client.Bottom) }
         @{ name = 'content-pane'; bounds = New-Object Drawing.Rectangle($sidebarRight, $offsetY, ($client.Right - $sidebarRight + $offsetX), $client.Bottom) }
     )
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
