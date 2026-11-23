@@ -1,1 +1,1 @@
-Server tools can check whether each chat host, desktop tab and history are healthy.
+Chat diagnostics show which chats cannot reach their host or display their history.
