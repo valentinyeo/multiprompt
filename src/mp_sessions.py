@@ -126,6 +126,7 @@ def session_catalog(send, listing):
             host=row.get("host") or config.get("spawn_host_name"),
             workspace=row.get("workspace") or config.get("spawn_workspace"),
             group=row.get("group") if "group" in row else config.get("spawn_group"),
+            spawn_tab_kind=config.get("spawn_tab_kind"),
         )
         if not row.get("tab_open"):
             after = config.get("spawn_after_tab")
@@ -191,13 +192,16 @@ def find_existing(send, listing, slot, display, folder):
 def placement_open(send, listing, tmux, display, workspace, host, target):
     after_tab = target.get("after_tab")
     group = target.get("group")
+    tab_kind = target.get("spawn_tab_kind")
+    if tab_kind not in send.TAB_KINDS and target.get("sid"):
+        tab_kind = "chat"
     if isinstance(after_tab, int):
-        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=after_tab)
+        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=after_tab, tab_kind=tab_kind)
     if group:
-        return send.open_visible_tab(listing, tmux, display, workspace, host, group=group)
+        return send.open_visible_tab(listing, tmux, display, workspace, host, group=group, tab_kind=tab_kind)
     anchor = workspace_anchor(listing, workspace)
     if anchor is not None:
-        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=anchor)
+        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=anchor, tab_kind=tab_kind)
     return dict(ok=False, error="no_placement")
 
 
@@ -497,7 +501,7 @@ def cmd_start(args):
             raise ValueError("host configuration collision for " + repr(display))
         config = dict(enabled=False, cwd=folder, tmux=tmux, sid=sid, provider=provider, spawn_workspace=workspace,
                       spawn_name=display.casefold(), spawn_display=display, spawn_group=group, spawn_host=slot,
-                      spawn_host_name=host)
+                      spawn_host_name=host, spawn_tab_kind="chat")
         send.write_json(path, config)
         existing = dict(name=display, tmux=tmux, provider=provider, sid=sid, folder=folder, workspace=workspace,
                         group=group, host=host, running=False, tab_open=False)

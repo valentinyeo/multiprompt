@@ -22,13 +22,15 @@
               "id": 70,
               "title": "Anchor",
               "host": "remote-1",
-              "tmux": "live-anchor"
+              "tmux": "live-anchor",
+              "kind": "chat"
             },
             {
               "id": 71,
               "title": "Field chat",
               "host": "remote-1",
-              "tmux": "live-field"
+              "tmux": "live-field",
+              "kind": "chat"
             }
           ]
         }

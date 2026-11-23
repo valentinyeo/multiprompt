@@ -12,7 +12,8 @@
           "id": 40,
           "title": "Home anchor",
           "host": "remote-1",
-          "tmux": "live-home"
+          "tmux": "live-home",
+          "kind": "chat"
         }
       ]
     },
@@ -30,13 +31,15 @@
               "id": 30,
               "title": "Lead",
               "host": "remote-1",
-              "tmux": "live-lead"
+              "tmux": "live-lead",
+              "kind": "chat"
             },
             {
               "id": 31,
               "title": "Support",
               "host": "remote-1",
-              "tmux": "live-support"
+              "tmux": "live-support",
+              "kind": "chat"
             }
           ]
         }

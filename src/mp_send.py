@@ -271,6 +271,20 @@ def config_path_for_tmux(tmux):
     return None, None
 
 
+TAB_KINDS = frozenset({"chat", "shell"})
+
+
+def listing_tab_kind(tab=None, tmux=None):
+    if isinstance(tab, dict):
+        kind = tab.get("kind")
+        if kind in TAB_KINDS:
+            return kind
+        tmux = tab.get("tmux")
+    if isinstance(tmux, str) and tmux.startswith("live-"):
+        return "chat"
+    return "shell"
+
+
 def apply_spawn_placement(config, listing, workspace, group, tab, host):
     if workspace:
         config["spawn_workspace"] = workspace
@@ -290,6 +304,8 @@ def apply_spawn_placement(config, listing, workspace, group, tab, host):
         host_name = host
     if isinstance(host_name, str) and host_name.strip():
         config["spawn_host_name"] = host_name
+    if tab:
+        config["spawn_tab_kind"] = listing_tab_kind(tab)
 
 
 def sync_tab_placements(listing):
@@ -319,13 +335,14 @@ def verify_tab(tmux):
     return None
 
 
-def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_tab=None):
+def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_tab=None, tab_kind=None):
     if listing.get("ok") is not True:
         return dict(ok=False, error=listing.get("error") or "zsb_failed")
     existing = find_tab(listing, tmux)[2]
     if existing:
         return dict(ok=True, tab=existing.get("id"), existing=True)
-    common = ("--host", host, "--tmux", tmux, "--name", title)
+    kind = tab_kind if tab_kind in TAB_KINDS else listing_tab_kind(None, tmux)
+    common = ("--host", host, "--tmux", tmux, "--name", title, "--kind", kind)
     if after_tab is not None:
         opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(after_tab), *common)
     elif group:

@@ -1942,6 +1942,19 @@ pub fn startTunnelInboundListener() void {
     }
 }
 
+const ZsbSessionOpenFlag = enum(u3) { workspace, group, host, tmux, name, after_tab, kind };
+
+fn zsbSessionOpenFlagFor(arg: []const u8) ?ZsbSessionOpenFlag {
+    if (std.mem.eql(u8, arg, "--workspace")) return .workspace;
+    if (std.mem.eql(u8, arg, "--group")) return .group;
+    if (std.mem.eql(u8, arg, "--host")) return .host;
+    if (std.mem.eql(u8, arg, "--tmux")) return .tmux;
+    if (std.mem.eql(u8, arg, "--name")) return .name;
+    if (std.mem.eql(u8, arg, "--after-tab")) return .after_tab;
+    if (std.mem.eql(u8, arg, "--kind")) return .kind;
+    return null;
+}
+
 const ZsbSessionOpenArgs = struct {
     workspace: []const u8,
     group: []const u8,
@@ -1949,36 +1962,41 @@ const ZsbSessionOpenArgs = struct {
     tmux: []const u8,
     name: []const u8,
     after_tab: ?u32 = null,
+    kind: ?[]const u8 = null,
 };
 
 fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
-    if (argv.len != 11 or !std.mem.eql(u8, argv[0], "session-open")) return error.BadArgs;
-    const flags = [_][]const u8{ "--workspace", "--group", "--host", "--tmux", "--name", "--after-tab" };
-    var values: [6][]const u8 = @splat("");
+    if (argv.len < 5 or !std.mem.eql(u8, argv[0], "session-open")) return error.BadArgs;
+    var values: [7]?[]const u8 = @splat(null);
     var i: usize = 1;
-    while (i < argv.len) : (i += 2) {
-        var matched = false;
-        for (flags, 0..) |flag, fi| {
-            if (!std.mem.eql(u8, argv[i], flag)) continue;
-            if (values[fi].len != 0 or argv[i + 1].len == 0) return error.BadArgs;
-            values[fi] = argv[i + 1];
-            matched = true;
-            break;
-        }
-        if (!matched) return error.BadArgs;
+    while (i < argv.len) {
+        const flag = zsbSessionOpenFlagFor(argv[i]) orelse return error.BadArgs;
+        const slot = @intFromEnum(flag);
+        if (i + 1 >= argv.len or values[slot] != null or argv[i + 1].len == 0) return error.BadArgs;
+        values[slot] = argv[i + 1];
+        i += 2;
     }
-    if ((values[1].len == 0) == (values[5].len == 0)) return error.BadArgs;
-    for ([_]usize{ 0, 2, 3, 4 }) |vi| if (values[vi].len == 0) return error.BadArgs;
-    try validateZsbTmux(values[3]);
-    try validateZsbName(values[4]);
+    const workspace = values[@intFromEnum(ZsbSessionOpenFlag.workspace)] orelse return error.BadArgs;
+    const host = values[@intFromEnum(ZsbSessionOpenFlag.host)] orelse return error.BadArgs;
+    const tmux = values[@intFromEnum(ZsbSessionOpenFlag.tmux)] orelse return error.BadArgs;
+    const name = values[@intFromEnum(ZsbSessionOpenFlag.name)] orelse return error.BadArgs;
+    const group = values[@intFromEnum(ZsbSessionOpenFlag.group)] orelse "";
+    const after_text = values[@intFromEnum(ZsbSessionOpenFlag.after_tab)];
+    const kind = values[@intFromEnum(ZsbSessionOpenFlag.kind)];
+    if ((group.len == 0) == (after_text == null)) return error.BadArgs;
+    try validateZsbTmux(tmux);
+    try validateZsbName(name);
+    if (kind) |text| {
+        if (!std.mem.eql(u8, text, "chat") and !std.mem.eql(u8, text, "shell")) return error.BadArgs;
+    }
     var after_tab: ?u32 = null;
-    if (values[5].len != 0) {
-        for (values[5]) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
-        const tab = std.fmt.parseInt(u32, values[5], 10) catch return error.BadArgs;
+    if (after_text) |tab_text| {
+        for (tab_text) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+        const tab = std.fmt.parseInt(u32, tab_text, 10) catch return error.BadArgs;
         if (tab == 0) return error.BadArgs;
         after_tab = tab;
     }
-    return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4], .after_tab = after_tab };
+    return .{ .workspace = workspace, .group = group, .host = host, .tmux = tmux, .name = name, .after_tab = after_tab, .kind = kind };
 }
 
 fn validateZsbTmux(tmux: []const u8) !void {
@@ -2085,6 +2103,7 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
         if (shell.tmux_session_len > 0) {
             if (!zsbAppendJsonString(out, pos, shell.tmux_session[0..shell.tmux_session_len])) return false;
         } else if (!appendAsciiBuf(out, pos, "null")) return false;
+        if (!diagJsonStringField(out, pos, &first, "kind", if (shell.chat_view_on) "chat" else "shell")) return false;
         if (!diagJsonBoolField(out, pos, &first, "active", i == app_state.active_shell)) return false;
         if (@import("capacity.zig").remoteHostForShell(&shell) != null) {
             if (!zsbAppendSessionState(out, pos, &shell)) return false;
@@ -2168,6 +2187,14 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
         if (std.mem.eql(u8, host_names[hi], args.host)) host_id = host;
     }
     const host = host_id orelse return zsbUnknownName(out, "unknown_host", &host_names);
+    const chat_view = @import("chat_view.zig");
+    const old_chat_view = app_state.g_pending_chat_view;
+    defer app_state.g_pending_chat_view = old_chat_view;
+    if (args.kind) |kind| {
+        app_state.g_pending_chat_view = std.mem.eql(u8, kind, "chat");
+    } else if (chat_view.isLive(args.tmux)) {
+        app_state.g_pending_chat_view = true;
+    }
     if (findLocalTmuxTab(host, args.tmux)) |existing| {
         const shell = &app_state.shells[existing];
         const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"existing\":true,\"tab\":{d},\"workspace\":", .{shell.shell_id}) catch return 0;

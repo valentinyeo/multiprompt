@@ -61,6 +61,8 @@ elif sys.argv[1] == "session-open":
         tab_id = state.get("next_tab", 60)
         state["next_tab"] = tab_id + 1
         entry = dict(id=tab_id, title=title, host=host, tmux=tmux)
+        if tmux.startswith("live-"):
+            entry["kind"] = "chat"
         placed = False
         for ws in listing.get("workspaces") or []:
             if ws.get("name") != workspace:
@@ -445,6 +447,7 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(config.get("spawn_workspace"), "Away")
         self.assertEqual(config.get("spawn_group"), "Ops")
         self.assertEqual(config.get("spawn_after_tab"), 31)
+        self.assertEqual(config.get("spawn_tab_kind"), "chat")
         restarted = self.parsed(self.run_sessions("restart", "Field chat", MP_SESSIONS_TEST_LIST=listing_after))
         self.assertEqual(restarted.get("status"), "restarted")
         reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
@@ -452,6 +455,9 @@ class MpSessionsTest(unittest.TestCase):
         self.assertIn("--after-tab", reopen)
         self.assertEqual(reopen[reopen.index("--after-tab") + 1], "31")
         self.assertNotIn("Home", reopen)
+        self.assertIn("--kind", reopen)
+        self.assertEqual(reopen[reopen.index("--kind") + 1], "chat")
+        self.assertEqual([call for call in self.events("zsb") if call[0] == "shell-open"], [])
 
     def test_SOFT_3131_list_shows_workspace_and_filters_case_insensitively(self):
         vstack = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "vstack-listing.json").read_text(encoding="utf-8"))
@@ -501,6 +507,23 @@ class MpSessionsTest(unittest.TestCase):
         self.assertIn("Away", reopen)
         self.assertIn("--group", reopen)
         self.assertEqual(reopen[reopen.index("--group") + 1], "Ops")
+
+    def test_SOFT_3131_close_restart_reopens_chat_tab_kind(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Kind chat", "--workspace", "Away", "--group", "Ops",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        self.mark_running(started)
+        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
+        self.parsed(self.run_sessions("close", "Kind chat", MP_SESSIONS_TEST_LIST=listing_after))
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config.get("spawn_tab_kind"), "chat")
+        self.assertEqual(config.get("sid"), started["sid"])
+        restarted = self.parsed(self.run_sessions("restart", "Kind chat", MP_SESSIONS_TEST_LIST=listing_after))
+        self.assertEqual(restarted.get("sid"), started["sid"])
+        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertEqual(reopen[reopen.index("--tmux") + 1], started["tmux"])
+        self.assertEqual(reopen[reopen.index("--kind") + 1], "chat")
 
     def test_SOFT_3131_restart_uses_the_front_workspace_when_the_saved_one_is_gone(self):
         away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
