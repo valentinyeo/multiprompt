@@ -105,7 +105,7 @@ gh workflow run recall-handed.yml --ref <branch> -f tag=v0.28.1677
 
 The driver sends three messages, cancels the middle one from its menu, then presses Up and Delete on the last one. The stand-in must record those two targeted recalls and answer only the remaining message. The answered message must no longer offer Cancel. Evidence is `verify-chat-delivery`, including `recall-handed/recall-agent.jsonl` and `recall-handed-*.png`.
 
-## User quote evidence
+### User quote evidence
 
 The default `chat-delivery` journey appends both public MUBO-237 fixtures through the provider transcript boundary after the busy-send checks. It copies the displayed conversation through Ctrl+K, clears selection, scrolls to the newest message and saves `MUBO-237-user-quote-message.png` and `MUBO-237-pasted-quote-message.png`. Inspect the inset bar, rendered bold text, three-line fold and normal-weight words below. The seeded provider transcript is disclosed fixture input, not live provider delivery. The separate `chat-sending-status` journey remains unchanged for IGSH-931.
 
