@@ -1775,6 +1775,8 @@ test('MUBO-244 the chat photo remains readable after changing host and tab name'
   const headers = { ...auth(token), 'X-Layout-Features': 'bot_photo,csid,bot_appearance' };
   const seeded = { ...layout, tabs: [{ ...layout.tabs[0], csid: sid, face: 7 }] };
   await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(seeded), 'owner@example.com').run();
+  const legacy = '/v1/bot-photos/a936777b1a0df6e68accdbe08a2ae964dce9f9a354e51b3919887423bbf25cb7';
+  assert.equal((await request(legacy, { method: 'PUT', headers, body: JSON.stringify({ png }) })).status, 200);
   const uploaded = await request(path, { method: 'PUT', headers, body: JSON.stringify({ png }) });
   assert.equal(uploaded.status, 200);
   const photo = (await uploaded.json()).photo;
@@ -1786,4 +1788,5 @@ test('MUBO-244 the chat photo remains readable after changing host and tab name'
   assert.equal(after.layout.tabs[0].photo, photo);
   assert.equal(after.layout.tabs[0].face, 7);
   assert.deepEqual(await (await request(path, { headers })).json(), { png });
+  assert.equal((await db.prepare('SELECT png FROM bot_photos WHERE account=? AND key=?').bind('owner@example.com', legacy.split('/').at(-1)).first()).png, png);
 });

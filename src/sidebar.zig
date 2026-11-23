@@ -2127,7 +2127,7 @@ fn paletteShellView(index: usize) ?PaletteSessionView {
     if (index >= app_state.shell_count or index >= app_state.shells.len) return null;
     const shell = &app_state.shells[index];
     if (shell.tmux_session_len > shell.tmux_session.len or shell.name_len > shell.name.len) return null;
-    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite, .photo_key = @import("bot_photo.zig").key(shell) };
+    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite, .photo_key = @import("bot_photo.zig").displayKey(shell) };
 }
 
 fn paletteNamedSession(name: []const u8, workspace: u8, favorite: bool) PaletteSessionView {
@@ -2157,8 +2157,15 @@ fn paletteRemoteSession(host: u8, name: []const u8, workspace: u8, favorite: boo
             if (paletteShellView(index)) |view| return view;
         }
     }
+    var shell = app_state.empty_shell;
+    shell.kind = .tmux;
+    shell.tmux_host = host;
+    if (name.len > shell.tmux_session.len) return paletteNamedSession(name, workspace, favorite);
+    @memcpy(shell.tmux_session[0..name.len], name);
+    shell.tmux_session_len = @intCast(name.len);
     var view = paletteNamedSession(name, workspace, favorite);
-    view.photo_key = (@import("bot_photo_key.zig").Key{ .remote = .{ .host = host, .session = name } }).digest();
+    if (@import("bot_photo_key.zig").chatId("", name)) |id| view.appearance.face = @import("bot_avatar.zig").Appearance.forSession(&id).face;
+    view.photo_key = @import("bot_photo.zig").displayKey(&shell);
     return view;
 }
 

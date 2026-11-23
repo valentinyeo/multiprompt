@@ -206,6 +206,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .used = if (shell.last_used != 0) shell.last_used else null,
             .input = if (shell.input != 0) shell.input else null,
             .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
+            .csid = if (@import("bot_photo_key.zig").chatId(shell.claude_sid[0..shell.claude_sid_len], "") != null) try a.dupe(u8, shell.claude_sid[0..shell.claude_sid_len]) else null,
             .tmux_session = try a.dupe(u8, shell.tmux_session[0..shell.tmux_session_len]),
             .tmux_host = shell.tmux_host,
             .workspace = workspaces.items[ws].name,
@@ -247,8 +248,41 @@ var g_photo_sync_loaded = false;
 var g_photo_sync_saved_generation: u64 = 0;
 const PhotoContext = struct {
     access: []const u8,
-    pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
-        return @import("bot_photo.zig").readForSync(digest);
+    tabs: []const session_layout.Tab,
+    pub fn read(self: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
+        const photo = @import("bot_photo.zig");
+        const local = try photo.readForSync(digest);
+        if (local != .absent) return local;
+        var available = false;
+        for (self.tabs) |tab| {
+            if (tab.photo == null) continue;
+            const keys = @import("bot_photo_key.zig");
+            const legacy = (keys.Key{ .remote = .{ .host = tab.tmux_host, .session = tab.tmux_session } }).digest() orelse continue;
+            const chat = if (keys.chatId(tab.csid orelse "", tab.tmux_session)) |id| (keys.Key{ .chat = id }).digest() else null;
+            if (std.mem.eql(u8, &digest, &legacy) or (chat != null and std.mem.eql(u8, &digest, &chat.?))) { available = true; break; }
+        }
+        if (!available) return .absent;
+        const a = std.heap.page_allocator;
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        const path = try std.fmt.allocPrint(a, "/v1/bot-photos/{s}", .{hex});
+        defer a.free(path);
+        const response = try account_client.request("GET", path, self.access, "");
+        defer response.deinit();
+        if (response.status == 404) return .absent;
+        if (response.status != 200) return error.Network;
+        const parsed = try std.json.parseFromSlice(struct { png: []const u8 }, a, response.bytes, .{});
+        defer parsed.deinit();
+        const n = try std.base64.standard.Decoder.calcSizeForSlice(parsed.value.png);
+        if (n > 65536) return error.TooLarge;
+        const png = try a.alloc(u8, n);
+        errdefer a.free(png);
+        try std.base64.standard.Decoder.decode(png, parsed.value.png);
+        if (!photo.storeMissing(digest, png)) {
+            const current = try photo.readForSync(digest);
+            a.free(png);
+            return current;
+        }
+        return .{ .png = png };
     }
     pub fn send(self: @This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
         const response = try account_client.request(method, path, self.access, body);
@@ -1260,7 +1294,7 @@ fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const s
         }
         g_photo_sync_loaded = true;
     }
-    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access, .tabs = tabs });
     if (g_photo_sync.generation != g_photo_sync_saved_generation) {
         const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
         defer a.free(encoded);
@@ -1862,6 +1896,11 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            if (tab.csid) |sid| {
+                @memset(&shell.claude_sid, 0);
+                @memcpy(shell.claude_sid[0..sid.len], sid);
+                shell.claude_sid_len = @intCast(sid.len);
+            }
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
             if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false, desired.tabs);
             if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true, desired.tabs);

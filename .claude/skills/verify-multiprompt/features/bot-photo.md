@@ -1,6 +1,6 @@
 # Bot photos
 
-Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, src/bot_photo*, src/bot_avatar.zig, src/bot_look.zig, tools/mb.mjs, service/bot-photo.js, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
 
 ## Sub-features
 
@@ -35,6 +35,8 @@ Use PNG/JPEG within 16 MiB, 8192-pixel dimensions and 32-megapixel area. Right-c
 
 
 This journey uses offline local tabs. It does not verify account sync, remote services, or Android. Review `result.json` and screenshots before claiming success.
+
+MUBO-244 adds native key, face, disk fallback and reset tests, CLI dual-write tests, and an account API rename/host-change test. These prove the identity contract, not a live signed-in desktop-to-phone restore. The shared chat digest is SHA256 of UTF-8 `ZigShell bot avatar v1\0chat\0` followed by the chat ID as 32 lowercase hexadecimal characters, without UUID dashes. A known session ID wins over a full `live-<32 hex>` alias. Reads prefer that digest and fall back to the unchanged host/tab digest. Upload and Reset write both identities; a chat reset suppresses the legacy fallback. Default faces hash the same canonical chat ID with the existing FNV-1a face calculation. Unknown chat IDs retain the old tab behavior. Android needs a paired ticket implementing this contract; its repository is unchanged here.
 
 Account protocol checks run in the Test workflow. The Worker suite exercises D1 persistence, feature negotiation, layout-write preservation, concurrent writes, reset, and account/workspace isolation. `bot_photo_sync.zig` tests production upload scheduling with an explicit disk/HTTP stand-in for migration, retry, replace, reset, account changes and restart. These do not prove signed-in desktop-to-phone delivery.
 

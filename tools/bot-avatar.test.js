@@ -26,6 +26,7 @@ test('workspace order owns color and raw session owns face for arbitrary names',
   assert.doesNotMatch(source, /eqlIgnoreCase/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-identity-'));
   try {
+    copyZig(['bot_photo_key.zig'], dir);
     const identity = block(source, 'pub const Appearance = struct') + ';';
     const forShell = block(source, 'pub fn forShell(') + '\n' + block(source, 'pub fn forShellWithFace(');
     fs.writeFileSync(path.join(dir, 'session_layout.zig'), 'pub const color_count = 8;\n' + block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
@@ -33,6 +34,7 @@ test('workspace order owns color and raw session owns face for arbitrary names',
 const state = struct {
   pub const Shell = struct {
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
+    claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
     face: ?u8 = null, color: ?u8 = null,
   };

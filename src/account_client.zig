@@ -95,7 +95,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,csid,bot_photo" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);

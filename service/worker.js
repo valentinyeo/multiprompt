@@ -1,6 +1,6 @@
 import { makeAuth, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
 import { appPage, confirmPage } from './pages.js';
-import { remotePhotoKey, validPhotoPng } from './bot-photo.js';
+import { remotePhotoKey, chatPhotoId, chatPhotoKey, validPhotoPng } from './bot-photo.js';
 
 const now = () => Math.floor(Date.now() / 1000);
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -359,7 +359,7 @@ export default {
           const tabs = scoped(device, layout).tabs;
           let tab;
           for (const candidate of tabs) {
-            if (await remotePhotoKey(candidate.tmux_host, candidate.tmux_session) === key) { tab = candidate; break; }
+            if (await chatPhotoKey(candidate) === key || await remotePhotoKey(candidate.tmux_host, candidate.tmux_session) === key) { tab = candidate; break; }
           }
           if (!tab) fail(404, 'not_found');
           if (request.method === 'GET') {
@@ -442,6 +442,7 @@ export default {
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
+        const chats = new Map((previousLayout?.tabs || []).filter(tab => chatPhotoId(tab)).map(tab => [chatPhotoId(tab), tab]));
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
@@ -453,13 +454,16 @@ export default {
             if (previous?.starred_group !== undefined) tab.starred_group = previous.starred_group;
             else delete tab.starred_group;
           }
-          const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
+          if (!tab.csid && previous?.csid) tab.csid = previous.csid;
+          const chat = chats.get(chatPhotoId(tab));
+          if (!previous && chat?.face !== undefined && !Object.hasOwn(tab, 'face')) tab.face = chat.face;
+          const photo = photos.get(await chatPhotoKey(tab)) ?? photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
           if (photo !== undefined) tab.photo = photo;
           else delete tab.photo;
           if (!layoutFeature(req, 'bot_palette8') && !Object.hasOwn(tab, 'color') && previous?.color === 7) tab.color = 7;
           if (!layoutFeature(req, 'bot_appearance')) {
             for (const field of ['face', 'color']) {
-              if (previous?.[field] !== undefined) tab[field] = previous[field];
+              if ((previous || chat)?.[field] !== undefined) tab[field] = (previous || chat)[field];
               else delete tab[field];
             }
           }

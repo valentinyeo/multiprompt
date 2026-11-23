@@ -20,49 +20,55 @@ pub const Sync = struct {
 
     pub fn run(self: *Sync, a: std.mem.Allocator, account: []const u8, tabs: anytype, context: anytype) !void {
         for (tabs) |tab| {
-            const digest = (Key{ .remote = .{ .host = tab.tmux_host, .session = tab.tmux_session } }).digest() orelse continue;
-            const photo = context.read(digest) catch continue;
+            const legacy = (Key{ .remote = .{ .host = tab.tmux_host, .session = tab.tmux_session } }).digest() orelse continue;
+            const chat = if (@import("bot_photo_key.zig").chatId(tab.csid orelse "", tab.tmux_session)) |id| (Key{ .chat = id }).digest() else null;
+            var photo = context.read(chat orelse legacy) catch continue;
+            if (photo == .absent and chat != null) photo = context.read(legacy) catch continue;
             defer if (photo == .png) a.free(photo.png);
             if (photo == .absent) continue;
-            var hash = std.crypto.hash.sha2.Sha256.init(.{});
-            hash.update(account);
-            hash.update(&digest);
-            var identity: [32]u8 = undefined;
-            hash.final(&identity);
-            hash = std.crypto.hash.sha2.Sha256.init(.{});
-            hash.update(if (photo == .png) "png" else "deleted");
-            if (photo == .png) hash.update(photo.png);
-            var content: [32]u8 = undefined;
-            hash.final(&content);
-            var slot: ?usize = null;
-            for (self.entries, 0..) |entry, i| {
-                if (std.mem.eql(u8, &entry.identity, &identity)) { slot = i; break; }
+            const keys = [_]?[32]u8{ chat, legacy };
+            for (keys) |maybe_digest| {
+                const digest = maybe_digest orelse continue;
+                var hash = std.crypto.hash.sha2.Sha256.init(.{});
+                hash.update(account);
+                hash.update(&digest);
+                var identity: [32]u8 = undefined;
+                hash.final(&identity);
+                hash = std.crypto.hash.sha2.Sha256.init(.{});
+                hash.update(if (photo == .png) "png" else "deleted");
+                if (photo == .png) hash.update(photo.png);
+                var content: [32]u8 = undefined;
+                hash.final(&content);
+                var slot: ?usize = null;
+                for (self.entries, 0..) |entry, i| {
+                    if (std.mem.eql(u8, &entry.identity, &identity)) { slot = i; break; }
+                }
+                if (slot) |i| {
+                    if (std.mem.eql(u8, &self.entries[i].content, &content)) continue;
+                }
+                const hex = std.fmt.bytesToHex(digest, .lower);
+                const path = try std.fmt.allocPrint(a, "/v1/bot-photos/{s}", .{hex});
+                defer a.free(path);
+                var body: []const u8 = "";
+                defer if (body.len > 0) a.free(body);
+                if (photo == .png) {
+                    if (photo.png.len > 65536) continue;
+                    const base64 = try a.alloc(u8, std.base64.standard.Encoder.calcSize(photo.png.len));
+                    defer a.free(base64);
+                    _ = std.base64.standard.Encoder.encode(base64, photo.png);
+                    body = try std.json.Stringify.valueAlloc(a, .{ .png = base64 }, .{});
+                }
+                const status = context.send(if (photo == .png) "PUT" else "DELETE", path, body) catch continue;
+                if (status < 200 or status >= 300) continue;
+                if (slot) |i| {
+                    self.entries[i].content = content;
+                } else {
+                    const index = self.entries.len;
+                    self.entries = try a.realloc(self.entries, index + 1);
+                    self.entries[index] = .{ .identity = identity, .content = content };
+                }
+                self.generation +%= 1;
             }
-            if (slot) |i| {
-                if (std.mem.eql(u8, &self.entries[i].content, &content)) continue;
-            }
-            const hex = std.fmt.bytesToHex(digest, .lower);
-            const path = try std.fmt.allocPrint(a, "/v1/bot-photos/{s}", .{hex});
-            defer a.free(path);
-            var body: []const u8 = "";
-            defer if (body.len > 0) a.free(body);
-            if (photo == .png) {
-                if (photo.png.len > 65536) continue;
-                const base64 = try a.alloc(u8, std.base64.standard.Encoder.calcSize(photo.png.len));
-                defer a.free(base64);
-                _ = std.base64.standard.Encoder.encode(base64, photo.png);
-                body = try std.json.Stringify.valueAlloc(a, .{ .png = base64 }, .{});
-            }
-            const status = context.send(if (photo == .png) "PUT" else "DELETE", path, body) catch continue;
-            if (status < 200 or status >= 300) continue;
-            if (slot) |i| {
-                self.entries[i].content = content;
-            } else {
-                const index = self.entries.len;
-                self.entries = try a.realloc(self.entries, index + 1);
-                self.entries[index] = .{ .identity = identity, .content = content };
-            }
-            self.generation +%= 1;
         }
     }
 };
@@ -96,7 +102,7 @@ test "pictures migrate, retry, replace and reset without duplicate successful up
     var fixture = Fixture{};
     var sync = Sync{};
     defer sync.deinit(std.testing.allocator);
-    const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8 }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
+    const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8, csid: ?[]const u8 = null }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
     const a = std.testing.allocator;
     fixture.fail = true;
     try sync.run(a, "account-a", &tabs, &fixture);
@@ -151,7 +157,7 @@ test "acknowledgements survive more than 256 identities and restart" {
     var sync = Sync{};
     defer sync.deinit(a);
     var fixture = Fixture{};
-    const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8 }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
+    const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8, csid: ?[]const u8 = null }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
     for (0..300) |i| {
         const account = try std.fmt.allocPrint(a, "account-{d}", .{i});
         defer a.free(account);
@@ -163,4 +169,47 @@ test "acknowledgements survive more than 256 identities and restart" {
     defer restarted.deinit(a);
     try restarted.run(a, "account-0", &tabs, &fixture);
     try std.testing.expectEqual(@as(usize, 300), fixture.sends);
+}
+
+
+test "MUBO-244 sync copies legacy pictures to chat keys and prefers chat resets" {
+    const Fixture = struct {
+        chat: [32]u8,
+        primary: bool = false,
+        deleted: bool = false,
+        sends: usize = 0,
+        pub fn read(self: *@This(), digest: [32]u8) !Photo {
+            if (std.mem.eql(u8, &digest, &self.chat)) {
+                if (self.deleted) return .deleted;
+                if (!self.primary) return .absent;
+            }
+            return .{ .png = try std.testing.allocator.dupe(u8, "picture") };
+        }
+        pub fn send(self: *@This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
+            self.sends += 1;
+            try std.testing.expectEqualStrings(if (self.deleted) "DELETE" else "PUT", method);
+            try std.testing.expectEqualStrings(if (self.deleted) "" else "{\"png\":\"cGljdHVyZQ==\"}", body);
+            try std.testing.expect(std.mem.startsWith(u8, path, "/v1/bot-photos/"));
+            if (self.sends == 1 or self.sends == 4) try std.testing.expectEqualStrings("/v1/bot-photos/e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576", path);
+            return 200;
+        }
+    };
+    const a = std.testing.allocator;
+    var fixture = Fixture{ .chat = (Key{ .chat = @import("bot_photo_key.zig").chatId("11111111-2222-4333-8444-555555555555", "").? }).digest().? };
+    var sync = Sync{};
+    defer sync.deinit(a);
+    var tab = @import("session_layout.zig").Tab{ .name = "Runner", .tmux_host = 0, .tmux_session = "old-runner", .csid = "11111111-2222-4333-8444-555555555555", .workspace = "Work" };
+    try sync.run(a, "account", &.{tab}, &fixture);
+    try std.testing.expectEqual(@as(usize, 2), fixture.sends);
+    fixture.primary = true;
+    tab.tmux_host = 1;
+    tab.tmux_session = "live-11111111222243338444555555555555";
+    tab.csid = null;
+    try sync.run(a, "account", &.{tab}, &fixture);
+    try std.testing.expectEqual(@as(usize, 3), fixture.sends);
+    fixture.deleted = true;
+    try sync.run(a, "account", &.{tab}, &fixture);
+    try std.testing.expectEqual(@as(usize, 5), fixture.sends);
+    try sync.run(a, "account", &.{tab}, &fixture);
+    try std.testing.expectEqual(@as(usize, 5), fixture.sends);
 }

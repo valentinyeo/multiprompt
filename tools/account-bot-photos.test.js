@@ -45,3 +45,18 @@ test('photo validation rejects malformed data and bad checksums', async () => {
   assert.equal(validPhotoPng(header(bytes => { bytes[28] = 2; })), false);
   assert.equal(validPhotoPng(Buffer.from(png, 'base64').subarray(0, 40).toString('base64')), false);
 });
+
+
+test('MUBO-244 chat photo keys agree across UUID formats and restored aliases', async () => {
+  const { chatPhotoKey } = await import('../service/bot-photo.js');
+  const expected = 'e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576';
+  for (const csid of ['11111111-2222-4333-8444-555555555555', '11111111222243338444555555555555']) {
+    assert.equal(await chatPhotoKey({ csid, tmux_host: 0, tmux_session: 'old-runner' }), expected);
+  }
+  assert.equal(await chatPhotoKey({ tmux_host: 1, tmux_session: 'live-11111111222243338444555555555555' }), expected);
+  assert.equal(await chatPhotoKey({ csid: 'invalid', tmux_session: 'live-11111111222243338444555555555555' }), expected);
+  assert.equal(await chatPhotoKey({ csid: 'ABCDEF01-2222-4333-8444-555555555555', tmux_session: 'old' }), await chatPhotoKey({ csid: 'abcdef01222243338444555555555555' }));
+  for (const tmux_session of ['old-runner', 'live-short', 'live-1111111122224333844455555555555g', 'live-h11111111222243338444555555555555']) {
+    assert.equal(await chatPhotoKey({ tmux_session }), null);
+  }
+});

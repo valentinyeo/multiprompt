@@ -78,7 +78,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
-    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or !eq(u8, x.csid orelse "", y.csid orelse "") or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -91,6 +91,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     try tabs.appendSlice(a, remote.tabs);
     for (tabs.items) |*tab| {
         if (find(local.tabs, tab.*)) |i| {
+            if (tab.csid == null) tab.csid = local.tabs[i].csid;
             if (tab.group == null) tab.group = local.tabs[i].group;
             if (tab.starred_group == null) tab.starred_group = local.tabs[i].starred_group;
             if (tab.favorite == null) tab.favorite = local.tabs[i].favorite;
@@ -305,6 +306,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
     for (remote.tabs) |r| {
         var t = r;
         if (find(edited.tabs, r)) |ei| {
+            if (t.csid == null) t.csid = edited.tabs[ei].csid;
             t.used = layout.maxUsed(t.used, edited.tabs[ei].used);
             t.input = layout.maxUsed(t.input, edited.tabs[ei].input);
             t.visits = try layout.mergeVisits(a, t.visits, edited.tabs[ei].visits);
@@ -327,6 +329,9 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         }
         if (find(base.tabs, r)) |bi| {
             const ei = find(edited.tabs, r) orelse continue;
+            if (edited.tabs[ei].csid) |sid| {
+                if (!eq(u8, sid, base.tabs[bi].csid orelse "")) t.csid = sid;
+            }
             t.used = layout.maxUsed(t.used, base.tabs[bi].used);
             t.input = layout.maxUsed(t.input, base.tabs[bi].input);
             t.visits = try layout.mergeVisits(a, t.visits, base.tabs[bi].visits);
@@ -439,6 +444,7 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         }
         try normalized.object.put(a, "tmux_session", .{ .string = t.tmux_session });
         try normalized.object.put(a, "tmux_host", .{ .integer = t.tmux_host });
+        if (t.csid) |sid| try normalized.object.put(a, "csid", .{ .string = sid });
         try normalized.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, t.workspace).?) });
         try normalized.object.put(a, "manual", .{ .bool = t.manual });
         if (t.face) |face| {

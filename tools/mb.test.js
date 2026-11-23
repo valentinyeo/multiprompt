@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 let run;
@@ -10,7 +10,7 @@ try {
   if (error?.code !== 'ERR_MODULE_NOT_FOUND') throw error;
 }
 
-const FEATURES = 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups';
+const FEATURES = 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups,csid';
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==', 'base64');
 
 function harness(options = {}) {
@@ -419,6 +419,28 @@ test('MUBO-244 an uploaded photo follows a chat recreated on another host', asyn
     const writes = box.puts.length;
     const repeated = await box.call(['style', 'Restored', '--photo', photo]);
     assert.equal(repeated.code, 0, text(repeated));
+    assert.equal(box.puts.length, writes);
+  } finally { rmSync(box.dir, { recursive: true, force: true }); }
+});
+
+
+test('MUBO-244 style publishes a chat-names identity before uploading both photos', async () => {
+  const box = harness({ layout: { schema: 1, workspaces: [{ name: 'Work' }], tabs: [
+    { kind: 'tmux', name: 'Runner', tmux_session: 'named-runner', tmux_host: 0, workspace: 'Work' }
+  ] } });
+  try {
+    const names = join(box.dir, '.local/state/multiprompt');
+    mkdirSync(names, { recursive: true });
+    writeFileSync(join(names, 'chat-names.json'), JSON.stringify({ 'named-runner': { sid: '11111111-2222-4333-8444-555555555555' } }));
+    const photo = join(box.dir, 'face.png');
+    writeFileSync(photo, PNG);
+    const result = await box.call(['style', 'Runner', '--photo', photo]);
+    assert.equal(result.code, 0, text(result));
+    assert.equal(box.layout.tabs[0].csid, '11111111222243338444555555555555');
+    assert.equal(box.photos.get('e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576'), PNG.toString('base64'));
+    assert.equal(box.photos.size, 2);
+    const writes = box.puts.length;
+    assert.equal((await box.call(['style', 'Runner', '--photo', photo])).code, 0);
     assert.equal(box.puts.length, writes);
   } finally { rmSync(box.dir, { recursive: true, force: true }); }
 });

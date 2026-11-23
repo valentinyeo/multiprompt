@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { run as layoutRun } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
-const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
+const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo,csid';
 const USAGE = `usage: mb <command> [options]
 
 commands:
@@ -204,15 +204,46 @@ function restartable(lines, command) {
 }
 
 async function syncPhoto(ctx, host, session, png, dry) {
-  requireFeature(await readLayout(ctx), 'bot_photo');
-  const key = photoKey(host, session);
-  const current = await call(ctx, 'GET', '/v1/bot-photos/' + key, undefined, 'bot_photo');
-  if (current.status === 200 && current.data?.png === png) return false;
-  if (current.status !== 200 && current.status !== 404) throw refusal(current);
-  if (dry) return true;
-  const saved = await call(ctx, 'PUT', '/v1/bot-photos/' + key, { png }, 'bot_photo');
-  if (saved.status !== 200) throw refusal(saved);
-  return true;
+  const read = await readLayout(ctx);
+  requireFeature(read, 'bot_photo');
+  const tab = read.data.layout.tabs.find(tab => tabId(tab) === `${host}:${session.toLowerCase()}`);
+  let sid = tab?.csid;
+  if (!sid && host === defaultHost(ctx, {})) {
+    try {
+      const names = JSON.parse(readFileSync(join(ctx.env.HOME, '.local/state/multiprompt/chat-names.json'), 'utf8'));
+      sid = names[session]?.sid;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw new Failure('cannot read chat names: ' + error.message);
+    }
+  }
+  const candidate = [sid, /^live-[0-9a-f]{32}$/i.test(session) ? session.slice(5) : ''].find(value => /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(value));
+  const id = candidate ? candidate.replaceAll('-', '').toLowerCase() : null;
+  if (id && sid && !tab?.csid && !dry) {
+    requireFeature(read, 'csid');
+    await edit(ctx, layout => {
+      const current = layout.tabs.find(tab => tabId(tab) === `${host}:${session.toLowerCase()}`);
+      if (!current) throw new Failure('no such session');
+      if (current.csid) {
+        if (current.csid.replaceAll('-', '').toLowerCase() !== id) throw new Failure('chat identity changed; try again');
+        return null;
+      }
+      current.csid = id;
+      return layout;
+    });
+  }
+  const keys = [photoKey(host, session)];
+  if (id) keys.unshift(createHash('sha256').update('ZigShell bot avatar v1\0chat\0' + id).digest('hex'));
+  let changed = false;
+  for (const key of keys) {
+    const current = await call(ctx, 'GET', '/v1/bot-photos/' + key, undefined, 'bot_photo');
+    if (current.status === 200 && current.data?.png === png) continue;
+    if (current.status !== 200 && current.status !== 404) throw refusal(current);
+    changed = true;
+    if (dry) continue;
+    const saved = await call(ctx, 'PUT', '/v1/bot-photos/' + key, { png }, 'bot_photo');
+    if (saved.status !== 200) throw refusal(saved);
+  }
+  return changed;
 }
 function pngFromFile(file) {
   const bytes = readFileSync(file);

@@ -34,6 +34,8 @@ pub const Tab = struct {
     visits: ?[]const u64 = null,
     face: ?u8 = null,
     color: ?u8 = null,
+    csid: ?[]const u8 = null,
+    photo: ?u64 = null,
     tmux_session: []const u8,
     tmux_host: u8,
     workspace: []const u8,
@@ -112,6 +114,10 @@ pub fn validate(layout: Layout) !void {
     for (layout.tabs, 0..) |tab, i| {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
+        if (tab.csid) |sid| {
+            if (sid.len < 8 or sid.len > 39) return error.InvalidLayout;
+            for (sid) |c| if (!std.ascii.isHex(c) and c != '-') return error.InvalidLayout;
+        }
         if (tab.group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
         if (tab.starred_group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
         if (tab.face) |face| {
@@ -120,6 +126,7 @@ pub fn validate(layout: Layout) !void {
         if (tab.color) |color| {
             if (color >= color_count) return error.InvalidLayout;
         }
+        if (tab.photo) |photo| if (photo == 0 or photo > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.used) |used| if (used > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.input) |input| if (input > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.visits) |visits| {

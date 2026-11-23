@@ -5157,9 +5157,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (!@import("bot_look.zig").eligible(idx)) return 0;
                     const photo = @import("bot_photo.zig");
                     if (target == app_state.SEARCH_BOT_PHOTO_RESET) {
-                        if (photo.key(&app_state.shells[idx])) |digest| {
-                            if (!photo.reset(digest)) showHeaderNoticeAscii("Could not reset image", 4000, true);
-                        }
+                        if (!photo.resetForShell(&app_state.shells[idx])) showHeaderNoticeAscii("Could not reset image", 4000, true);
                     } else {
                         const digest = photo.ensureKey(idx) orelse {
                             showHeaderNoticeAscii("Could not save picture", 4000, true);
@@ -5181,7 +5179,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (!@import("bot_look.zig").eligible(current) or app_state.shells[current].title_id != title_id) return 0;
                             const current_key = photo.key(&app_state.shells[current]) orelse return 0;
                             if (!std.mem.eql(u8, &digest, &current_key)) return 0;
-                            if (photo.import(digest, @ptrCast(&file))) {
+                            if (photo.importForShell(&app_state.shells[current], @ptrCast(&file))) {
                                 debugLog("[bot-photo] import=ok");
                             } else {
                                 debugLog("[bot-photo] import=failed");

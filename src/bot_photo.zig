@@ -32,6 +32,8 @@ const Entry = struct { key: [32]u8 = @splat(0), used: bool = false, image: H = n
 var cache: [64]Entry = @splat(.{});
 var clock: u64 = 0;
 var token: usize = 0;
+var sync_generation = std.atomic.Value(u64).init(0);
+var cache_generation: u64 = 0;
 
 fn start() bool {
     if (token != 0) return true;
@@ -39,10 +41,49 @@ fn start() bool {
 }
 
 pub fn key(shell: *const state.Shell) ?[32]u8 {
+    if (shell.claude_sid_len <= shell.claude_sid.len and shell.tmux_session_len <= shell.tmux_session.len) {
+        if (@import("bot_photo_key.zig").chatId(shell.claude_sid[0..shell.claude_sid_len], shell.tmux_session[0..shell.tmux_session_len])) |id| return (Key{ .chat = id }).digest();
+    }
+    return legacyKey(shell);
+}
+
+pub fn legacyKey(shell: *const state.Shell) ?[32]u8 {
     if (shell.kind == .tmux and shell.tmux_session_len > 0 and shell.tmux_session_len <= shell.tmux_session.len) {
         return (Key{ .remote = .{ .host = shell.tmux_host, .session = shell.tmux_session[0..shell.tmux_session_len] } }).digest();
     }
     return (Key{ .local = shell.avatar_local_id }).digest();
+}
+
+pub fn displayKey(shell: *const state.Shell) ?[32]u8 {
+    const primary = key(shell) orelse return null;
+    const legacy = legacyKey(shell) orelse return primary;
+    if (std.mem.eql(u8, &primary, &legacy)) return primary;
+    var target_buf: [768]u16 = undefined;
+    const target = pathFor(primary, &target_buf) orelse return primary;
+    if (w.GetFileAttributesW(target.ptr) != 0xffffffff) return primary;
+    var marker_buf: [800]u16 = undefined;
+    if (resetPath(target, &marker_buf)) |marker| {
+        if (w.GetFileAttributesW(marker.ptr) != 0xffffffff) return primary;
+    }
+    return legacy;
+}
+
+pub fn importForShell(shell: *const state.Shell, source: [*:0]const u16) bool {
+    const primary = key(shell) orelse return false;
+    if (!import(primary, source)) return false;
+    if (legacyKey(shell)) |legacy| {
+        if (!std.mem.eql(u8, &primary, &legacy) and !import(legacy, source)) return false;
+    }
+    return true;
+}
+
+pub fn resetForShell(shell: *const state.Shell) bool {
+    const primary = key(shell) orelse return true;
+    if (!reset(primary)) return false;
+    if (legacyKey(shell)) |legacy| {
+        if (!std.mem.eql(u8, &primary, &legacy) and !reset(legacy)) return false;
+    }
+    return true;
 }
 
 pub fn ensureKey(index: u32) ?[32]u8 {
@@ -278,6 +319,23 @@ fn smallPng(path: [:0]const u16) ![]u8 {
     return readPng(@ptrCast(&temp));
 }
 
+pub fn storeMissing(digest: [32]u8, png: []const u8) bool {
+    if (png.len < 20 or png.len > 65536 or !std.mem.startsWith(u8, png, "\x89PNG\r\n\x1a\n") or !std.mem.endsWith(u8, png, "\x00\x00\x00\x00IEND\xaeB\x60\x82")) return false;
+    const mutex = lock(digest) orelse return false;
+    defer unlock(mutex);
+    var target_buf: [768]u16 = undefined;
+    const target = pathFor(digest, &target_buf) orelse return false;
+    if (w.GetFileAttributesW(target.ptr) != 0xffffffff or w.GetLastError() != 2) return false;
+    var marker_buf: [800]u16 = undefined;
+    const marker = resetPath(target, &marker_buf) orelse return false;
+    if (w.GetFileAttributesW(marker.ptr) != 0xffffffff or w.GetLastError() != 2) return false;
+    var path_buf: [2304]u8 = undefined;
+    const n = std.unicode.utf16LeToUtf8(&path_buf, target) catch return false;
+    if (!@import("file_io.zig").writeFileAtomicSync(path_buf[0..n], png)) return false;
+    _ = sync_generation.fetchAdd(1, .release);
+    return true;
+}
+
 pub fn readForSync(digest: [32]u8) !SyncPhoto {
     const mutex = lock(digest) orelse return error.Busy;
     defer unlock(mutex);
@@ -307,8 +365,13 @@ pub fn drawKey(digest: [32]u8, hdc: H, rc: w.RECT) bool {
 }
 
 pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {
-    const digest = pending_key orelse key(shell) orelse return false;
+    const digest = pending_key orelse displayKey(shell) orelse return false;
     pending_key = null;
+    const generation = sync_generation.load(.acquire);
+    if (generation != cache_generation) {
+        for (&cache) |*entry| release(entry);
+        cache_generation = generation;
+    }
     clock +%= 1;
     var entry: ?*Entry = null;
     for (&cache) |*item| if (item.used and std.mem.eql(u8, &item.key, &digest)) { entry = item; break; };
@@ -409,4 +472,47 @@ test "MUBO-244 photo identity follows a chat recreated under another tab and hos
     restored.tmux_session_len = alias.len;
     try std.testing.expectEqualSlices(u8, &before, &key(&restored).?);
     try std.testing.expectEqualStrings("e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576", &std.fmt.bytesToHex(before, .lower));
+}
+
+
+test "MUBO-244 a restored chat prefers its synced photo and reset over a legacy picture" {
+    var guid: w.GUID = undefined;
+    try std.testing.expect(CoCreateGuid(&guid) == 0);
+    const id = std.fmt.bytesToHex(std.mem.asBytes(&guid).*, .lower);
+    var shell = state.empty_shell;
+    shell.kind = .tmux;
+    shell.tmux_host = 2;
+    const name = try std.fmt.bufPrint(&shell.tmux_session, "mubo-244-{s}", .{id});
+    shell.tmux_session_len = @intCast(name.len);
+    @memcpy(shell.claude_sid[0..id.len], &id);
+    shell.claude_sid_len = id.len;
+    const primary = key(&shell).?;
+    const legacy = legacyKey(&shell).?;
+    var primary_buf: [768]u16 = undefined;
+    var legacy_buf: [768]u16 = undefined;
+    var marker_buf: [800]u16 = undefined;
+    const primary_path = pathFor(primary, &primary_buf).?;
+    const legacy_path = pathFor(legacy, &legacy_buf).?;
+    const marker = resetPath(primary_path, &marker_buf).?;
+    defer {
+        _ = w.DeleteFileW(primary_path.ptr);
+        _ = w.DeleteFileW(legacy_path.ptr);
+        _ = w.DeleteFileW(marker.ptr);
+    }
+    const encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==";
+    var bytes: [128]u8 = undefined;
+    const n = try std.base64.standard.Decoder.calcSizeForSlice(encoded);
+    const png = bytes[0..n];
+    try std.base64.standard.Decoder.decode(png, encoded);
+    try std.testing.expect(storeMissing(legacy, png));
+    try std.testing.expectEqual(legacy, displayKey(&shell).?);
+    try std.testing.expect(storeMissing(primary, png));
+    try std.testing.expectEqual(primary, displayKey(&shell).?);
+    const stored = try readForSync(primary);
+    defer if (stored == .png) std.heap.page_allocator.free(stored.png);
+    try std.testing.expectEqualSlices(u8, png, stored.png);
+    try std.testing.expect(reset(primary));
+    try std.testing.expectEqual(primary, displayKey(&shell).?);
+    try std.testing.expect(!storeMissing(primary, png));
+    try std.testing.expect((try readForSync(primary)) == .deleted);
 }

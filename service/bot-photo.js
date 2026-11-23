@@ -11,6 +11,20 @@ export async function remotePhotoKey(host, session) {
   return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+export function chatPhotoId(tab) {
+  for (const sid of [tab.csid, /^live-[0-9a-f]{32}$/i.test(tab.tmux_session) ? tab.tmux_session.slice(5) : '']) {
+    if (/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(sid)) return sid.replaceAll('-', '').toLowerCase();
+  }
+  return null;
+}
+
+export async function chatPhotoKey(tab) {
+  const id = chatPhotoId(tab);
+  if (!id) return null;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode('ZigShell bot avatar v1\0chat\0' + id)));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function validPhotoPng(encoded) {
   if (typeof encoded !== 'string' || encoded.length > 87384 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) return false;
   let raw;

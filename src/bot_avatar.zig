@@ -24,7 +24,8 @@ pub fn forShellWithFace(shell: *const state.Shell, face: ?u8) Appearance {
         const n = std.unicode.utf16LeToUtf8(&name, shell.name[0..shell.name_len]) catch 0;
         break :blk name[0..n];
     };
-    var appearance = Appearance.forSession(session);
+    const chat = if (shell.claude_sid_len <= shell.claude_sid.len) @import("bot_photo_key.zig").chatId(shell.claude_sid[0..shell.claude_sid_len], session) else null;
+    var appearance = if (chat) |id| Appearance.forSession(&id) else Appearance.forSession(session);
     appearance.face = face orelse appearance.face;
     const workspace = if (shell.workspace < state.g_lws_count) shell.workspace else 0;
     appearance.color = shell.color orelse @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
