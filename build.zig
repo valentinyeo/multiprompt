@@ -930,6 +930,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(deepgram_key_tests).step);
     const deepgram_key_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/deepgram-key-source.test.js" });
     test_step.dependOn(&deepgram_key_source_tests.step);
+    const all_sessions_tests = b.addSystemCommand(&.{ "node", "--test", "tools/soft-2445-all-sessions.test.js" });
+    all_sessions_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&all_sessions_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
     test_step.dependOn(&session_state_bucket_tests.step);
     const other_workspace_invariant_tests = b.addSystemCommand(&.{ "node", "--test", "tools/other-workspace-invariant.test.js" });
