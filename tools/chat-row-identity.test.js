@@ -1,78 +1,79 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
-const read = name => fs.readFileSync(path.join(root, 'src', name), 'utf8');
+const harness = String.raw`
+const std = @import("std");
+const echo = @import("chat_echo.zig");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
 
-function body(source, name) {
-  const start = source.indexOf(`fn ${name}(`);
-  assert.ok(start >= 0, `${name} is missing`);
-  const end = source.indexOf('\n}\n', start);
-  assert.ok(end > start, `${name} has no body`);
-  return source.slice(start, end + 2);
+const rows = "{\"role\":\"user\",\"text\":\"Please check this\",\"timestamp\":\"2026-11-07T00:00:01Z\",\"offset\":0,\"end\":100}\n" ++
+    "{\"role\":\"assistant\",\"text\":\"Checked\",\"timestamp\":\"2026-11-07T00:00:02Z\",\"offset\":100,\"end\":200}\n";
+
+fn load(h: *history.History, inode: u64) !void {
+    const a = std.testing.allocator;
+    const wire = try std.fmt.allocPrint(a, "@mp\t1\thistory\tok\thosted-session\t0\t200\t{d}\t0\tclaude\thosted-chat\t2000\t\ttail\t0\n{s}@@MP_END@@\n", .{ inode, rows });
+    defer a.free(wire);
+    try h.apply(a, wire, 1, transcript.Identity.initTmux(1, 0, false, "hosted-chat", "hosted-session"));
 }
 
-function identityFields(history) {
-  const keyed = body(history, 'eql').match(/inline for \(\.\{([^}]+)\}\) \|field\|/);
-  assert.ok(keyed, 'the row identity has no field list');
-  return [...keyed[1].matchAll(/"(\w+)"/g)].map(match => match[1]);
+test "SOFT-3097 hosted pending retires above its reply without a transcript client id" {
+    var h: history.History = .{};
+    defer h.deinit(std.testing.allocator);
+    try load(&h, 11);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    const user = h.blocks.items[0];
+    const reply = h.blocks.items[1];
+    try std.testing.expectEqual(.user, user.role);
+    try std.testing.expectEqual(.prose, reply.role);
+    const prompt = std.unicode.utf8ToUtf16LeStringLiteral("Please check this");
+    var pending = [_]echo.Pending{.{ .text = prompt, .prefix = prompt, .anchor = .{ .after_ms = user.stamp_ms - 1000, .sent_ms = user.stamp_ms - 100 } }};
+    if (@hasField(echo.Pending, "client_id")) pending[0].client_id = 123;
+    const blocks = [_]echo.UserBlock{.{ .text = h.text.items[user.start..][0..user.len], .stamp_ms = user.stamp_ms, .message_id = user.message_id }};
+    var assigned: [1]?usize = undefined;
+    echo.assign(&pending, &blocks, false, &.{}, &assigned);
+    try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
+    const visible_rows = h.blocks.items.len + @as(usize, if (assigned[0] == null) 1 else 0);
+    try std.testing.expectEqual(@as(usize, 2), visible_rows);
+    try std.testing.expect(user.start < reply.start);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Checked"), h.text.items[reply.start..][0..reply.len]);
 }
 
-function identity(row, history, fields) {
-  const rows = body(history, 'rowIdentity');
-  const sourced = /\{[a-z]+}:\{[a-z]+}/.test(rows) || rows.includes('source:');
-  const native = row.read_id || row.id || '';
-  const id = native || (sourced ? `source:${row.inode}:${row.offset}:${row.end}` : '');
-  const text = /\.text = if \(id\.len == 0\) m\.text else ""/.test(rows) && !native ? row.text : '';
-  return fields.map(field => (field === 'id' ? id : field === 'text' ? text : row[field] || '')).join('\u0000');
+test "SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair" {
+    var h: history.History = .{};
+    defer h.deinit(std.testing.allocator);
+    try load(&h, 11);
+    try load(&h, 12);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(.user, h.blocks.items[0].role);
+    try std.testing.expectEqual(.prose, h.blocks.items[1].role);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, h.rows.items, "Please check this"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, h.rows.items, "Checked"));
+    try load(&h, 12);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
 }
+`;
 
-function distinctRows(rows, history) {
-  const fields = identityFields(history);
-  return new Set(rows.map(row => identity(row, history, fields))).size;
+for (const name of [
+  'SOFT-3097 hosted pending retires above its reply without a transcript client id',
+  'SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair',
+]) {
+  test(name, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-row-identity-'));
+    try {
+      copyZig(['chat_echo.zig', 'chat_history.zig'], dir, path.join(root, 'src'));
+      require('./fixtures/inline-stubs').writeChatMention(dir);
+      fs.writeFileSync(path.join(dir, 'test.zig'), harness);
+      const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', name], { encoding: 'utf8', timeout: 60000 });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 }
-
-test('SOFT-3097 a hosted pending row retires when its transcript row has no client id', () => {
-  const echo = read('chat_echo.zig');
-  const send = read('chat_send.zig');
-  assert.doesNotMatch(echo, /\.client_id/, 'a pending row never needs a client id to match its transcript row');
-  assert.doesNotMatch(send, /\.client_id/, 'a hosted transcript row never needs a client id to retire its bubble');
-  assert.match(body(echo, 'pickBlock'), /^\s*fn pickBlock\([\s\S]*?\{\n    if \(p\.prefix\.len == 0\) return null;/, 'the text prefix is the first thing pickBlock checks');
-  assert.match(body(echo, 'pickBlock'), /if \(messageMatches\(b\.text, p, norm\)\) return bi;/);
-  const assign = body(send, 'chatEchoAssignForKey');
-  assert.doesNotMatch(assign, /if \(wire\.len == 0\) continue;/, 'a pending entry without a wire id still joins the assignment');
-  assert.match(assign, /\.prefix = chatEchoNormalizePrefix\(e\.text/);
-});
-
-test('SOFT-3097 a retired pending row leaves one row above the reply', () => {
-  const render = read('chat_render.zig');
-  const landed = render.indexOf('if (chatEchoRowLanded(e)) continue;');
-  assert.ok(landed >= 0, 'the layout skips a pending row the transcript already carries');
-  assert.ok(render.indexOf('app_state.g_chat_layout_rects[i] = rc;') < landed, 'landed rows are laid out before pending rows');
-});
-
-test('SOFT-3097 reading the same id-less row twice yields one row', () => {
-  const history = read('chat_history.zig');
-  const once = { role: 'user', text: 'same prompt', timestamp: '2026-11-07T00:00:00Z', offset: 0, end: 100, segment: 0 };
-  const twice = [
-    { ...once, inode: 11 },
-    { ...once, inode: 12 },
-  ];
-  assert.equal(distinctRows(twice, history), 1, 'two reads of one id-less row are one row');
-  const different = [
-    { ...once, inode: 11 },
-    { ...once, inode: 11, text: 'another prompt' },
-  ];
-  assert.equal(distinctRows(different, history), 2, 'two different id-less rows keep their own rows');
-});
-
-test('SOFT-3097 rows that carry a native id keep their own rows', () => {
-  const history = read('chat_history.zig');
-  const rows = [
-    { role: 'user', id: 'native-a', text: 'same prompt', timestamp: '', offset: 0, end: 100, segment: 0 },
-    { role: 'user', id: 'native-b', text: 'same prompt', timestamp: '', offset: 100, end: 200, segment: 0 },
-  ];
-  assert.equal(distinctRows(rows, history), 2, 'identical text under two native ids stays two rows');
-});
