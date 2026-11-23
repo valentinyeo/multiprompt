@@ -1745,6 +1745,9 @@ pub fn applyServerLayout(json: []const u8) !void {
     var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
     desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
+    const listed = try a.alloc(@import("tmux_closed.zig").LayoutTab, server.value.tabs.len);
+    for (server.value.tabs, 0..) |tab, ti| listed[ti] = .{ .host = tab.tmux_host, .session = tab.tmux_session };
+    app_state.g_tmux_closed.reconcile(listed);
     for (desired.tabs) |tab| {
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
     }
