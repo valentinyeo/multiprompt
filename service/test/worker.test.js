@@ -1790,3 +1790,25 @@ test('MUBO-244 the chat photo remains readable after changing host and tab name'
   assert.deepEqual(await (await request(path, { headers })).json(), { png });
   assert.equal((await db.prepare('SELECT png FROM bot_photos WHERE account=? AND key=?').bind('owner@example.com', legacy.split('/').at(-1)).first()).png, png);
 });
+
+
+test('MUBO-244 a workspace key cannot claim another workspace chat photo', async () => {
+  const { token } = await enroll();
+  const csid = '11111111-2222-4333-8444-555555555555';
+  const seeded = { ...layout, workspaces: [{ name: 'Other' }, { name: 'Private' }], tabs: [layout.tabs[0], { ...layout.tabs[0], tmux_session: 'private-chat', tmux_host: 1, workspace: 'Private', csid }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(seeded), 'owner@example.com').run();
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
+  const photo = '/v1/bot-photos/e675a29f53a92c0b3b809cf2d0c8ce652f1def6483829a4547ab8f143d7c2576';
+  assert.equal((await request(photo, { method: 'PUT', headers: auth(token), body: JSON.stringify({ png }) })).status, 200);
+  const key = 'mpk_w_' + 'q'.repeat(43);
+  await db.prepare('INSERT INTO service_keys (hash,account,kind,workspace,label,created) VALUES (?,?,?,?,?,?)').bind(await hash(key), 'owner@example.com', 'workspace', 'Other', 'photo-scope', 1).run();
+  const headers = { Authorization: 'Bearer ' + key, 'X-Layout-Features': 'csid,bot_photo' };
+  assert.equal((await request(photo, { headers })).status, 404);
+  for (const tab of [{ ...layout.tabs[0], csid }, { ...layout.tabs[0], tmux_session: 'live-' + csid.replaceAll('-', '') }]) {
+    const current = await (await request('/v1/layout', { headers })).json();
+    const claimed = { ...current.layout, tabs: [tab] };
+    const response = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: current.revision, layout: claimed }) });
+    assert.equal(response.status, 403);
+    assert.equal((await request(photo, { headers })).status, 404);
+  }
+});

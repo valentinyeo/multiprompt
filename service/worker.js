@@ -131,7 +131,8 @@ function confine(device, layout, previous) {
   if (layout.workspaces.length !== 1 || layout.workspaces[0].name !== name || layout.tabs.some(tab => tab.workspace !== name)) fail(403, 'scope_denied');
   const id = tab => `${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`;
   const outside = new Set(previous.tabs.filter(tab => tab.workspace !== name).map(id));
-  if (layout.tabs.some(tab => outside.has(id(tab)))) fail(403, 'scope_denied');
+  const outsideChats = new Set(previous.tabs.filter(tab => tab.workspace !== name).map(chatPhotoId).filter(Boolean));
+  if (layout.tabs.some(tab => outside.has(id(tab)) || outsideChats.has(chatPhotoId(tab)))) fail(403, 'scope_denied');
   const tabs = []; let placed = false;
   for (const tab of previous.tabs) {
     if (tab.workspace !== name) tabs.push(tab);
