@@ -25,7 +25,8 @@ test("IGSH-1892 zsb relaunches a missing pane for attached sessions", () => {
     require("node:path").resolve(__dirname, "../src/browser_bridge.zig"),
     "utf8",
   );
-  assert.match(bridge, /browser_suspended or agent_needs_pane\)/);
+  assert.match(bridge, /pane_wanted = app_state\.shells\[ti\]\.browser_enabled or app_state\.shells\[ti\]\.browser_suspended or agent_needs_pane;/);
+  assert.match(bridge, /zsbPaneLaunchNeeded\(app_state\.shells\[ti\]\.browser_window_id, pane_missing, pane_wanted\)/);
   assert.match(bridge, /launchBrowserForAgentRequest\(ti\)/);
   assert.match(bridge, /last_active_event = now/);
 });

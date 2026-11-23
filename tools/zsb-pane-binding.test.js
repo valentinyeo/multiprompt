@@ -267,7 +267,8 @@ test("a stale or foreign binding forces a re-resolve and one retry", () => {
 
   const retry = functionBody(mainZig, "zsbRetryAfterStaleBinding", "tunnelInboundThread");
   assert.match(retry, /queueZsbRebindRequest\(session\)/);
-  assert.match(retry, /zsbPollPaneWindowIdSilent\(session, 12_000, 500\)/);
+  assert.match(retry, /zsbPollPaneWindowIdSilent\(session, zsbBindWaitMs\(true\), ZSB_PANE_LAUNCH_RETRY_MS\)/,
+    "the retry must answer inside the caller's reply deadline instead of polling for 12s");
   assert.match(retry, /zsbBuildBridgeCmd\(fresh_wid, argv/);
   assert.doesNotMatch(retry, /queueZsbBindRequest\(session\)/,
     "a retry must re-resolve the window instead of rewriting the same id");

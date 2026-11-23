@@ -73,6 +73,7 @@ const shellZsbSessionKey = @import("browser_pane.zig").shellZsbSessionKey;
 const zsbPrimarySessionToken = @import("browser_pane.zig").zsbPrimarySessionToken;
 const zsbSessionHasWebView2 = @import("browser_pane.zig").zsbSessionHasWebView2;
 const writePaneSessionFileForShell = @import("browser_pane.zig").writePaneSessionFileForShell;
+const removePaneSessionFilesForShell = @import("browser_pane.zig").removePaneSessionFilesForShell;
 const browserFrozenMarkerExistsForKey = @import("browser_pane.zig").browserFrozenMarkerExistsForKey;
 const buildBrowserCdpLifecycleCmd = @import("browser_pane.zig").buildBrowserCdpLifecycleCmd;
 const findDataFileNameAscii = @import("browser_pane.zig").findDataFileNameAscii;
@@ -935,6 +936,11 @@ pub fn handleZsbBindRequest() void {
     const session = session_buf[0..session_len];
     var found = false;
     if (findZsbPaneTarget(session)) |ti| {
+        if (app_state.shells[ti].browser_window_id == 0) {
+            const stored = zsbStoredPaneWindowId(session) orelse 0;
+            app_state.shells[ti].browser_window_id = zsbKeepStoredPaneWindow(force, app_state.shells[ti].browser_window_id, stored);
+            if (app_state.shells[ti].browser_window_id != 0) writePaneSessionFileForShell(ti);
+        }
         if (info_only) {
             while (!app_state.g_zsb_bind_mutex.tryLock()) Sleep(0);
             app_state.g_zsb_bind_info = .{
@@ -952,11 +958,13 @@ pub fn handleZsbBindRequest() void {
         }
         if (force and app_state.shells[ti].browser_window_id != 0) {
             app_state.shells[ti].browser_window_id = 0;
+            removePaneSessionFilesForShell(ti);
         }
         found = ensureZsbPaneBindingForShell(ti);
         const pane_missing = app_state.shells[ti].browser_hwnd == null or IsWindow(app_state.shells[ti].browser_hwnd) == 0;
         const agent_needs_pane = browserPaneAgentAttached(ti) or zsbShellRecentlyDriven(ti, 60_000);
-        if (pane_missing and (app_state.shells[ti].browser_enabled or app_state.shells[ti].browser_suspended or agent_needs_pane)) {
+        const pane_wanted = app_state.shells[ti].browser_enabled or app_state.shells[ti].browser_suspended or agent_needs_pane;
+        if (zsbPaneLaunchNeeded(app_state.shells[ti].browser_window_id, pane_missing, pane_wanted)) {
             _ = clearFailedBrowserPaneForRequest(ti);
             app_state.shells[ti].browser_enabled = true;
             app_state.shells[ti].browser_suspended = false;
@@ -969,7 +977,7 @@ pub fn handleZsbBindRequest() void {
                 saveSession();
             }
             found = true;
-        } else if (!found and !pane_missing) {
+        } else if (!found and (!pane_missing or app_state.shells[ti].browser_window_id != 0)) {
             found = true;
         }
         while (!app_state.g_zsb_bind_mutex.tryLock()) Sleep(0);
@@ -1092,6 +1100,36 @@ fn zsbFindPaneWindowIdSilent(session: []const u8) ?i64 {
     return if (token.len > 0) zsbReadPaneWindowIdForTokenSilent(token) else null;
 }
 
+const ZSB_PANE_LAUNCH_WAIT_MS: u64 = 3_000;
+const ZSB_PANE_LAUNCH_RETRY_MS: DWORD = 250;
+
+fn zsbBindWaitMs(pane_coming: bool) u64 {
+    if (!pane_coming) return 0;
+    return ZSB_PANE_LAUNCH_WAIT_MS;
+}
+
+fn zsbKeepStoredPaneWindow(force: bool, current: i64, stored: i64) i64 {
+    if (force or current != 0) return current;
+    if (stored <= 0) return current;
+    return stored;
+}
+
+fn zsbPaneLaunchNeeded(bound_window_id: i64, pane_missing: bool, pane_wanted: bool) bool {
+    if (!pane_missing) return false;
+    if (!pane_wanted) return false;
+    return bound_window_id == 0;
+}
+
+fn zsbStoredPaneWindowId(session: []const u8) ?i64 {
+    const token = zsbPrimarySessionToken(session);
+    if (token.len == 0) return null;
+    return zsbReadPaneWindowIdForTokenSilent(token);
+}
+
+fn zsbSendPaneNotReady(client: SOCKET, session: []const u8) void {
+    zsbSendJsonError(client, "pane_not_ready", "the browser pane for this session is reopening", session, "Retry in a few seconds. If it repeats, run multiprompt-browser open for this session.");
+}
+
 fn zsbPollPaneWindowIdSilent(session: []const u8, timeout_ms: u64, interval_ms: DWORD) ?i64 {
     const deadline = GetTickCount64() + timeout_ms;
     while (GetTickCount64() < deadline) {
@@ -1109,7 +1147,7 @@ fn zsbStatusPaneWindowId(session: []const u8, rebound: *bool) ?i64 {
     if (queueZsbBindRequest(session) orelse false) {
         rebound.* = true;
         if (zsbFindPaneWindowIdSilent(session)) |wid| return wid;
-        if (zsbPollPaneWindowIdSilent(session, 12_000, 500)) |wid| return wid;
+        if (zsbPollPaneWindowIdSilent(session, zsbBindWaitMs(true), ZSB_PANE_LAUNCH_RETRY_MS)) |wid| return wid;
     }
     return null;
 }
@@ -1162,16 +1200,22 @@ fn zsbUnfreezeBlocking(window_id: i64) void {
 
 fn zsbResolvePaneWindowId(client: SOCKET, session: []const u8) ?i64 {
     const token = zsbPrimarySessionToken(session);
-    const deadline = GetTickCount64() + 12_000;
-    while (true) {
-        var info: ZsbPaneInfo = .{};
-        if (!(queueZsbBindRequestEx(session, false, false, &info) orelse false)) break;
-        if (info.window_id > 0) {
-            if (browserFrozenMarkerExistsForKey(token)) zsbUnfreezeBlocking(info.window_id);
-            return info.window_id;
+    var info: ZsbPaneInfo = .{};
+    const found = queueZsbBindRequestEx(session, false, false, &info) orelse {
+        zsbSendNoPaneForSession(client, session);
+        return null;
+    };
+    if (info.window_id > 0) {
+        if (browserFrozenMarkerExistsForKey(token)) zsbUnfreezeBlocking(info.window_id);
+        return info.window_id;
+    }
+    if (found) {
+        if (zsbPollPaneWindowIdSilent(session, zsbBindWaitMs(true), ZSB_PANE_LAUNCH_RETRY_MS)) |wid| {
+            if (browserFrozenMarkerExistsForKey(token)) zsbUnfreezeBlocking(wid);
+            return wid;
         }
-        if (GetTickCount64() >= deadline) break;
-        Sleep(500);
+        zsbSendPaneNotReady(client, session);
+        return null;
     }
     zsbSendNoPaneForSession(client, session);
     return null;
@@ -1788,7 +1832,7 @@ fn zsbVerifyOpenRequest(client: SOCKET, session: []const u8, window_id: i64, url
         }
         if (!outcome.stale or attempt + 1 >= 2) break;
         if (!(queueZsbRebindRequest(session) orelse false)) break;
-        const fresh = zsbPollPaneWindowIdSilent(session, 12_000, 500) orelse break;
+        const fresh = zsbPollPaneWindowIdSilent(session, zsbBindWaitMs(true), ZSB_PANE_LAUNCH_RETRY_MS) orelse break;
         if (fresh == wid) break;
         wid = fresh;
     }
@@ -1812,7 +1856,7 @@ fn zsbRetryAfterStaleBinding(
     if (run.timed_out or run.out_len == 0) return;
     if (!zsbLooksLikeStaleBindingError(out_buf[0..run.out_len])) return;
     if (!(queueZsbRebindRequest(session) orelse false)) return;
-    const fresh_wid = zsbPollPaneWindowIdSilent(session, 12_000, 500) orelse return;
+    const fresh_wid = zsbPollPaneWindowIdSilent(session, zsbBindWaitMs(true), ZSB_PANE_LAUNCH_RETRY_MS) orelse return;
     if (fresh_wid == window_id) return;
     var retry_buf: [ZSB_COMMAND_CAP]u8 = undefined;
     const retry_cmd = zsbBuildBridgeCmd(fresh_wid, argv, &retry_buf) orelse return;

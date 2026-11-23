@@ -820,6 +820,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&browser_engine_selection_tests.step);
     const zsb_session_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-isolation.test.js" });
     test_step.dependOn(&zsb_session_isolation_tests.step);
+    const zsb_pane_rebind_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-pane-rebind.test.js" });
+    test_step.dependOn(&zsb_pane_rebind_tests.step);
+    vps_test_step.dependOn(&zsb_pane_rebind_tests.step);
     const browser_theme_sync_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-theme-sync.test.js" });
     test_step.dependOn(&browser_theme_sync_tests.step);
     const skills_and_sync_login_tests = b.addSystemCommand(&.{ "node", "--test", "tools/skills-and-sync-login.test.js" });

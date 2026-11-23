@@ -41,8 +41,12 @@ fn queueZsbRebindRequest(session: []const u8) ?bool {
     rebinds += 1;
     return true;
 }
+const ZSB_PANE_LAUNCH_RETRY_MS: u32 = 250;
+fn zsbBindWaitMs(_: bool) u64 {
+    return 3_000;
+}
 fn zsbPollPaneWindowIdSilent(_: []const u8, timeout: u64, interval: u32) ?i64 {
-    std.debug.assert(timeout == 12_000 and interval == 500);
+    std.debug.assert(timeout == 3_000 and interval == 250);
     polls += 1;
     return 43;
 }
@@ -117,7 +121,7 @@ test "version mismatch is explicit for successful and failed replies, reload rem
     defer std.testing.allocator.free(reload);
     try std.testing.expectEqualStrings(mismatch, reload);
 }
-test "outdated errors bypass rebind and twelve-second poll; genuine ownership errors retry" {
+test "outdated errors bypass rebind and the pane wait; genuine ownership errors retry" {
     var output: [1024]u8 = undefined;
     const outdated = "{\"ok\":false,\"error\":\"extension outdated, reload it in chrome://extensions (empty session pane tab list)\"}";
     @memcpy(output[0..outdated.len], outdated);
