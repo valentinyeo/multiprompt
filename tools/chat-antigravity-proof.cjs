@@ -6,7 +6,7 @@ function verify(root) {
   const dir = path.join(root, 'antigravity-chats');
   const read = name => fs.readFileSync(path.join(dir, name), 'utf8');
   const json = name => JSON.parse(read(name));
-  const png = name => fs.readFileSync(path.join(dir, `${name}.png`)).subarray(0, 8).toString('hex');
+  const png = name => fs.readFileSync(path.join(root, `${name}.png`)).subarray(0, 8).toString('hex');
   assert.equal(json('observation.json').error, null);
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0);

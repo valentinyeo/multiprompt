@@ -41,7 +41,6 @@ Copy-Item $antigravityConfig "$caseDir/antigravity-config.json"
 $antigravityRoot = Split-Path $antigravityConfig
 $antigravityHistory = @(Get-ChildItem "$antigravityRoot/*.history.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('Switched AI: Claude to Antigravity') })
 if ($antigravityHistory.Count -ne 1) { throw 'The switch did not write one handed-over antigravity history' }
-Copy-Item $antigravityHistory[0].FullName "$caseDir/antigravity-history.jsonl"
 if (-not (Read-Shared $antigravityHistory[0].FullName).Contains($earlierText)) { throw 'The switched chat lost the earlier message' }
 Bind-Transcript
 Send-Composer $afterText
@@ -51,6 +50,7 @@ Send-Composer $afterText
 [void](Wait-For 'antigravity reply reached the switched chat' {
     (Read-Shared $antigravityHistory[0].FullName).Contains('Antigravity stand-in reply')
 } 60)
+Copy-Item $antigravityHistory[0].FullName "$caseDir/antigravity-history.jsonl"
 Shot 'antigravity-switched-chat'
 Shot 'after'
 Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'

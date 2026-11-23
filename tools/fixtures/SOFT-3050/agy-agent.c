@@ -25,11 +25,23 @@ static void emit(const char *line) {
     fflush(stdout);
 }
 
+static int appendString(char *out, int used, int size, const char *text) {
+    for (const char *p = text; *p; p++) {
+        if (used >= size - 3) break;
+        if (*p == '"' || *p == '\\') out[used++] = '\\';
+        out[used++] = *p;
+    }
+    return used;
+}
+
 int main(int argc, char **argv) {
     char argv_line[2048];
     int used = snprintf(argv_line, sizeof(argv_line), "{\"pid\":%lu,\"argv\":[", (unsigned long)GetCurrentProcessId());
     for (int i = 0; i < argc && used > 0 && used < (int)sizeof(argv_line) - 8; i++) {
-        used += snprintf(argv_line + used, sizeof(argv_line) - used, "%s\"%s\"", i ? "," : "", argv[i]);
+        if (i) argv_line[used++] = ',';
+        argv_line[used++] = '"';
+        used = appendString(argv_line, used, (int)sizeof(argv_line) - 4, argv[i]);
+        argv_line[used++] = '"';
     }
     if (used > 0 && used < (int)sizeof(argv_line) - 4) {
         snprintf(argv_line + used, sizeof(argv_line) - used, "]}");
