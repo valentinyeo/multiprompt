@@ -700,6 +700,7 @@ try:
         sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
+connected = time.monotonic()
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
@@ -724,6 +725,9 @@ except socket.timeout:
     fail("reply_timeout", f"multiprompt app/bridge deadline exceeded; run zsb reset to reconnect without reopening the pane. Reply timeout after {time.monotonic() - started:.3f}s (deadline {timeout:g}s). " + fix, hint=fix)
 except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
+finished = time.monotonic()
+if os.environ.get("ZSB_TIMING") == "1":
+    print(f"[zsb-client-timing] verb={args[0]} connect_ms={(connected - started) * 1000:.1f} reply_ms={(finished - connected) * 1000:.1f} total_ms={(finished - started) * 1000:.1f}", file=sys.stderr)
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
     fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed). " + fix)

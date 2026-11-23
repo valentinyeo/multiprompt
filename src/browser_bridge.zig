@@ -1104,19 +1104,41 @@ fn zsbPollPaneWindowIdSilent(session: []const u8, timeout_ms: u64, interval_ms: 
     return null;
 }
 
-fn zsbStatusPaneWindowId(session: []const u8, rebound: *bool) ?i64 {
-    if (zsbFindPaneWindowIdSilent(session)) |wid| return wid;
-    if (queueZsbBindRequest(session) orelse false) {
+const ZsbStatusTiming = struct {
+    find_ms: u64 = 0,
+    bind_ms: u64 = 0,
+    poll_ms: u64 = 0,
+    total_ms: u64 = 0,
+};
+
+var g_last_zsb_status_timing: ZsbStatusTiming = .{};
+
+fn zsbStatusPaneWindowId(session: []const u8, rebound: *bool, timing: *ZsbStatusTiming) ?i64 {
+    const t_find = GetTickCount64();
+    if (zsbFindPaneWindowIdSilent(session)) |wid| {
+        timing.find_ms = GetTickCount64() -| t_find;
+        return wid;
+    }
+    timing.find_ms = GetTickCount64() -| t_find;
+    const t_bind = GetTickCount64();
+    const bound = queueZsbBindRequest(session) orelse false;
+    timing.bind_ms = GetTickCount64() -| t_bind;
+    if (bound) {
         rebound.* = true;
         if (zsbFindPaneWindowIdSilent(session)) |wid| return wid;
-        if (zsbPollPaneWindowIdSilent(session, 12_000, 500)) |wid| return wid;
+        const t_poll = GetTickCount64();
+        const wid = zsbPollPaneWindowIdSilent(session, 12_000, 500);
+        timing.poll_ms = GetTickCount64() -| t_poll;
+        if (wid) |found_wid| return found_wid;
     }
     return null;
 }
 
 fn zsbSendStatus(client: SOCKET, session: []const u8) void {
+    const started = GetTickCount64();
     var rebound = false;
-    const maybe_wid = zsbStatusPaneWindowId(session, &rebound);
+    var timing: ZsbStatusTiming = .{};
+    const maybe_wid = zsbStatusPaneWindowId(session, &rebound, &timing);
     var out: [768]u8 = undefined;
     var pos: usize = 0;
     if (!appendAsciiBuf(&out, &pos, "{\"ok\":true,\"tunnel\":\"up\",\"port\":19548,\"session\":")) return;
@@ -1131,6 +1153,14 @@ fn zsbSendStatus(client: SOCKET, session: []const u8) void {
     if (rebound and !appendAsciiBuf(&out, &pos, ",\"rebound\":true")) return;
     if (!appendAsciiBuf(&out, &pos, "}\n")) return;
     _ = send(client, out[0..pos].ptr, @intCast(pos), 0);
+    timing.total_ms = GetTickCount64() -| started;
+    g_last_zsb_status_timing = timing;
+    if (verboseLoggingEnabled()) {
+        var lbuf: [192]u8 = undefined;
+        const wid_val: i64 = maybe_wid orelse 0;
+        const ls = std.fmt.bufPrint(&lbuf, "[zsb-timing] verb=status find_ms={d} bind_ms={d} poll_ms={d} total_ms={d} wid={d} rebound={}", .{ timing.find_ms, timing.bind_ms, timing.poll_ms, timing.total_ms, wid_val, rebound }) catch "";
+        debugLog(ls);
+    }
 }
 
 fn zsbSendWebView2Status(client: SOCKET, session: []const u8) void {
@@ -1473,7 +1503,9 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         return;
     }
 
+    const t_resolve_start = GetTickCount64();
     const window_id = zsbResolvePaneWindowId(client, session) orelse return;
+    const resolve_ms = GetTickCount64() -| t_resolve_start;
 
     var cmd_buf: [ZSB_COMMAND_CAP]u8 = undefined;
     const cmd_slice = zsbBuildBridgeCmd(window_id, argv[0..argc], &cmd_buf) orelse {
@@ -1493,16 +1525,25 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
     };
     defer std.heap.page_allocator.free(out_buf);
 
+    const t_bridge_start = GetTickCount64();
     var run = zsbRunBridgeOnce(cmd_slice, out_buf) orelse {
         zsbSendError(client, "multiprompt-browser: pipe create failed\n");
         return;
     };
+    const bridge_ms = GetTickCount64() -| t_bridge_start;
     if (!run.proc_ok) {
         zsbSendError(client, "multiprompt-browser: bridge exec failed\n");
         return;
     }
 
+    const t_retry_start = GetTickCount64();
     zsbRetryAfterStaleBinding(session, window_id, argv[0..argc], out_buf, &run);
+    const retry_ms = GetTickCount64() -| t_retry_start;
+    if (verboseLoggingEnabled()) {
+        var tbuf: [192]u8 = undefined;
+        const ts = std.fmt.bufPrint(&tbuf, "[zsb-timing] verb={s} resolve_ms={d} bridge_ms={d} retry_ms={d} total_ms={d}", .{ argv[0], resolve_ms, bridge_ms, retry_ms, GetTickCount64() -| t_resolve_start }) catch "";
+        debugLog(ts);
+    }
 
     if (run.out_len > 0) {
         var sent: usize = 0;
@@ -3288,4 +3329,122 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     app_state.g_account_locked = true;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"account_locked\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
     try std.testing.expectEqual(active, app_state.active_shell);
+}
+
+const ZsbStatusTestUi = struct {
+    ready: HANDLE,
+    ui_hwnd: HANDLE = null,
+    pane_hwnd: HANDLE = null,
+
+    fn run(self: *@This()) void {
+        const win32 = @import("win32.zig");
+        const hwnd_message: HANDLE = @ptrFromInt(@as(usize, @bitCast(@as(isize, -3))));
+        const cls = std.unicode.utf8ToUtf16LeStringLiteral("STATIC");
+        const empty = std.unicode.utf8ToUtf16LeStringLiteral("");
+        self.ui_hwnd = win32.CreateWindowExW(0, cls, empty, 0, 0, 0, 0, 0, hwnd_message, null, null, null);
+        self.pane_hwnd = win32.CreateWindowExW(0, cls, empty, 0, 0, 0, 0, 0, hwnd_message, null, null, null);
+        _ = win32.SetEvent(self.ready);
+        var msg = std.mem.zeroes(win32.MSG);
+        while (win32.GetMessageW(&msg, null, 0, 0) > 0) {
+            if (msg.message == WM_APP_ZSB_BIND) {
+                handleZsbBindRequest();
+                continue;
+            }
+            if (msg.message == 0x8099) break;
+            _ = win32.DispatchMessageW(&msg);
+        }
+        if (self.pane_hwnd != null) _ = win32.DestroyWindow(self.pane_hwnd);
+        if (self.ui_hwnd != null) _ = win32.DestroyWindow(self.ui_hwnd);
+    }
+};
+
+test "MUBO-253 browser pane status round trip finishes within two seconds" {
+    const win32 = @import("win32.zig");
+    const ready = win32.CreateEventW(null, 1, 0, null);
+    try std.testing.expect(ready != null);
+    defer _ = CloseHandle(ready);
+
+    var ui = ZsbStatusTestUi{ .ready = ready };
+    const ui_thread = try std.Thread.spawn(.{}, ZsbStatusTestUi.run, .{&ui});
+    defer {
+        if (ui.ui_hwnd != null) _ = PostMessageW(ui.ui_hwnd, 0x8099, 0, 0);
+        ui_thread.join();
+    }
+    try std.testing.expectEqual(@as(DWORD, 0), WaitForSingleObject(ready, 5000));
+    try std.testing.expect(ui.ui_hwnd != null and ui.pane_hwnd != null);
+
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    const prev_hwnd = app_state.g_main_hwnd;
+    defer app_state.g_main_hwnd = prev_hwnd;
+    app_state.g_main_hwnd = ui.ui_hwnd;
+
+    app_state.shells[1] = app_state.empty_shell;
+    app_state.shells[1].kind = .tmux;
+    app_state.shells[1].shell_id = 99253;
+    app_state.shells[1].tmux_host = TMUX_HOST_DE;
+    const sess = "mubo-253-status";
+    @memcpy(app_state.shells[1].tmux_session[0..sess.len], sess);
+    app_state.shells[1].tmux_session_len = sess.len;
+    app_state.shells[1].browser_hwnd = ui.pane_hwnd;
+    app_state.shells[1].browser_window_id = 0;
+    app_state.shells[1].browser_enabled = false;
+    app_state.shell_count = 2;
+
+    var wsa: WSADATA = undefined;
+    try std.testing.expectEqual(@as(i32, 0), WSAStartup(0x0202, &wsa));
+    const srv = socket(AF_INET, SOCK_STREAM, 0);
+    try std.testing.expect(srv != INVALID_SOCKET);
+    defer _ = closesocket(srv);
+    var addr = SOCKADDR_IN{
+        .sin_family = AF_INET,
+        .sin_port = htons(0),
+        .sin_addr = 0x0100007F,
+        .sin_zero = std.mem.zeroes([8]u8),
+    };
+    try std.testing.expectEqual(@as(i32, 0), bind(srv, &addr, @sizeOf(SOCKADDR_IN)));
+    var bound = std.mem.zeroes(SOCKADDR_IN);
+    var blen: i32 = @sizeOf(SOCKADDR_IN);
+    try std.testing.expectEqual(@as(i32, 0), getsockname(srv, &bound, &blen));
+    try std.testing.expectEqual(@as(i32, 0), listen(srv, 1));
+
+    const client_sock = socket(AF_INET, SOCK_STREAM, 0);
+    try std.testing.expect(client_sock != INVALID_SOCKET);
+    defer _ = closesocket(client_sock);
+    try std.testing.expectEqual(@as(i32, 0), win32.connect(client_sock, &bound, @sizeOf(SOCKADDR_IN)));
+    const server_sock = accept(srv, null, null);
+    try std.testing.expect(server_sock != INVALID_SOCKET);
+
+    const ctx = try std.heap.page_allocator.create(ZsbWorkerCtx);
+    errdefer {
+        _ = closesocket(server_sock);
+        std.heap.page_allocator.destroy(ctx);
+    }
+    ctx.client = server_sock;
+    const wire = "ZSB:mubo-253-status:c3RhdHVzHw==";
+    @memcpy(ctx.req[0..wire.len], wire);
+    ctx.req_len = wire.len;
+
+    const started = GetTickCount64();
+    const worker = try std.Thread.spawn(.{}, zsbWorkerThread, .{@intFromPtr(ctx)});
+    var reply_buf: [1024]u8 = undefined;
+    var reply_len: usize = 0;
+    while (reply_len < reply_buf.len) {
+        const n = recv(client_sock, reply_buf[reply_len..].ptr, @intCast(reply_buf.len - reply_len), 0);
+        if (n <= 0) break;
+        reply_len += @as(usize, @intCast(n));
+    }
+    worker.join();
+    const elapsed_ms = GetTickCount64() -| started;
+    const reply = reply_buf[0..reply_len];
+    std.debug.print("[MUBO-253] status round trip: total_ms={d} find_ms={d} bind_ms={d} poll_ms={d} reply={s}", .{
+        elapsed_ms,
+        g_last_zsb_status_timing.find_ms,
+        g_last_zsb_status_timing.bind_ms,
+        g_last_zsb_status_timing.poll_ms,
+        reply,
+    });
+    try std.testing.expect(std.mem.indexOf(u8, reply, "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply, "\"session\":\"mubo-253-status\"") != null);
+    try std.testing.expect(elapsed_ms < 2000);
 }

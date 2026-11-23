@@ -299,6 +299,7 @@ async function checkBridgeVersion(message) {
 
 async function handleHostMessage(message) {
   if (!message?.method) return;
+  const startedAt = Date.now();
 
   const reloadPending = message.method === "extensionReload" && extensionReloadTimer != null;
   if (reloadPending) {
@@ -324,6 +325,8 @@ async function handleHostMessage(message) {
       ...(error?.failedStep ? { failedStep: error.failedStep, results: error.results || [] } : {}),
     });
     if (reloadPending) scheduleExtensionReload();
+  } finally {
+    console.log("multiprompt browser bridge done:", message.method, Date.now() - startedAt, "ms");
   }
 }
 

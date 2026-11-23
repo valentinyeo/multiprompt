@@ -193,18 +193,28 @@ def handle(client, directory):
                     or not hmac.compare_digest(token, NOTIFY_TOKEN)):
                 return
             paths = sockets(directory)
+            started = time.monotonic()
+            session = b""
             if message.startswith(b"ZSB:"):
                 session = message.split(b":", 2)[1]
                 paths = zsb_sockets(paths, session)
-            deadline = time.monotonic() + 0.8
+            routed = time.monotonic()
+            deadline = routed + 0.8
             for path in paths:
                 upstream = connect(path, deadline)
                 if upstream is None:
                     continue
+                connected = time.monotonic()
                 with upstream:
                     if message.startswith(b"ZSB:"):
                         upstream.sendall(message)
                         proxy(client, upstream)
+                        if os.environ.get("MP_NOTIFY_RELAY_TIMING") == "1":
+                            done = time.monotonic()
+                            print(
+                                f"[zsb-relay-timing] session={session.decode('utf-8', 'replace')} route_ms={(routed - started) * 1000:.1f} connect_ms={(connected - routed) * 1000:.1f} proxy_ms={(done - connected) * 1000:.1f} total_ms={(done - started) * 1000:.1f}",
+                                file=sys.stderr,
+                            )
                         return
                     upstream.sendall(message)
     except OSError:

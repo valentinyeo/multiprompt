@@ -23,6 +23,7 @@ var native_resolve_log = struct {
     mutex: SpinMutex = .{},
     ids: [32][128]u8 = undefined,
     lengths: [32]usize = @splat(0),
+    started: [32]u64 = @splat(0),
     next: usize = 0,
 }{};
 
@@ -2626,6 +2627,7 @@ fn runPipeServer(allocator: std.mem.Allocator, context: *HostContext, command_pi
                             const index = native_resolve_log.next;
                             @memcpy(native_resolve_log.ids[index][0..id.len], id);
                             native_resolve_log.lengths[index] = id.len;
+                            native_resolve_log.started[index] = GetTickCount64();
                             native_resolve_log.next = (index + 1) % native_resolve_log.ids.len;
                             native_resolve_log.mutex.unlock();
                         }
@@ -2698,10 +2700,13 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
 
     if (getString(parsed.value.object.get("id"))) |id| {
         var resolved = false;
+        var started_at: u64 = 0;
         lockMutex(&native_resolve_log.mutex);
-        for (&native_resolve_log.ids, &native_resolve_log.lengths) |*stored, *length| {
+        for (&native_resolve_log.ids, &native_resolve_log.lengths, &native_resolve_log.started) |*stored, *length, *started| {
             if (length.* > 0 and std.mem.eql(u8, stored[0..length.*], id)) {
                 length.* = 0;
+                started_at = started.*;
+                started.* = 0;
                 resolved = true;
                 break;
             }
@@ -2712,7 +2717,8 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
                 if (result == .object) {
                     if (getI64(result.object.get("windowId"))) |window_id| {
                         var line: [128]u8 = undefined;
-                        logChromeLaunch(std.fmt.bufPrint(&line, "native resolve reply windowId={d}", .{window_id}) catch "native resolve reply windowId=<unknown>");
+                        const elapsed_ms = if (started_at > 0) GetTickCount64() -| started_at else 0;
+                        logChromeLaunch(std.fmt.bufPrint(&line, "native resolve reply windowId={d} elapsed_ms={d}", .{ window_id, elapsed_ms }) catch "native resolve reply windowId=<unknown>");
                     }
                 }
             }
