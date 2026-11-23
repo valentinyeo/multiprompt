@@ -27,7 +27,7 @@ export function releaseAssets(release, repository) {
   const assets = new Map();
   for (const asset of release.assets) {
     const name = asset.name;
-    if (!/^(?:(?:multiprompt(?:-dev)?|zigshell-bridge)-(?:x64|arm64)\.exe|multiprompt-extension\.zip|release-notes\.json|SHA256SUMS\.txt(?:\.sig)?)$/.test(name)) continue;
+    if (!/^(?:(?:multibot|multiprompt(?:-dev)?|zigshell-bridge)-(?:x64|arm64)\.exe|multiprompt-extension\.zip|release-notes\.json|SHA256SUMS\.txt(?:\.sig)?)$/.test(name)) continue;
     if (assets.has(name) || asset.browser_download_url !== `https://github.com/${repository}/releases/download/${release.tag_name}/${name}`) throw new Error('Untrusted or duplicate asset URL');
     if (!Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > 256 * 1024 * 1024) throw new Error('Invalid asset size');
     assets.set(name, asset);
@@ -43,7 +43,7 @@ export function signedFiles(manifest, signature, rawKey) {
   if (manifest.length > 1048576 || signature.length !== 64 || !verify(null, manifest, key, signature)) throw new Error('Invalid release manifest signature');
   const files = new Map();
   for (const line of manifest.toString('utf8').trimEnd().split('\n')) {
-    const match = /^([a-f0-9]{64}) [ *]((?:multiprompt(?:-dev)?|zigshell-bridge)-(?:x64|arm64)\.exe|multiprompt-extension\.zip|release-notes\.json)$/.exec(line);
+    const match = /^([a-f0-9]{64}) [ *]((?:multibot|multiprompt(?:-dev)?|zigshell-bridge)-(?:x64|arm64)\.exe|multiprompt-extension\.zip|release-notes\.json)$/.exec(line);
     if (!match || files.has(match[2])) throw new Error('Invalid or duplicate manifest entry');
     files.set(match[2], match[1]);
   }
@@ -125,7 +125,7 @@ export async function mirrorRelease({ gh = defaultGh, git = defaultGit, download
       const bytes = await download(assets.get(name));
       if (createHash('sha256').update(bytes).digest('hex') !== expected) throw new Error(`Checksum mismatch: ${name}`);
       if (name === 'release-notes.json' && JSON.parse(bytes).version !== source.tag_name.slice(1)) throw new Error('Release notes version mismatch');
-      if (name === 'multiprompt-x64.exe' || name === 'multiprompt-arm64.exe') {
+      if (/^(?:multibot|multiprompt)-(?:x64|arm64)\.exe$/.test(name)) {
         if (!bytes.includes(Buffer.from(`MPVERSION=${source.tag_name.slice(1)};`))) throw new Error('Executable version mismatch');
       }
       fs.writeFileSync(path.join(directory, name), bytes);

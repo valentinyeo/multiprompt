@@ -4,7 +4,7 @@ const client = @import("account_client.zig");
 const INVALID = std.math.maxInt(usize);
 pub const Kind = enum { freeze, crash, blank_chat };
 pub const FreezeKind = enum { freeze, blank_chat };
-pub const Module = enum { @"multiprompt.exe", @"ntdll.dll", @"kernelbase.dll", @"kernel32.dll", @"user32.dll", @"win32u.dll", @"gdi32.dll", @"gdi32full.dll", @"dwrite.dll" };
+pub const Module = enum { @"multibot.exe", @"multiprompt.exe", @"ntdll.dll", @"kernelbase.dll", @"kernel32.dll", @"user32.dll", @"win32u.dll", @"gdi32.dll", @"gdi32full.dll", @"dwrite.dll" };
 pub const FreezeContext = union(enum) {
     unavailable,
     captured: ?struct { module: Module, rva: usize },
@@ -244,7 +244,7 @@ test "legacy payloads remain byte exact" {
 
 test "freeze payload bounds and canonical module names" {
     var out: [8192]u8 = undefined;
-    const names = [_][]const u8{ "multiprompt.exe", "ntdll.dll", "kernelbase.dll", "kernel32.dll", "user32.dll", "win32u.dll", "gdi32.dll", "gdi32full.dll", "dwrite.dll" };
+    const names = [_][]const u8{ "multibot.exe", "multiprompt.exe", "ntdll.dll", "kernelbase.dll", "kernel32.dll", "user32.dll", "win32u.dll", "gdi32.dll", "gdi32full.dll", "dwrite.dll" };
     inline for (std.meta.fields(Module), names) |field, name| {
         const context: FreezeContext = .{ .captured = .{ .module = @enumFromInt(field.value), .rva = 0x42 } };
         const body = contextualPayload(&out, "freeze-12345", .freeze, "0.28.1", 123, 0, &.{}, context).?;

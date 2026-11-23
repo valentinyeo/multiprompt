@@ -68,7 +68,7 @@ gh run download <id>
 ```
 
 ```powershell
-./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multibot.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
 ```
 
 Unlike `control.ps1` journeys, this harness seeds saved tmux tabs and replaces only the SSH boundary via production `ssh-path.txt`. Artifacts `verify-reconnect-<exe_source>` retain case logs, Doctor, screenshots, and cleanup. `tools/verify-reconnect/check-evidence.js` can recompute measurements when run with artifact dirs and `run.json` metadata.

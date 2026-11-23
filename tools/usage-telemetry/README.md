@@ -1,7 +1,7 @@
 # Native AI usage telemetry
 
 The collector for multiprompt's native Combined and Today's AI cards runs inside
-`multiprompt.exe`. It does not host HTTP, render a dashboard, add a tray icon,
+`multibot.exe`. It does not host HTTP, render a dashboard, add a tray icon,
 start a second process, or require Node.js.
 
 Build it with:

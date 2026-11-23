@@ -25,7 +25,7 @@ test('production publishes the build, startup proof and signature gates without 
   assert.doesNotMatch(job('build'), /^    if:/m);
   assert.match(job('build'), /Executable embedded version does not match release tag/);
   assert.deepEqual(needsOf('launch'), ['prepare', 'build']);
-  assert.match(job('launch'), /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64\.exe -Evidence release-proof/);
+  assert.match(job('launch'), /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multibot-x64\.exe -Evidence release-proof/);
   assert.match(job('launch'), /name: release-launch-proof\n          path: release-proof\/\n          if-no-files-found: error/);
   assert.match(job('gitleaks'), /release_scan: true/);
   assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation']);

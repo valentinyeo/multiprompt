@@ -73,7 +73,7 @@ jobs:
           zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="$env:APP_VERSION" -Drevision="$env:GITHUB_SHA"
           if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
           Copy-Item zig-out/bin/* desktop/
-          @{ version = $env:APP_VERSION; revision = $env:GITHUB_SHA; sha256 = (Get-FileHash desktop/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content desktop/build.json
+          @{ version = $env:APP_VERSION; revision = $env:GITHUB_SHA; sha256 = (Get-FileHash desktop/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content desktop/build.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: desktop-${{ matrix.case }}

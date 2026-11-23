@@ -81,6 +81,23 @@ if (feedReady) {
     assert.deepEqual(state.calls.find(call => call[1] === 'release' && call[2] === 'edit'), ['gh', 'release', 'edit', 'v1.2.4', '--repo', legacyRepository, '--draft=false', '--latest']);
   });
 
+  test('mirrors canonical executables as well as the signed old-updater aliases', async () => {
+    const state = harness();
+    for (const arch of ['x64', 'arm64']) {
+      const name = `multibot-${arch}.exe`;
+      const bytes = state.source.bytes.get(`multiprompt-${arch}.exe`);
+      state.source.bytes.set(name, bytes);
+      state.source.release.assets.push({ name, size: bytes.length, browser_download_url: `https://github.com/${sourceRepository}/releases/download/v1.2.4/${name}` });
+    }
+    const manifest = Buffer.from([...state.source.bytes].filter(([name]) => !name.startsWith('SHA256SUMS.')).map(([name, bytes]) => `${createHash('sha256').update(bytes).digest('hex')}  ${name}\n`).join(''));
+    state.source.bytes.set('SHA256SUMS.txt', manifest);
+    state.source.bytes.set('SHA256SUMS.txt.sig', sign(null, manifest, privateKey));
+    for (const asset of state.source.release.assets) asset.size = state.source.bytes.get(asset.name).length;
+    await publish(state);
+    assert.deepEqual(state.uploaded, state.source.bytes);
+    for (const arch of ['x64', 'arm64']) assert.deepEqual(state.uploaded.get(`multibot-${arch}.exe`), state.uploaded.get(`multiprompt-${arch}.exe`));
+  });
+
   test('a retry is a no-op once the legacy feed is current, and never downgrades it', async () => {
     for (const tag of ['v1.2.4', 'v1.2.5', 'v2.0.0']) {
       const state = harness();

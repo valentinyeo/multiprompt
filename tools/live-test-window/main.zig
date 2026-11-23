@@ -267,7 +267,7 @@ fn start(io: std.Io, path: []const u8, exe_arg: ?[]const u8, session: ?[]const u
         }
         try removeFolder(io, state.folder);
     }
-    const exe = try fullPath(exe_arg orelse try fmt("{s}\\Documents\\GitHub\\zigshell\\zig-out\\bin\\multiprompt.exe", .{try env(std.unicode.utf8ToUtf16LeStringLiteral("USERPROFILE"))}));
+    const exe = try fullPath(exe_arg orelse try fmt("{s}\\Documents\\GitHub\\zigshell\\zig-out\\bin\\multibot.exe", .{try env(std.unicode.utf8ToUtf16LeStringLiteral("USERPROFILE"))}));
     const folder = try fmt("{s}\\mp-livetest-{d}-{d}", .{ try env(std.unicode.utf8ToUtf16LeStringLiteral("TEMP")), GetCurrentProcessId(), GetTickCount64() });
     const appdata = try fmt("{s}\\appdata", .{folder});
     try cwd().createDirPath(io, appdata);

@@ -14,7 +14,7 @@ ubuntu-latest for every push to `master` (and on demand with a `ref` input) and 
 
 - `install [run-id|latest]` - downloads the artifact, uploads the exe to
   `%LOCALAPPDATA%\MultipromptDev` in 120 KB base64 chunks, stops only `multiprompt-dev` processes
-  whose path is inside that folder, and swaps in the new exe. His normal `multiprompt.exe` is never
+  whose path is inside that folder, and swaps in the new exe. His normal `multibot.exe` is never
   matched.
 - `place` - starts the dev exe and moves its `MultipromptDevWindow` window maximised onto the second
   monitor (X=-2560, Y=-493, 2048x1280).

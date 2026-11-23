@@ -11,7 +11,7 @@ function New-GuardStage([string]$Exe, [string]$Profile, [string]$Root) {
     New-Item -ItemType Directory -Force $bin, $telemetry | Out-Null
     $files = @{}
     foreach ($item in @(
-        @('exe', $exePath, (Join-Path $bin 'multiprompt.exe')),
+        @('exe', $exePath, (Join-Path $bin 'multibot.exe')),
         @('bridge', $bridgePath, (Join-Path $bin 'zigshell-bridge.exe')),
         @('config', $configPath, (Join-Path $telemetry 'config.example.json')),
         @('helper', $helperPath, (Join-Path $telemetry 'kimi-usage.py'))

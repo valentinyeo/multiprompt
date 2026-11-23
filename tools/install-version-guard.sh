@@ -3,6 +3,7 @@ check_install_version() {
   local exe="$1" candidate="${2#v}" allow_downgrade="$3"
   installed_version=''
   if ! installed_version=$(lh shell "\$ErrorActionPreference='Stop'; \$exe='$exe';
+    if (-not (Test-Path -LiteralPath \$exe) -and [IO.Path]::GetFileName(\$exe) -ieq 'multibot.exe') { \$exe=Join-Path (Split-Path \$exe) 'multiprompt.exe' }
     \$bytes=[IO.File]::ReadAllBytes(\$exe);
     \$markers=@([regex]::Matches([Text.Encoding]::ASCII.GetString(\$bytes), 'MPVERSION=([0-9]+\.[0-9]+\.[0-9]+);') | ForEach-Object { \$_.Groups[1].Value } | Select-Object -Unique);
     if (\$markers.Count -gt 1) { throw 'ambiguous installed version' }

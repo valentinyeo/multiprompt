@@ -231,7 +231,7 @@ test('main window discovery matches Multi Bot and legacy multiprompt titles', as
 test('proc discovery counts only Wine app/collector processes in this prefix, not Node or other runs', async () => {
   const { procSnapshot } = await lib;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-proc-test-'));
-  const prefix = '/scratch/bench/prefix', exe = '/build/multiprompt.exe';
+  const prefix = '/scratch/bench/prefix', exe = '/build/multibot.exe';
   try {
     const make = (pid, loader, args, env) => {
       const dir = path.join(root, String(pid)); fs.mkdirSync(dir);
@@ -241,8 +241,8 @@ test('proc discovery counts only Wine app/collector processes in this prefix, no
       const tail = Array(25).fill('0'); tail[0] = 'S'; tail[11] = '123'; tail[12] = '45'; tail[19] = String(pid); tail[21] = '400';
       fs.writeFileSync(path.join(dir, 'stat'), `${pid} (name with ) parentheses) ${tail.join(' ')}`);
     };
-    make(100, '/usr/lib/wine/wine64', ['Z:\\build\\multiprompt.exe', '--name', 'bench-0'], `WINEPREFIX=${prefix}`);
-    make(101, '/usr/lib/wine/wine64', ['Z:\\build\\multiprompt.exe', '--usage-telemetry'], `WINEPREFIX=${prefix}`);
+    make(100, '/usr/lib/wine/wine64', ['Z:\\build\\multibot.exe', '--name', 'bench-0'], `WINEPREFIX=${prefix}`);
+    make(101, '/usr/lib/wine/wine64', ['Z:\\build\\multibot.exe', '--usage-telemetry'], `WINEPREFIX=${prefix}`);
     make(102, '/usr/bin/node', ['node', 'run.mjs', '--exe', exe], `WINEPREFIX=${prefix}`);
     make(103, '/usr/lib/wine/wine64', [exe], 'WINEPREFIX=/other/prefix');
     make(104, '/usr/lib/wine/wine64', ['C:\\windows\\system32\\cmd.exe'], `WINEPREFIX=${prefix}`);
@@ -250,7 +250,7 @@ test('proc discovery counts only Wine app/collector processes in this prefix, no
     assert.deepEqual([...snapshot.keys()], [100, 101]);
     assert.deepEqual(snapshot.get(100), { ticks: 168, rssPages: 400, start: '100', gui: true });
     assert.equal(snapshot.get(101).gui, false);
-    fs.writeFileSync(path.join(root, '100/cmdline'), 'Z:\\build\\multiprompt.exe --name bench-0    ');
+    fs.writeFileSync(path.join(root, '100/cmdline'), 'Z:\\build\\multibot.exe --name bench-0    ');
     fs.writeFileSync(path.join(root, '101/cmdline'), `${exe} --usage-telemetry    `);
     assert.equal(procSnapshot(prefix, exe, root).has(100), true);
     assert.equal(procSnapshot(prefix, exe, root).get(101).gui, false);

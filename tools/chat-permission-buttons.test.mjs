@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const zig = process.env.ZIG || 'zig';
-const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multiprompt.exe');
+const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multibot.exe');
 const winPath = file => `Z:${file.replaceAll('/', '\\')}`;
 
 for (const agent of ['claude', 'codex']) test(`ISSUE-266 ${agent} permission buttons deliver one digit and disappear`, { timeout: 175000 }, async () => {

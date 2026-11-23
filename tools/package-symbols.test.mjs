@@ -11,14 +11,14 @@ test('packages the app symbols, not the bridge symbols', () => {
     const input = join(root, 'bin');
     const output = join(root, 'dist');
     mkdirSync(input);
-    writeFileSync(join(input, 'multiprompt.exe'), 'app exe');
-    writeFileSync(join(input, 'multiprompt.pdb'), 'app symbols');
+    writeFileSync(join(input, 'multibot.exe'), 'app exe');
+    writeFileSync(join(input, 'multibot.pdb'), 'app symbols');
     writeFileSync(join(input, 'zigshell-bridge.pdb'), 'bridge symbols');
     const run = () => spawnSync('bash', ['tools/package-symbols.sh', input, output, 'x64'], { encoding: 'utf8' });
     assert.equal(run().status, 0);
     assert.equal(readFileSync(join(output, 'multiprompt-x64-symbols.pdb'), 'utf8'), 'app symbols');
     assert.equal(readFileSync(join(output, 'multiprompt-x64-symbols.exe'), 'utf8'), 'app exe');
-    rmSync(join(input, 'multiprompt.pdb'));
+    rmSync(join(input, 'multibot.pdb'));
     assert.notEqual(run().status, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });

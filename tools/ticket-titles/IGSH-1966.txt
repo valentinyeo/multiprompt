@@ -1,0 +1,1 @@
+Rename the app file from multiprompt.exe to multibot.exe

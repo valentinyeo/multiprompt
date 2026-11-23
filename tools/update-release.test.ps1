@@ -1,4 +1,4 @@
-param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '', [string]$NativeUpdate = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
+param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multibot.exe", [string]$Evidence = '', [string]$NativeUpdate = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script:manifestFault = ''
@@ -383,7 +383,7 @@ try {
             if ([DateTime]::UtcNow -gt $coldDeadline) { throw 'Cold staged update did not finish' }
             Start-Sleep -Milliseconds 100
         }
-        Assert ((Get-FileHash $cold).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'Cold staged swap did not install verified update'
+        Assert ((Get-FileHash $cold).Hash -eq (Get-FileHash "$Root/v1.10.0/multibot-x64.exe").Hash) 'Cold staged swap did not install verified update'
         Assert ((Get-Content "$cold.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Real app update did not forward launch arguments'
         Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Cold update restored tabs before swapping'
         Passed 'real cold-launch staged apply preserves launch arguments before tabs'
@@ -456,7 +456,7 @@ try {
         Assert (-not (Test-Path "$target.previous.exe")) 'Background check installed without consent'
         Passed 'no automatic restart while running'
         [IO.File]::AppendAllText("$dir/next.exe", 'tampered')
-        Refuses { Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" 'multiprompt-x64.exe' $target } 'Checksum mismatch accepted'
+        Refuses { Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" 'multibot-x64.exe' $target } 'Checksum mismatch accepted'
         Passed 'checksum mismatch refused'
         Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage good checksum'
         [IO.File]::AppendAllText("$dir/next-bridge.exe", 'tampered')
@@ -481,7 +481,7 @@ try {
         } finally { $mutex.ReleaseMutex(); $mutex.Dispose(); $accepted.Dispose() }
         Assert ($apply.WaitForExit(30000)) 'Apply did not finish after download completed'
         Assert ($apply.ExitCode -eq 0) 'First signed swap failed'
-        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'First app swap mismatch'
+        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.10.0/multibot-x64.exe").Hash) 'First app swap mismatch'
         Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.10.0/zigshell-bridge-x64.exe").Hash) 'First bridge swap mismatch'
         Assert (-not (Test-Path "$dir/ready.txt")) 'Successful card did not clear'
         Assert ((Get-Content "$target.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Launch arguments not preserved'
@@ -496,7 +496,7 @@ try {
         Assert (Save-Update $target '1.10.0' 'x64') 'Second release not staged'
         Install-Update $target 'x64' '' '1.10.0'
         Assert ($bridgeHelper.WaitForExit(5000)) 'Old bridge helper survived swap'
-        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.11.0/multiprompt-x64.exe").Hash) 'Second app update failed'
+        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.11.0/multibot-x64.exe").Hash) 'Second app update failed'
         Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.11.0/zigshell-bridge-x64.exe").Hash) 'Second bridge update failed'
         Assert (-not (Test-Path "$dir/ready.txt")) 'Second card did not clear'
         Assert (-not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '--usage-telemetry' })) 'Update left a usage helper process'
@@ -512,9 +512,9 @@ try {
     }
     if ($TestGroup -eq 'Rollback') {
         $env:IGSH_246 = '0'
-        Copy-Item "$Root/v1.11.0/multiprompt-x64.exe" $target -Force
+        Copy-Item "$Root/v1.11.0/multibot-x64.exe" $target -Force
         Copy-Item "$Root/v1.11.0/zigshell-bridge-x64.exe" "$Root/zigshell-bridge.exe" -Force
-        Copy-Item "$Root/v1.10.0/multiprompt-x64.exe" "$target.previous.exe" -Force
+        Copy-Item "$Root/v1.10.0/multibot-x64.exe" "$target.previous.exe" -Force
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
         Copy-Item "$Root/extension/manifest.json" "$extension/manifest.json" -Force
         $launch = ' "--name" "Review Desk" "--other" "C:\tail\\"'
@@ -531,7 +531,7 @@ try {
         Assert ((Get-FileHash $target).Hash -eq $goodHash) 'Rollback did not restore app'
         Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq $bridgeHash) 'Rollback did not restore bridge'
         Assert ((Get-FileHash "$target.previous.exe").Hash -eq $goodHash) 'Previous executable not retained'
-        Assert ((Get-FileHash "$dir/failed.exe").Hash -eq (Get-FileHash "$Root/v1.12.0/multiprompt-x64.exe").Hash) 'Failed executable not quarantined'
+        Assert ((Get-FileHash "$dir/failed.exe").Hash -eq (Get-FileHash "$Root/v1.12.0/multibot-x64.exe").Hash) 'Failed executable not quarantined'
         Assert ((Get-Content "$dir/rejected.txt" -Raw) -eq 'v1.12.0') 'Failed version not suppressed'
         Assert (-not (Save-Update $target '1.11.0' 'x64')) 'Failed version retried'
         Assert (-not (Test-Path "$dir/ready.txt")) 'Failed version remains ready'

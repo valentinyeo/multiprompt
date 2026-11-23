@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multiprompt.exe');
+const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multibot.exe');
 const toolExe = path.resolve(root, process.env.LIVETEST_EXE || 'zig-out/bin/mp-livetest.exe');
 let prefix, env, xvfb, wm, wineLock, realWindow, testWindow, realPids, testPids, state, folder;
 let batchId = 0;

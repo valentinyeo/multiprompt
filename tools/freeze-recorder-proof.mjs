@@ -16,7 +16,7 @@ export function validateFreezeReport(text) {
     assert.match(lines.shift(), /^frame_size: -?\d+ -?\d+$/);
     assert.match(lines.shift(), /^client_size: -?\d+ -?\d+$/);
   }
-  assert.match(lines.shift(), /^instruction: (?:multiprompt\.exe|ntdll\.dll|kernelbase\.dll|kernel32\.dll|user32\.dll|win32u\.dll|gdi32\.dll|gdi32full\.dll|dwrite\.dll)\+0x[0-9A-F]+$/);
+  assert.match(lines.shift(), /^instruction: (?:multibot\.exe|ntdll\.dll|kernelbase\.dll|kernel32\.dll|user32\.dll|win32u\.dll|gdi32\.dll|gdi32full\.dll|dwrite\.dll)\+0x[0-9A-F]+$/);
   assert.equal(lines.shift(), 'stack_rvas:');
   let frames = 0;
   while (/^  0x[0-9A-F]+$/.test(lines[0])) { lines.shift(); frames++; }

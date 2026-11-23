@@ -6,7 +6,7 @@ Cross-compile from Windows with Zig 0.16.0:
 zig build -Dtarget=aarch64-windows -Doptimize=ReleaseSmall --prefix zig-out-arm64
 ```
 
-The output includes ARM64 versions of `multiprompt.exe`, `multiprompt-dev.exe`,
+The output includes ARM64 versions of `multibot.exe`, `multiprompt-dev.exe`,
 and `zigshell-bridge.exe`. Telemetry is included in the main executable and runs on a background
 worker inside it; there is no telemetry file to copy.
 Keep the main executable and browser bridge together. A portable archive should retain the `zig-out/bin`
@@ -15,7 +15,7 @@ include the telemetry reconnect script and example configuration under
 `tools/usage-telemetry`. Never include local configuration, credentials, SSH
 keys, runtime session data, or Chromium's generated theme caches.
 
-Extract the archive on the ARM laptop and run `zig-out/bin/multiprompt.exe`.
+Extract the archive on the ARM laptop and run `zig-out/bin/multibot.exe`.
 Configure SSH and browser extension/native-host integration on that computer.
 The optional internal WebView2 DLL is not included in the ARM preview.
 

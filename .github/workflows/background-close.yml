@@ -40,7 +40,7 @@ jobs:
             Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
             & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
             if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
-            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+            Copy-Item zig-out/bin/multibot.exe bin/multibot.exe
           } else {
             if ($env:EXE_SOURCE -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected build or a release tag' }
             gh release download $env:EXE_SOURCE --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir bin
@@ -48,12 +48,12 @@ jobs:
             $line = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
             if ($line.Count -ne 1) { throw 'Missing unique executable checksum' }
             if ((Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
-            Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+            Copy-Item bin/multiprompt-x64.exe bin/multibot.exe
           }
-          @{exe_source=$env:EXE_SOURCE; revision=(git rev-parse HEAD); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; exe_sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower()} | ConvertTo-Json | Set-Content evidence/provenance.json
+          @{exe_source=$env:EXE_SOURCE; revision=(git rev-parse HEAD); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; exe_sha256=(Get-FileHash bin/multibot.exe -Algorithm SHA256).Hash.ToLower()} | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Exercise external and deliberate close messages
         shell: pwsh
-        run: ./tools/background-close.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+        run: ./tools/background-close.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

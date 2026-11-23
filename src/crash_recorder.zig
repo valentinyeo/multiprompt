@@ -186,7 +186,7 @@ pub fn buildReport(b: *Buf, in: ReportInput) void {
     if (in.address >= in.exe_base and in.address - in.exe_base < 0x4000_0000) {
         b.print("exe_offset: 0x{X} (address minus exe base; match with the .pdb)\n", .{in.address - in.exe_base});
     } else {
-        b.add("exe_offset: n/a (address is outside multiprompt.exe)\n");
+        b.add("exe_offset: n/a (address is outside multibot.exe)\n");
     }
     b.print("thread_id: {d}\ntabs: {d}\nchat_view: {s}\ninstance: {s}\n", .{
         in.thread_id, in.snap.tab_count, if (in.snap.chat_view) "on" else "off", in.snap.instance,
@@ -610,7 +610,7 @@ fn recordCrash() void {
         const wl = win.GetModuleFileNameW(hmod, &wname, wname.len);
         if (wl > 0 and wl < wname.len) module = basenameUtf8(wname[0..wl], &mod_name_buf);
     } else {
-        module = "multiprompt.exe";
+        module = "multibot.exe";
     }
 
     var rvas: [24]usize = undefined;
@@ -834,7 +834,7 @@ test "buildReport has the fields tools/crash-report.js reads" {
         .address = 0x140001234,
         .access_kind = 1,
         .access_addr = 0,
-        .module = "multiprompt.exe",
+        .module = "multibot.exe",
         .module_base = 0x140000000,
         .exe_base = 0x140000000,
         .thread_id = 77,

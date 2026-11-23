@@ -53,7 +53,7 @@ export function workspace(config) {
       save(path.join(config.out, 'journey.json'), { feature: args.feature });
       fs.mkdirSync(evidenceRoot, { recursive: true });
       const build = json(path.join(config.root, 'desktop/build.json'));
-      const exe = path.join(config.root, 'desktop/multiprompt.exe');
+      const exe = path.join(config.root, 'desktop/multibot.exe');
       if (hash(exe) !== build.sha256) throw new Error('Downloaded executable hash mismatch');
       save(path.join(evidenceRoot, 'build.json'), { version: build.version, sha256: build.sha256, revision: build.revision });
       const run = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(config.root, skill, 'control.ps1'), '-Feature', args.feature, '-Exe', exe, '-ExpectedVersion', build.version, '-ExpectedHash', build.sha256, '-Evidence', evidenceRoot], { cwd: config.root, encoding: 'utf8', timeout: 600000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PSModulePath: path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/Modules') } });

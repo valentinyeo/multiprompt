@@ -33,7 +33,7 @@ Chat UI work may also require [verify-chat-still](../verify-chat-still/SKILL.md)
 Invoke [control.ps1](control.ps1) only through `verify.yml` on GitHub Windows:
 
 ```powershell
-& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
 ```
 
 Area maps may use `drive.ps1 <feature> <journey>` with the same identity arguments (see each file). Harness: .NET UI Automation for identity, Win32 SendInput with layout-mapped keys (not Unicode packets). Custom palette rows: real Ctrl+K search plus arrow/Enter — no invented accessibility nodes or private WM_APP messages. Foreground must be our window before input.

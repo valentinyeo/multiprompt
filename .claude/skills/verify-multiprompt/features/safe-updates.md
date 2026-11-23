@@ -1,6 +1,6 @@
 # Safe release updates
 
-Source files: src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1, .github/workflows/legacy-update-feed.yml, tools/legacy-update-proof.ps1
+Source files: src/executable_rename.zig, tools/executable-rename.test.ps1, tools/fixtures/SOFT-1966/legacy-update.ps1, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1, .github/workflows/legacy-update-feed.yml, tools/legacy-update-proof.ps1
 
 ## Sub-features
 
@@ -23,6 +23,8 @@ Prove responsive signed-out launch during background checking, cold-launch stage
 - The fixture driver stages signed notes for several versions newer than the running app, then launches that real app with the cold-apply readiness flag. A held update mutex prevents production checks from replacing the local fixture.
 - It independently checks signed staged JSON for four ticket-title entries across three releases. Production paint logs must show the newest three titles and `and 1 more`, with unclipped note bounds. A real ownership-checked mouse click opens all four titles, then collapses the card again. Screenshots and observed paint data are saved as `update-card-notes.png`, `update-card-notes.json`, `update-card-expanded.png` and `update-card-expanded.json`.
 - A second signed fixture checks `IGSH-1243 Changelog ticket links` and its ticket URL; its proof is `ticket-title staged notes retain title and ticket link`. The fixture also stages a newer native executable at the installed path and verifies the restart card restores the saved session. Screenshots still require visual review; paint logs cannot prove readability.
+
+The Tests workflow also runs `test-executable-rename` on GitHub Windows. Its signed local fixtures drive a frozen pre-rename updater into the real new app, then apply the following canonical update. Old taskbar shortcuts and autostart commands must open `multibot.exe`; a temporary file lock must leave the app usable and a failed redirected startup must roll back. The `executable-rename-proof` artifact records these assertions in `executable-rename.json`.
 
 ## Gotchas
 

@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const modules = Promise.all([import('./chat-bench/lib.mjs'), import('./chat-bench/good-run.mjs'), import('./chat-bench/receipt.mjs')]);
 
-async function setup(t) {
+async function setup(t, prefix = 'multiprompt') {
   const [{ defaults, hash }, { goodRun }, { checkReceipt }] = await modules;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-guard-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -22,8 +22,8 @@ async function setup(t) {
   fs.writeFileSync(log, '');
   const releaseDir = path.join(dir, 'assets');
   fs.mkdirSync(releaseDir);
-  fs.copyFileSync(exe, path.join(releaseDir, 'multiprompt-x64.exe'));
-  for (const name of ['multiprompt-arm64.exe', 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe', 'multiprompt-extension.zip']) fs.writeFileSync(path.join(releaseDir, name), name);
+  fs.copyFileSync(exe, path.join(releaseDir, `${prefix}-x64.exe`));
+  for (const name of [`${prefix}-arm64.exe`, 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe', 'multiprompt-extension.zip']) fs.writeFileSync(path.join(releaseDir, name), name);
   const seal = () => {
     const names = fs.readdirSync(releaseDir).filter(name => name !== 'SHA256SUMS.txt');
     fs.writeFileSync(path.join(releaseDir, 'SHA256SUMS.txt'), names.map(name => `${hash(path.join(releaseDir, name))}  ${name}\n`).join(''));
@@ -63,7 +63,7 @@ else if (command.includes('MPVERSION=')) {
 }
 else if (command.includes('Get-FileHash')) {
   const name = command.match(/([^\\\\']+)' -Algorithm/)[1];
-  console.log(name === 'multiprompt-x64.exe' ? process.env.LH_TEST_HASH : crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.GH_TEST_ASSETS, name))).digest('hex'));
+  console.log(/^(?:multibot|multiprompt)-x64[.]exe$/.test(name) ? process.env.LH_TEST_HASH : crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.GH_TEST_ASSETS, name))).digest('hex'));
 }
 else if (command.includes("-ArgumentList 'tabs'")) {
   const calls = fs.readFileSync(process.env.LH_TEST_LOG, 'utf8');
@@ -202,7 +202,7 @@ for (const mode of ['failed', 'invalid', 'missing', 'different-binary']) {
 for (const matchingHash of [true, false]) {
   test(`IGSH-530 GitHub receipt ${matchingHash ? 'accepts the verified release' : 'rejects a different release hash'}`, async t => {
     const f = await setup(t);
-    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multiprompt.exe';
+    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multibot.exe';
     if (!matchingHash) f.run.binary.exeSha256 = '0'.repeat(64);
     f.save();
     const original = fs.readFileSync(f.receipt, 'utf8');
@@ -296,9 +296,10 @@ test('installer downloads latest, uploads bounded chunks, hashes every asset and
     assert.match(result.calls[assembly][1], /Sort-Object Name/);
   }
   const install = result.calls.find(args => args[1].includes('Rename-Item'))[1];
-  assert.match(install, /Copy-Item "\$s\\multiprompt-x64\.exe" "\$b\\multiprompt\.exe"/);
+  assert.match(install, /Copy-Item "\$s\\multiprompt-x64\.exe" \$target/);
+  assert.match(install, /foreach \(\$name in @\('multibot', 'multiprompt'\)\)/);
   assert.match(install, /Copy-Item "\$s\\zigshell-bridge-x64\.exe"/);
-  assert.match(install, /multiprompt-stable-\$v-\$t\.exe/);
+  assert.match(install, /\$name-stable-\$v-\$t\.exe/);
   assert.match(install, /Select -Skip 5/);
   assert.ok(install.includes("$b='C:\\Users\\tester\\Documents\\GitHub\\zigshell\\zig-out\\bin'"));
   const expand = result.calls.find(args => args[1].includes('Expand-Archive'))[1];
@@ -369,7 +370,7 @@ for (const [name, installedVersion, candidate, allowed] of [
     const probe = result.calls.findIndex(call => call[1]?.includes('MPVERSION='));
     assert(probe >= 0, 'reads the installed exe without requiring a running app');
     assert.match(result.calls[probe][1], /ReadAllBytes\(\$exe\)/);
-    assert.match(result.calls[probe][1], /\\zig-out\\bin\\multiprompt\.exe/);
+    assert.match(result.calls[probe][1], /\\zig-out\\bin\\multibot\.exe/);
     if (allowed) {
       const firstWrite = result.calls.findIndex(call => call[0] === 'write' || /New-Item|Rename-Item|Copy-Item/.test(call[1]));
       assert(probe < firstWrite, 'version check precedes every upload, rename, and copy');
@@ -425,4 +426,20 @@ test('ISSUE-433 shared guard reads the on-disk marker before file-version and em
   assert.match(helper, /\[Text\.Encoding\]::Unicode\.GetString/);
   assert.match(helper, /\$markers\.Count -gt 1/);
   assert.doesNotMatch(helper, /Get-Process|MainWindowTitle|Start-Process/);
+});
+
+
+test('installer publishes the new filename while preserving old pinned entry points', async t => {
+  const f = await setup(t, 'multibot');
+  const result = f.install(['--release', 'latest', '--bench', f.receipt]);
+  assert.equal(result.status, 0, result.stderr);
+  const download = result.ghCalls.find(args => args[1] === 'download');
+  assert.ok(download.includes('multibot-x64.exe'));
+  assert.ok(!download.includes('multiprompt-x64.exe'));
+  const install = result.calls.find(args => args[1].includes('Rename-Item'))[1];
+  assert.match(install, /Copy-Item "\$s\\multibot-x64\.exe" \$target/);
+  assert.match(install, /@\('multibot', 'multiprompt'\)/);
+  const version = result.calls.find(args => args[1].includes('MPVERSION='))[1];
+  assert.match(version, /multibot\.exe/);
+  assert.match(version, /Join-Path \(Split-Path \$exe\) 'multiprompt\.exe'/);
 });

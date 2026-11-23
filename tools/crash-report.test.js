@@ -12,7 +12,7 @@ const SAMPLE = [
   'exception_code: 0xC0000005 (ACCESS_VIOLATION)',
   'exception_address: 0x0000000140001234',
   'access: write at 0x0000000000000000',
-  'module: multiprompt.exe',
+  'module: multibot.exe',
   'module_base: 0x0000000140000000',
   'module_offset: 0x1234',
   'exe_base: 0x0000000140000000',
@@ -43,14 +43,14 @@ test('log tail lines never overwrite report fields', () => {
 });
 
 test('a report without an exe offset gives null', () => {
-  const r = parseCrashReport('exe_offset: n/a (address is outside multiprompt.exe)\n');
+  const r = parseCrashReport('exe_offset: n/a (address is outside multibot.exe)\n');
   assert.strictEqual(r.exeOffset, null);
 });
 
 test('symbolizerArgs passes hex offsets as RVAs', () => {
-  const a = symbolizerArgs('multiprompt.exe', [0x1234, 0x20]);
+  const a = symbolizerArgs('multibot.exe', [0x1234, 0x20]);
   assert.ok(a.includes('--relative-address'));
-  assert.ok(a.includes('--obj=multiprompt.exe'));
+  assert.ok(a.includes('--obj=multibot.exe'));
   assert.deepStrictEqual(a.slice(-2), ['0x1234', '0x20']);
 });
 

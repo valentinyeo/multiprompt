@@ -22,7 +22,7 @@ if [ -z "$release" ]; then
   exit 1
 fi
 if [ "$only_ext" = 0 ] && [ -z "$bench" ]; then
-  echo 'refusing to install: pass --bench <results.json> from a default-config PASS of node tools/chat-bench/run.mjs --exe <the multiprompt.exe to install>' >&2
+  echo 'refusing to install: pass --bench <results.json> from a default-config PASS of node tools/chat-bench/run.mjs --exe <the multibot.exe to install>' >&2
   exit 1
 fi
 repo=valentinyeo/multiprompt
@@ -54,9 +54,15 @@ finish() {
   exit "$status"
 }
 trap 'finish' EXIT
-assets=(multiprompt-extension.zip)
-if [ "$only_ext" = 0 ]; then assets+=(multiprompt-x64.exe zigshell-bridge-x64.exe); fi
 gh api "repos/$repo/releases/tags/$release" > "$download_dir/release.json"
+app_asset=$(node --input-type=module - "$download_dir/release.json" <<'NODE'
+import fs from 'node:fs';
+const { assets } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+console.log(assets.some(asset => asset.name === 'multibot-x64.exe') ? 'multibot-x64.exe' : 'multiprompt-x64.exe');
+NODE
+)
+assets=(multiprompt-extension.zip)
+if [ "$only_ext" = 0 ]; then assets+=("$app_asset" zigshell-bridge-x64.exe); fi
 patterns=(--pattern SHA256SUMS.txt)
 for asset in "${assets[@]}"; do patterns+=(--pattern "$asset"); done
 gh release download "$release" -R "$repo" --dir "$download_dir" "${patterns[@]}"
@@ -78,7 +84,8 @@ for (const line of fs.readFileSync(path.join(dir, 'SHA256SUMS.txt'), 'utf8').tri
   if (!match || sums.has(match[2])) throw new Error('Invalid SHA256SUMS.txt');
   sums.set(match[2], match[1]);
 }
-for (const name of ['multiprompt-x64.exe', 'multiprompt-arm64.exe', 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe', 'multiprompt-extension.zip']) {
+const prefix = metadata.assets.some(asset => asset.name === 'multibot-x64.exe') ? 'multibot' : 'multiprompt';
+for (const name of [`${prefix}-x64.exe`, `${prefix}-arm64.exe`, 'zigshell-bridge-x64.exe', 'zigshell-bridge-arm64.exe', 'multiprompt-extension.zip']) {
   if (!sums.has(name)) throw new Error(`Missing SHA256SUMS.txt entry: ${name}`);
 }
 for (const name of names) {
@@ -86,8 +93,8 @@ for (const name of names) {
 }
 NODE
 if [ "$only_ext" = 0 ]; then
-  receipt_sha=$(sha256sum "$download_dir/multiprompt-x64.exe" | cut -d' ' -f1)
-  node --input-type=module - "$bench" "$download_dir/multiprompt-x64.exe" "$download_dir/results-local.json" <<'NODE'
+  receipt_sha=$(sha256sum "$download_dir/$app_asset" | cut -d' ' -f1)
+  node --input-type=module - "$bench" "$download_dir/$app_asset" "$download_dir/results-local.json" <<'NODE'
 import fs from 'node:fs';
 const [input, exe, output] = process.argv.slice(2);
 try {
@@ -107,7 +114,7 @@ profile=$(lh shell '$env:USERPROFILE' --timeout 60 | tr -d '\r\n')
 if [[ ! "$profile" =~ ^[A-Za-z]:\\Users\\[A-Za-z0-9._-]+$ ]]; then echo 'refusing install: unexpected laptop user folder' >&2; exit 1; fi
 app="$profile\\Documents\\GitHub\\zigshell"
 if [ "$only_ext" = 0 ]; then
-  check_install_version "$app\\zig-out\\bin\\multiprompt.exe" "$release" "$allow_downgrade"
+  check_install_version "$app\\zig-out\\bin\\multibot.exe" "$release" "$allow_downgrade"
 fi
 upload_pc="$app\\release-upload-$(basename "$download_dir")"
 staged_pc=1
@@ -133,9 +140,25 @@ for asset in "${assets[@]}"; do upload "$asset"; done
 if [ "$only_ext" = 0 ]; then
   lh shell "\$ErrorActionPreference='Stop'; \$b='$app\\zig-out\\bin'; \$s='$upload_pc'; \$t=Get-Date -Format HHmmss;
     \$v='v$installed_version';
-    Rename-Item \"\$b\\multiprompt.exe\" \"multiprompt-stable-\$v-\$t.exe\"; Copy-Item \"\$s\\multiprompt-x64.exe\" \"\$b\\multiprompt.exe\";
+    \$backups=@{}; \$written=@();
+    try {
+      foreach (\$name in @('multibot', 'multiprompt')) {
+        \$target=\"\$b\\\$name.exe\";
+        if (Test-Path -LiteralPath \$target) {
+          \$backup=\"\$name-stable-\$v-\$t.exe\";
+          Rename-Item -LiteralPath \$target -NewName \$backup;
+          \$backups[\$target]=\"\$b\\\$backup\";
+        }
+        \$written += \$target;
+        Copy-Item \"\$s\\$app_asset\" \$target;
+      }
+    } catch {
+      foreach (\$target in \$written) { Remove-Item -LiteralPath \$target -Force -ErrorAction SilentlyContinue }
+      foreach (\$target in \$backups.Keys) { Move-Item -LiteralPath \$backups[\$target] -Destination \$target -Force }
+      throw;
+    };
     Rename-Item \"\$b\\zigshell-bridge.exe\" \"zigshell-bridge-old-\$t.exe\" -ErrorAction SilentlyContinue; Copy-Item \"\$s\\zigshell-bridge-x64.exe\" \"\$b\\zigshell-bridge.exe\" -Force;
-    Get-ChildItem \"\$b\\multiprompt-stable-v*.exe\" | Sort LastWriteTime -Descending | Select -Skip 5 | ForEach-Object { \$backup=\$_; try { Remove-Item \$backup.FullName } catch { Write-Output \"skipped locked backup \$(\$backup.Name)\" } };
+    Get-ChildItem \"\$b\\*-stable-v*.exe\" | Group-Object { \$_.Name.Split('-')[0] } | ForEach-Object { \$_.Group | Sort LastWriteTime -Descending | Select -Skip 5 | ForEach-Object { \$backup=\$_; try { Remove-Item \$backup.FullName } catch { Write-Output \"skipped locked backup \$(\$backup.Name)\" } } };
     Get-ChildItem \"\$b\\zigshell-bridge-old-*.exe\" | Remove-Item -ErrorAction SilentlyContinue; 'app installed, backup of ' + \$v" --timeout 60
 fi
 lh shell "\$ErrorActionPreference='Stop'; Expand-Archive '$upload_pc\\multiprompt-extension.zip' '$upload_pc\\extension' -Force;

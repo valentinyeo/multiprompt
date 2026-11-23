@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const zig = process.env.ZIG || 'zig';
-const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multiprompt.exe');
+const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multibot.exe');
 const winPath = file => `Z:${file.replaceAll('/', '\\')}`;
 
 test('ISSUE-438 Chat View drag selection and context Copy', { timeout: 175000 }, async t => {

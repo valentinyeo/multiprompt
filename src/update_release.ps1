@@ -44,7 +44,7 @@ function Save-Update([string]$Target, [string]$Version, [string]$Architecture) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $headers = @{ 'User-Agent' = 'multiprompt-updater'; Accept = 'application/vnd.github+json' }
     $release = Invoke-RestMethod 'https://api.github.com/repos/valentinyeo/multiprompt/releases/latest' -Headers $headers -TimeoutSec 15
-    $names = @("multiprompt-$Architecture.exe", "zigshell-bridge-$Architecture.exe", 'multiprompt-extension.zip', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig')
+    $names = @("multibot-$Architecture.exe", "zigshell-bridge-$Architecture.exe", 'multiprompt-extension.zip', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig')
     $assets = @($names | ForEach-Object { Get-ReleaseAsset $release $_ })
     if ((Get-ReleaseVersion $release.tag_name) -le (Get-ReleaseVersion $Version)) { return $false }
     $dir = "$Target.update"
@@ -132,7 +132,7 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
             }
         }
         $ready = Get-Content -LiteralPath "$dir/ready.txt" -Raw
-        if ($ready -notmatch '^MPVERSION=(\d+\.\d+\.\d+);(multiprompt-(x64|arm64)\.exe)$' -or $Matches[3] -cne $Architecture) { throw 'Invalid staged update' }
+        if ($ready -notmatch '^MPVERSION=(\d+\.\d+\.\d+);((?:multibot|multiprompt)-(x64|arm64)\.exe)$' -or $Matches[3] -cne $Architecture) { throw 'Invalid staged update' }
         $tag = 'v' + $Matches[1]
         $name = $Matches[2]
         if ((Get-ReleaseVersion $tag) -le (Get-ReleaseVersion $Version)) { throw 'Staged update is not newer' }

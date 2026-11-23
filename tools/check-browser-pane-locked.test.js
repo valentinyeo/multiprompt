@@ -454,7 +454,7 @@ test('pane-lock journey is mapped, indexed, allowed and included in the pull-req
   assert.ok(workflow.includes('tools/check-browser-pane-locked.test.js'));
   assert.match(workflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| '' \}\}/);
   assert.match(workflow, /name: Build branch executable\s+if: inputs\.candidate_artifact == '' && env\.RELEASE_TAG == '' && \(env\.FEATURE == 'safe-updates' \|\| env\.CHAT_SHAPE_PROOF == '1' \|\| env\.CHAT_SWITCH_PROFILE == '1'\)\s+run: zig build/);
-  assert.match(workflow, /} else \{\s*Copy-Item zig-out\/bin\/multiprompt\.exe verify-bin\/multiprompt\.exe/);
+  assert.match(workflow, /} else \{\s*Copy-Item zig-out\/bin\/multibot\.exe verify-bin\/multibot\.exe/);
   assert.ok(read(`${directory}/features/README.md`).includes('](browser-pane-locked.md)'));
   assert.ok(read(`${directory}/SKILL.md`).includes('`browser-pane-locked`'));
   for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) assert.ok(map.includes(`## ${section}`));

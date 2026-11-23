@@ -60,7 +60,7 @@ test('Windows behavioral update tests stay nightly while source checks run on PR
   ]) assert.equal(source.split('\n').filter(line => line.trim() === command).length, 1, command);
   for (const command of [
     'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
-    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"',
+    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multibot.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multibot.exe"',
   ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
   assert.match(source, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
   assert.match(source, /foreach \(\$finding in 1\.\.9\)/);
@@ -68,19 +68,19 @@ test('Windows behavioral update tests stay nightly while source checks run on PR
   assert.match(update, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: update-verifier/);
   assert.match(build, /runs-on: ubuntu-latest/);
   assert.match(build, /arch: \[arm64, x64\]/);
-  assert.match(build, /if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all\n/);
+  assert.match(build, /if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all\n/);
   const releaseBuild = read('.github/workflows/release.yml').match(/zig build -Dtarget=.+/)[0]
     .replace('${{ matrix.target }}', 'x86_64-windows-gnu')
     .replace("${{ github.event_name != 'pull_request' }}", 'true')
     .replace(/ -Dversion="\$\{TAG#v\}"/, '')
     .replace(/ -Drevision="\$\{\{ needs.prepare.outputs.sha \}\}"/, '');
   assert.match(read('.github/workflows/release.yml'), / -Drevision="\$\{\{ needs.prepare.outputs.sha \}\}"/);
-  assert.ok(build.includes(`run: ${releaseBuild} --summary all\n`));
-  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
+  assert.ok(build.includes(`run: timeout 1200 ${releaseBuild} --summary all\n`));
+  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multibot.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
   assert.match(build, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-\$\{\{ matrix.arch \}\}-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
   assert.match(update, /MULTIPROMPT_TEST_SIGNING_KEY: \$\{\{ github.workspace \}\}\/update-verifier\/update-test-key.der/);
   assert.match(build, /- name: Prepare throwaway update-test signing key\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: node tools\/update-release-fixtures.mjs --prepare-key zig-out\/bin\/update-test-key.der/);
-  assert.ok(build.indexOf('run: node tools/update-release-fixtures.mjs --prepare-key') < build.indexOf('run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all'));
+  assert.ok(build.indexOf('run: node tools/update-release-fixtures.mjs --prepare-key') < build.indexOf('run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all'));
   const signer = read('tools/update-release-fixtures.mjs');
   assert.match(signer, /process.env.MULTIPROMPT_TEST_SIGNING_KEY[\s\S]*createPrivateKey\(\{ key: fs.readFileSync\(process.env.MULTIPROMPT_TEST_SIGNING_KEY\)/);
   assert.match(signer, /const publicKey = createPublicKey\(privateKey\)/);
@@ -96,7 +96,7 @@ test('Windows behavioral update tests stay nightly while source checks run on PR
   assert.match(suite, /\$TestGroup = 'All'/);
   assert.match(suite, /if \(\$TestGroup -ne 'Rollback'\)/);
   assert.match(suite, /if \(\$TestGroup -ne 'Lifecycle'\)/);
-  assert.match(suite, /Copy-Item "\$Root\/v1\.11\.0\/multiprompt-x64\.exe" \$target -Force/);
+  assert.match(suite, /Copy-Item "\$Root\/v1\.11\.0\/multibot-x64\.exe" \$target -Force/);
   assert.match(suite, /Copy-Item "\$Root\/v1\.11\.0\/zigshell-bridge-x64\.exe" "\$Root\/zigshell-bridge\.exe" -Force/);
   assert.match(suite, /if \(\$TestGroup -ne 'Rollback'\) \{\s*Select-Release 'v1.11.0'\s*Assert \(Save-Update \$target '1.10.0'/);
   assert.match(suite, /Start-Sleep -Seconds 61/);

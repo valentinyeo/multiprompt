@@ -32,7 +32,7 @@ async function run() {
   const prefix = path.join(out, 'wine-prefix');
   if (fs.existsSync(prefix)) throw new Error('Choose a fresh --out directory');
   const env = { ...process.env, WINEPREFIX: prefix, WINEARCH: 'win64', WINEDEBUG: '-all', WINEDLLOVERRIDES: 'winemenubuilder.exe=d', MULTIPROMPT_NO_LOGIN: '1', ZIGSHELL_DEBUG: '1', MAGICK_THREAD_LIMIT: '1' };
-  const exe = path.join(out, 'multiprompt.exe');
+  const exe = path.join(out, 'multibot.exe');
   fs.copyFileSync(options.exe, exe);
   const helper = path.join(out, 'paste-focus-helper.exe');
   await execute(process.env.ZIG || 'zig', ['cc', '-target', 'x86_64-windows-gnu', path.join(path.dirname(script), 'paste-focus-helper.c'), '-o', helper, '-luser32', '-lgdi32'], { env, timeout: 120000 });

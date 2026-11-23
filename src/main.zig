@@ -9457,6 +9457,7 @@ pub fn main(init: std.process.Init) void {
     if (@import("console_snapshot.zig").runIfRequested(args)) return;
     defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
+    if (!IS_DEV and @import("executable_rename.zig").redirect(args, APP_VERSION)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION ++ (if (IS_DEV) " dev" else ""));
     if (update_check.runRelaunchHelperIfRequested()) return;

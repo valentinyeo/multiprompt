@@ -166,7 +166,7 @@ test('Codex workspace receives hosted context without credentials and still reje
     fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ verdict: 'BLOCKED', evidence: [{ file: 'probe', observation: JSON.stringify({ env, response: JSON.parse(child.stdout) }) }] }));
   `);
   fs.mkdirSync(path.join(root, 'desktop'));
-  fs.writeFileSync(path.join(root, 'desktop/multiprompt.exe'), 'not an executable');
+  fs.writeFileSync(path.join(root, 'desktop/multibot.exe'), 'not an executable');
   fs.writeFileSync(path.join(root, 'desktop/build.json'), JSON.stringify({ sha256: 'incorrect' }));
   fs.cpSync(new URL('../.claude/', import.meta.url), path.join(root, '.claude'), { recursive: true });
   for (const [index, runner] of [

@@ -131,5 +131,5 @@ test('the docs no longer name a helper process for the usage meter', () => {
   for (const file of ['openwiki/operations/build-and-install.md', 'docs/windows-arm64.md', 'tools/usage-telemetry/README.md', 'docs/idle-cpu.md']) {
     assert.doesNotMatch(read(file), /--usage-telemetry\b(?!\.json)/, file);
   }
-  assert.match(read('tools/usage-telemetry/README.md'), /runs inside\s+`multiprompt\.exe`/);
+  assert.match(read('tools/usage-telemetry/README.md'), /runs inside\s+`multibot\.exe`/);
 });

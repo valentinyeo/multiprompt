@@ -18,13 +18,22 @@ if (root === '--prepare-key') {
   process.exit(0);
 }
 const wrong = generateKeyPairSync('ed25519');
-for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true], ['9.10.0', false], ['9.11.0', false]]) {
+const releasesToBuild = [['1.10.0', false], ['1.11.0', false], ['1.12.0', true], ['9.10.0', false], ['9.11.0', false]];
+for (const file of [process.env.MULTIPROMPT_RENAME_FIRST, process.env.MULTIPROMPT_RENAME_SECOND].filter(Boolean)) {
+  const bytes = fs.readFileSync(file);
+  const versions = [...new Set([...bytes.toString('latin1').matchAll(/MPVERSION=(\d+\.\d+\.\d+);/g)].map(match => match[1]))];
+  if (versions.length !== 1) throw new Error('Rename fixture needs one embedded version');
+  releasesToBuild.push([versions[0], false, bytes]);
+}
+for (const [version, broken, native] of releasesToBuild) {
   const dir = path.join(root, `v${version}`);
   fs.mkdirSync(dir, { recursive: true });
-  const app = Buffer.concat([fs.readFileSync(path.join(root, broken ? 'broken.exe' : 'fixture.exe')), Buffer.from(`MPVERSION=${version};`)]);
+  const app = native || Buffer.concat([fs.readFileSync(path.join(root, broken ? 'broken.exe' : 'fixture.exe')), Buffer.from(`MPVERSION=${version};`)]);
   const bridge = Buffer.concat([fs.readFileSync(path.join(root, 'fixture.exe')), Buffer.from(`BRIDGEVERSION=${version};`)]);
-  const names = ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip'];
+  const names = ['multibot-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip'];
   for (const [i, bytes] of [app, bridge, fs.readFileSync(path.join(root, 'extension.zip'))].entries()) fs.writeFileSync(path.join(dir, names[i]), bytes);
+  fs.writeFileSync(path.join(dir, 'multiprompt-x64.exe'), app);
+  names.push('multiprompt-x64.exe');
   const releases = version === '9.10.0' ? [
     { version: '9.8.0', changes: ['IGSH-1 Older change'] },
     { version: '9.9.0', changes: ['IGSH-2 Middle change'] },

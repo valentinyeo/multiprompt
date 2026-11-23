@@ -53,4 +53,4 @@ node --test tools/laptop-check/run.test.js
 
 `--no-post` prints the result without writing to the board. The raw machine result for a tag stays in `~/.local/state/multiprompt-laptop-check/result-<tag>.json`; delete that file, or the matching `state.json` entry, to force a new attempt.
 
-The laptop needs `multiprompt.exe`, `zigshell-bridge.exe` and the extension installed under `%USERPROFILE%\Documents\GitHub\zigshell`, which `tools/install-laptop1.sh` already produces.
+The laptop needs `multibot.exe`, `zigshell-bridge.exe` and the extension installed under `%USERPROFILE%\Documents\GitHub\zigshell`, which `tools/install-laptop1.sh` already produces.

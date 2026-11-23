@@ -158,7 +158,7 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
   assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 5);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
-  assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
+  assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multibot-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
   assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: false$/m);
@@ -492,7 +492,7 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
   for (const [bytes, accepted] of [['junk MPVERSION=1.2.9; tail', true], ['MPVERSION=1.2.3;', false], ['', false], ['MPVERSION=1.2.9;MPVERSION=1.2.3;', false]]) {
-    fs.writeFileSync(path.join(f.dir, 'zig-out/bin/multiprompt.exe'), bytes);
+    fs.writeFileSync(path.join(f.dir, 'zig-out/bin/multibot.exe'), bytes);
     const result = spawnSync(process.execPath, ['--input-type=module', '-', 'v1.2.9'], { input: check, cwd: f.dir, encoding: 'utf8' });
     assert.equal(result.status === 0, accepted, result.stderr);
   }
@@ -751,4 +751,15 @@ test('SOFT fragment names stamp the existing canonical release title', async () 
     }, undefined, { 'IGSH-2489': 'Saved chats open in their own tabs' });
   });
   assert.deepEqual(stamp.tickets, ['IGSH-2489']);
+});
+
+
+test('release packages the new name and byte-identical old-updater aliases', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
+  for (const name of ['multibot.exe', 'zigshell-bridge.exe', 'multiprompt-dev.exe']) fs.writeFileSync(path.join(f.dir, 'zig-out/bin', name), name);
+  const run = spawnSync('bash', ['-e', '-c', script('Package').replaceAll('${{ matrix.arch }}', 'x64')], { cwd: f.dir, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'dist/multibot-x64.exe'), 'utf8'), 'multibot.exe');
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'dist/multiprompt-x64.exe')), fs.readFileSync(path.join(f.dir, 'dist/multibot-x64.exe')));
 });
