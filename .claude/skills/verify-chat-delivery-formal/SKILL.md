@@ -47,6 +47,8 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-3092 makes the host's atomic publish retry a Windows share violation and answers a failed fresh start with its own reason. `message_store_transaction`, `message_poll`, `message_poll_locked` and their callers are unchanged; `host_write`, `host_publish`, `host_fresh_archive`, `host_fresh_error`, `host_fresh_request` and `host_accept_client` stay outside the delivery model, like the host start, owner and dispatch path. Only the reader's file hash moved and the sync commit names that fix.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
