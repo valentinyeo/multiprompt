@@ -20,6 +20,7 @@ test('SOFT-2295 archive fields are negotiated and omitted for older account serv
   assert.match(desktop, /if \(!remote\.workspace_archive_supported\) rebased = try account_layout\.activeWorkspaces\(alloc, rebased\)/);
   assert.match(body(desktop, 'publishSessionLayout'), /if \(!app_state\.g_account_workspace_archive_supported\) \{[\s\S]*plain_local = account_layout\.activeWorkspaces[\s\S]*plain_base = account_layout\.activeWorkspaces[\s\S]*plain_synced = account_layout\.activeWorkspaces/);
   assert.match(body(desktop, 'handleLayoutReply'), /if \(reply\.workspace_archive_supported\) received\.value else account_layout\.workspaceArchiveFrom/);
+  assert.match(body(desktop, 'handleLayoutReply'), /if \(!reply\.workspace_archive_supported\) \{[\s\S]*local_ack = session_layout\.encode\(alloc, account_layout\.activeWorkspaces/);
 });
 
 test('SOFT-2295 archived registry entries are captured and inactive deletes publish', () => {

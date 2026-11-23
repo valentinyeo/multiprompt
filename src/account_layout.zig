@@ -448,7 +448,6 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         }
     }
     for (remote.tabs) |r| {
-        if (workspaceIndex(base.workspaces, r.workspace) != null and workspaceIndex(edited.workspaces, r.workspace) == null) continue;
         var t = r;
         if (find(edited.tabs, r)) |ei| {
             t.used = layout.maxUsed(t.used, edited.tabs[ei].used);
@@ -502,6 +501,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             }
             if (!eq(u8, edited.tabs[ei].workspace, base.tabs[bi].workspace)) t.workspace = edited.tabs[ei].workspace;
         }
+        if (workspaceIndex(base.workspaces, t.workspace) != null and workspaceIndex(edited.workspaces, t.workspace) == null) continue;
         try tabs.append(a, t);
     }
     for (edited.tabs) |t| {
@@ -1637,6 +1637,14 @@ test "SOFT-2295 workspace deletion wins over a concurrent session addition" {
         try std.testing.expectEqual(@as(usize, 1), result.workspaces.len);
         try std.testing.expectEqual(@as(usize, 0), result.tabs.len);
     }
+    const occupied = Layout{ .workspaces = base.workspaces, .tabs = added.tabs };
+    var moved_tab = added.tabs[0];
+    moved_tab.workspace = "Other";
+    const moved_out = Layout{ .workspaces = deleted.workspaces, .tabs = &.{moved_tab} };
+    const moved = try rebase(a, occupied, moved_out, occupied);
+    try std.testing.expectEqual(@as(usize, 1), moved.workspaces.len);
+    try std.testing.expectEqual(@as(usize, 1), moved.tabs.len);
+    try std.testing.expectEqualStrings("Other", moved.tabs[0].workspace);
 }
 
 test "SOFT-2295 older wire schema stays strict and local archive state survives its round trip" {
@@ -1659,6 +1667,10 @@ test "SOFT-2295 older wire schema stays strict and local archive state survives 
     try std.testing.expect(preserved.workspaces[1].archived.?);
     try std.testing.expectEqual(@as(usize, 1), preserved.tabs.len);
     try std.testing.expect(equal(try activeWorkspaces(a, preserved), echoed.value));
+    const migrated = try rebase(a, echoed.value, preserved, legacy.value);
+    try std.testing.expectEqual(@as(usize, 2), migrated.workspaces.len);
+    try std.testing.expect(migrated.workspaces[1].archived.?);
+    try std.testing.expectEqual(@as(usize, 1), migrated.tabs.len);
     const supported = try layout.parse(a, try layout.encode(a, preserved));
     defer supported.deinit();
     try std.testing.expect(supported.value.workspaces[1].archived.?);

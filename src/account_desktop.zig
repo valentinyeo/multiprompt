@@ -2385,6 +2385,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         defer ack.deinit();
         local_ack = session_layout.encode(alloc, account_layout.unacknowledgedWhiteWorkspaces(alloc, ack.value, old_base.value, edited.value) catch return) catch return;
     }
+    if (!reply.workspace_archive_supported) {
+        const candidate = session_layout.parse(alloc, local_ack orelse (session_layout.encode(alloc, server.value) catch return)) catch return;
+        defer candidate.deinit();
+        local_ack = session_layout.encode(alloc, account_layout.activeWorkspaces(alloc, candidate.value) catch return) catch return;
+    }
     const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, session_layout.encode(alloc, server.value) catch return) catch return;
     defer ack_parsed.deinit();
     const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
