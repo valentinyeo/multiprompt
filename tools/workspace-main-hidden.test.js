@@ -18,7 +18,8 @@ test('IGSH-2281 an empty Main workspace stays out of the menu', () => {
   assert.match(empty, /sessionCount\(index\)/);
   const load = body('loadEntries');
   assert.match(load, /if \(entry\.archived\) continue;/);
-  assert.match(load, /if \(emptyHome\(entry_count\)\) entry_count -= 1;/);
+  assert.match(empty, /entries\[index - views\.len\]/);
+  assert.match(load, /if \(emptyHome\(entry_count \+ views\.len - 1\)\) entry_count -= 1;/);
   assert.match(body('headerClick'), /loadEntries\(\);/);
   assert.match(source, /test "IGSH-2281 workspace menu hides an empty Main"/);
 });

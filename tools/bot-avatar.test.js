@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -80,6 +81,7 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
   const hit = block(sidebar, 'pub fn hitTestSidebar(');
   const height = block(sidebar, 'pub fn rowTotalHeight(');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-layout-'));
+  copyZig(['workspace_view.zig'], dir);
   require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 0; }\n');
   fs.writeFileSync(path.join(dir, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 20; }\n');
@@ -95,6 +97,8 @@ ${block(read('src/app_state.zig'), 'pub const HitTarget = union(enum)')};
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
+const g_sidebar_view: ?@import("workspace_view.zig").Builtin = null;
+fn layoutViewRows(_: *[MAX_ROWS]Row, _: @import("workspace_view.zig").Builtin) u32 { unreachable; }
 var pinned_collapsed = false;
 var pinned_count: usize = 4;
 const SECTION_HEADER_H = 24;

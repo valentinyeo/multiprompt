@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -17,7 +18,7 @@ function body(file, name) {
 test('workspace views use inbox ordering and membership across local and remote workspaces', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-views-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-  for (const name of ['frequent.zig', 'workspace_view.zig']) fs.copyFileSync(path.join(root, 'src', name), path.join(dir, name));
+  copyZig(['workspace_view.zig'], dir);
   const state = read('src/app_state.zig');
   const start = state.indexOf('pub const InboxRow = struct {');
   const row = state.slice(start, state.indexOf('\n};', start) + 3);
