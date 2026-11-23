@@ -5,7 +5,7 @@ const style = @import("chat_style.zig");
 const echo = @import("chat_echo.zig");
 const diff = @import("chat_diff.zig");
 
-const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", client_id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
@@ -49,7 +49,7 @@ pub const History = struct {
         return result;
     }
 
-    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8, client_id: u64) !void {
+    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8) !void {
         const start = self.text.items.len;
         const first_block = self.blocks.items.len;
         const max_blocks = 1 + std.mem.count(u8, bytes, "\n");
@@ -65,7 +65,6 @@ pub const History = struct {
         const row_key = if (id.len == 0) 0 else md.rowKey(id);
         for (self.blocks.items[first_block..]) |*block| {
             block.message_id = message_id;
-            block.client_id = client_id;
             block.row_key = row_key;
             block.reaction_reference = @import("chat_reaction.zig").reference(id);
             block.source_offset = source_offset;
@@ -91,7 +90,6 @@ pub const History = struct {
         var last_stamp: std.ArrayList(u8) = .empty;
         defer last_stamp.deinit(a);
         var last_role: md.Role = .prose;
-        var last_client_id: u64 = 0;
         var source_offset: u64 = 0;
         var source_end: u64 = 0;
         var segment: u64 = 0;
@@ -103,8 +101,6 @@ pub const History = struct {
         defer tools.deinit();
         var tool_arena = std.heap.ArenaAllocator.init(a);
         defer tool_arena.deinit();
-        var users = std.StringHashMap(void).init(a);
-        defer users.deinit();
         var row_at: usize = 0;
         while (lines.next()) |line| {
             defer row_at += line.len + 1;
@@ -156,12 +152,12 @@ pub const History = struct {
                 continue;
             }
             if (std.mem.eql(u8, m.role, "tool")) {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
                 message.clearRetainingCapacity();
                 last_id.clearRetainingCapacity();
                 if (m.text.len == 0) continue;
                 const tool_text_start = self.text.items.len;
-                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id, 0);
+                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id);
                 const index = self.blocks.items.len - 1;
                 var block = &self.blocks.items[index];
                 block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "running") orelse .running;
@@ -183,16 +179,11 @@ pub const History = struct {
             }
             const role: md.Role = if (std.mem.eql(u8, m.role, "user")) .user else if (std.mem.eql(u8, m.role, "assistant")) .prose else continue;
             if (m.text.len == 0) return error.InvalidHistory;
-            const client = if (m.client_id.len > 0) m.client_id else m.id;
             const merge = m.id.len > 0 and std.mem.eql(u8, m.id, last_id.items) and role == last_role and segment == m.segment;
-            if (role == .user and m.client_id.len > 0 and !merge) {
-                if (users.contains(client)) continue;
-                try users.put(try tool_arena.allocator().dupe(u8, client), {});
-            }
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
                 message.clearRetainingCapacity();
                 source_offset = m.offset;
                 segment = m.segment;
@@ -209,9 +200,8 @@ pub const History = struct {
             last_read_id.clearRetainingCapacity();
             try last_read_id.appendSlice(a, m.read_id orelse m.id);
             last_role = role;
-            last_client_id = if (client.len == 0) 0 else md.rowKey(client);
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
         var pending = tools.valueIterator();
         while (pending.next()) |tool| {
             if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {
@@ -474,7 +464,7 @@ pub const History = struct {
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try self.rowIdentity(scratch, line, order.items.len);
+            const key = try rowIdentity(scratch, line);
             const slot = try incoming.getOrPut(key);
             if (!slot.found_existing) {
                 slot.value_ptr.* = .{ .index = order.items.len };
@@ -487,7 +477,7 @@ pub const History = struct {
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
+            const key = try rowIdentity(scratch, line);
             const matched = incoming.getPtr(key);
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
             if (matched) |entry| {
@@ -557,12 +547,13 @@ pub const History = struct {
         end: u64,
         segment: u64,
         timestamp: []const u8,
+        text: []const u8,
         settlement: @FieldType(Message, "settlement"),
 
         const Context = struct {
             pub fn hash(_: @This(), key: RowIdentity) u64 {
                 var h = std.hash.Wyhash.init(key.segment);
-                inline for (.{ "role", "id", "timestamp" }) |field| {
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
                     const bytes = @field(key, field);
                     std.hash.autoHash(&h, bytes.len);
                     h.update(bytes);
@@ -578,7 +569,7 @@ pub const History = struct {
 
             pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
                 if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
-                inline for (.{ "role", "id", "timestamp" }) |field| {
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
                 if (lhs.settlement) |fact| {
@@ -589,14 +580,10 @@ pub const History = struct {
         };
     };
 
-    fn rowIdentity(self: History, a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
+    fn rowIdentity(a: std.mem.Allocator, line: []const u8) !RowIdentity {
         const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
-        const native_id = m.read_id orelse m.id;
-        const id = if (native_id.len > 0) native_id else if (m.end > m.offset)
-            try std.fmt.allocPrint(a, "source:{d}:{d}:{d}", .{ self.inode, m.offset, m.end })
-        else
-            try std.fmt.allocPrint(a, "legacy:{d}:{d}:{d}:{d}", .{ self.inode, self.start, self.offset, ordinal });
-        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .settlement = m.settlement };
+        const id = m.read_id orelse m.id;
+        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .text = if (id.len == 0) m.text else "", .settlement = if (id.len == 0) m.settlement else null };
     }
 
     pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {
@@ -667,11 +654,11 @@ pub const History = struct {
         var merged: std.ArrayList(Item) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
-            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try self.rowIdentity(scratch, line, merged.items.len) });
+            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try rowIdentity(scratch, line) });
         }
         var changed = false;
         for (rows) |row_bytes| {
-            const key = try self.rowIdentity(scratch, row_bytes, 0);
+            const key = try rowIdentity(scratch, row_bytes);
             if (key.end <= key.offset) return error.InvalidHistory;
             if (key.end <= self.start) continue;
             var index: usize = from;
@@ -826,7 +813,6 @@ pub const Backfill = struct {
 
     pub fn finish(self: *Backfill, a: std.mem.Allocator, tail: History) !History {
         var result = tail.cursor();
-        result.start = self.start;
         errdefer result.deinit(a);
         var size = tail.rows.items.len;
         for (self.pages.items) |page| size += page.len;
@@ -843,6 +829,7 @@ pub const Backfill = struct {
         result.rows.deinit(a);
         result.rows = recent.rows;
         recent.rows = .empty;
+        result.start = self.start;
         result.revision +%= 1;
         try result.render(a);
         self.deinit(a);
@@ -995,47 +982,6 @@ pub fn column(client_right: i32, sidebar: i32, visible_browser: bool, split_left
 
 const row = "{\"role\":\"user\",\"text\":\"old history\",\"timestamp\":\"2026-10-03T12:34:00Z\",\"id\":\"one\"}\n";
 const first = "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++ row ++ "@@MP_END@@\n";
-test "SOFT-2526 two identical messages keep their client ids through replay and cache" {
-    const a = std.testing.allocator;
-    const key = transcript.Identity.initTmux(2526, 0, false, "term-1", "");
-    var history: History = .{};
-    defer history.deinit(a);
-    try history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
-        "{\"role\":\"user\",\"id\":\"native-a\",\"text\":\"same prompt\",\"offset\":0,\"end\":100}\n" ++
-        "{\"role\":\"user\",\"id\":\"native-b\",\"text\":\"same prompt\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
-    const wire = "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
-        "{\"role\":\"user\",\"id\":\"native-a\",\"client_id\":\"desktop-a\",\"text\":\"same prompt\",\"offset\":0,\"end\":100}\n" ++
-        "{\"role\":\"user\",\"id\":\"native-b\",\"client_id\":\"desktop-b\",\"text\":\"same prompt\",\"offset\":100,\"end\":200}\n@@MP_END@@\n";
-    for (0..3) |_| {
-        try history.apply(a, wire, 1, key);
-        try std.testing.expectEqual(@as(usize, 2), history.blocks.items.len);
-        try std.testing.expectEqual(md.rowKey("desktop-a"), history.blocks.items[0].client_id);
-        try std.testing.expectEqual(md.rowKey("desktop-b"), history.blocks.items[1].client_id);
-    }
-    const cached = try history.encode(a, key);
-    defer a.free(cached);
-    var restored = try History.decode(a, cached, key);
-    defer restored.deinit(a);
-    try std.testing.expectEqual(@as(usize, 2), restored.blocks.items.len);
-    try std.testing.expectEqual(history.blocks.items[1].client_id, restored.blocks.items[1].client_id);
-}
-
-test "SOFT-2526 idless identical history rows survive a narrower replay" {
-    const a = std.testing.allocator;
-    const key = transcript.Identity.initTmux(2526, 0, false, "term-1", "");
-    var history: History = .{};
-    defer history.deinit(a);
-    try history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
-        "{\"role\":\"user\",\"text\":\"same prompt\",\"offset\":0,\"end\":100}\n" ++
-        "{\"role\":\"user\",\"text\":\"same prompt\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
-    for (0..3) |_| {
-        try history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t100\n" ++
-            "{\"role\":\"user\",\"text\":\"same prompt\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
-        try std.testing.expectEqual(@as(usize, 2), history.blocks.items.len);
-        try std.testing.expectEqual(@as(u64, 0), history.blocks.items[0].client_id);
-    }
-}
-
 test "persistent session cache survives runtime id cwd and discovered sid changes" {
     var k = transcript.Identity.initTmux(1, 0, false, "term-1", "/old");
     const stable = cacheKey(k);
