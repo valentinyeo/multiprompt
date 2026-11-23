@@ -8296,6 +8296,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     armBrowserEdgeMaskRaise();
                 }
                 if (focusGuardComposerRepairAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
+                @import("session_caret.zig").repairActiveSessionCaret();
             }
             if (activePaneBorderOn() or chatViewOwnsInput()) {
                 _ = InvalidateRect(hwnd, null, 0);
@@ -8908,6 +8909,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         retry_delay = 100;
                     } else if (landed) {
                         app_state.g_refocus_remaining = 0;
+                        @import("session_caret.zig").repairActiveSessionCaret();
                     } else if (app_state.g_refocus_remaining > 0) {
                         app_state.g_refocus_remaining -= 1;
                         retry = true;
