@@ -24,7 +24,7 @@ test('a new live chat on the shared server connection runs its start command', (
     const spawn = body(palette, name);
     const started = spawn.indexOf('live.starting(');
     assert.ok(started >= 0, `${name} marks the chat as starting`);
-    const launch = spawn.search(/if \(shell\.native_terminal\) @import\("native_session\.zig"\)\.launch\(shell\.shell_id, (host_sid\.\?|sid)\);/);
+    const launch = spawn.search(/if \(shell\.native_terminal\) @import\("native_session\.zig"\)\.launch\(SessionIdentity\.fromShell\(shell\.\*\) orelse return false\);/);
     assert.ok(launch > started, `${name} must run the start command for a native live chat`);
   }
   const consoleSource = read('src/console.zig');
@@ -37,7 +37,7 @@ test('the start command runs once over the shared connection and reports failure
   assert.match(launch, /slot\.command\[0\.\.slot\.command_len\]/);
   assert.match(launch, /std\.Thread\.spawn/);
   const worker = body(native, 'launchWorker');
-  assert.match(worker, /transport\.openCommand\(host, command\)/);
+  assert.match(worker, /transport\.openCommand\(identity\.host\.index\(\), command\)/);
   assert.doesNotMatch(worker, /openTerminal|reconnect/);
   assert.match(worker, /launchStarted\(/);
   assert.match(worker, /startFailed\(/);
