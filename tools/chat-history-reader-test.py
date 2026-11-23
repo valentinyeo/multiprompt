@@ -2120,6 +2120,14 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
         self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [1, 4])
 
+    def test_soft_3097_skill_quote_echo_keeps_the_command_in_front(self):
+        self.path.write_text((ROOT / 'tools/fixtures/SOFT-3097/skill-quote-echo.jsonl').read_text())
+        _, rows = self.read()
+        quoted = ('> quoted line one\n>\n> quoted line two\n>\n> quoted line three\n>\n'
+                  '> quoted line four\n>\n> quoted line five\n>\n> … own question @Builder{live-builder} ?')
+        self.assertEqual([(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')],
+                         [('user', '/pstack:correct ' + quoted), ('assistant', 'echo reply')])
+
     def test_refused_slash_command_facts_are_opt_in_and_additive(self):
         prompt = '/hormozi-skills:audit-offer can you use this also to review my own offer'
         enqueue = dict(type='queue-operation', operation='enqueue', timestamp='2026-10-13T11:06:22.591Z', content=prompt)
@@ -4441,27 +4449,43 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         polled = threading.Event()
         self.send.side_effect = lambda *args, **kwargs: (sent.set(), {'status': 'sent'})[1]
         original_poll = reader.message_poll
+        original_select = selectors.DefaultSelector.select
+        original_wake = reader.message_worker_wake
+        wakes = []
+        select_phase = 'startup'
+        idle_select_timeouts = []
 
         def poll(*args):
             original_poll(*args)
             polled.set()
 
+        def wake(lock_path):
+            wakes.append(lock_path)
+            return original_wake(lock_path)
+
+        def select(selector_self, timeout=None):
+            result = original_select(selector_self, timeout)
+            if select_phase == 'waiting' and not sent.is_set():
+                idle_select_timeouts.append('ready' if result else 'timeout')
+            return result
+
         with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 1), \
-                patch.object(reader, 'message_poll', side_effect=poll):
+                patch.object(reader, 'message_poll', side_effect=poll), \
+                patch.object(reader, 'message_worker_wake', side_effect=wake), \
+                patch.object(selectors.DefaultSelector, 'select', select):
             worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
             worker.start()
             self.assertTrue(polled.wait(5), 'the worker never started')
             time.sleep(0.15)
-            started = time.monotonic()
+            select_phase = 'waiting'
             self.submit('message_fixture_0002', 'second prompt')
             reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
-            self.assertTrue(sent.wait(3), 'the second message was never sent')
-            waited = time.monotonic() - started
+            self.assertTrue(sent.wait(5), 'the second message was never sent')
             self.accept('second prompt')
             worker.join(10)
-        print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
         self.assertFalse(worker.is_alive(), 'the worker did not stop')
-        self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
+        self.assertEqual(len(wakes), 1, 'submit must signal the running worker instead of spawning another')
+        self.assertEqual(idle_select_timeouts[:1], ['ready'], idle_select_timeouts)
 
     def test_native_history_continues_after_started(self):
         self.submit()

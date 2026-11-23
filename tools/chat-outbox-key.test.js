@@ -84,7 +84,7 @@ test('restart keeps the key through session JSON save and parse', (t) => {
   const end = save.indexOf('\n        if ', start);
   assert.ok(start >= 0 && end > start, 'session serializes chat_id');
   const savedTab = source.match(/const SavedTab = struct \{[\s\S]*?\n};/)[0];
-  assert.match(body('applySavedTabFields'), /shells\[idx\]\.chat_id = tab\.chat_id/);
+  assert.match(body('spawnSavedTab'), /shells\[idx\]\.chat_id = tabs\[t\]\.chat_id/);
   assert.match(body('preserveFailedRemoteSavedTab'), /shell\.chat_id = tab\.chat_id/);
   execute(t, keys + `
 const json_reader = @import("json_reader.zig");

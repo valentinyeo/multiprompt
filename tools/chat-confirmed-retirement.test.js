@@ -77,8 +77,8 @@ test('load, background tick and Resync all apply receipt-gated retirement', () =
   assert.match(body(send, 'chatEchoClearConfirmedForShell'), /chatEchoTakenSettledIn/);
 });
 
-test('skill order matching requires receipt confirmation and preserves ordinary word order', () => {
-  assert.match(body(send, 'chatEchoAssignForKey'), /\.confirmed = .*phaseTaken/);
-  assert.match(body(echo, 'messageMatches'), /p\.confirmed and sameSkillText/);
-  assert.match(echo, /test "IGSH-1831 reordered skills/);
+test('SOFT-3097 skill order matching holds while a message is still queued and keeps ordinary word order', () => {
+  assert.doesNotMatch(echo, /\.confirmed/);
+  assert.match(body(echo, 'messageMatches'), /sameSkillText\(body, norm\)/);
+  assert.match(echo, /test "SOFT-3097 a queued skill message with a quote reconciles once with its transcript row"/);
 });
