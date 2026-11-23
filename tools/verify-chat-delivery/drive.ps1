@@ -1514,7 +1514,7 @@ foreach ($plan in $plans) {
         Doctor $true
         Copy-Item "$settings/session.json" "$caseDir/session-chat.json"
         Shot "$($plan.name)-after"
-        if ($plan.name -eq 'busy-send' -and -not $isSending) { . "$PSScriptRoot/user-quotes.ps1" }
+        if ($isSendStays) { . "$PSScriptRoot/user-quotes.ps1" }
     } catch {
         $observation.error = $_.ToString()
         $observation.error | Set-Content "$caseDir/error.txt"

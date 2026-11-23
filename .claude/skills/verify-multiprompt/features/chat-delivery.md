@@ -107,7 +107,7 @@ The driver sends three messages, cancels the middle one from its menu, then pres
 
 ### User quote evidence
 
-The default `chat-delivery` journey appends both public MUBO-237 fixtures through the provider transcript boundary after the busy-send checks. It copies the displayed conversation through Ctrl+K, clears selection, scrolls to the newest message and saves `MUBO-237-user-quote-message.png` and `MUBO-237-pasted-quote-message.png`. Inspect the inset bar, rendered bold text, three-line fold and normal-weight words below. The seeded provider transcript is disclosed fixture input, not live provider delivery. The separate `chat-sending-status` journey remains unchanged for IGSH-931.
+The default `chat-delivery` journey appends both public MUBO-237 fixtures through the provider transcript boundary after the 20-send checks in `send-stays-gone`. It copies the displayed conversation through Ctrl+K, clears selection, scrolls to the newest message and saves `MUBO-237-user-quote-message.png` and `MUBO-237-pasted-quote-message.png`. Inspect the inset bar, rendered bold text, three-line fold and normal-weight words below. The seeded provider transcript is disclosed fixture input, not live provider delivery. The separate `chat-sending-status` journey remains unchanged for IGSH-931.
 
 ## Gotchas
 
