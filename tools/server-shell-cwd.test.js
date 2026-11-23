@@ -122,6 +122,18 @@ test "explicit other server and local shell do not inherit the chat folder" {
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
+    const current = body('src/console.zig', 'spawnShellFromMenuIndex')
+      .replaceAll('@import("capacity.zig").remoteHostForShell', 'remoteHostForShell')
+      .replaceAll('@import("vps.zig").shellKnownRemotePath', 'shellKnownRemotePath');
+    const file = path.join(dir, 'test.zig');
+    const positive = fs.readFileSync(file, 'utf8');
+    const negative = positive.replace(current, body('tools/fixtures/SOFT-3003/console.zig', 'spawnShellFromMenuIndex'));
+    assert.notEqual(negative, positive);
+    fs.writeFileSync(file, negative);
+    const baseline = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.notEqual(baseline.status, 0, 'The master snapshot must reproduce the missing chat directory');
+    assert.match(baseline.stderr, /server shell uses chat cwd[^\n]*FAIL/);
+    assert.match(baseline.stderr, /provider cwd wins[^\n]*FAIL/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
