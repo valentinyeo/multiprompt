@@ -805,7 +805,8 @@ const FixedMeasure = struct {
 test "MUBO-237 parses skill-prefixed quote with trailing ellipsis reply into prefix quote and suffix" {
     const a = std.testing.allocator;
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
-    const message = w(
+    const message = try std.unicode.utf8ToUtf16LeAlloc(
+        a,
         "/pstack:poteto-help > **The fix itself is small. The time goes into waiting and checks around it.**\n" ++
             ">\n" ++
             "> How the hours went:\n" ++
@@ -818,6 +819,7 @@ test "MUBO-237 parses skill-prefixed quote with trailing ellipsis reply into pre
             ">\n" ++
             "> \u{2026} i thoughtwith pstack thinks speed up now we wait 7  hours for a very  urgent bug fix emergenyc or not?",
     );
+    defer a.free(message);
     const parts = parse(message) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, w("/pstack:poteto-help"), message[parts.prefix.start..parts.prefix.end]);
     try std.testing.expectEqualSlices(u16, w("i thoughtwith pstack thinks speed up now we wait 7  hours for a very  urgent bug fix emergenyc or not?"), message[parts.suffix.start..parts.suffix.end]);
