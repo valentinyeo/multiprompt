@@ -1323,7 +1323,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
-        "version",          "workspace-list",
+        "version",          "workspace-list", "pc-state", "tab-action",
     };
     var remote_allowed = false;
     for (remote_verbs) |remote_verb| {
@@ -1347,7 +1347,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
-    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
+    if (std.mem.eql(u8, argv[0], "pc-state") or std.mem.eql(u8, argv[0], "tab-action") or std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
@@ -2657,6 +2657,10 @@ pub fn handleZsbWorkspaceRequest() void {
     const out = &app_state.g_zsb_workspace_response;
     var len = if (std.mem.eql(u8, args[0], "workspace-list"))
         if (args.len == 1) zsbWorkspaceList(out) else zsbWorkspaceError(out, "bad_args")
+    else if (std.mem.eql(u8, args[0], "pc-state"))
+        if (args.len == 1) @import("tab_state_desktop.zig").pcState(out) else zsbWorkspaceError(out, "bad_args")
+    else if (std.mem.eql(u8, args[0], "tab-action"))
+        @import("tab_state_desktop.zig").command(args, out)
     else if (std.mem.eql(u8, args[0], "session-status"))
         zsbSessionStatus(args, out)
     else if (std.mem.eql(u8, args[0], "shell-open"))

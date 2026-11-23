@@ -47,6 +47,8 @@ print_help() {
         printf '  Without --tab, read the target:true tab from zsb tabs (which may not be active).\n'
         ;;
       navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)' ;;
+      pc-state) echo 'usage: zsb pc-state (desktop-owned tab state, including closed tabs)' ;;
+      tab-action) echo 'usage: zsb tab-action <JSON request with verb, expected and state>' ;;
       workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)' ;;
       session-status) echo 'usage: zsb session-status --tab <id>'
         echo '  Reports connecting, connected after a live tmux attachment, or disconnected with exit_code.'
@@ -228,7 +230,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
+if [ "$1" = "pc-state" ] || [ "$1" = "tab-action" ] || [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -525,9 +527,12 @@ except ValueError:
     fail("bad_args", "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400")
 
 
-if args[0] == "workspace-list":
+if args[0] in {"workspace-list", "pc-state"}:
     if len(args) != 1:
         fail("bad_args", "usage: zsb workspace-list")
+elif args[0] == "tab-action":
+    if len(args) != 2 or len(args[1].encode()) > 4096:
+        fail("bad_args", "tab-action needs one bounded JSON request")
 elif args[0] == "session-status":
     try:
         if len(args) != 3 or args[1] != "--tab" or not args[2].isascii() or not args[2].isdigit() or not 0 < int(args[2]) <= 0xffffffff:

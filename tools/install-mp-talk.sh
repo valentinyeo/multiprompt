@@ -82,6 +82,7 @@ for pair in $python_tools; do
   cp "$here/src/${pair#*:}" "$share/"
 done
 cp "$here/src/mp_sessions_health.py" "$share/"
+cp "$here/src/mp_tab_state.py" "$share/"
 for pair in $node_tools; do
   cp "$here/tools/${pair#*:}" "$share/"
 done

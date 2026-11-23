@@ -34,6 +34,17 @@ def health_report_fn():
     return _health_report_fn
 
 
+def tab_command_fn():
+    existing = globals().get("tab_command")
+    if callable(existing):
+        return existing
+    source = Path(__file__).resolve().with_name("mp_tab_state.py")
+    spec = importlib.util.spec_from_file_location("mp_tab_state", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.tab_command
+
+
 def load_send(session_api=True):
     here = Path(__file__).resolve()
     source = here.with_name("mp_send.py")
@@ -763,17 +774,35 @@ def parse(argv):
     renamed.add_argument("new_name")
     moved = commands.add_parser("move", help="move a chat tab to another workspace or group")
     moved.add_argument("name")
-    moved.add_argument("--workspace", required=True)
+    moved.add_argument("--workspace")
+    moved.add_argument("--position", type=int)
+    moved.add_argument("--host")
+    moved.add_argument("--json", action="store_true")
     moved.add_argument("--group")
     ending = commands.add_parser("close", help="stop a chat and close its tab")
     ending.add_argument("name")
     ending.add_argument("--force", action="store_true")
+    ending.add_argument("--host")
+    ending.add_argument("--json", action="store_true")
+    for verb in ("pin", "unpin", "archive", "unarchive", "wait", "restore", "open"):
+        action = commands.add_parser(verb, help=verb + " a desktop tab with PC-state confirmation")
+        action.add_argument("name", nargs="?" if verb == "open" else None)
+        action.add_argument("--json", action="store_true")
+        action.add_argument("--host")
+        if verb == "open":
+            action.add_argument("--kind", choices=("chat", "shell"))
+            action.add_argument("--tmux")
+            action.add_argument("--title")
+            action.add_argument("--sid")
+            action.add_argument("--workspace")
+            action.add_argument("--group")
+            action.add_argument("--position", type=int)
     probe = commands.add_parser("health", help="check each chat host, tab, history and optional ping")
     probe.add_argument("--json", action="store_true")
     probe.add_argument("--ping", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
-    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "health", "-h", "--help"}:
+    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "health", "open", "pin", "unpin", "archive", "unarchive", "wait", "restore", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -800,6 +829,8 @@ def main(argv=None):
         if command == "send":
             tail = argv[1:] if argv and argv[0] == "send" else argv
             return handlers[command](parse_send(tail))
+        if command in {"open", "close", "move", "pin", "unpin", "archive", "unarchive", "wait", "restore"}:
+            return tab_command_fn()(send, args)
         return handlers[command](args)
     except send.RateLimited as error:
         print("mp-sessions: " + str(error), file=sys.stderr)

@@ -14,7 +14,13 @@ const USAGE = `usage: mb <command> [options]
 commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
-  close <name> [--host N]
+  close <name> [--host N] [--json]
+  pin <name> [--host N] [--json]
+  unpin <name> [--host N] [--json]
+  archive <name> [--host N] [--json]
+  unarchive <name> [--host N] [--json]
+  wait <name> [--host N] [--json]
+  restore <name> [--host N] [--json]
   restart <name> [--host N]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
@@ -860,6 +866,15 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (['open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore'].includes(command)) {
+      const sessions = overrides.sessions || ((args) => spawnSync('python3', [mpSessionsScript(env), ...args], {
+        encoding: 'utf8', env, timeout: 60000
+      }));
+      const result = sessions([command, ...rest]);
+      if (result.stdout?.trimEnd()) out(result.stdout.trimEnd());
+      if (result.stderr?.trimEnd()) err(result.stderr.trimEnd());
+      return result.status ?? 1;
+    }
     if (command === 'health') {
       const flags = parse(rest);
       const home = env.HOME;

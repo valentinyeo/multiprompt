@@ -6,6 +6,7 @@ pub const Entry = struct {
     host: u8,
     name: [64]u8 = @splat(0),
     len: usize,
+    tab_state: ?@import("tab_state.zig").State = null,
     face: ?u8 = null,
     color: ?u8 = null,
 
@@ -22,6 +23,10 @@ pub const Entry = struct {
         if (self.color) |color| {
             try json.objectField("color");
             try json.write(color);
+        }
+        if (self.tab_state) |state| {
+            try json.objectField("tab_state");
+            try json.write(state);
         }
         try json.endObject();
     }
@@ -48,6 +53,7 @@ pub const Closed = struct {
     pub fn reopen(self: *Closed, host: u8, name: []const u8) void {
         for (self.entries.items, 0..) |entry, i| {
             if (same(entry.host, entry.name[0..entry.len], host, name)) {
+                if (entry.tab_state) |state| state.deinit(std.heap.page_allocator);
                 _ = self.entries.orderedRemove(i);
                 return;
             }
@@ -72,6 +78,12 @@ pub const Closed = struct {
                     const entry = &self.entries.items[self.entries.items.len - 1];
                     const face = json_reader.uintDefault(item, "face", 20);
                     const color = json_reader.uintDefault(item, "color", @import("session_layout.zig").color_count);
+                    if (item.object.get("tab_state")) |value| {
+                        const parsed = std.json.parseFromValue(@import("tab_state.zig").State, a, value, .{ .allocate = .alloc_always }) catch continue;
+                        defer parsed.deinit();
+                        @import("tab_state.zig").validate(parsed.value) catch continue;
+                        entry.tab_state = try parsed.value.dupe(a);
+                    }
                     entry.face = if (face < 20) @intCast(face) else null;
                     entry.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
                 }

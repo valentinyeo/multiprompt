@@ -2827,6 +2827,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
             }
         }
     }
+    if (remember_closed) @import("tab_state_desktop.zig").rememberClose(idx);
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
