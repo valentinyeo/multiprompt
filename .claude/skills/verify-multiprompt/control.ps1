@@ -208,11 +208,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Sidebar row transcript seeding failed' }
         $quietTab = @{ kind = 'tmux'; name = 'Quiet chat'; manual = $true; tmux_host = 0; tmux_session = $remoteNames[0]; cv = $false; pid = 0; la = [DateTime]::UtcNow.AddMinutes(-30).ToFileTimeUtc() }
         $loudTab = @{ kind = 'tmux'; name = 'Loud chat'; manual = $true; tmux_host = 0; tmux_session = $remoteNames[1]; cv = $false; pid = 0; la = [DateTime]::UtcNow.AddMinutes(-10).ToFileTimeUtc() }
-        $remoteSeed = @{ active_tab = 1; single_window = $true; tabs = @($quietTab, $loudTab) }
+        $remoteSeed = @{ active_tab = 0; single_window = $true; tabs = @($quietTab, $loudTab) }
         $remoteSeedJson = ConvertTo-Json -InputObject $remoteSeed -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
-        $result.seedBoundary = 'Two stand-in tmux tabs saved once before launch, with distinct manual names and activity times, and the newer one selected. Only SSH is replaced; the sidebar rows, the real mouse click and the chat reopen run in the real app.'
+        $result.seedBoundary = 'Two stand-in tmux tabs saved once before launch, with distinct manual names and activity times, and the first one selected so the row to click is the inactive second row. Only SSH is replaced; the sidebar rows, the real mouse click and the chat reopen run in the real app.'
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
         $extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }

@@ -13,7 +13,7 @@ Keep the pointer over a session row in the sidebar and click it. The chat opens 
 
 ## Driving it with control.ps1
 
-Before launch the harness saves two stand-in tmux tabs on the replaced SSH boundary, with distinct manual names and activity times, and selects the newer one. The journey reads the sidebar text bands from a real screenshot, parks the real pointer on the last (older) session row, screenshots the row, clicks at that exact point, logs the pointer position before and after, waits for the chat to reopen, and screenshots again. The pass requires the row glyphs under the pointer to be the same before and after (ink overlap of the band at the pointer) and the pointer to stay at the same screen point. Evidence: `sidebar-row-before.png`, `sidebar-row-after.png`, `sidebar-row.json`, the app log and `result.json`.
+Before launch the harness saves two stand-in tmux tabs on the replaced SSH boundary, with distinct manual names and activity times, and selects the first one. The journey reads the sidebar text bands from a real screenshot, parks the real pointer on the last (inactive) session row, screenshots the row, clicks at that exact point, logs the pointer position before and after, waits for the clicked chat to reopen, and screenshots again. The pass requires the row glyphs under the pointer to be the same before and after (ink overlap of the band at the pointer) and the pointer to stay at the same screen point. Evidence: `sidebar-row-before.png`, `sidebar-row-after.png`, `sidebar-row.json`, the app log and `result.json`.
 
 ## Gotchas
 

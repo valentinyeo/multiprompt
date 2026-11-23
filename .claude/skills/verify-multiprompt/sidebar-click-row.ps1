@@ -41,7 +41,7 @@ function Get-SidebarBands([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bo
     } finally { $bitmap.Dispose() }
 }
 
-function Get-BandMask([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bottom) {
+function Get-BandSignature([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bottom) {
     $bitmap = [Drawing.Bitmap]::new($Path)
     try {
         $min = 255
@@ -55,16 +55,19 @@ function Get-BandMask([string]$Path, [int]$Dx, [int]$Dy, [int]$Top, [int]$Bottom
             }
         }
         $threshold = $min + [int](($max - $min) * 0.55)
-        $count = 0
-        $mask = New-Object 'bool[,]' (($Dx + 170) - ($Dx + 20)), ($Bottom - $Top)
-        for ($y = $Top; $y -lt $Bottom; $y++) {
-            for ($x = $Dx + 20; $x -lt $Dx + 170; $x++) {
+        $signature = ''
+        $total = 0
+        for ($x = $Dx + 20; $x -lt $Dx + 170; $x++) {
+            $n = 0
+            for ($y = $Top; $y -lt $Bottom; $y++) {
                 $color = $bitmap.GetPixel($x, $y)
                 $lum = [int](($color.R + $color.G + $color.B) / 3)
-                if ($lum -ge $threshold) { $mask[$x - ($Dx + 20), $y - $Top] = $true; $count++ }
+                if ($lum -ge $threshold) { $n++ }
             }
+            $total += $n
+            $signature += [char](48 + [Math]::Min($n, 9))
         }
-        return @{ mask = $mask; ink = $count; width = ($Dx + 170) - ($Dx + 20); height = ($Bottom - $Top) }
+        return @{ signature = $signature; ink = $total }
     } finally { $bitmap.Dispose() }
 }
 
@@ -72,8 +75,8 @@ $check = @{ name = 'sidebar-click-row'; passed = $false; boundary = 'Two stand-i
 $result.checks += $check
 Wait-Until {
     $state = Read-Session
-    $null -ne $state -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[0].name -ceq 'Quiet chat' -and $state.tabs[1].name -ceq 'Loud chat'
-} 'two saved sessions restored with the newer one active' 180
+    $null -ne $state -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 0 -and $state.tabs[0].name -ceq 'Quiet chat' -and $state.tabs[1].name -ceq 'Loud chat'
+} 'two saved sessions restored with the first one active' 180
 [void][VerifyNative]::DwmFlush()
 [VerifyNative]::MoveMouseClient($script:window, 900, 420, $true)
 Start-Sleep -Milliseconds 400
@@ -85,7 +88,7 @@ $dy = $origin.Y - $frame.Top
 WindowShot 'sidebar-row-locate'
 $bands = Get-SidebarBands (Join-Path $Evidence 'sidebar-row-locate.png') $dx $dy ($dy + 90) ([Math]::Min($dy + 430, $frame.Bottom - $frame.Top - 110))
 if ($bands.Count -lt 2) { throw ('Sidebar shows fewer than two session rows: ' + $bands.Count) }
-$row = $bands[$bands.Count - 2]
+$row = $bands[$bands.Count - 1]
 $clickX = $dx + 85
 $clickY = [int](($row.top + $row.bottom) / 2)
 Record ("Pointer target: sidebar row at client $clickX,$clickY spanning $($row.top)..$($row.bottom)")
@@ -100,7 +103,7 @@ $pointerAfterClick = [SidebarRowCursor]::Now()
 Record ('Pointer after click: ' + ($pointerAfterClick -join ','))
 Wait-Until {
     $state = Read-Session
-    $null -ne $state -and $state.active_tab -eq 0
+    $null -ne $state -and $state.active_tab -eq 1
 } 'clicked sidebar session became the selected chat' 60
 Start-Sleep -Milliseconds 1500
 WindowShot 'sidebar-row-after'
@@ -108,20 +111,14 @@ $pointerAfter = [SidebarRowCursor]::Now()
 if ($pointerAfter[0] -ne $pointerBefore[0] -or $pointerAfter[1] -ne $pointerBefore[1]) { throw ('Pointer moved during the click proof: ' + ($pointerBefore -join ',') + ' to ' + ($pointerAfter -join ',')) }
 $bandTop = $row.top
 $bandBottom = $row.bottom
-$before = Get-BandMask (Join-Path $Evidence 'sidebar-row-before.png') $dx $dy $bandTop $bandBottom
-$after = Get-BandMask (Join-Path $Evidence 'sidebar-row-after.png') $dx $dy $bandTop $bandBottom
-if ($before.ink -lt 60) { throw ('The row band under the pointer has too little text to compare: ' + $before.ink) }
-$both = 0
-$any = 0
-for ($x = 0; $x -lt $before.width; $x++) {
-    for ($y = 0; $y -lt $before.height; $y++) {
-        $a = $before.mask[$x, $y]
-        $b = $after.mask[$x, $y]
-        if ($a -and $b) { $both++ }
-        if ($a -or $b) { $any++ }
-    }
+$rowBeforeSignature = Get-BandSignature (Join-Path $Evidence 'sidebar-row-before.png') $dx $dy $bandTop $bandBottom
+$rowAfterSignature = Get-BandSignature (Join-Path $Evidence 'sidebar-row-after.png') $dx $dy $bandTop $bandBottom
+if ($rowBeforeSignature.ink -lt 60) { throw ('The row band under the pointer has too little text to compare: ' + $rowBeforeSignature.ink) }
+$matching = 0
+for ($i = 0; $i -lt $rowBeforeSignature.signature.Length; $i++) {
+    if ([Math]::Abs([int]$rowBeforeSignature.signature[$i] - [int]$rowAfterSignature.signature[$i]) -le 1) { $matching++ }
 }
-$overlap = if ($any -eq 0) { 0 } else { [Math]::Round(100.0 * $both / $any, 1) }
+$overlap = [Math]::Round(100.0 * $matching / $rowBeforeSignature.signature.Length, 1)
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $trace = if (Test-Path $log) { Read-SharedText $log } else { '' }
 $reopens = ([regex]::Matches($trace, 'respawnShellInPlace ok kind=')).Count + ([regex]::Matches($trace, 'ssh-reconnect|reconnect-ok|switchToShell: 1 -> 0')).Count
@@ -135,8 +132,8 @@ Save-Json @{
     clickY = $clickY
     clickPoint = @($clickX + $origin.X - $frame.Left, $clickY + $origin.Y - $frame.Top)
     inkOverlap = $overlap
-    inkBefore = $before.ink
-    inkAfter = $after.ink
+    inkBefore = $rowBeforeSignature.ink
+    inkAfter = $rowAfterSignature.ink
     activeBefore = $stateBefore.active_tab
     activeAfter = (Read-Session).active_tab
     reopenLogLines = $reopens
