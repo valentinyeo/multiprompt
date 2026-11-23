@@ -1,1 +1,0 @@
-Recover stalled update checks and show failures in the UI

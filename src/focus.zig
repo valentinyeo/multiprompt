@@ -20,9 +20,6 @@ const GWLP_HWNDPARENT = @import("win32.zig").GWLP_HWNDPARENT;
 const SWP_FRAMECHANGED = @import("win32.zig").SWP_FRAMECHANGED;
 const SWP_NOZORDER = @import("win32.zig").SWP_NOZORDER;
 const SWP_NOACTIVATE = @import("win32.zig").SWP_NOACTIVATE;
-const SWP_NOMOVE = @import("win32.zig").SWP_NOMOVE;
-const SWP_NOSIZE = @import("win32.zig").SWP_NOSIZE;
-const HWND_TOP = @import("win32.zig").HWND_TOP;
 const WS_EX_TOOLWINDOW = @import("win32.zig").WS_EX_TOOLWINDOW;
 const WS_EX_NOACTIVATE = @import("win32.zig").WS_EX_NOACTIVATE;
 const GW_HWNDFIRST = @import("win32.zig").GW_HWNDFIRST;
@@ -139,21 +136,6 @@ pub fn focusGuardNoteActivation() void {
     app_state.g_focus_activation_until = GetTickCount64() + 1000;
 }
 
-fn activationRaiseAllows(now: u64, until: u64, target: HANDLE, raise_hwnd: HANDLE) bool {
-    return target != null and raise_hwnd != null and target == raise_hwnd and now <= until;
-}
-
-test "SOFT-3069 the activation raise authorizes only our own frame, only during the activation window" {
-    const main: HANDLE = @ptrFromInt(0x1000);
-    const other: HANDLE = @ptrFromInt(0x2000);
-    try std.testing.expect(activationRaiseAllows(100, 1100, main, main));
-    try std.testing.expect(!activationRaiseAllows(100, 1100, other, main));
-    try std.testing.expect(!activationRaiseAllows(100, 1100, null, main));
-    try std.testing.expect(!activationRaiseAllows(100, 1100, main, null));
-    try std.testing.expect(!activationRaiseAllows(1200, 1100, main, main));
-}
-
-
 fn focusGuardSurface(hwnd: HANDLE) HANDLE {
     if (hwnd == null) return null;
     const root = GetAncestor(hwnd, GA_ROOT);
@@ -233,10 +215,6 @@ fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
         const inside = @import("settings_panel.zig").ownsWindow(target);
         focusTrace(if (inside) .allowed else .blocked, target, caller);
         return inside;
-    }
-    if (activationRaiseAllows(GetTickCount64(), app_state.g_focus_activation_raise_until, target, app_state.g_focus_activation_raise_hwnd)) {
-        focusTrace(.activation_raise, target, caller);
-        return true;
     }
     focusGuardReadMouse();
     const now = GetTickCount64();
@@ -399,8 +377,6 @@ pub fn focusGuardActivationTarget() HANDLE {
 pub fn focusGuardComposerRepairAllowed() bool {
     return app_state.g_chat_composer_hwnd != null and focusGuardActivationTarget() == app_state.g_chat_composer_hwnd and focusGuard(app_state.g_chat_composer_hwnd);
 }
-
-
 pub fn installHook() void {
     if (app_state.g_hook == null) {
         var attempt: u8 = 0;
@@ -1164,31 +1140,6 @@ pub fn cancelShellRefocus(hwnd: HANDLE) void {
     app_state.g_ws_switch_focus_grace = 0;
     const timer_hwnd = if (hwnd != null) hwnd else app_state.g_main_hwnd;
     if (timer_hwnd != null) _ = KillTimer(timer_hwnd, TIMER_REFOCUS);
-}
-
-pub fn frontOnActivation() void {
-    const main = app_state.g_main_hwnd orelse return;
-    if (IsIconic(main) != 0) return;
-    if (@import("computer_pane.zig").controlling()) return;
-    if (@import("settings_panel.zig").isOpen()) return;
-    focusGuardNoteActivation();
-    const fg = GetForegroundWindow();
-    if (!foregroundHwndIsOurs(fg)) {
-        app_state.g_focus_activation_raise_hwnd = main;
-        app_state.g_focus_activation_raise_until = GetTickCount64() + app_state.ACTIVATION_RAISE_MS;
-        defer {
-            app_state.g_focus_activation_raise_hwnd = null;
-            app_state.g_focus_activation_raise_until = 0;
-        }
-        const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
-        const our_thread = GetCurrentThreadId();
-        const attached_fg = fg_thread != 0 and fg_thread != our_thread and FocusNative.AttachThreadInput(our_thread, fg_thread, 1) != 0;
-        _ = SetForegroundWindow(main);
-        if (GetForegroundWindow() != main) SwitchToThisWindow(main, 0);
-        if (attached_fg) _ = FocusNative.AttachThreadInput(our_thread, fg_thread, 0);
-        altqLog("activate_raise fg={X} main_fg={} attached={}", .{ altqPtr(GetForegroundWindow()), GetForegroundWindow() == main, attached_fg });
-    }
-    _ = FocusNative.SetWindowPos(main, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 pub fn systemAltTabSuppressionActive() bool {

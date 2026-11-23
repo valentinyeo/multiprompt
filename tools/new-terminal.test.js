@@ -61,7 +61,7 @@ test('SOFT-2460 Ctrl+K lists Open shell on VPS 1 and VPS 2', () => {
   assert.match(empty, /SEARCH_NEW_OFFSET \+ 3/);
   assert.match(empty, /SEARCH_NEW_OFFSET \+ 4/);
   const main = read('src/main.zig');
-  const menu = main.slice(main.indexOf('if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET'), main.indexOf('if (target == SEARCH_REOPEN_OFFSET)'));
+  const menu = main.slice(main.indexOf('if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET)'), main.indexOf('if (target == SEARCH_REOPEN_OFFSET)'));
   assert.match(menu, /g_search_shells_mode = !open_session/);
   assert.doesNotMatch(menu, /g_search_shells_mode = false/);
   assert.doesNotMatch(menu, /g_search_open_session_mode = false/);

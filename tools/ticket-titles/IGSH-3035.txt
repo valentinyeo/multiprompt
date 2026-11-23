@@ -1,1 +1,0 @@
-Chat stuck after a failed fresh start turns away every message

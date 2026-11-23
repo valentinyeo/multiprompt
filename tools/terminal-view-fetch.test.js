@@ -14,7 +14,7 @@ test('IGSH-1266 a tab in terminal view schedules no chat fetch', () => {
   assert.match(session, /pub fn chatActiveTabWantsChat\(\) bool \{[\s\S]*?shouldShow\(app_state\.shells\[app_state\.active_shell\]\.chat_view_on\)/,
     'the gate must read the active tab chat_view_on');
   assert.match(session, /pub fn chatFetchWanted\(chat_active: bool\) bool \{\s*return @import\("chat_view\.zig"\)\.fetchWanted\(chat_active, chatActiveTabWantsChat\(\)\);\s*\}/);
-  assert.match(session, /if \(\(!delivery and !chatFetchWanted\(app_state\.g_chat_active\)\) or !key\.hasSession\(\)\) return;/,
+  assert.match(session, /if \(\(!delivery and !chatFetchWanted\(app_state\.g_chat_active\)\) or key\.shell_id == 0\) return;/,
     'the request path must refuse a terminal-view tab');
   assert.match(session, /if \(chatFetchWanted\(app_state\.g_chat_active\)\) chatFileRequest\(chatFileIdentity\(\)\);/,
     'the ready path must refuse a terminal-view tab too');

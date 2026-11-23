@@ -53,7 +53,7 @@ test('IGSH-1928 a server switches only after a login with the app key alone', ()
 });
 
 test('IGSH-1928 failed server retries run from the existing timer without waiting on a worker', () => {
-  assert.match(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{[\s\S]*?updateCardPoll\(\);[\s\S]*?@import\("ssh_identity\.zig"\)\.retry\(\);/);
+  assert.match(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{\s*updateCardPoll\(\);\s*@import\("ssh_identity\.zig"\)\.retry\(\);/);
   const retry = body(identity, 'retry');
   assert.match(retry, /if \(!started\.load\(\.acquire\) or running\.load\(\.acquire\)\) return;/);
   assert.match(retry, /if \(!lock\.tryLock\(\)\) return;/);

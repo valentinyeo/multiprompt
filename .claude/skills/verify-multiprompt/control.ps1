@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions', 'fresh-start')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions', 'fresh-start')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -154,11 +154,13 @@ try {
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
+    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
+    $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -eq 'fresh-start') {
         New-Item -ItemType Directory -Force (Join-Path $scratch 'profile/home') | Out-Null
+        $env:USERPROFILE = Join-Path $scratch 'profile/home'
+        $env:HOME = $env:USERPROFILE
     }
-    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch $(if ($Feature -eq 'fresh-start') { 'profile/home' } else { 'profile' }) }
-    $env:HOME = if ($Feature -eq 'fresh-start') { $env:USERPROFILE } else { Join-Path $scratch 'profile' }
     if ($Feature -eq 'status-card') {
         $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetry')
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
@@ -293,17 +295,7 @@ try {
         $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
         New-Item -ItemType Directory -Force $env:MP_VERIFY_STATE, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
         $ssh = Join-Path $scratch 'ssh.exe'
-        if (-not (Get-Command zig -ErrorAction SilentlyContinue)) {
-            $toolchain = Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.16.0'
-            if (-not (Test-Path (Join-Path $toolchain 'zig.exe'))) {
-                $zip = Join-Path $env:RUNNER_TEMP 'picker-zig.zip'
-                Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-                if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-                Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-            }
-            $env:PATH = $toolchain + ';' + $env:PATH
-        }
-        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot 'picker-refresh-ssh.c') -o $ssh
+        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
         $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; workspace_count = 2; workspaces = @(@{ name = 'Other'; wid = 'verify-other' }, @{ name = 'Example'; wid = 'verify-example' }); tabs = @(
@@ -341,21 +333,6 @@ try {
         Save-Json $bindingSeed 'seed-session.json'
         $result.seedBoundary = 'One saved bare SSH tab with no terminal binding. Only SSH is replaced by an owned console showing an existing named terminal session. The real app resolves its public pane-info request, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
     }
-    if ($Feature -eq 'server-shell-input') {
-        $serverShellState = Join-Path $scratch 'server-shell-state'
-        New-Item -ItemType Directory -Force $serverShellState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $serverShellDocument = @{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; sessions = @('server-shell') }
-        [IO.File]::WriteAllText((Join-Path $serverShellState 'state.json'), ($serverShellDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
-        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
-        $env:MP_VERIFY_STATE = $serverShellState
-        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
-        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
-        $serverShellSeed = @{ active_tab = 0; single_window = $true; shared_server_connection = $true; tabs = @(@{ kind = 'vps'; name = 'Server shell'; manual = $true; tmux_host = 0; pid = 0 }) }
-        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), ($serverShellSeed | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
-        Save-Json $serverShellSeed 'seed-session.json'
-        $result.seedBoundary = 'One saved VPS tab with shared server connection enabled. Only SSH is replaced by the transport boundary, which seeds scrollback, a selectable marker and interrupt receipts for the native terminal child.'
-    }
     if ($Feature -in @('chat-switch-speed', 'chat-still', 'chat-options', 'chat-slash', 'fresh-start')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -366,7 +343,7 @@ try {
             $remotePanes[$remoteNames[$i]] = 4300 + $i
             $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
         }
-        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { $env:HOME }
+        $verifyHome = if ($Feature -eq 'fresh-start') { Join-Path $scratch 'profile/home' } else { Join-Path $scratch 'profile' }
         $remoteDocument = [ordered]@{ name = $(if ($Feature -eq 'chat-still') { 'chat-still' } elseif ($Feature -eq 'fresh-start') { 'fresh-start' } else { 'chat-switch-speed' }); fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = $verifyHome; procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
         if ($Feature -eq 'chat-slash') { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
         [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
@@ -411,8 +388,6 @@ try {
             $remoteDocument.sid = $remoteSids['verify-fresh-start']
             $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
             [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
-            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY bootstrap-fresh-start
-            if ($LASTEXITCODE -ne 0) { throw 'Fresh start host bootstrap failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         if ($Feature -eq 'chat-slash') {
@@ -525,16 +500,12 @@ try {
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     }
-    $readySeconds = if ($Feature -eq 'fresh-start') { 180 } else { 60 }
     Wait-Until {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
-        if ($script:window -eq [IntPtr]::Zero) { throw 'main window handle is not published yet' }
         $state = Read-Inbox
-        if ($null -eq $state) { throw 'inbox-default.json is not readable yet' }
-        if (@($state.shells).Count -le 0) { throw 'inbox-default.json publishes no shell rows yet' }
-        $true
-    } 'owned main window and initialized CMD session' $readySeconds
+        $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
+    } 'owned main window and initialized CMD session' 60
     if ($UpdateFixtureRoot) {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
@@ -672,7 +643,6 @@ try {
             . (Join-Path $PSScriptRoot 'control-feature-favorites-groups.ps1')
         }
         'tmux-binding' { . (Join-Path $PSScriptRoot 'tmux-binding.ps1') }
-        'server-shell-input' { . (Join-Path $PSScriptRoot 'server-shell-input.ps1') }
         'relaunch-saved-sessions' {
             . (Join-Path $PSScriptRoot 'control-feature-relaunch-saved-sessions.ps1')
         }
@@ -830,7 +800,7 @@ try {
         }
     } catch {
         $result.status = 'failed'
-        if (-not $result['error']) { $result.failureKind = 'infrastructure' }
+        if (-not $result.error) { $result.failureKind = 'infrastructure' }
         $result.cleanup = $_.Exception.Message
     }
     if ($null -ne $warmup) { $warmup.Dispose() }

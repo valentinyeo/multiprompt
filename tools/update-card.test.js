@@ -29,7 +29,7 @@ test('exe embeds MPVERSION=<APP_VERSION>; and keeps it referenced', () => {
 });
 
 test('update card wiring: poll on timer and activate, card paint, hit test, three surfaces', () => {
-  assert.match(main, /TIMER_UPDATE_CHECK\) \{[\s\S]*?updateCardPoll\(\)/);
+  assert.match(main, /TIMER_UPDATE_CHECK\) \{\s*updateCardPoll\(\)/);
   assert.match(main, /WM_ACTIVATEAPP[^]*?updateCardPoll\(\)/);
   assert.match(main, /paintSidebarFooter\(hdc\)/);
   assert.match(main, /updateCardRelaunch\(hwnd\)/);

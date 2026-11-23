@@ -6,7 +6,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { atomic, defaults, hash, imageInk, parseLog, records, searchMainWindows, winPath } from './lib.mjs';
+import { atomic, defaults, hash, imageInk, parseLog, records, winPath } from './lib.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);
@@ -168,7 +168,7 @@ async function run() {
     atomic(path.join(prefix, 'drive_c/launch.cmd'), `@echo off\r\nset "APPDATA=${winPath(appdata)}"\r\n"${winPath(exe)}" --name palette --no-window-restore\r\n`);
     app = spawn('wine', ['C:\\windows\\system32\\cmd.exe', '/c', 'C:\\launch.cmd'], { env: { ...env, ZIGSHELL_CHAT_FIXTURE_DIR: winPath(mailbox) }, stdio: ['ignore', logFd, logFd] });
     await until(async () => {
-      window ||= (await searchMainWindows(execute))[0];
+      window ||= (await execute('xdotool', ['search', '--name', 'multiprompt v']).catch(() => ({ stdout: '' }))).stdout.trim().split(/\s+/)[0];
       return window && parseLog(log()).heartbeat?.tabs === tabs.length;
     }, 180_000, 'App did not restore four Chat View tabs');
     await execute('xdotool', ['windowsize', window, '1280', '800', 'windowmove', window, '0', '0', 'windowfocus', '--sync', window]);

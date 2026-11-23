@@ -1,1 +1,0 @@
-A server chat can ask the desktop app to open a VPS shell tab or attach an existing tmux session.

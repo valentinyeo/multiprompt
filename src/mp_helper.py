@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -14,6 +16,8 @@ PROVIDER = "claude"
 MODELS = ("opus", "sonnet", "haiku", "fable")
 EFFORTS = ("low", "medium", "high")
 FOLDER = re.compile(r"[A-Za-z0-9_./~+ -]{1,220}\Z")
+VERIFY_TRIES = 4
+VERIFY_PAUSE = 1.0
 _send = None
 
 
@@ -32,8 +36,12 @@ def send_module():
     return _send
 
 
+def host_root():
+    return Path.home() / ".local/state/multiprompt/agent-host"
+
+
 def host_key(sid):
-    return send_module().host_config_key(PROVIDER, sid)
+    return hashlib.sha256((PROVIDER + ":" + sid).encode()).hexdigest()[:32]
 
 
 def identity(parent, name):
@@ -46,6 +54,23 @@ def identity(parent, name):
     return sid, "live-" + hexed, "mp-helper-" + hexed
 
 
+def read_json(path):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def write_json(path, value):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name("." + path.name + "." + str(os.getpid()) + ".tmp")
+    handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(value, separators=(",", ":"), sort_keys=True))
+    os.replace(temporary, path)
+
+
 def parent_tmux():
     tmux = send_module().own_tmux()
     if not tmux:
@@ -54,14 +79,13 @@ def parent_tmux():
 
 
 def helpers(parent):
-    send = send_module()
     rows = []
-    for path in sorted(send.host_root().glob("*.config.json")):
-        config = send.read_json(path)
+    for path in sorted(host_root().glob("*.config.json")):
+        config = read_json(path)
         if not config or config.get("helper_parent") != parent or not isinstance(config.get("helper_name"), str):
             continue
-        state = send.read_json(path.with_name(path.name[: -len(".config.json")] + ".state.json")) or {}
-        alive = send.pid_alive(state.get("pid"))
+        state = read_json(path.with_name(path.name[: -len(".config.json")] + ".state.json")) or {}
+        alive = send_module().pid_alive(state.get("pid"))
         rows.append(dict(name=config["helper_name"], sid=config.get("sid"), tmux=config.get("tmux"), cwd=config.get("cwd"),
                          model=config.get("model") or "", effort=config.get("effort") or "",
                          state=("busy" if state.get("inflight") else "idle") if alive else "stopped"))
@@ -77,25 +101,87 @@ def pick(parent, name):
     raise ValueError("no helper named " + repr(name) + " under this chat; run mp-helper list")
 
 
+def reader_cli(*args):
+    reader = str(send_module().reader_path())
+    try:
+        done = subprocess.run([sys.executable, reader, "host", *args], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("host command failed: " + str(error))
+    try:
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise ValueError("host command gave no answer")
+    return reply if isinstance(reply, dict) else {}
+
+
+def zsb_command():
+    candidates = [Path(__file__).resolve().with_name("mp-zsb")]
+    found = shutil.which("zsb")
+    if found:
+        candidates.append(Path(found))
+    candidates.append(Path.home() / ".local/bin/zsb")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "zsb"
+
+
+def zsb(*args):
+    try:
+        done = subprocess.run([zsb_command(), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        return dict(ok=False, error="zsb_unavailable", message=str(error))
+    try:
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return dict(ok=False, error="zsb_no_answer", message=(done.stderr or "").strip()[:200])
+    return reply if isinstance(reply, dict) else dict(ok=False, error="zsb_no_answer")
+
+
+def find_tab(listing, tmux):
+    for workspace in listing.get("workspaces") or []:
+        tabs = [(None, tab) for tab in workspace.get("tabs") or []]
+        for group in workspace.get("groups") or []:
+            tabs.extend((group.get("name"), tab) for tab in group.get("tabs") or [])
+        for group, tab in tabs:
+            if tab.get("tmux") == tmux:
+                return workspace.get("name"), group, tab
+    return None, None, None
+
+
+def verify_tab(tmux):
+    for attempt in range(VERIFY_TRIES):
+        if attempt:
+            time.sleep(VERIFY_PAUSE)
+        listing = zsb("workspace-list")
+        tab = find_tab(listing, tmux)[2] if listing.get("ok") is True else None
+        if tab:
+            return tab
+    return None
+
+
 def show(parent, tmux, name):
-    send = send_module()
-    listing = send.zsb("workspace-list")
+    listing = zsb("workspace-list")
     if listing.get("ok") is not True:
         return dict(ok=False, error=listing.get("error") or "zsb_failed")
-    existing = send.find_tab(listing, tmux)[2]
+    existing = find_tab(listing, tmux)[2]
     if existing:
         return dict(ok=True, tab=existing.get("id"), existing=True)
-    workspace, group, tab = send.find_tab(listing, parent)
+    workspace, group, tab = find_tab(listing, parent)
     if not tab or not tab.get("host"):
         return dict(ok=False, error="parent_tab_not_open")
-    opened = send.open_visible_tab(listing, tmux, name, workspace, tab["host"], after_tab=tab["id"])
+    common = ("--host", tab["host"], "--tmux", tmux, "--name", name)
+    opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(tab["id"]), *common)
     if opened.get("ok") is not True and opened.get("error") == "bad_args" and group:
-        opened = send.open_visible_tab(listing, tmux, name, workspace, tab["host"], group=group)
+        opened = zsb("session-open", "--workspace", workspace, "--group", group, *common)
+    if opened.get("ok") is not True and opened.get("error") == "reply_timeout":
+        tab = verify_tab(tmux)
+        if tab:
+            return dict(ok=True, tab=tab.get("id"), verified=True)
     return opened
 
 
 def start(args):
-    send = send_module()
     parent = parent_tmux()
     name = " ".join(args.name.split())
     if not name or len(name) > 63 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in name):
@@ -109,8 +195,8 @@ def start(args):
     sid, tmux, message_id = identity(parent, name)
     if tmux == parent:
         raise ValueError("a chat cannot be its own helper")
-    path = send.host_root() / (host_key(sid) + ".config.json")
-    config = send.read_json(path)
+    path = host_root() / (host_key(sid) + ".config.json")
+    config = read_json(path)
     if config and (config.get("helper_parent") != parent or config.get("cwd") != folder):
         raise ValueError("a helper named " + repr(name) + " already runs here with another folder; pick another name")
     config = dict(config or dict(enabled=False), cwd=folder, tmux=tmux, helper_parent=parent, helper_name=name)
@@ -118,17 +204,17 @@ def start(args):
         config["model"] = args.model
     if args.effort:
         config["effort"] = args.effort
-    send.write_json(path, config)
-    enable = ["enable", PROVIDER, sid, "--tmux", tmux, "--cwd", folder, "--permission-mode", "bypassPermissions"]
-    enabled = send.reader_cli(*enable)
+    write_json(path, config)
+    enabled = reader_cli("enable", PROVIDER, sid, "--tmux", tmux, "--cwd", folder, "--permission-mode", "bypassPermissions")
     if enabled.get("status") != "enabled":
         raise ValueError("helper host was not enabled: " + str(enabled.get("reason") or enabled.get("status")))
-    started = send.reader_cli("start", PROVIDER, sid)
+    started = reader_cli("start", PROVIDER, sid)
     if started.get("status") not in ("started", "already"):
         raise ValueError("helper host did not start: " + str(started.get("reason") or started.get("status")))
     shown = show(parent, tmux, name)
     first = None
     if task is not None:
+        send = send_module()
         reader = send.reader_module()
         message = send.submit(reader, PROVIDER, sid, tmux, task, message_id)
         send.dispatch(reader, PROVIDER, sid, tmux)
@@ -233,13 +319,12 @@ def message(args):
 
 
 def close(args):
-    send = send_module()
     parent = parent_tmux()
     row = pick(parent, args.name)
-    listing_reply = send.zsb("workspace-list")
-    tab = send.find_tab(listing_reply, row["tmux"])[2] if listing_reply.get("ok") is True else None
-    closed = send.zsb("session-close", "--tab", str(tab["id"])) if tab else dict(ok=True)
-    stopped = send.reader_cli("disable", PROVIDER, row["sid"])
+    listing_reply = zsb("workspace-list")
+    tab = find_tab(listing_reply, row["tmux"])[2] if listing_reply.get("ok") is True else None
+    closed = zsb("session-close", "--tab", str(tab["id"])) if tab else dict(ok=True)
+    stopped = reader_cli("disable", PROVIDER, row["sid"])
     print(json.dumps(dict(ok=stopped.get("status") == "disabled", name=row["name"], tab_closed=closed.get("ok") is True,
                           tab_error=closed.get("error")), separators=(",", ":")))
     return 0 if stopped.get("status") == "disabled" else 3

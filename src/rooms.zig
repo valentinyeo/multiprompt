@@ -198,34 +198,10 @@ pub const Controller = struct {
         return .unsupported;
     }
 
-    fn roomJobCleanup(job: *transport.Job, thread: std.Thread) void {
-        thread.join();
-        allocator.free(job.request);
-        allocator.free(job.output);
-        allocator.destroy(job);
-    }
-
     pub fn shutdown(self: *Controller) void {
         const job = self.job orelse return;
         job.cancelled.store(true, .release);
-        if (job.thread) |thread| {
-            if (@import("ui_thread.zig").busy()) {
-                self.job = null;
-                if (self.journal_lock) |*guard| guard.deinit();
-                self.journal_lock = null;
-                @import("idle_budget.zig").bump(.thread_spawn);
-                const worker = std.Thread.spawn(.{}, roomJobCleanup, .{ job, thread }) catch {
-                    thread.join();
-                    allocator.free(job.request);
-                    allocator.free(job.output);
-                    allocator.destroy(job);
-                    return;
-                };
-                worker.detach();
-                return;
-            }
-            thread.join();
-        }
+        if (job.thread) |thread| thread.join();
         allocator.free(job.request);
         allocator.free(job.output);
         allocator.destroy(job);

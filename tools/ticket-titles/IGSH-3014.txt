@@ -1,1 +1,0 @@
-Fresh start and send commands can run directly

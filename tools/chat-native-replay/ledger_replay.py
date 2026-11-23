@@ -1,3 +1,4 @@
+"""Hosted-only structural ledger baseline; no live DB or transcript access."""
 import json
 from collections import Counter
 from pathlib import Path

@@ -30,5 +30,5 @@ test('IGSH-1908: a folder hit ranks the open chat ahead of an archived row with 
   const shellBranch = rank.slice(rank.indexOf('if (target < app_state.shell_count) {'), rank.indexOf('const group_index'));
   assert.match(shellBranch, /paletteTextMatchRank\(sessionFolderLeaf\(&app_state\.shells\[target\]\), query\)/, 'folder hit counts toward the match rank');
   const outranks = body('fn paletteResultOutranks(');
-  assert.match(outranks, /if \(key_open != prev_open\) return key_open;/, 'open session wins a match-quality tie with a non-session row');
+  assert.match(outranks, /key_open != prev_open and \(paletteRowIsArchived\(key\) or paletteRowIsArchived\(prev\)\)\) return key_open;/, 'open session wins a tie with an archived row');
 });

@@ -48,10 +48,7 @@ function audit(text) {
   assert.ok(hide >= 0 && hide < layout.indexOf('IsIconic('), 'even minimized frames must hide a re-shown console');
   const repairs = (layout.match(/verifyShellWindowSize\(/g) || []).length;
   assert.ok(repairs > 0);
-  const reconnectLayout = fn(text, 'layoutReconnectedConsole');
-  assert.match(reconnectLayout, /reconnectConsoleLayoutAllowed/);
-  assert.match(fn(text, 'finalizeReconnectedConsoleLayout'), /verifyShellWindowSize/);
-  assert.equal((text.match(/verifyShellWindowSize\(/g) || []).length, repairs + 2, 'all size repair callers stay within guarded layout');
+  assert.equal((text.match(/verifyShellWindowSize\(/g) || []).length, repairs + 1, 'all size repair callers stay within guarded layout');
   const send = fn(text, 'sendLocalChatPromptEx');
   assert.doesNotMatch(send, /g_chat_active\s*=/, 'sending must not disable containment');
   assert.match(send, /!shellConsoleShouldBeVisible\(shell_index\)[^]*pasteTextToShellDirect\(shell_index, text\)/);

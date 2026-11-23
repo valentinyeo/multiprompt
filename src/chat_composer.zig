@@ -367,7 +367,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = left + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH();
+    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
     return .{
         .pane = slot,
         .transcript = .{
@@ -399,7 +399,7 @@ pub fn chatViewLayout() ChatViewLayout {
 }
 
 pub fn chatNewMessagesHeight() i32 {
-    return uiScaled(30);
+    return if (app_state.g_chat_new_messages.count() != 0) uiScaled(30) else 0;
 }
 
 pub fn chatNewMessagesRect() ?RECT {
@@ -1576,7 +1576,7 @@ fn chatAcAccept() bool {
         app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
     }
-    if ((app_state.g_chat_ac.token.start == 0 or app_state.g_chat_ac.token.mode != .slash) and (entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
+    if ((entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
         app_state.g_chat_ac_skill_command_len = ilen;
         @memcpy(app_state.g_chat_ac_skill_command[0..ilen], wide[0..ilen]);
     }
@@ -2921,10 +2921,8 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     app_state.shell_count = 0;
     app_state.g_chat_scrolled_up = true;
     app_state.g_chat_new_messages = .{};
-    const initial = chatViewLayout();
     app_state.g_chat_new_messages.arrive(123, true);
     const layout = chatViewLayout();
-    try std.testing.expectEqualDeep(initial.transcript, layout.transcript);
     const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
     try std.testing.expect(pill.top >= layout.transcript.bottom);
     try std.testing.expect(pill.bottom <= layout.composer_card.top - chatWorkingIndicatorH());
@@ -3362,54 +3360,6 @@ test "IGSH-836 skill keyboard survives stationary hover and real movement or cli
     _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 0);
     n = GetWindowTextW(edit, &text, text.len);
     try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
-}
-
-test "SOFT-3086 accepting a slash skill mid-message inserts plain text" {
-    const w = @import("win32.zig");
-    const saved = .{
-        .g_chat_composer_hwnd = app_state.g_chat_composer_hwnd,
-        .g_chat_ac_hwnd = app_state.g_chat_ac_hwnd,
-        .g_chat_ac = app_state.g_chat_ac,
-        .g_chat_active = app_state.g_chat_active,
-        .g_restoring = app_state.g_restoring,
-        .shell_count = app_state.shell_count,
-        .g_chat_ac_mru = app_state.g_chat_ac_mru,
-        .g_chat_ac_mru_count = app_state.g_chat_ac_mru_count,
-        .g_chat_skill_name_len = app_state.g_chat_skill_name_len,
-        .g_chat_skill_body_len = app_state.g_chat_skill_body_len,
-        .g_chat_ac_dialog_len = app_state.g_chat_ac_dialog_len,
-        .g_chat_ac_skill_command_len = app_state.g_chat_ac_skill_command_len,
-        .g_chat_ac_skill_command = app_state.g_chat_ac_skill_command,
-        .entry = app_state.g_chat_ac_slots[0].entries[0],
-    };
-    defer {
-        inline for (std.meta.fields(@TypeOf(saved))) |field| {
-            if (comptime !std.mem.eql(u8, field.name, "entry")) @field(app_state, field.name) = @field(saved, field.name);
-        }
-        app_state.g_chat_ac_slots[0].entries[0] = saved.entry;
-    }
-    const edit = CreateWindowExW(0, L("EDIT"), L(""), ES_MULTILINE, 0, 0, 600, 80, null, null, null, null) orelse return error.TestUnexpectedResult;
-    defer _ = w.DestroyWindow(edit);
-    app_state.g_chat_composer_hwnd = edit;
-    app_state.g_chat_ac_hwnd = null;
-    app_state.g_chat_active = false;
-    app_state.g_restoring = true;
-    app_state.shell_count = 0;
-    app_state.g_chat_ac_slots[0].entries[0] = .{ .kind = 'S', .name = "review", .hint = "", .desc = "" };
-    for ([_]struct { input: [*:0]const u16, start: usize, end: usize, expected: []const u16 }{
-        .{ .input = L("why /rev ?"), .start = 4, .end = 8, .expected = std.mem.span(L("why /review  ?")) },
-        .{ .input = L("why /rev"), .start = 4, .end = 8, .expected = std.mem.span(L("why /review ")) },
-        .{ .input = L("/rev"), .start = 0, .end = 4, .expected = std.mem.span(L("/review ")) },
-    }) |case| {
-        _ = SetWindowTextW(edit, case.input);
-        app_state.g_chat_ac = .{ .open = true, .count = 1, .token = .{ .mode = .slash, .start = case.start, .end = case.end } };
-        try std.testing.expect(chatAcAccept());
-        var text: [64]u16 = undefined;
-        const n = GetWindowTextW(edit, &text, text.len);
-        try std.testing.expectEqualSlices(u16, case.expected, text[0..@intCast(n)]);
-        try std.testing.expectEqual(case.start == 0, app_state.g_chat_ac_skill_command_len > 0);
-        try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_skill_name_len);
-    }
 }
 
 test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {

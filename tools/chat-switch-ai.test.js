@@ -118,28 +118,6 @@ with tempfile.TemporaryDirectory() as directory:
 `);
 });
 
-test('a failed switch start keeps the old AI enabled and reports failure', () => {
-  python(setup + String.raw`
-with tempfile.TemporaryDirectory() as directory:
-    transcript = prepare(directory)
-    stopped = []
-    attempts = []
-    def fake_start(p, s):
-        attempts.append((p, s))
-        if p == 'pi':
-            return dict(status='error', reason='down')
-        return dict(status='started')
-    with patch.dict(r, conversation_path=lambda *args: transcript, host_start=fake_start, host_stop=lambda *args: stopped.append(args) or dict(status='stopped')):
-        reply = r['host_reply'](dict(op='switch_ai', provider='claude', sid=sid, to='pi'))
-    assert reply.get('status') == 'error' and reply.get('reason') == 'switch_start_failed', reply
-    assert reply.get('running') == 'Claude' and reply.get('provider') == 'claude' and reply.get('sid') == sid, reply
-    assert len(attempts) >= 1 and attempts[0] == ('pi', attempts[0][1]), attempts
-    assert stopped == [], stopped
-    assert r['host_config']('claude', sid) is not None and r['host_config']('claude', sid).get('enabled') is True
-    print('SWITCH_AI_PASS')
-`);
-});
-
 test('history for the shell provider stays acceptable after a switch', () => {
   python(setup + String.raw`
 with tempfile.TemporaryDirectory() as directory:

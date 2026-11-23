@@ -1,1 +1,0 @@
-Multiprompt: a send to a wrong chat id reports success

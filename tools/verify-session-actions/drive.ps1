@@ -43,6 +43,8 @@ function Wait-For([string]$ConditionName, [scriptblock]$Check) {
     Write-Host "[session-actions] wait: $ConditionName"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
+    # A journey condition that never becomes true is a journey result, not a runner fault:
+    # pr-verifier.cjs treats "timeout" wording as infrastructure and reports BLOCKED.
     throw "Journey condition not met: $ConditionName (checked for 90 seconds)"
 }
 function Check([string]$Name, [bool]$Condition) {
@@ -136,6 +138,10 @@ function Stop-AppJob {
 }
 function Context([int]$Index) {
     Focus
+    # Row geometry must come from the newest paint that carries this row's rect.
+    # [sidebar-avatar] is deduplicated per target, face and colour, so after a tab
+    # count change the app suppresses it and only [photo-proof] still reports the
+    # moved row. Its dedupe key includes the rect itself, so a moved row is logged.
     $pair = Wait-For 'painted sidebar target' {
         $lines = (Log) -split '\r?\n'
         $found = $null; $foundAt = -1
@@ -159,6 +165,11 @@ function Context([int]$Index) {
     [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7110 7112(?:\s|$)' })
 }
 function Resume-Archived([string]$Name) {
+    # SOFT-2444 keeps archived chats out of the plain Ctrl+K session list; the 7300 row
+    # block kept its label handler but nothing appends those rows any more. The live
+    # user route is Ctrl+K -> archived sessions (All Sessions, Archived tab) -> Ctrl+F
+    # filter -> Enter, which reinstates the deleted chat through the same archived
+    # resume command this journey already verifies.
     [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
     $archived=@($saved).Count
     $offset=(Log).Length

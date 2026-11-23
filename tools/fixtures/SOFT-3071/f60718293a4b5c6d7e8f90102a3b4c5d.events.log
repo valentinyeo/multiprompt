@@ -1,3 +1,0 @@
-{"at":1795158000,"event":"start","detail":{"tmux":"live-signalled"}}
-{"at":1795158060,"event":"agent_started","detail":{"pid":1207}}
-{"at":1795161600,"event":"signal","detail":{"signal":15}}

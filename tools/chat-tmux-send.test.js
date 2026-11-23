@@ -12,7 +12,6 @@ function body(name) {
 }
 const prelude = String.raw`
 const std = @import("std");
-const CHAT_OUTBOX_MSG_CAP = 16384;
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -49,7 +48,7 @@ var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
 const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
-var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 }{.{}};
+var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
 var shell_count: u32 = 1;
@@ -275,7 +274,6 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
-    require('./fixtures/inline-stubs').writeChatMention(dir);
     const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {

@@ -238,16 +238,8 @@ var release_ready = false;
 var restart_after_download = false;
 var restart_status: []const u8 = "";
 
-fn showUpdateCheckNotice() void {
-    if (app_state.g_update_check_notice_len == 0) return;
-    @import("console.zig").showHeaderNoticeAscii(app_state.g_update_check_notice[0..app_state.g_update_check_notice_len], 8000, true);
-    app_state.g_update_check_notice_len = 0;
-}
-
 pub fn updateCardPoll() void {
-    const polled = update_release.poll();
-    showUpdateCheckNotice();
-    if (polled) |version| {
+    if (update_release.poll()) |version| {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
             debugLog2("update-card: new version ready ", version);
