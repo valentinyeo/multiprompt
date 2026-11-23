@@ -1577,6 +1577,51 @@ def transport_reader():
             close(cid)
 
 
+def install_antigravity_host(namespace):
+    sid = state()["sid"]
+    namespace["host_write"](namespace["host_paths"]("claude", sid)["config"],
+                            dict(enabled=True, provider="claude", sid=sid, tmux="verify-agent", cwd=state()["cwd"]))
+    previous_switch = namespace["host_dispatch_switch"]
+    previous_owned = namespace["host_owned"]
+    previous_deliver = namespace["host_deliver"]
+    previous_event = namespace["host_event"]
+    previous_accept = namespace["host_accept"]
+
+    def mine(provider, candidate):
+        moved = namespace["host_switch_follow"](candidate)
+        if moved is not None:
+            provider, candidate = moved
+        return provider, candidate, candidate == sid or provider == "antigravity"
+
+    def dispatch_switch(provider, candidate):
+        return mine(provider, candidate)[2] or previous_switch(provider, candidate)
+
+    def owned(provider, candidate):
+        return mine(provider, candidate)[2] or previous_owned(provider, candidate)
+
+    def deliver(provider, candidate, token, attempt, epoch, text):
+        provider, candidate, ours = mine(provider, candidate)
+        if not ours:
+            return previous_deliver(provider, candidate, token, attempt, epoch, text)
+        record("antigravity-deliver.jsonl", provider=provider, sid=candidate, text=text)
+        session = dict(turn=token, state=dict(display_history=True), pending={}, messages={},
+                       sends=[dict(id=token, attempt=attempt, accepted=False)])
+        previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token))
+        previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
+        block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
+        reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
+        namespace["host_delta"](session, block, reply)
+        namespace["host_complete"](provider, candidate, "verify-agent", session, block)
+        previous_event(provider, candidate, "verify-agent", session, "turn.ended", dict(status="completed"))
+        if session.get("db") is not None:
+            session["db"].close()
+        return dict(status="sent")
+
+    namespace["host_dispatch_switch"] = dispatch_switch
+    namespace["host_owned"] = owned
+    namespace["host_deliver"] = deliver
+
+
 def serve_reader():
     namespace = reader_namespace()
     if state().get("name") == "model-settings":
@@ -1590,6 +1635,8 @@ def serve_reader():
         record("model-host-start.jsonl", result=started)
         if started.get("status") not in ("started", "already"):
             raise RuntimeError("Production host failed to start: " + str(started))
+    if state().get("name") == "antigravity-chats":
+        install_antigravity_host(namespace)
     if state().get("name") == "recall-handed":
         import hashlib
         sid = state()["sid"]
