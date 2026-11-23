@@ -325,12 +325,10 @@ def cmd_whoami(args):
     if not tmux:
         raise ValueError("cannot identify this chat; run from inside a Multibot chat")
     listing = send.zsb("workspace-list")
-    if listing.get("ok") is not True:
-        raise ValueError("cannot read this chat's current name; open the desktop app and retry")
-    tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux]
-    if len(tabs) != 1 or not tabs[0].get("title"):
+    tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux] if listing.get("ok") is True else []
+    if len(tabs) > 1:
         raise ValueError("this chat has no unique named tab on the desktop")
-    tab = tabs[0]
+    name = (tabs[0].get("title") if tabs else None) or send.published_names().get(tmux) or tmux
     provider = os.environ.get("MULTIBOT_PROVIDER")
     sid = os.environ.get("MULTIBOT_SID")
     root = send.host_root()
@@ -352,7 +350,7 @@ def cmd_whoami(args):
     if len(identities) != 1:
         raise ValueError("cannot identify this chat's linked agent session uniquely")
     provider, sid = identities.pop()
-    identity = dict(name=tab["title"], sid=sid, provider=provider, tmux=tmux, link=send.link_token(tab["title"], tmux))
+    identity = dict(name=name, sid=sid, provider=provider, tmux=tmux, link=send.link_token(name, tmux))
     if args.json:
         print(json.dumps(identity, separators=(",", ":")))
     else:
