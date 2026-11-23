@@ -1,0 +1,1 @@
+Bug-fix pull requests must ship a captured failing input and proof that master failed before the fix.

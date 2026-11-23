@@ -2,11 +2,14 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const verifier = require('./pr-verifier.cjs');
 
+const fixtureRepro = [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0 }];
+
 function finish(pr, masterFails = false, headStatus = 'passed', extra = {}) {
   const selection = verifier.validateSelection({ features: ['appearance'] }, ['appearance'], pr);
   const run = status => ({ status, artifact: 'verify-appearance', error: status === 'failed' ? 'wrong visible appearance' : '', screenshots: ['after.png'], ...extra });
   const summary = { head: { appearance: [run(headStatus)] } };
   if (masterFails) summary.masterFailures = ['appearance'];
+  if (selection.bugFix) summary.fixtureRepro = fixtureRepro;
   return verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
 }
 
@@ -37,7 +40,8 @@ test('a repair label adds no journey when the diff maps to none', () => {
     const selection = verifier.validateSelection({ features: [] }, ['appearance'], pr);
     assert.deepEqual(selection.features, [], JSON.stringify(pr));
     const result = verifier.finalize({ verdict: { verdict: 'PASS' }, selection, summary: { head: {} } });
-    assert.notEqual(result.final, 'FAIL', JSON.stringify(pr));
+    assert.equal(result.final, 'FAIL', JSON.stringify(pr));
+    assert.match(result.body, /failing-first repro/i);
   }
 });
 
@@ -81,7 +85,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.doesNotMatch(selected, /repro_features|base_features/);
     const selectionFile = path.join(dir, 'selection.json');
     const summary = path.join(dir, 'summary.json');
-    fs.writeFileSync(summary, JSON.stringify({ head: {} }));
+    fs.writeFileSync(summary, JSON.stringify({ head: {}, fixtureRepro: [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0 }] }));
     assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=PASS\+NOTES/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -90,7 +94,8 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
 
 const ciFix = { title: 'SOFT-2728: Fix master red checks' };
 const ciSelection = (extra = {}) => ({ ...verifier.validateSelection({ features: [] }, ['appearance'], ciFix), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [], ...extra });
-const ciReceipt = (extra = {}) => ({ head: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }] });
+const fixtureProof = [{ ticket: 'IGSH-2728', base_exit_code: 1, head_exit_code: 0 }];
+const ciReceipt = (extra = {}) => ({ head: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }], fixtureRepro: fixtureProof });
 const ciFinish = (selection, summary) => verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
 const passing = { head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] } };
 
@@ -98,6 +103,7 @@ test('a repair whose files are all owned by a CI workflow passes when that recei
   const result = ciFinish(ciSelection(), ciReceipt());
   assert.notEqual(result.final, 'FAIL');
   assert.match(result.body, /Repro by CI workflow: ci-repair-receipt\.yml \(tools: base exit 1, head exit 0\)/);
+  assert.match(result.body, /Repro by captured fixture: IGSH-2728 \(base exit 1, head exit 0\)/);
 });
 
 test('a CI receipt is not a repro when base stayed green, head is red, or the receipt is missing', () => {
@@ -107,7 +113,7 @@ test('a CI receipt is not a repro when base stayed green, head is red, or the re
 });
 
 test('a repair PR with a touched journey is judged on that journey alone', () => {
-  const result = ciFinish(ciSelection({ features: ['appearance'] }), passing);
+  const result = ciFinish(ciSelection({ features: ['appearance'] }), { ...passing, fixtureRepro: fixtureProof });
   assert.equal(result.final, 'PASS');
   assert.doesNotMatch(result.body, /Repro journey/i);
 });
@@ -127,6 +133,26 @@ test('a leftover nearest field never turns a proven CI receipt into a missing jo
 test('a PR that is not a repair never needs the CI receipt', () => {
   const selection = { ...ciSelection(), ...verifier.validateSelection({ features: [] }, ['appearance'], { title: 'Document appearance' }), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [] };
   assert.notEqual(ciFinish(selection, { head: {} }).final, 'FAIL');
+});
+
+test('SOFT-3144 a bug fix without captured fixture proof fails the verifier', () => {
+  const selection = { ...ciSelection(), bugFix: true };
+  const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary: { head: {} }, selection, runUrl: 'https://example.test/run' });
+  assert.equal(result.final, 'FAIL');
+  assert.match(result.body, /failing-first repro/i);
+});
+
+test('SOFT-3144 a bug fix passes when fixture repro shows base red and head green', () => {
+  const result = ciFinish(ciSelection(), ciReceipt());
+  assert.notEqual(result.final, 'FAIL');
+  assert.match(result.body, /Repro by captured fixture/);
+});
+
+test('SOFT-3144 fixture repro fails when base stayed green or head stayed red', () => {
+  for (const row of [{ base_exit_code: 0, head_exit_code: 0 }, { base_exit_code: 1, head_exit_code: 1 }]) {
+    const result = ciFinish(ciSelection(), { head: {}, fixtureRepro: [{ ticket: 'IGSH-2728', ...row }] });
+    assert.equal(result.final, 'FAIL', JSON.stringify(row));
+  }
 });
 
 test('summarize carries the repro of each selected CI workflow from its raw summary', () => {

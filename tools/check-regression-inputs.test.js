@@ -106,6 +106,36 @@ test('CLI checks committed additions via merge-base, not unchanged legacy or bas
   assert.match(green.stdout, /Regression inputs OK/);
 });
 
+test('SOFT-3144 bug pull requests require a captured fixture, repro.json and a reading test', async t => {
+  const { checkRegressionInputs } = await api;
+  const { checkBugFixtureErrors } = require('./regression-fixture.cjs');
+  const { dir, git, write, commit } = repository(t);
+  write('README', 'seed\n');
+  const base = commit();
+  git('checkout', '-q', '-b', 'head');
+  const feature = checkBugFixtureErrors({
+    base,
+    root: dir,
+    pr: { title: 'SOFT-900: Add a sidebar hint', body: '', labels: [] },
+    files: ['src/chat_echo.zig'],
+  });
+  assert.deepEqual(feature, []);
+  const missing = checkBugFixtureErrors({
+    base,
+    root: dir,
+    pr: { title: 'SOFT-901: Fix stale chat rows', body: '', labels: [] },
+    files: ['src/chat_echo.zig'],
+  });
+  assert.ok(missing.length);
+  mkdirSync(join(dir, 'tools/fixtures/SOFT-901'), { recursive: true });
+  write('tools/fixtures/SOFT-901/input.json', '{}\n');
+  write('tools/fixtures/SOFT-901/repro.json', JSON.stringify({ command: ['node', '--test', 'tools/missing.test.js'] }) + '\n');
+  write('tools/regression-bug.test.js', "const fs = require('node:fs');\nfs.readFileSync('tools/fixtures/SOFT-901/input.json');\n");
+  commit();
+  const partial = checkRegressionInputs(base, dir, { title: 'SOFT-901: Fix stale chat rows', body: '', labels: [] });
+  assert.equal(partial.errors.length, 0);
+});
+
 test('synthetic source strings and regular expressions are not executed history readers', async () => {
   const { findHistoryInputs } = await api;
   const source = [
@@ -116,7 +146,7 @@ test('synthetic source strings and regular expressions are not executed history 
   ].join('\n');
   assert.deepEqual(findHistoryInputs('tools/synthetic.test.js', source, new Set([1, 2, 3, 4])), []);
   const fs = require('node:fs');
-  for (const file of ['check-regression-inputs.mjs', 'check-regression-inputs.test.js', 'check-routing-ids.test.js', 'check-powershell-host-names.test.js']) {
+  for (const file of ['check-regression-inputs.mjs', 'check-regression-inputs.test.js', 'check-routing-ids.test.js', 'check-powershell-host-names.ps1', 'regression-fixture.cjs', 'regression-repro-runner.mjs']) {
     const text = fs.readFileSync(join(__dirname, file), 'utf8');
     assert.deepEqual(findHistoryInputs(`tools/${file}`, text, new Set(text.split('\n').map((_, i) => i + 1))), [], file);
   }

@@ -1,0 +1,7 @@
+{
+  "command": ["node", "--test", "tools/regression-fixture-proof.test.js"],
+  "files": [
+    "tools/regression-fixture-proof.test.js",
+    "tools/fixtures/SOFT-3144/pr-1269.json"
+  ]
+}

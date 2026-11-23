@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { checkBugFixtureErrors, isBugPullRequest } = require('./regression-fixture.cjs');
 
 export function isInputFile(file) {
   return /^tools\/.*\.(?:[cm]?js|py)$/.test(file) || file.startsWith('tests/') || file === 'build.zig' || /^\.github\/workflows\/[^/]+\.yml$/.test(file);
@@ -101,7 +105,19 @@ export function findHistoryInputs(file, source, added) {
   return errors;
 }
 
-export function checkRegressionInputs(base, root = '.') {
+function readPullRequest(root) {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath || !fs.existsSync(eventPath)) return null;
+  const event = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
+  if (!event.pull_request) return null;
+  return {
+    title: event.pull_request.title,
+    body: event.pull_request.body || '',
+    labels: (event.pull_request.labels || []).map(label => label.name),
+  };
+}
+
+export function checkRegressionInputs(base, root = '.', pr = readPullRequest(root)) {
   if (!base || base.startsWith('-')) throw new Error('Usage: node tools/check-regression-inputs.mjs <base-ref> [--root DIR]');
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const range = `${base}...HEAD`;
@@ -112,7 +128,8 @@ export function checkRegressionInputs(base, root = '.') {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     errors.push(...findHistoryInputs(file, source, addedLines(diff)));
   }
-  return { errors, files: files.length };
+  if (pr) errors.push(...checkBugFixtureErrors({ base, root, pr }));
+  return { errors, files: files.length, bugPullRequest: pr ? isBugPullRequest(pr, root) : false };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -120,7 +137,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const [base, flag, root] = process.argv.slice(2);
     if (process.argv.length > 6 || flag && (flag !== '--root' || !root)) throw new Error('Usage: node tools/check-regression-inputs.mjs <base-ref> [--root DIR]');
     const result = checkRegressionInputs(base, root || '.');
-    if (result.errors.length) { console.error(result.errors.join('\n')); process.exitCode = 1; }
-    else console.log(`Regression inputs OK: ${result.files} changed input files`);
+    if (result.errors.length) {
+      console.error(result.errors.join('\n'));
+      process.exitCode = 1;
+    } else {
+      const suffix = result.bugPullRequest ? '; bug-fix fixture requirements satisfied' : '';
+      console.log(`Regression inputs OK: ${result.files} changed input files${suffix}`);
+    }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

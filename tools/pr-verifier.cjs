@@ -4,6 +4,13 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
 const { touchedJourneysForDiff } = require('./touched-journeys.cjs');
+const {
+  isBugPullRequest,
+  isRepair,
+  fixtureReproFromSummary,
+  missingFixtureReproNote,
+  primaryTicket,
+} = require('./regression-fixture.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -30,11 +37,6 @@ function oneLine(value, limit = MAX_LINE) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
-function isRepair(pr) {
-  return /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
-    (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
-}
-
 function ciRepro(selection, summary) {
   const workflows = selection.ciWorkflows || [];
   const receipts = summary?.ciRepro || [];
@@ -53,7 +55,7 @@ function validateSelection(raw, available, pr = {}) {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
-  const bugFix = isRepair(pr);
+  const bugFix = isBugPullRequest(pr, '.');
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
   const features = [];
   const dropped = [];
@@ -383,6 +385,13 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     final = 'FAIL';
     notes.unshift('A repair PR with no desktop journey needs a CI workflow receipt that shows base failed and head passed.');
   }
+  const fixtureProof = selection.bugFix ? fixtureReproFromSummary(summary) : null;
+  if (fixtureProof) {
+    notes.unshift(`Repro by captured fixture: ${fixtureProof.map(item => `${item.ticket} (base exit ${item.base_exit_code}, head exit ${item.head_exit_code})`).join(', ')}.`);
+  } else if (selection.bugFix) {
+    final = 'FAIL';
+    notes.unshift(missingFixtureReproNote(primaryTicket(selection.pr || {})));
+  }
   if (modelProblem) {
     final = 'FAIL';
     notes.unshift(`No verifier ran: ${modelProblem}.`);
@@ -534,7 +543,7 @@ function resolve(env) {
   const dispatched = env.EVENT_NAME === 'workflow_dispatch';
   const eligible = pr.state === 'OPEN' && !pr.isCrossRepository && (dispatched || !pr.isDraft);
   if (eligible) gh(['api', `repos/${repo}/statuses/${pr.headRefOid}`, '-X', 'POST', '-f', 'context=pstack-verifier', '-f', 'state=pending', '-f', 'description=Verification is checking current PR metadata and evidence']);
-  const baseSha = isRepair(pr)
+  const baseSha = isBugPullRequest(pr)
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
@@ -947,6 +956,8 @@ async function main(argv, env) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
     }
     fs.mkdirSync(outDir, { recursive: true });
+    selection.bugFix = isBugPullRequest(pr);
+    selection.pr = { title: pr.title, body: pr.body || '', labels: (pr.labels || []).map(label => label.name || label) };
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
     setOutputs({ features: JSON.stringify(selection.features), ci_workflows: JSON.stringify(selection.ciWorkflows) });
@@ -992,7 +1003,8 @@ async function main(argv, env) {
     }
     if (env.PR_NUMBER) {
       try {
-        Object.assign(selection, { bugFix: isRepair(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
+        const pr = JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']));
+        Object.assign(selection, { bugFix: isBugPullRequest(pr), pr: { title: pr.title, body: pr.body || '', labels: (pr.labels || []).map(label => label.name) } });
       } catch {
         infrastructure.push('Could not confirm bug-fix metadata; verification is BLOCKED.');
       }
@@ -1031,7 +1043,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, isRepair, isBugPullRequest, primaryTicket };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

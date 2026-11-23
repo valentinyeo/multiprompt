@@ -193,6 +193,11 @@ jobs:
         run: |
           node verifier-tools/tools/pr-verifier.cjs download verifier-out/selection.json evidence
           node verifier-tools/tools/pr-verifier.cjs summarize evidence verifier-out/selection.json verifier-out
+      - name: Record failing-first captured fixture repro on base and head
+        if: steps.evidence.outcome == 'success'
+        env:
+          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
+        run: node verifier-tools/tools/regression-repro-runner.mjs run ${{ needs.resolve.outputs.base_sha }} verifier-out/summary.json
       - name: Build ladder judge request
         if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
         run: node verifier-tools/tools/pr-verifier.cjs build-ladder-request verifier-out

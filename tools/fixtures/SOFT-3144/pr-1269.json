@@ -1,0 +1,5 @@
+{
+  "title": "SOFT-3097: Revert per-message client identity so chat rows dedupe again",
+  "body": "Executable native regressions in tools/chat-row-identity.test.js without a captured fixture.",
+  "base": "605610d5a212a93fd251721680eb049e89b9226e"
+}

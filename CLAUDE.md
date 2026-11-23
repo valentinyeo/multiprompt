@@ -42,7 +42,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Rule | Enforced by |
 | --- | --- |
 | Allocate distinct routing IDs outside registered dynamic bands. | `tools/check-routing-ids.mjs`, `tools/routing-id-bands.json` |
-| Snapshot regression inputs in `tools/fixtures/<ticket>/`, not Git history. | `tools/check-regression-inputs.mjs` (new reads in PR diffs) |
+| Snapshot regression inputs in `tools/fixtures/<ticket>/`, not Git history; bug-fix PRs need captured fixture repro. | `tools/check-regression-inputs.mjs`, `tools/regression-repro-runner.mjs`, `tools/pr-verifier-repro.test.js` |
 | Do not bind PowerShell host-owned variables or name functions after aliases. | `tools/check-powershell-host-names.ps1` |
 | Server-chat native commands use exit codes and retain stderr evidence through `Invoke-ServerNative`. | `tools/verify-server-chat/native.ps1`, `tools/verify-server-chat.test.py` |
 | Keep palette, tab actions and shortcut documentation aligned. | `tools/palette-rows.test.js`, `tools/shortcuts-doc.test.js` |
