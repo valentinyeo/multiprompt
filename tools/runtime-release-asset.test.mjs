@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { generationOf } from './check-runtime-generation.mjs';
-import { runtimeAsset, runtimeGeneration, runtimePayload } from './runtime-release-asset.mjs';
+import { publishRuntime, runtimeAsset, runtimeGeneration, runtimePayload } from './runtime-release-asset.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = name => fs.readFileSync(new URL(`src/${name}`, root));
@@ -39,12 +38,18 @@ test('every bundled constant decodes to its source file', () => {
   assert.deepEqual(Buffer.from(connectors[2], 'base64'), read('chat_connectors/codex.py'));
 });
 
-test('the payload ends with the reader source at its released generation', () => {
-  const payload = runtimePayload('1.2.3');
-  const source = read('chat_history_reader.py').toString('utf8');
-  assert.equal(payload.endsWith(source), true);
-  assert.equal(runtimeGeneration(payload), generationOf(source));
-  assert.match(payload, /^MULTIBOT_APP_VERSION = '1\.2\.3'$/m);
+test('the published asset is the runtime the desktop installs at its own generation', () => {
+  const candidate = runtimePayload('1.2.3');
+  assert.match(candidate, /^MULTIBOT_APP_VERSION = '1\.2\.3'$/m);
+  const published = publishRuntime(candidate);
+  const text = published.payload.toString('utf8');
+  assert.match(text, new RegExp(`^RUNTIME_GENERATION = ${published.generation}$`, 'm'));
+  assert.equal(runtimeGeneration(published.payload), published.generation);
+  assert.match(text, /^CONNECTOR_SOURCES = /m);
+  assert.match(text, /^def runtime_release_install\(payload\):$/m);
+  const marker = "READER_SOURCE = r'''";
+  const inner = candidate.slice(candidate.lastIndexOf(marker) + marker.length, candidate.indexOf("\n'''", candidate.lastIndexOf(marker)));
+  assert.equal(text.trimEnd().endsWith(inner.trimEnd()), true, 'the asset ends with the bundled reader source');
 });
 
 test('the release workflow signs the runtime asset into the manifest', () => {

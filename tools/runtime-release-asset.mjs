@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 export const runtimeAsset = 'multiprompt-runtime.py';
 const reader = 'chat_history_reader.py';
@@ -25,10 +26,25 @@ export function runtimeGeneration(payload) {
   return Number(found[1]);
 }
 
+export function publishRuntime(payload, python = process.env.PYTHON || 'python3') {
+  const program = [
+    'import json,sys',
+    "namespace = {'__name__': 'runtime_asset'}",
+    "exec(compile(sys.stdin.read(), 'reader', 'exec'), namespace)",
+    "sys.stdout.write(json.dumps({'generation': namespace['RUNTIME_GENERATION'], 'source': namespace['READER_SOURCE']}))",
+  ].join('\n');
+  const result = JSON.parse(execFileSync(python, ['-c', program], {
+    input: payload, encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024,
+  }));
+  return { generation: Number(result.generation), payload: Buffer.from(result.source, 'utf8') };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [tag, target] = process.argv.slice(2);
   const version = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(tag || '')?.[1];
   if (!version || !target) throw new Error('Usage: runtime-release-asset.mjs <vX.Y.Z> <output>');
-  fs.writeFileSync(target, runtimePayload(version));
-  console.log(`RUNTIME_ASSET ${target} generation ${runtimeGeneration(fs.readFileSync(target))}`);
+  const published = publishRuntime(runtimePayload(version));
+  if (published.generation !== runtimeGeneration(published.payload)) throw new Error('Published runtime generation does not parse');
+  fs.writeFileSync(target, published.payload);
+  console.log(`RUNTIME_ASSET ${target} generation ${published.generation}`);
 }
