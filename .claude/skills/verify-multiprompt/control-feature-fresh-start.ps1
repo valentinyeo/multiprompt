@@ -54,7 +54,8 @@ try {
         $state = Read-Session
         $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'tmux' -and
             $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv -and
-            $state.tabs[0].PSObject.Properties['csid'] -and $state.tabs[0].csid
+            $state.tabs[0].PSObject.Properties['csid'] -and $state.tabs[0].csid -and
+        $state.tabs[0].PSObject.Properties['ai_agent'] -and $state.tabs[0].ai_agent -eq 1
     } 'seeded remote Chat View tab restored' 60
     Wait-Until {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
