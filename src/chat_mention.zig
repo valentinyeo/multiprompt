@@ -456,7 +456,10 @@ pub fn mentionContextTail(blocks: []const ChatBlock, text: []const u16, omit_tra
         const line = if (pick.user) copyVisible(slice, &.{}, &scratch) else slice;
         if (line.len == 0) continue;
         if (w > 0) {
-            w = appendAscii(out, w, "\n\n---\n\n") orelse return out[0..w];
+            const separator = "\n\n---\n\n";
+            if (separator.len > out.len - w) return out[0..w];
+            @memcpy(out[w..][0..separator.len], separator);
+            w += separator.len;
         }
         const n = std.unicode.utf16LeToUtf8(out[w..], line) catch return out[0..w];
         w += n;
@@ -757,6 +760,18 @@ test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" 
         try std.testing.expectEqualSlices(u16, want[0..m], raw[0..got]);
         try std.testing.expect(std.mem.indexOf(u16, raw[0..got], hidden) == null);
     }
+}
+
+test "SOFT-3084 recent mention context separates UTF-8 lines" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hi雪ping");
+    const blocks = [_]ChatBlock{
+        .{ .start = 0, .len = 2, .role = .user },
+        .{ .start = 2, .len = 1, .role = .prose },
+        .{ .start = 3, .len = 4, .role = .user },
+    };
+    var out: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("hi\n\n---\n\n雪\n\n---\n\nping", mentionContextTail(&blocks, text, false, &out).?);
+    try std.testing.expectEqualStrings("hi", mentionContextTail(&blocks, text, false, out[0..3]).?);
 }
 
 test "SOFT-3084 mention framing separates typing chat from recipients" {
