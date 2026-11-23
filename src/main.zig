@@ -1464,14 +1464,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
 fn browserFocusHotkey() void {
     const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
@@ -5495,13 +5488,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                if (target == SEARCH_CHAT_RESYNC_OFFSET or target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    @import("chat_session.zig").chatResync();
+                    clearSearchBackdrop(); showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) _ = @import("chat_auto_switch.zig").startToggle(app_state.active_shell) else @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
