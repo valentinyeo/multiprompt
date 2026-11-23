@@ -7034,6 +7034,36 @@ class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(self.events('text.delta'), [])
 
 
+class SOFT_3098_ReplyOnceTest(HostEventStreamFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.session['state']['display_history'] = True
+        self.path = reader.host_paths(self.provider, self.sid)['history']
+
+    def archived(self):
+        return [json.loads(line)['row'] for line in self.path.read_text().splitlines() if line.strip()]
+
+    def served(self):
+        query = dict(id=9, provider='claude', codex=False, sid=self.sid, tmux='', cwd=str(self.home),
+                     follow=False, offset=0, before=0, cached_sid='', inode=0, mtime=0, probe='', start=0)
+        wire = reader.response(query, None, False, ('claude', self.sid, self.path, None))
+        return [json.loads(line) for line in wire.splitlines()[1:-1]]
+
+    def reply(self):
+        return dict(type='assistant', message=dict(id='msg-reply', content=[dict(type='text', text='The same answer')]))
+
+    def test_a_replayed_assistant_message_is_archived_once(self):
+        self.feed(self.reply(), self.reply())
+        rows = [row for row in self.archived() if row.get('role') == 'assistant']
+        self.assertEqual([row['text'] for row in rows], ['The same answer'])
+        self.assertEqual([row.get('id') for row in rows], ['msg-reply:text:0'])
+
+    def test_a_replayed_reply_is_served_once_after_a_refetch(self):
+        self.feed(self.reply(), self.reply())
+        shown = [row for row in self.served() if row.get('role') == 'assistant']
+        self.assertEqual([row['text'] for row in shown], ['The same answer'])
+
+
 class LiveSnapshotTest(HostEventStreamFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()

@@ -4014,14 +4014,38 @@ def host_session_state(provider, sid):
     return state if isinstance(state, dict) else {}
 
 
+def host_history_tail_id(path):
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 8192))
+            data = stream.read()
+    except OSError:
+        return ""
+    lines = [line for line in data.splitlines() if line]
+    if not lines:
+        return ""
+    try:
+        entry = json.loads(lines[-1])
+    except ValueError:
+        return ""
+    row = entry.get("row") if isinstance(entry, dict) else None
+    stored = row.get("id") if isinstance(row, dict) else None
+    return stored if isinstance(stored, str) else ""
+
+
 def host_history_append(provider, sid, session, row):
     if row.get("role") == "user" and isinstance(row.get("text"), str):
         host_fresh_note_user(session["state"], row["text"])
     if not session.get("state", {}).get("display_history"):
         return
-    row = dict(row, id=row.get("id") or "history-" + uuid.uuid4().hex,
+    identity = row.get("id") if isinstance(row.get("id"), str) else ""
+    row = dict(row, id=identity or "history-" + uuid.uuid4().hex,
                timestamp=row.get("timestamp") or datetime.now().isoformat())
     path = host_paths(provider, sid)["history"]
+    if identity and host_history_tail_id(path) == identity:
+        return
     data = (json.dumps(dict(type="multiprompt_history", row=row), separators=(",", ":")) + "\n").encode("utf-8")
     with path.open("ab") as stream:
         stream.write(data)
@@ -4092,7 +4116,8 @@ def host_fresh_archive(provider, sid, tmux, session):
                             continue
                         payload = event.get("payload") or {}
                         if event.get("kind") == "text.done" and payload.get("text"):
-                            append(dict(role="assistant", text=payload["text"], id="event-" + str(seq)))
+                            stable = event.get("item") if isinstance(event.get("item"), str) else ""
+                            append(dict(role="assistant", text=payload["text"], id=stable or "event-" + str(seq)))
                         elif event.get("kind") == "turn.started" and payload.get("message_id") not in seen:
                             token = payload.get("message_id")
                             seen.add(token)
@@ -4521,7 +4546,8 @@ def host_switch_rows(provider, sid, tmux):
             event = json.loads(raw)
             payload = event.get("payload") or {}
             if event.get("room_scope") is None and event.get("kind") == "text.done" and payload.get("text"):
-                rows.append(dict(role="assistant", text=payload["text"], id="event-" + str(seq)))
+                stable = event.get("item") if isinstance(event.get("item"), str) else ""
+                rows.append(dict(role="assistant", text=payload["text"], id=stable or "event-" + str(seq)))
             elif event.get("room_scope") is None and event.get("kind") == "turn.started":
                 message = db.execute("SELECT text FROM shared_messages WHERE id=?", (payload.get("message_id"),)).fetchone()
                 if message:
@@ -4657,7 +4683,8 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
     if not isolated and kind == "text.done" and isinstance(payload, dict) and payload.get("text"):
         if isinstance(fresh, dict) and fresh.get("phase") == "handover":
             fresh["text"][item or "reply"] = payload["text"]
-        host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"]))
+        stable = item if isinstance(item, str) and item else ""
+        host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"], id=stable))
     elif not isolated and kind == "item.started" and isinstance(payload, dict) and payload.get("type") == "tool_call":
         host_history_append(provider, sid, session,
                             dict(role="tool", id=item, text=tool_summary(payload.get("tool") or "Tool", payload.get("input") or {}),
@@ -4789,7 +4816,7 @@ def host_assistant_event(provider, sid, tmux, session, event):
         return
     session["current"][str(parent)] = message_id
     entry = host_stream_message(session, message_id)
-    for block in message["content"]:
+    for index, block in enumerate(message["content"]):
         if not isinstance(block, dict):
             continue
         if block.get("type") == "tool_use" and isinstance(block.get("id"), str):
@@ -4798,7 +4825,8 @@ def host_assistant_event(provider, sid, tmux, session, event):
                             title=block.get("name"), display_name=block.get("name")), block["id"])
         elif block.get("type") in ("text", "thinking") and parent is None:
             kind = block["type"]
-            opened = host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind)
+            indexed = entry["index"].get(index)
+            opened = indexed if isinstance(indexed, dict) and indexed["kind"] == kind else (host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind))
             if session["pending"].pop(opened["item"], None) is not None and not opened["done"] and opened["text"]:
                 host_event(provider, sid, tmux, session, opened["kind"] + ".delta", dict(text=opened["text"], done=False), opened["item"])
             text = block.get("text") if kind == "text" else block.get("thinking")

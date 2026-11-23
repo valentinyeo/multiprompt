@@ -2157,7 +2157,48 @@ pub fn chatEchoClearConfirmedForShell(idx: u32) void {
     }
 }
 
-pub fn chatEchoMatchActive() void {
+pub fn chatEchoReconcileShell(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return false;
+    var waiting = false;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.state == .cancelled or e.message_wire_id[0] == 0) continue;
+        waiting = true;
+        break;
+    }
+    if (!waiting) return false;
+    const history = chatHistoryEntry(chatFileIdentityForShell(idx)) orelse return false;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey(key, history.history.blocks.items, history.history.text.items, !history.history.restore_full and history.history.start == 0, &assignment);
+    if (assignment.count == 0) return false;
+    chatEchoStoreAnchors(&assignment);
+    var changed = false;
+    var i: usize = 0;
+    while (i < app_state.g_chat_outbox.items.len) {
+        const e = app_state.g_chat_outbox.items[i];
+        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+            i += 1;
+            continue;
+        }
+        const bi = chatEchoAssignedBlock(&assignment, e.id) orelse {
+            i += 1;
+            continue;
+        };
+        var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
+        chatConfirmedAdd(key_copy[0..e.key_len], e.text, history.history.blocks.items[bi], e);
+        if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
+        rememberLandedSend(idx, e);
+        chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+        changed = true;
+    }
+    return changed;
+}
+
+fn chatEchoMatchActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -3072,6 +3113,14 @@ pub fn chatOutboxTick() void {
     chatTmuxSettle();
     var changed = false;
     const now_ms: i64 = @intCast(GetTickCount64());
+    var reconciled = [_]bool{false} ** 256;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state == .cancelled or e.message_wire_id[0] == 0) continue;
+        const shell_index = chatOutboxShellForKey(e.key[0..e.key_len]) orelse continue;
+        if (shell_index >= reconciled.len or reconciled[shell_index]) continue;
+        reconciled[shell_index] = true;
+        if (chatEchoReconcileShell(shell_index)) changed = true;
+    }
     for (app_state.g_chat_histories.items) |history| {
         if (history.retired) continue;
         const idx = @import("inbox.zig").findShellById(history.key.shell_id) orelse continue;
