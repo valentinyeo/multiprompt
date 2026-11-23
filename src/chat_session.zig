@@ -2342,6 +2342,89 @@ test "IGSH-1593 startup failure reaches an empty cached transcript after the hos
     try std.testing.expectEqualSlices(u16, expected, app_state.g_chat_capture[0..app_state.g_chat_last_len]);
 }
 
+test "MUBO-249 a refresh that appends rows keeps the saved layout while live chat state exists" {
+    const a = std.heap.page_allocator;
+    const live = @import("chat_live.zig");
+    const shell_id: u32 = 24901;
+    const saved = .{
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .hwnd = app_state.g_main_hwnd,
+        .histories = app_state.g_chat_histories,
+        .cache_shell = app_state.g_chat_cache_shell_id,
+        .cache_generation = app_state.g_chat_cache_generation,
+        .from_file = app_state.g_chat_blocks_from_file,
+        .file_valid = app_state.g_chat_file_valid,
+        .drawn = g_chat_live_drawn_revision,
+    };
+    app_state.g_chat_histories = .empty;
+    defer {
+        chatHistoryForget(shell_id);
+        live.release(shell_id);
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.hwnd;
+        app_state.g_chat_cache_shell_id = saved.cache_shell;
+        app_state.g_chat_cache_generation = saved.cache_generation;
+        app_state.g_chat_blocks_from_file = saved.from_file;
+        app_state.g_chat_file_valid = saved.file_valid;
+        g_chat_live_drawn_revision = saved.drawn;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_last_hash = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = shell_id;
+    app_state.shells[0].ai_agent = 1;
+    @memcpy(app_state.shells[0].tmux_session[0..8], "term-249");
+    app_state.shells[0].tmux_session_len = 8;
+    @memcpy(app_state.shells[0].claude_sid[0..3], "sid");
+    app_state.shells[0].claude_sid_len = 3;
+    const key = chatFileIdentity();
+    const entry = chatHistoryEntry(key) orelse return error.TestUnexpectedResult;
+    var wire = try perfWire(a, "term-249", 256 * 1024, 1, 0);
+    defer wire.deinit(a);
+    try entry.history.apply(a, wire.items, 1, key);
+    const base = entry.history.blocks.items.len;
+    try std.testing.expect(base > 100);
+    _ = live.begin(shell_id, 0, "sid");
+    try std.testing.expect(live.revision(shell_id) != 0);
+    app_state.g_chat_cache_shell_id = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_last_hash = 0;
+    g_chat_live_drawn_revision = 0;
+    try std.testing.expect(refreshChatBlockCache(true));
+    try std.testing.expectEqual(base, app_state.g_chat_block_count);
+    var round: u32 = 0;
+    while (round < 4) : (round += 1) {
+        app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
+        const before = entry.history.blocks.items.len;
+        const revision = entry.history.revision;
+        var more = try perfWire(a, "term-249", 2 * 1024, 2 + round, entry.history.offset);
+        defer more.deinit(a);
+        try entry.history.apply(a, more.items, 2 + round, key);
+        try std.testing.expect(entry.history.blocks.items.len > before);
+        entry.history.changed_from = before;
+        entry.history.revision = revision +% 1;
+        try std.testing.expect(refreshChatBlockCache(false));
+        try std.testing.expectEqual(entry.history.blocks.items.len, app_state.g_chat_block_count);
+        try std.testing.expectEqual(before, app_state.g_chat_layout_reuse);
+    }
+}
+
 test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polling" {
     const old_count = app_state.shell_count;
     const old_shell = app_state.shells[0];
