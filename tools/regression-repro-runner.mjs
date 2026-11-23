@@ -77,7 +77,7 @@ export function runRegressionRepro({ root = '.', base, pr, headRoot = root }) {
   try {
     execFileSync('git', ['worktree', 'add', '--detach', tempBase, baseSha], { cwd: root });
     copyFiles(carry, headRoot, tempBase);
-    const baseOut = runCommand(manifest.command, tempBase, { REGRESSION_REPRO_BASE: '1' });
+    const baseOut = runCommand(manifest.command, tempBase);
     return {
       ticket: manifest.ticket,
       folder: manifest.folder,

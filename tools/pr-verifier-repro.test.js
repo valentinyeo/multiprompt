@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const verifier = require('./pr-verifier.cjs');
 
-const fixtureRepro = [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: expected the bug-fix fixture gate on base before this repair', head_log: 'ok 1' }];
+const fixtureRepro = [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: bug-fix fixture gate missing', head_log: 'ok 1' }];
 
 function finish(pr, masterFails = false, headStatus = 'passed', extra = {}) {
   const selection = verifier.validateSelection({ features: ['appearance'] }, ['appearance'], pr);
@@ -85,7 +85,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.doesNotMatch(selected, /repro_features|base_features/);
     const selectionFile = path.join(dir, 'selection.json');
     const summary = path.join(dir, 'summary.json');
-    fs.writeFileSync(summary, JSON.stringify({ head: {}, fixtureRepro: [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: expected the bug-fix fixture gate on base before this repair', head_log: 'ok 1' }] }));
+    fs.writeFileSync(summary, JSON.stringify({ head: {}, fixtureRepro: [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: bug-fix fixture gate missing', head_log: 'ok 1' }] }));
     assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=PASS\+NOTES/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

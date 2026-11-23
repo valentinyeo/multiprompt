@@ -14,12 +14,7 @@ function gatePresent(root) {
 }
 
 test('SOFT-3144 requires the bug-fix fixture gate on head', () => {
-  const gate = gatePresent(repoRoot);
-  if (process.env.REGRESSION_REPRO_BASE === '1') {
-    assert.equal(gate, true, 'expected the bug-fix fixture gate on base before this repair');
-    return;
-  }
-  assert.equal(gate, true);
+  assert.equal(gatePresent(repoRoot), true, 'bug-fix fixture gate missing');
   const { checkBugFixtureErrors } = require('./regression-fixture.cjs');
   assert.ok(Array.isArray(sample.files) && sample.files.length, 'fixture must ship the captured PR file list');
   const errors = checkBugFixtureErrors({

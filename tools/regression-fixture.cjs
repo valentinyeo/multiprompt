@@ -112,7 +112,7 @@ function checkBugFixtureErrors({ base, root = '.', pr, files }) {
 function substantiveBaseFailure(log) {
   const text = String(log || '');
   if (!text || /MODULE_NOT_FOUND|Cannot find module/.test(text)) return false;
-  return /AssertionError|checkBugFixtureErrors|tools\/fixtures\/|expected the bug-fix fixture gate/i.test(text);
+  return /AssertionError|checkBugFixtureErrors|tools\/fixtures\/|bug-fix fixture gate missing/i.test(text);
 }
 
 function provenFixtureRepro(item) {
