@@ -313,6 +313,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tools/update-release-journey.test.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tools/legacy-update-feed.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Restore Zig toolchain (PR)
         if: steps.paths.outputs.heavy == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
