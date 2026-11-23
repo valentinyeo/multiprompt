@@ -27,6 +27,7 @@ const LogFont = extern struct {
 extern fn mp_terminal_window_new(w.HANDLE, *const LogFont, u32, u32, ?[*]const u32, OutputFn, ResizeFn, ?*anyopaque) w.HANDLE;
 extern fn mp_terminal_window_feed(w.HANDLE, [*]const u8, usize) void;
 extern fn mp_terminal_window_style(w.HANDLE, *const LogFont, u32, u32, ?[*]const u32) void;
+extern fn mp_terminal_window_report(w.HANDLE) void;
 extern fn mp_terminal_window_copy(w.HANDLE) c_int;
 extern fn mp_terminal_window_paste(w.HANDLE) void;
 
@@ -158,10 +159,20 @@ pub fn remoteShellCommand(buf: []u8, kind: app_state.ShellKind, tmux_session: ?[
     return buf[0..pos];
 }
 
-fn shellFont(font: *LogFont) void {
+fn shellFontHeight() i32 {
+    if (app_state.g_console_font_override > 0) {
+        const dpi: i32 = @intCast(@import("console.zig").mainWindowDpi());
+        const scaled = @divTrunc(@as(i32, app_state.g_console_font_override) * dpi + 48, 96);
+        return std.math.clamp(scaled, 6, 72);
+    }
     @import("themes.zig").ensureDevThemeInitialized();
-    var height: i32 = app_state.g_dev_theme.console_font_height;
-    if (height < 6 or height > 72) height = 16;
+    const height: i32 = app_state.g_dev_theme.console_font_height;
+    if (height < 6 or height > 72) return 16;
+    return height;
+}
+
+fn shellFont(font: *LogFont) void {
+    const height = shellFontHeight();
     font.* = .{};
     font.height = -height;
     font.weight = @import("fonts.zig").SHELL_WEIGHT;
@@ -381,6 +392,7 @@ pub fn ready(shell_id: u32, ok: bool) void {
     if (idx == app_state.active_shell and !app_state.g_chat_active and shell.hwnd != null) {
         _ = @import("chat_composer.zig").showShellConsole(@intCast(idx), w.SW_SHOW, "native-session");
         @import("window_layout.zig").repositionActive();
+        if (shell.hwnd) |hwnd| mp_terminal_window_report(hwnd);
     }
 }
 
@@ -520,6 +532,7 @@ pub fn restyle(shell_id: u32) void {
     var font: LogFont = .{};
     shellFont(&font);
     mp_terminal_window_style(slot.hwnd, &font, @import("themes.zig").themeConsoleFg(), @import("themes.zig").themeConsoleBg(), palette());
+    mp_terminal_window_report(slot.hwnd.?);
 }
 
 pub fn copy(hwnd: w.HANDLE) bool {
@@ -567,6 +580,20 @@ test "remote shell command keeps attach, create and resurrect text without ssh" 
     try std.testing.expectEqual(@as(u32, 0), app_state.g_pending_resurrect_len);
     const login = remoteShellCommand(&buf, .vps, null, 5, false) orelse return error.NoCommand;
     try std.testing.expect(std.mem.endsWith(u8, login, "exec ${SHELL:-bash} -l"));
+}
+
+test "SOFT-2460 the console font override is the shell tab face height" {
+    const saved_override = app_state.g_console_font_override;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer {
+        app_state.g_console_font_override = saved_override;
+        app_state.g_main_monitor_dpi = saved_dpi;
+    }
+    app_state.g_main_monitor_dpi = 96;
+    app_state.g_console_font_override = 20;
+    try std.testing.expectEqual(@as(i32, 20), shellFontHeight());
+    app_state.g_main_monitor_dpi = 192;
+    try std.testing.expectEqual(@as(i32, 40), shellFontHeight());
 }
 
 test "IGSH-1923 a squeezed terminal never shrinks the remote session" {

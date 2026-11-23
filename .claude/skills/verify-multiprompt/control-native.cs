@@ -679,10 +679,15 @@ public static class VerifyNative {
             Thread.Sleep(35);
         }
     }
+    public static void MoveClient(IntPtr hwnd, int x, int y) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Mouse target is not in the owned window");
+        MouseAt(point.X, point.Y, 0);
+    }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");
-        if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Cannot position mouse on pill");
+        MouseAt(point.X, point.Y, 0);
         foreach (uint flags in new uint[] { 2, 4 }) {
             Input input = new Input(); input.type = 0;
             input.data.mouse = new Mouse { flags = flags };
