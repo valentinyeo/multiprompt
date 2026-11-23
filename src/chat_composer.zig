@@ -164,6 +164,7 @@ const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
 const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
+const Shell = @import("app_state.zig").Shell;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chat_keynav = @import("chat_keynav.zig");
