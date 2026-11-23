@@ -1749,7 +1749,9 @@ pub fn applyServerLayout(json: []const u8) !void {
     for (server.value.tabs, 0..) |tab, ti| listed[ti] = .{ .host = tab.tmux_host, .session = tab.tmux_session };
     app_state.g_tmux_closed.reconcile(listed);
     for (desired.tabs) |tab| {
-        if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
+        if (app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) continue;
+        if (tmux_identity.duplicateOfLocalChat(app_state.shells[0..app_state.shell_count], tab.tmux_host, tab.tmux_session)) continue;
+        try kept.append(a, tab);
     }
     desired.tabs = kept.items;
     app_state.g_account_applying = true;

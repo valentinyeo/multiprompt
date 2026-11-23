@@ -83,13 +83,40 @@ pub fn prefer(candidate: Pane, current: Pane) bool {
     return candidate.last_viewed > current.last_viewed;
 }
 
+fn sameChat(a: anytype, b: anytype) bool {
+    if (same(a.tmux_host, a.tmux_session[0..a.tmux_session_len], b.tmux_host, b.tmux_session[0..b.tmux_session_len])) return true;
+    const chat = @import("chat_identity.zig");
+    return chat.same(
+        chat.Key.init(a.tmux_host, a.claude_sid[0..a.claude_sid_len], a.tmux_session[0..a.tmux_session_len]),
+        chat.Key.init(b.tmux_host, b.claude_sid[0..b.claude_sid_len], b.tmux_session[0..b.tmux_session_len]),
+    );
+}
+
+pub fn duplicateOfLocalChat(shells: anytype, host: u8, session: []const u8) bool {
+    const incoming = @import("chat_identity.zig").Key.init(host, "", session);
+    if (incoming.sid_len == 0) return false;
+    for (shells) |shell| {
+        if (shell.kind == .tmux or shell.claude_sid_len == 0) continue;
+        if (@import("chat_identity.zig").same(@import("chat_identity.zig").Key.init(shell.tmux_host, shell.claude_sid[0..shell.claude_sid_len], ""), incoming)) return true;
+    }
+    return false;
+}
+
 pub fn restoreWinner(tabs: anytype, index: usize) usize {
     const tab = &tabs[index];
     var winner = index;
     for (tabs, 0..) |*other, i| {
-        if (!same(tab.tmux_host, tab.tmux_session[0..tab.tmux_session_len], other.tmux_host, other.tmux_session[0..other.tmux_session_len])) continue;
-        if (other.last_viewed > tabs[winner].last_viewed or
-            (other.last_viewed == tabs[winner].last_viewed and i < winner)) winner = i;
+        if (i == index or !sameChat(tab, other)) continue;
+        if (other.manual != tabs[winner].manual) {
+            if (other.manual) winner = i;
+            continue;
+        }
+        if (same(tab.tmux_host, tab.tmux_session[0..tab.tmux_session_len], other.tmux_host, other.tmux_session[0..other.tmux_session_len])) {
+            if (other.last_viewed > tabs[winner].last_viewed or
+                (other.last_viewed == tabs[winner].last_viewed and i < winner)) winner = i;
+            continue;
+        }
+        if (i < winner) winner = i;
     }
     return winner;
 }
@@ -107,8 +134,11 @@ test "restore dedupe keeps newest full record and name, separating hosts and emp
         tmux_host: u8 = 0,
         tmux_session: []const u8 = "remote-3",
         tmux_session_len: usize = 8,
+        claude_sid: [40]u8 = @splat(0),
+        claude_sid_len: u32 = 0,
         last_viewed: u64 = 0,
         name: []const u8,
+        manual: bool = false,
         pinned_top: bool = false,
     };
     var tabs = [_]Tab{
@@ -130,6 +160,30 @@ test "restore dedupe keeps newest full record and name, separating hosts and emp
         } else try std.testing.expectEqual(i, winner);
     }
     try std.testing.expectEqual(@as(usize, 4), kept);
+}
+
+test "MUBO-252 two saved tabs for one chat restore the original tab only" {
+    const Tab = struct {
+        tmux_host: u8 = 0,
+        tmux_session: []const u8 = "",
+        tmux_session_len: usize = 0,
+        claude_sid: [40]u8 = @splat(0),
+        claude_sid_len: u32 = 0,
+        last_viewed: u64 = 0,
+        manual: bool = false,
+    };
+    const sid = "01234567-89ab-8def-8123-0123456789ab";
+    var identity: [40]u8 = @splat(0);
+    @memcpy(identity[0..sid.len], sid);
+    var tabs = [_]Tab{
+        .{ .tmux_session = "live-0123456789ab8def81230123456789ab", .tmux_session_len = 37, .claude_sid = identity, .claude_sid_len = 36, .last_viewed = 10 },
+        .{ .tmux_session = "term-restore", .tmux_session_len = 12, .claude_sid = identity, .claude_sid_len = 36, .last_viewed = 40 },
+    };
+    try std.testing.expectEqual(@as(usize, 0), restoreWinner(&tabs, 0));
+    try std.testing.expectEqual(@as(usize, 0), restoreWinner(&tabs, 1));
+    tabs[1].manual = true;
+    try std.testing.expectEqual(@as(usize, 1), restoreWinner(&tabs, 0));
+    try std.testing.expectEqual(@as(usize, 1), restoreWinner(&tabs, 1));
 }
 
 test "open and adoption identity excludes empty sessions and other hosts" {

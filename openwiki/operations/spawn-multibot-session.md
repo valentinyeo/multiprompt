@@ -71,7 +71,7 @@ node tools/mp-layout.mjs open \
   --star
 ```
 
-`--star` marks the tab as a favorite. The same session, host, workspace, and group opens one tab; a second run leaves the layout revision unchanged. An existing tab in that workspace moves into `--group` when the group differs. A tab that already belongs to another workspace is refused unless `--move` is passed. Group names use the same NFC trim, 1 to 64 units, and no control characters as a live chat. The command sends `X-Layout-Features: groups` and refuses, before starting tmux, when the service does not advertise groups. `node tools/multibot.mjs open` accepts the same shell and chat arguments.
+`--star` marks the tab as a favorite. The same session, host, workspace, and group opens one tab; a second run leaves the layout revision unchanged. An existing tab in that workspace moves into `--group` when the group differs. A tab that already belongs to another workspace is refused unless `--move` is passed. Group names use the same NFC trim, 1 to 64 units, and no control characters as a live chat. The command sends `X-Layout-Features: groups` and refuses, before starting tmux, when the service does not advertise groups. `node tools/multibot.mjs open` accepts the same shell and chat arguments. `mb open --kind chat` for a chat whose name already has a tab on that host prints `already open` and writes nothing, so a restore loop cannot add a second tab for one chat; `--face`, `--color` and `--photo` still apply to that tab.
 
 Run the command once per shell runner. Three runners can share one workspace and one group. Signed-in desktop clients show the group within about ten seconds.
 

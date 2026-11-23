@@ -100,12 +100,12 @@ test('MUBO-252 the chat identity module is tested on its own', () => {
 
 test('MUBO-252 the saved session restore asks the chat winner first', () => {
   assert.match(read('src/session.zig'), /if \(tmux_identity\.restoreWinner\(tabs\[0\.\.tab_count\], t\) != t\) continue;/);
-  assert.match(tmux, /if \(!sameChat\(tab, other\)\) continue;/);
+  assert.match(tmux, /if \(i == index or !sameChat\(tab, other\)\) continue;/);
 });
 
 test('MUBO-252 the account layout sync keeps the row already on screen', () => {
   const source = read('src/account_desktop.zig');
-  assert.match(source, /if \(nativeChatShellFor\(tab\.tmux_host, tab\.tmux_session\)\) continue;/);
+  assert.match(source, /if \(tmux_identity\.duplicateOfLocalChat\(app_state\.shells\[0\.\.app_state\.shell_count\], tab\.tmux_host, tab\.tmux_session\)\) continue;/);
 });
 
 test('MUBO-252 opening an already open chat writes nothing', async () => {
@@ -123,7 +123,7 @@ test('MUBO-252 opening an already open chat writes nothing', async () => {
     return { status: 200, headers, json: async () => ({ revision: 1, layout }) };
   };
   try {
-    const code = await run(['open', '--kind', 'chat', '--title', 'Poteto', '--folder', '/work', '--workspace', 'Work'], {
+    const code = await run(['open', '--kind', 'chat', '--title', 'Poteto', '--folder', '/work', '--workspace', 'Work', '--host', '0'], {
       env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'https://account.test', HOME: dir },
       out: line => out.push(line),
       err: line => out.push(line),

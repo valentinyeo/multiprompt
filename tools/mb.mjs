@@ -279,6 +279,17 @@ async function open(ctx, flags) {
   if (flags.kind === 'chat') {
     const name = flags.title || flags.tmux;
     if (!name || !flags.folder || !flags.workspace) throw new Failure('chat open needs a title, folder and workspace');
+    if (flags.host !== undefined) {
+      const host = hostSlot(flags.host);
+      const wanted = clean(String(name)).toLowerCase();
+      const current = await readLayout(ctx);
+      const opened = current.data.layout.tabs.find(tab => tab.tmux_host === host && clean(String(tab.name || '')).toLowerCase() === wanted);
+      if (opened) {
+        if (flags.face !== undefined || flags.color !== undefined || flags.photo) return style(ctx, { ...flags, _: [opened.tmux_session] });
+        ctx.out(`already open ${opened.tmux_session}`);
+        return 0;
+      }
+    }
     const args = ['open', '--kind', 'chat', '--name', name, '--folder', flags.folder, '--workspace', flags.workspace];
     if (flags.group) args.push('--group', flags.group);
     if (flags.host !== undefined) args.push('--host', String(flags.host));
