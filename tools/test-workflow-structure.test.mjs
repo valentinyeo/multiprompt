@@ -89,6 +89,29 @@ test('Tests starts on every pull request and every master push so drift cannot h
   assert.doesNotMatch(events, /^  (?:workflow_run|repository_dispatch):/m);
 });
 
+test('SOFT-1966 chat row negative control requires the reverted identity field', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const guard = workflow.match(/if ! (grep[^\n]+); then\n\s+echo 'Base no longer uses identity-only matching'/)?.[1];
+  assert.ok(guard);
+  const dir = fs.mkdtempSync(join(tmpdir(), 'chat-row-guard-'));
+  try {
+    fs.mkdirSync(join(dir, '.chat-row-base/src'), { recursive: true });
+    for (const [source, expected] of [
+      ['    client_id: u64 = 0,\n', 0],
+      ['pub fn requeueOnReconnect(state: OutboxState, has_client_id: bool) bool {\n    return has_client_id;\n}\n', 1],
+      ['    text: []const u16,\n', 1],
+    ]) {
+      fs.writeFileSync(join(dir, '.chat-row-base/src/chat_echo.zig'), source);
+      const result = spawnSync('bash', ['-c', guard], { cwd: dir, encoding: 'utf8', timeout: 5000 });
+      assert.equal(result.status, expected, result.stderr);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('red regression job installs the Zig compiler before running changed suites', () => {
   const red = fs.readFileSync(new URL('../.github/workflows/check-red-run.yml', import.meta.url), 'utf8');
   const install = red.indexOf('      - name: Install Zig 0.16.0');
