@@ -200,6 +200,7 @@ const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_RE
 const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -526,6 +527,7 @@ const RESTART_HOSTS = 3;
 const RestartChatJob = struct {
     all: bool = false,
     fresh: bool = false,
+    auto_switch: bool = false,
     switch_to: u8 = 0,
     count: u8 = 0,
     identities: [RESTART_HOSTS]SessionIdentity = undefined,
@@ -1013,6 +1015,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
+        SEARCH_CHAT_AUTO_SWITCH_OFFSET => "Chat View: Auto-switch AI when a plan runs out fallback next ai usage limit rate limit quota",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1543,7 +1546,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, SEARCH_CHAT_SWITCH_CODEX_OFFSET, SEARCH_CHAT_SWITCH_PI_OFFSET, SEARCH_CHAT_AUTO_SWITCH_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2832,6 +2835,23 @@ test "IGSH-2280 a switch reply replaces the shell provider and sid" {
     try std.testing.expect(adoptedSwitch(std.testing.allocator, "{\"status\":\"busy\",\"reason\":\"chat_busy\"}", &sid_buf) == null);
 }
 
+fn autoSwitchRequest(out: []u8, identity: SessionIdentity) ?[]const u8 {
+    const provider = identity.provider();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    if (provider.len == 0 or sid.len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"set_auto_switch\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"toggle\":true}}", .{ identity.owner, identity.host.index(), provider, sid }) catch null;
+}
+
+test "SOFT-2469 the auto-switch row toggles the saved host setting" {
+    var buf: [256]u8 = undefined;
+    const identity = SessionIdentity.remote(1, "same-chat", "11111111-2222-4333-8444-555555555555", 1) orelse return error.TestUnexpectedResult;
+    const request = autoSwitchRequest(&buf, identity) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"op\":\"set_auto_switch\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"toggle\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"claude\"") != null);
+    try std.testing.expect(autoSwitchRequest(&buf, SessionIdentity.remote(1, "same-chat", "", 1) orelse return error.TestUnexpectedResult) == null);
+}
+
 fn switchAiDone(target: u8) []const u8 {
     return switch (target) {
         1 => "Chat switched to Claude",
@@ -2882,6 +2902,20 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
 }
 
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
+    if (job.auto_switch) {
+        const Reply = struct { result: struct { status: []const u8 = "", on: bool = false } = .{} };
+        const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+            restartChatNotice("Auto-switch AI failed: the server did not answer");
+            return;
+        };
+        defer parsed.deinit();
+        if (!std.mem.eql(u8, parsed.value.result.status, "ok")) {
+            restartChatNotice("Auto-switch AI failed: this live chat cannot change it");
+            return;
+        }
+        restartChatNotice(if (parsed.value.result.on) "Auto-switch AI is on" else "Auto-switch AI is off");
+        return;
+    }
     if (job.switch_to != 0) {
         const parsed = std.json.parseFromSlice(SwitchEnvelope, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
             restartChatNotice("Switch AI failed: the server did not answer");
@@ -2949,6 +2983,8 @@ fn restartChatThread(job: *RestartChatJob) void {
         const identity = job.identities[0];
         const request = if (job.switch_to != 0)
             switchAiRequest(&buf, identity, switchAiName(job.switch_to)) orelse return
+        else if (job.auto_switch)
+            autoSwitchRequest(&buf, identity) orelse return
         else if (job.fresh)
             std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ identity.owner, identity.host.index(), identity.provider(), std.mem.sliceTo(&identity.sid, 0) }) catch return
         else
@@ -2966,21 +3002,25 @@ fn restartChatThread(job: *RestartChatJob) void {
 }
 
 pub fn startRestartChat(all: bool) bool {
-    return startChatJob(all, false, 0, app_state.active_shell);
+    return startChatJob(all, false, false, 0, app_state.active_shell);
 }
 
 pub fn startSwitchAi(tab: u32, target: u8) bool {
     if (target < 1 or target > 3) return false;
-    return startChatJob(false, false, target, tab);
+    return startChatJob(false, false, false, target, tab);
 }
 
 pub fn startFreshChat(tab: u32) bool {
-    return startChatJob(false, true, 0, tab);
+    return startChatJob(false, true, false, 0, tab);
 }
 
-fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
+pub fn startAutoSwitchToggle(tab: u32) bool {
+    return startChatJob(false, false, true, 0, tab);
+}
+
+fn startChatJob(all: bool, fresh: bool, auto_switch: bool, switch_to: u8, tab: u32) bool {
     const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
-    job.* = .{ .all = all, .fresh = fresh, .switch_to = switch_to };
+    job.* = .{ .all = all, .fresh = fresh, .auto_switch = auto_switch, .switch_to = switch_to };
     if (all) {
         for (0..app_state.shell_count) |i| {
             if (job.count >= RESTART_HOSTS) break;
@@ -4685,6 +4725,14 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = sw.id;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        liveChatTab(app_state.active_shell) and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Auto-switch AI when a plan runs out", "fallback next ai usage limit rate limit quota ran out of plan" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_AUTO_SWITCH_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
