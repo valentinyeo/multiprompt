@@ -710,7 +710,7 @@ test "Chat View requests grayscale Regular body and Bold emphasis" {
     try std.testing.expectEqual(@as(i32, 400), (ChatFontOptions{}).body_weight);
     try std.testing.expectEqual(@as(i32, 700), (ChatFontOptions{}).bold_weight);
     try std.testing.expect((ChatFontOptions{}).body_weight < (ChatFontOptions{}).bold_weight);
-    inline for (.{ @embedFile("chat_render.zig"), @embedFile("chat_composer.zig") }) |source| {
+    inline for (.{ @embedFile("chat_fonts.zig"), @embedFile("chat_composer.zig") }) |source| {
         var lines = std.mem.splitScalar(u8, source, '\n');
         var requests: usize = 0;
         while (lines.next()) |line| {
@@ -722,7 +722,7 @@ test "Chat View requests grayscale Regular body and Bold emphasis" {
         try std.testing.expect(requests > 0 or std.mem.indexOf(u8, source, ".chat(") != null);
         try std.testing.expect(std.mem.indexOf(u8, source, "@import(\"fonts.zig\").chat(") != null);
     }
-    try std.testing.expect(std.mem.indexOf(u8, @embedFile("chat_render.zig"), "style.bold or level > 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, @embedFile("chat_fonts.zig"), "style.bold or level > 0") != null);
     inline for (.{ UI_REGULAR, UI_ITALIC }) |file| {
         try std.testing.expectEqual(@as(u16, 400), std.mem.readInt(u16, fontTable(file, "OS/2")[4..6], .big));
     }

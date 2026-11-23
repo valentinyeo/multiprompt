@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2499 extracts font helpers from `src/chat_render.zig` at `c98cd6ce12ab6d746418d248a766a52ed1b9ed0b`. Both covered functions, `chatRelayout` and `chatEchoNotSent`, are byte-identical to the previous sync commit, and every other recorded file hash still matches. Only the render hash and sync commit change; bounds, decisions, probes and properties stay unchanged. Hosted CI reruns the native probes, inherited-findings comparison and mutation checks.
+
 SOFT-2525 merged `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6`, retaining its client-ID reconciliation and updated native probes. All nine covered send functions, the extracted timeout branch and restore guard are byte-identical to that master tip, and all other recorded file hashes match it. The checked session routing and Pi login reply payload remain outside the fixed-session model. The coverage record now names that master tip and the merged send file hash; bounds, decisions, probes and properties remain unchanged from master.
 
 SOFT-2525 restores Pi login's one-argument live-reply guard by carrying the checked session and bytes together. Compared with `cc067da0c3d9b2c22b9db957ee1c0c9daff113ab`, all nine covered send functions, the extracted timeout branch and restore guard are byte-identical, and every other recorded file hash is unchanged. Only the send file hash and sync commit move; bounds, decisions, probes and properties remain unchanged.
