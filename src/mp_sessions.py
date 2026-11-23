@@ -76,11 +76,13 @@ def sync_agent(send, path, name=None, archive=False):
             raise ValueError("invalid chat address")
         if name is not None:
             config["hypertask_desired_name"] = name
-        if archive:
+        if archive and not config.get("hypertask_archived"):
             config.update(hypertask_archive_pending=True, hypertask_closed=True)
         def save():
             latest = send.read_json(path) or {}
             latest.update({key: value for key, value in config.items() if key.startswith("hypertask_")})
+            if config.get("hypertask_closed"):
+                latest["enabled"] = False
             for key in ("hypertask_create_pending", "hypertask_archive_pending"):
                 if key not in config:
                     latest.pop(key, None)
@@ -293,11 +295,13 @@ def pick_target(send, listing, target):
         raise ValueError("empty chat name")
     rows = session_catalog(send, listing)
     exact = [row for row in rows if send.squash(row.get("name") or "") == key]
+    exact = [row for row in exact if not row.get("hypertask_closed")] or exact
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
         raise ValueError("more than one chat is named " + repr(target) + "; pass the {session} form")
     prefixed = [row for row in rows if send.squash(row.get("name") or "").startswith(key)]
+    prefixed = [row for row in prefixed if not row.get("hypertask_closed")] or prefixed
     if len(prefixed) == 1:
         return prefixed[0]
     if len(prefixed) > 1:
@@ -694,6 +698,9 @@ def cmd_close(args):
     target = pick_target(send, listing, args.name)
     if not target.get("sid"):
         raise ValueError("chat has no session id")
+    if not target.get("tab_open") and not target.get("running") and not args.permanent:
+        print(json.dumps(dict(ok=True, status="closed", name=target.get("name"), tmux=target["tmux"]), separators=(",", ":")))
+        return 0
     if target.get("busy") and not args.force:
         raise ValueError((target.get("name") or target["tmux"]) + " is busy; pass --force to close anyway")
     tab_closed = None
@@ -705,7 +712,7 @@ def cmd_close(args):
     stopped = send.reader_cli("stop", target["provider"], target["sid"])
     result = dict(ok=stopped.get("status") == "stopped", status="closed", name=target.get("name"),
                   tmux=target["tmux"], tab_closed=tab_closed)
-    if result["ok"]:
+    if result["ok"] and args.permanent:
         path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
         try:
             result["hypertask_agent"] = sync_agent(send, path, archive=True)
@@ -751,6 +758,7 @@ def parse(argv):
     ending = commands.add_parser("close", help="stop a chat and close its tab")
     ending.add_argument("name")
     ending.add_argument("--force", action="store_true")
+    ending.add_argument("--permanent", action="store_true", help="close for good and archive this chat's Hypertask agent")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
     if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "sync-agent", "-h", "--help"}:

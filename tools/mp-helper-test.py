@@ -258,6 +258,20 @@ class MpHelperTest(unittest.TestCase):
         self.assertEqual(result["visible_error"], "reply_timeout")
         self.assertEqual(len([call for call in self.events("zsb") if call[0] == "session-open"]), 1)
 
+    def test_SOFT_2443_replacing_a_permanently_closed_helper_gets_a_new_identity(self):
+        first = self.parsed(self.run_helper("start", "--name", "A"))
+        path = next(self.host.glob("*.config.json"))
+        config = json.loads(path.read_text())
+        config.update(enabled=False, hypertask_closed=True, hypertask_agent_id="old-agent")
+        path.write_text(json.dumps(config))
+        replacement = self.parsed(self.run_helper("start", "--name", "A"))
+        self.assertNotEqual(first["sid"], replacement["sid"])
+        again = self.parsed(self.run_helper("start", "--name", "A"))
+        self.assertEqual(replacement["sid"], again["sid"])
+        rows = self.parsed(self.run_helper("list", "--json"))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sid"], replacement["sid"])
+
     def test_SOFT_2013_a_repeat_start_keeps_a_running_helper_enabled(self):
         first = self.parsed(self.run_helper("start", "--name", "A"))
         path = next(iter(self.configs()))

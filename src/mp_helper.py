@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 
 PROVIDER = "claude"
@@ -58,7 +59,7 @@ def helpers(parent):
     rows = []
     for path in sorted(send.host_root().glob("*.config.json")):
         config = send.read_json(path)
-        if not config or config.get("helper_parent") != parent or not isinstance(config.get("helper_name"), str):
+        if not config or config.get("hypertask_closed") or config.get("helper_parent") != parent or not isinstance(config.get("helper_name"), str):
             continue
         state = send.read_json(path.with_name(path.name[: -len(".config.json")] + ".state.json")) or {}
         alive = send.pid_alive(state.get("pid"))
@@ -107,13 +108,23 @@ def start(args):
     if task is not None and (not task.strip() or "\x00" in task):
         raise ValueError("empty task")
     sid, tmux, message_id = identity(parent, name)
+    existing = next((row for row in helpers(parent) if row["name"].casefold() == name.casefold()), None)
+    if existing:
+        sid, tmux = existing["sid"], existing["tmux"]
+        message_id = "mp-helper-" + tmux[5:]
     if tmux == parent:
         raise ValueError("a chat cannot be its own helper")
     path = send.host_root() / (host_key(sid) + ".config.json")
     config = send.read_json(path)
+    if config and config.get("hypertask_closed"):
+        sid = str(uuid.uuid4())
+        tmux = "live-" + sid.replace("-", "")
+        message_id = "mp-helper-" + sid.replace("-", "")
+        path = send.host_root() / (host_key(sid) + ".config.json")
+        config = None
     if config and (config.get("helper_parent") != parent or config.get("cwd") != folder):
         raise ValueError("a helper named " + repr(name) + " already runs here with another folder; pick another name")
-    config = dict(config or dict(enabled=False), cwd=folder, tmux=tmux, helper_parent=parent, helper_name=name)
+    config = dict(config or dict(enabled=False), cwd=folder, tmux=tmux, sid=sid, provider=PROVIDER, helper_parent=parent, helper_name=name)
     if args.model:
         config["model"] = args.model
     if args.effort:

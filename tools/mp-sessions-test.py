@@ -305,6 +305,18 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(restarted["status"], "restarted")
         self.assertIn(["start", "claude", started["sid"]], self.events("host"))
 
+    def test_SOFT_2443_permanent_close_never_reuses_the_old_agent_binding(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Ops"))
+        closed = self.parsed(self.run_sessions("close", "Ops", "--permanent"))
+        self.assertTrue(closed["ok"])
+        refused = self.run_sessions("restart", "Ops")
+        self.assertEqual(refused.returncode, 2)
+        replacement = self.parsed(self.run_sessions("start", "--name", "Ops"))
+        self.assertNotEqual(replacement["sid"], started["sid"])
+        self.assertNotEqual(replacement["tmux"], started["tmux"])
+        repeated = self.parsed(self.run_sessions("start", "--name", "Ops"))
+        self.assertEqual(repeated["sid"], replacement["sid"])
+
     def test_SOFT_3055_close_refuses_a_busy_chat(self):
         started = self.parsed(self.run_sessions("start", "--name", "Busy"))
         key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]

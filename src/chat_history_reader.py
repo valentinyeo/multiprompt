@@ -6813,6 +6813,8 @@ def host_cli(argv):
     paths = host_paths(provider, sid)
     if command == "enable":
         config = host_read(paths["config"]) or {}
+        if config.get("hypertask_closed"):
+            return dict(status="refused", reason="chat_closed")
         config.update(enabled=True, provider=provider, sid=sid)
         if tmux is not None:
             config["tmux"] = tmux
@@ -6832,7 +6834,10 @@ def host_cli(argv):
         host_stop(provider, sid)
         config = host_read(paths["config"]) or {}
         if config.get("hypertask_agent_id"):
-            host_write(paths["config"], dict(config, enabled=False, hypertask_archive_pending=True, hypertask_closed=True))
+            config.update(enabled=False, hypertask_closed=True)
+            if not config.get("hypertask_archived"):
+                config["hypertask_archive_pending"] = True
+            host_write(paths["config"], config)
             host_hypertask_sync(provider, sid, archive=True)
         else:
             try:

@@ -93,6 +93,28 @@ jobs:
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes
         run: node tools/check-timer-ratchet.mjs
+      - name: Prove the original rename misses Hypertask
+        run: |
+          set +e
+          MP_AGENT_SESSIONS_SOURCE=tools/fixtures/SOFT-2443/mp_sessions.before.py timeout 60 python3 tools/hypertask-agent-test.py AgentTest.test_rename_reaches_hypertask_with_chat_token > before-agent-rename.log 2>&1
+          status=$?
+          set -e
+          cat before-agent-rename.log
+          test "$status" = 1
+          grep -F 'AssertionError:' before-agent-rename.log
+          grep -F 'Original chat' before-agent-rename.log
+      - name: Verify chat agent lifecycle without live services
+        run: timeout 120 python3 tools/hypertask-agent-test.py -v
+      - name: Verify existing session and helper commands
+        run: |
+          timeout 120 python3 tools/mp-sessions-test.py -v
+          timeout 120 python3 tools/mp-helper-test.py -v
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: agent-rename-before
+          path: before-agent-rename.log
+          if-no-files-found: ignore
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup

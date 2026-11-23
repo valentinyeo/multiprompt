@@ -174,7 +174,26 @@ class AgentTest(unittest.TestCase):
         self.sync(archive=True)
         self.sync(archive=True)
         self.assertTrue(self.agents['agent-one']['archived'])
+        config = self.send.read_json(self.path)
+        self.assertFalse(config['enabled'])
+        self.assertTrue(config['hypertask_closed'])
+        self.assertNotIn('hypertask_archive_pending', config)
         self.assertEqual([row[1] for row in self.requests], ['/api/mcp/agents/agent-one/archive'])
+
+    def test_only_permanent_close_requests_archive(self):
+        with patch.object(self.send, 'reader_cli', return_value=dict(status='stopped')):
+            self.sessions.cmd_close(self.sessions.parse(['close', CHAT['name']]))
+            self.assertEqual(self.requests, [])
+            self.sessions.cmd_close(self.sessions.parse(['close', CHAT['name'], '--permanent']))
+        self.assertTrue(self.agents['agent-one']['archived'])
+        self.assertEqual(self.requests[-1][2], 'Bearer ' + token('agent-one'))
+
+    def test_permanently_closed_runtime_cannot_reenable_its_archived_agent(self):
+        self.sync(archive=True)
+        reader = self.reader()
+        enabled = reader.host_cli(['enable', CHAT['provider'], CHAT['sid']])
+        self.assertEqual(enabled, dict(status='refused', reason='chat_closed'))
+        self.assertFalse(reader.host_enabled(CHAT['provider'], CHAT['sid']))
 
     def test_mismatched_token_cannot_rename_another_agent(self):
         self.token_file.write_text(token('other-agent'))

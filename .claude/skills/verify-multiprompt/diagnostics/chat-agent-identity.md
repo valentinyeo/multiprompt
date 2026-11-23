@@ -4,7 +4,7 @@ SOFT-2443 links each hosted chat record to one Hypertask agent ID and token-file
 
 ## Hosted proof
 
-`.github/workflows/hypertask-agent.yml` runs `timeout 120 python3 tools/hypertask-agent-test.py -v` on GitHub Ubuntu. All HTTP requests go to a loopback fake server. No live credentials or Hypertask calls are needed.
+The `reader-tests` job in `.github/workflows/test.yml` runs `timeout 120 python3 tools/hypertask-agent-test.py -v` on GitHub Ubuntu. All HTTP requests go to a loopback fake server. No live credentials or Hypertask calls are needed.
 
 The workflow first runs the rename regression against `tools/fixtures/SOFT-2443/mp_sessions.before.py` and requires the original name to remain unchanged. The same test must then pass against production code. It checks the resulting remote name and the exact chat-token authorization. Other cases cover distinct agents, duplicate-binding refusal, close/archive, retries, denied permissions, parent-token isolation, and an actual `mb rename` followed by the desktop's name-publication boundary and runtime sync.
 
@@ -18,6 +18,6 @@ New-agent creation requires an explicitly supplied `HYPERTASK_MANAGEMENT_KEY`. T
 
 Rename and archive requests always use that chat's own token. Hypertask currently rejects these operations for agent tokens with `Agents cannot manage agents`. Failed operations remain pending and report an error; they never fall back to the owner's login. This upstream permission limit prevents a live end-to-end success today. The fake server proves both permitted behavior and the refusal path, not a production API permission grant.
 
-Closing through `mp-sessions close` or disabling a helper is permanent for this binding. Stopping or rotating the runtime is not. Closed records retain their agent ID for archive recovery. A new top-level chat using a closed name gets a new session address. Hiding a desktop tab alone is not treated as permanent closure.
+Closing through `mp-sessions close --permanent` or disabling a helper is permanent for this binding. Ordinary Close, stopping or rotating the runtime is not. Closed records retain their agent ID for archive recovery. A new top-level chat using a closed name gets a new session address. Hiding a desktop tab alone is not treated as permanent closure.
 
 No Windows UI, Android UI, production archive or production self-rename success is claimed by this proof. Existing clients can ignore the additional helper-record fields; no shared wire schema changes.
