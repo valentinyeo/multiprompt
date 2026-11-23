@@ -1,21 +1,3 @@
-"""Slow-network boundary for the slow-network journey.
-
-Two roles, both selected by the first argument:
-
-  ssh <ssh args...>   the stand-in ssh client the app spawns. It connects to the
-                      local slow proxy, hands over its ssh argv and relays the
-                      app's stdin/stdout over that socket.
-
-  proxy               listens on MP_VERIFY_SLOW_PORT. Every connection is paired
-                      with a real boundary process for the host side on the next
-                      port, and both directions are delayed by MP_VERIFY_SLOW_MS.
-                      The app's remote traffic therefore crosses a real TCP
-                      socket with an added one-way delay, while the remote host
-                      itself stays the repository's SSH/tmux stand-in.
-
-Nothing here writes app state. The boundary process is the same
-tools/verify-chat-delivery/boundary.py the other journeys use.
-"""
 import json
 import os
 import socket
@@ -55,8 +37,6 @@ def send_frame(sock, value):
 
 
 def ssh_client(args):
-    # Real ssh answers -V locally. The app's ssh-path probe only allows 3 s, so
-    # the version query must not cross the delay the rest of the link carries.
     if args == ['-V']:
         sys.stdout.write('OpenSSH_verification\n')
         sys.stdout.flush()
@@ -98,8 +78,6 @@ def ssh_client(args):
 
 
 def pump(src, dst, delay):
-    """Relay src to dst, holding every chunk for delay seconds without
-    serialising the stream behind the sleep."""
     pending = []
     lock = threading.Lock()
     finished = threading.Event()
