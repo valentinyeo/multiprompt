@@ -298,7 +298,6 @@ pub const FocusTraceEvent = enum {
     activateapp_inactive,
     blocked,
     activation_refocus,
-    activation_raise,
     allowed,
     setfocus_null_return,
     setfocus_returned,

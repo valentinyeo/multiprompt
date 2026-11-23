@@ -660,12 +660,6 @@ def shell():
                 identity = "history-tail-" + str(i)
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
-        tail_calls = state().get("soft2779Tail")
-        if isinstance(tail_calls, int) and tail_calls > 0:
-            for i in range(tail_calls):
-                identity = "soft-2779-tail-" + str(i)
-                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 40))]))
-                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 200, is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
@@ -1101,20 +1095,10 @@ def install_reaction_worker(namespace):
 def reader_namespace():
     import base64
 
-    if os.name == "nt" and os.environ.get("MP_VERIFY_STATE"):
-        verify_dir = str(Path(__file__).resolve().parent)
-        os.environ["PYTHONPATH"] = verify_dir + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
-        spec = importlib.util.spec_from_file_location("sitecustomize", Path(__file__).with_name("sitecustomize.py"))
-        site = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(site)
-
-    if globals().get("MODE") == "bootstrap-fresh-start":
+    if MODE == "bootstrap-fresh-start":
         source = (Path(__file__).resolve().parents[2] / "src/chat_history_reader.py").read_text(encoding="utf-8")
     else:
         source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
-    published = ROOT / "app-reader.py"
-    if not published.exists():
-        published.write_text(source, encoding="utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
@@ -1236,21 +1220,6 @@ def reader_namespace():
         fixture.install(namespace, ROOT, record)
         install_reaction_worker(namespace)
         record("fresh-start-boundary.jsonl", worker="in-process production dispatch and connector polling")
-        if os.name == "nt":
-            verify_dir = str(Path(__file__).resolve().parent)
-            original_subprocess = namespace["subprocess"]
-
-            class FreshStartHostSpawn:
-                def __getattr__(self, name):
-                    return getattr(original_subprocess, name)
-
-                def Popen(self, args, *positional, **options):
-                    env = dict(options.get("env") or os.environ)
-                    env["PYTHONPATH"] = verify_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-                    options["env"] = env
-                    return original_subprocess.Popen(args, *positional, **options)
-
-            namespace["subprocess"] = FreshStartHostSpawn()
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1349,9 +1318,6 @@ def run_message_worker():
 
 def terminal_session(command):
     value = state()
-    if value.get("name") == "server-shell-input" and "exec ${SHELL:-bash} -l" in command:
-        record("invocations.jsonl", kind="login", session="server-shell")
-        return "server-shell", None
     if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
         record("invocations.jsonl", kind="login", session="workspace")
         return "workspace", None
@@ -1393,7 +1359,6 @@ def terminal_frame(session, size):
 
 def terminal_reader():
     import base64
-    import binascii
     import threading
 
     box = dict(size=[24, 80], opening=None, closed=False)
@@ -1417,14 +1382,6 @@ def terminal_reader():
                 elif isinstance(value.get("size"), list):
                     box["size"] = value["size"]
                     changed.set()
-                elif isinstance(value.get("input"), str) and state().get("name") == "server-shell-input":
-                    try:
-                        data = base64.b64decode(value["input"], validate=True)
-                    except (ValueError, binascii.Error):
-                        continue
-                    if b"\x03" in data:
-                        (ROOT / "interrupt.json").write_text(json.dumps(dict(bytes=len(data))), encoding="utf-8")
-                        changed.set()
         except (OSError, ValueError):
             pass
         finally:
@@ -1450,18 +1407,13 @@ def terminal_reader():
     if (ROOT / "console-detached").exists():
         return 0
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
-    transcript = ""
-    if state().get("name") == "server-shell-input":
-        marker = "SOFT3048SCROLL-42"
-        transcript = "".join(f"scroll-{index:03d}\r\n" for index in range(200)) + marker + "\r\nINTERRUPTIBLE\r\n"
-        (ROOT / "scroll-ready.json").write_text(json.dumps(dict(marker=marker, lines=200)), encoding="utf-8")
     previous = None
     while not box["closed"]:
         if (ROOT / "console-detached").exists():
             return 0
         key, shown, text, grey, row = terminal_frame(session, box["size"])
         if key != previous:
-            send((text + "\r\n" + transcript).encode("utf-8") if transcript else text.encode("utf-8"))
+            send(text.encode("utf-8"))
             rows = [line.rstrip() for line in shown.splitlines()]
             record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=8 if grey else 7, promptRow=row, greySuggestion=grey)
             (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")
@@ -1623,14 +1575,8 @@ def bootstrap_fresh_start_host():
     paths = namespace["host_paths"]("claude", sid)
     if not paths["config"].exists():
         namespace["host_write"](paths["config"], dict(
-            enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
+            enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
             command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
-    if not namespace["host_alive"]("claude", sid):
-        for stale in ("lock", "owner", "socket"):
-            try:
-                paths[stale].unlink()
-            except OSError:
-                pass
     started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
     record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)
     if started.get("status") not in ("started", "already"):
@@ -1650,7 +1596,7 @@ def serve_reader():
         paths = namespace["host_paths"]("claude", sid)
         if not paths["config"].exists():
             namespace["host_write"](paths["config"], dict(
-                enabled=True, provider="claude", sid=sid, tmux=tmux, cwd=cwd, model="sonnet",
+                enabled=True, tmux=tmux, cwd=cwd, model="sonnet",
                 command=[sys.executable, str(Path(__file__).with_name("fresh-start-agent.py"))]))
         started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
         record("fresh-start-host.jsonl", stage="host_start", sid=sid, result=started)

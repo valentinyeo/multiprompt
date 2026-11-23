@@ -95,7 +95,7 @@ fn browserPaneOwnsForegroundHwnd(fg: HANDLE, _: HANDLE) bool {
 fn foregroundIsOurs() bool {
     return foreground != null and foreground != win(9);
 }
-fn focusTrace(event: enum { allowed, activation_refocus, activation_raise, blocked, setfocus_null_return, setfocus_returned }, _: HANDLE, _: usize) void {
+fn focusTrace(event: enum { allowed, activation_refocus, blocked, setfocus_null_return, setfocus_returned }, _: HANDLE, _: usize) void {
     if (event == .blocked) blocked_logs += 1;
 }
 fn debugLog(text: []const u8) void {

@@ -5,7 +5,6 @@
                 $null -ne $state -and $null -ne $inbox -and $state.active_workspace -eq 0 -and @($state.tabs).Count -eq 3 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'tmux' -and $state.tabs[1].tmux_session -eq 'second' -and $state.tabs[1].tmux_host -eq 2 -and $inbox.active_workspace -eq 0 -and $inbox.active_shell_id -eq $state.tabs[1].shell_id -and @($inbox.shells | Where-Object { $_.sid -eq $inbox.active_shell_id -and $_.name -eq 'Second' }).Count -eq 1
             } 'second seeded remote tab active in Other' 60
             Save-Json @{ session = (Read-Session); inbox = (Read-Inbox) } 'sessions-initial.json'
-            . (Join-Path $PSScriptRoot 'picker-refresh.ps1')
             Press @(0x12, 0x33) 'Alt+3: switch to Example workspace'
             Wait-Until {
                 $state = Read-Session

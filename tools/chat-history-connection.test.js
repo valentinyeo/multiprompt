@@ -73,7 +73,6 @@ var lengths: [3]usize = @splat(0);
 var offsets: [3]usize = @splat(0);
 fn GetTickCount64() u64 { return now; }
 fn Sleep(ms: u32) void { now += ms; }
-fn uiThreadBusy() bool { return false; }
 fn CloseHandle(_: HANDLE) i32 { closes += 1; return 1; }
 fn TerminateProcess(_: HANDLE, _: u32) i32 { terminations += 1; return 1; }
 fn WaitForSingleObject(_: HANDLE, _: u32) u32 { return if (mode == .dead or mode == .truncated) 0 else 258; }

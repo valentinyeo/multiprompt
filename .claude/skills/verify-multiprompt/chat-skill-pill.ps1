@@ -54,16 +54,6 @@ foreach ($theme in @('dark', 'light')) {
     Press @(0x11, 0x0D) 'Ctrl+Enter: send ordinary message'
     Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'ordinary message left composer'
     $captures += Save-SkillPill ($theme + '-plain-sent') $theme $thread $false $edit
-    foreach ($case in @(
-        @{ name = 'mid-skill'; text = 'why is this not done via /pill-proof ?' },
-        @{ name = 'end-skill'; text = 'why is this not done via /pill-proof' }
-    )) {
-        Assert-ChatTyping $case.text ($theme + '-' + $case.name)
-        $captures += Save-SkillPill ($theme + '-' + $case.name + '-draft') $theme $edit $false
-        Press @(0x11, 0x0D) 'Ctrl+Enter: send literal slash skill mention'
-        Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'literal slash mention left composer'
-        $captures += Save-SkillPill ($theme + '-' + $case.name + '-sent') $theme $thread $false $edit
-    }
     Assert-ChatTyping '/pill-proof arguments stay normal' ($theme + '-skill')
     $captures += Save-SkillPill ($theme + '-skill-draft') $theme $edit $true
     if ($theme -eq 'dark') { Snapshot 'action' }

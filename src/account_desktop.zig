@@ -446,30 +446,6 @@ pub fn accountPush() void {
     };
     startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
 }
-pub fn accountServerPaletteName(slot: u8) []const u8 {
-    const fallbacks = [_][]const u8{ "Server 1", "Server 2", "Server 3" };
-    if (slot >= fallbacks.len) return "Server";
-    if (app_state.g_account_base) |base| {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const parsed = session_layout.parse(arena.allocator(), base) catch null orelse {
-            if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
-                if (host.name.len > 0) return host.name;
-            }
-            return fallbacks[slot];
-        };
-        defer parsed.deinit();
-        if (account_hosts.isRemoved(parsed.value.removed_hosts orelse &.{}, slot)) return "";
-        if (account_hosts.find(parsed.value.hosts orelse &.{}, slot)) |layout_host| {
-            if (layout_host.name.len > 0) return layout_host.name;
-        }
-    }
-    if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
-        if (host.name.len > 0) return host.name;
-    }
-    return fallbacks[slot];
-}
-
 pub fn accountRemoveServer(slot: u8) void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_busy or g_account_key_prompt_active) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -2485,7 +2461,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
         }
         var window_pid: DWORD = 0;
         const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
-        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG, 250, null) != 0;
+        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 8000, null) != 0;
         const action = secondLaunchAction(alive, is_app, has_window, responsive);
         var log_buf: [128]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log_buf, "second-launch: {s} pid={d} reason={s}", .{ @tagName(action), pid, if (!alive) "not_alive" else if (!is_app) "not_app" else if (!has_window) "no_window" else if (!responsive) "hung" else "responsive" }) catch "second-launch");
@@ -2505,12 +2481,12 @@ pub fn accountClaim(hwnd: HANDLE) bool {
                 const process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
                 if (process != null) {
                     defer _ = CloseHandle(process);
-                    _ = TerminateProcess(process, 1);
-                    _ = WaitForSingleObject(process, 0);
-                    result = WaitForSingleObject(mutex, 0);
+                    if (TerminateProcess(process, 1) != 0 and WaitForSingleObject(process, 5000) == 0) {
+                        result = WaitForSingleObject(mutex, 5000);
+                    }
                 }
             },
-            .refuse => result = WaitForSingleObject(mutex, 0),
+            .refuse => result = WaitForSingleObject(mutex, 3000),
         }
     }
     if (result != 0 and result != 0x80) {

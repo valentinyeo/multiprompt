@@ -1,1 +1,0 @@
-Other slow-internet freezes after SOFT-3066

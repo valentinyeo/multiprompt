@@ -1,1 +1,0 @@
-A chat can read its own Multibot name

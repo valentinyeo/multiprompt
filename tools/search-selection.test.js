@@ -83,7 +83,7 @@ test("destination searches filter open workspaces, closed workspaces and groups"
     assert.match(body, /g_search_result_count = 0;/,
       "root commands must not leak into the submenu before Back");
   }
-  const helper = functionBody("sortFilteredResultsAfterBack", "preferFirstFilteredResultAfterBack");
+  const helper = functionBody("preferFirstFilteredResultAfterBack", "updateSearchResults");
   assert.match(helper, /paletteQueryRank\(target\) > paletteQueryRank/,
     "exact names must precede prefix and substring matches");
 });

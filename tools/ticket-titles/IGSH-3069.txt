@@ -1,1 +1,0 @@
-Alt+Tab does not bring the app to the front

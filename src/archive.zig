@@ -635,9 +635,6 @@ pub fn requestRemoteTmuxPaneRedraw(idx: u32) void {
 const RemoteKillOutcome = session_kills.Outcome;
 
 fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8, agent: u8, pending: ?session_kills.Token) RemoteKillOutcome {
-    if (pending == null and @import("ui_thread.zig").busy()) {
-        return if (queuePendingSessionKill(session, host, sid, agent)) .retry else .unsafe;
-    }
     if (!remoteTmuxTargetIsSafe(session)) {
         debugLog("killRemoteTmuxSession: unsafe session skipped");
         return .unsafe;
@@ -1117,8 +1114,7 @@ pub fn archiveTabAt(i: usize) void {
     const entry = rememberArchivedTab(i) orelse return;
     const ts_len = entry.tmux_session_len;
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
-    const outcome = killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "", 1, null);
-    if (outcome == .unsafe) {
+    if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "", 1, null) != .gone) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;

@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 MP_SEND = ROOT / "tools" / "mp-send"
@@ -48,73 +47,55 @@ class MpSendTest(unittest.TestCase):
     def run_send(self, *args, **extra):
         return subprocess.run([sys.executable, str(MP_SEND), *args], capture_output=True, text=True, env=self.env(**extra), timeout=120)
 
-    def test_SOFT_3085_unknown_session_is_refused_even_with_a_terminal_flag(self):
+    def test_IGSH_1266_send_inserts_one_message_through_the_shared_store(self):
         done = self.run_send("claude", SID, "check the build", "--tmux", "mp-test-send")
-        self.assertEqual(done.returncode, 2, done.stderr)
-        self.assertEqual(done.stdout, "")
-        self.assertIn("no live host or pane agent", done.stderr)
-        self.assertFalse(self.store().exists())
+        self.assertEqual(done.returncode, 3, done.stderr)
+        token = done.stdout.strip()
+        self.assertRegex(token, r"\Amp-[0-9a-f]{32}\Z")
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], token)
+        self.assertEqual(rows[0][1:4], ("claude", SID, "check the build"))
+        self.assertEqual(rows[0][4:6], ("failed", "session_unavailable"))
+        self.assertEqual(rows[0][6], 1)
+        with sqlite3.connect(self.store()) as db:
+            self.assertEqual(db.execute("SELECT origin FROM shared_messages WHERE id=?", (token,)).fetchone(), ("agent",))
 
-    def test_SOFT_3085_wait_refuses_a_session_with_no_agent(self):
+    def test_IGSH_1266_wait_reports_the_final_state_for_a_session_with_no_agent(self):
         done = self.run_send("claude", SID, "hello", "--tmux", "mp-test-nobody", "--wait", "--timeout", "20")
-        self.assertEqual(done.returncode, 2, done.stderr)
-        self.assertEqual(done.stdout, "")
-        self.assertIn("no live host or pane agent", done.stderr)
-        self.assertFalse(self.store().exists())
+        self.assertEqual(done.returncode, 3, done.stderr)
+        lines = done.stdout.splitlines()
+        self.assertRegex(lines[0], r"\Amp-[0-9a-f]{32}\Z")
+        self.assertEqual(lines[1], "state=failed receipt=session_unavailable")
+        self.assertEqual(self.rows()[0][4:6], ("failed", "session_unavailable"))
 
-    def test_IGSH_1266_second_submit_with_the_same_id_adds_no_second_message(self):
-        module = load_mp_send()
-        with patch.dict(os.environ, self.env()):
-            reader = module.reader_module()
-        first = module.submit(reader, "claude", SID, "mp-test-once", "hello", "mp-0123456789abcdef0123")
-        second = module.submit(reader, "claude", SID, "mp-test-once", "hello", "mp-0123456789abcdef0123")
-        self.assertEqual(first["id"], second["id"])
+    def test_IGSH_1266_second_run_with_the_same_id_adds_no_second_message(self):
+        first = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
+        second = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
+        self.assertEqual(first.returncode, 3, first.stderr)
+        self.assertEqual(second.returncode, 3, second.stderr)
+        self.assertEqual(first.stdout, second.stdout)
         self.assertEqual(len(self.rows()), 1)
-        self.assertEqual(self.rows()[0][1:4], ("claude", SID, "hello"))
 
-    def test_SOFT_3085_a_stale_terminal_locator_is_not_a_live_destination(self):
-        self.store().parent.mkdir(parents=True)
+    def test_IGSH_1266_known_terminal_binding_is_used_without_the_flag(self):
+        self.run_send("claude", SID, "first", "--tmux", "mp-test-binding")
         with sqlite3.connect(self.store()) as db:
-            db.execute("CREATE TABLE message_locators (provider TEXT, sid TEXT, tmux TEXT)")
-            db.execute("INSERT INTO message_locators VALUES (?,?,?)", ("claude", SID, "mp-test-binding"))
-        done = self.run_send("claude", SID, "hello")
-        self.assertEqual(done.returncode, 2, done.stderr)
-        self.assertEqual(done.stdout, "")
-        self.assertIn("no live host or pane agent", done.stderr)
-        with sqlite3.connect(self.store()) as db:
-            self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE name='shared_messages'").fetchall(), [])
+            db.execute("INSERT OR REPLACE INTO message_locators VALUES (?,?,?)", ("claude", SID, "mp-test-binding"))
+            db.commit()
+        done = self.run_send("claude", SID, "second")
+        self.assertEqual(done.returncode, 3, done.stderr)
+        self.assertEqual(len(self.rows()), 2)
 
     def test_IGSH_1266_unknown_binding_fails_without_touching_the_store(self):
         done = self.run_send("claude", SID, "hello")
         self.assertEqual(done.returncode, 2)
-        self.assertIn("no live host or pane agent", done.stderr)
+        self.assertIn("--tmux", done.stderr)
         self.assertFalse(self.store().exists())
 
     def test_IGSH_1266_bad_identity_and_empty_text_are_refused(self):
         self.assertEqual(self.run_send("claude", "bad id", "hello", "--tmux", "mp-test-a").returncode, 2)
         self.assertEqual(self.run_send("claude", SID, "   ", "--tmux", "mp-test-a").returncode, 2)
         self.assertEqual(self.run_send("codex", SID, "hello", "--tmux", "mp-test-a", "--id", "short").returncode, 2)
-
-    def test_SOFT_3060_stopped_hosted_chats_still_appear_in_the_session_list(self):
-        module = load_mp_send()
-        host = self.home / ".local/state/multiprompt/agent-host"
-        host.mkdir(parents=True)
-        tmux, sid = "live-stopped", SID
-        (host / "k1.config.json").write_text(json.dumps(dict(cwd="/work/x", enabled=True, tmux=tmux)))
-        (host / "k1.state.json").write_text(json.dumps(dict(sid=sid, pid=99999999, provider="claude", started=1.0)))
-        names = self.home / ".local/state/multiprompt/chat-names.json"
-        names.write_text(json.dumps({tmux: dict(name="Paused Lead", at=1.0)}))
-        bin_dir = self.home / "bin"
-        bin_dir.mkdir()
-        tmux_sh = bin_dir / "tmux"
-        tmux_sh.write_text("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf 'live-stopped\\n'; exit 0; fi\nexit 1\n")
-        tmux_sh.chmod(0o755)
-        os.environ["HOME"] = str(self.home)
-        os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
-        chats = {row["tmux"]: row for row in module.live_chats()}
-        self.assertIn(tmux, chats)
-        self.assertEqual(chats[tmux]["state"], "stopped")
-        self.assertEqual(chats[tmux]["name"], "Paused Lead")
 
     def test_IGSH_1266_installed_runtime_reader_is_preferred(self):
         runtime = self.home / ".multiprompt-runtime"
@@ -151,8 +132,7 @@ class MpSendTest(unittest.TestCase):
         out, err = sys.stdout, sys.stderr
         sys.stdout, sys.stderr = open(os.devnull, "w"), open(os.devnull, "w")
         try:
-            with patch.object(module, "resolve_destination", return_value=(SID, "mp-test-fake")):
-                code = module.main(["claude", SID, "hello", "--tmux", "mp-test-fake", "--wait", "--json", "--timeout", "5"])
+            code = module.main(["claude", SID, "hello", "--tmux", "mp-test-fake", "--wait", "--json", "--timeout", "5"])
         finally:
             sys.stdout.close()
             sys.stderr.close()

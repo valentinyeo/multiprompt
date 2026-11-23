@@ -5,26 +5,24 @@
 - Selection happens before requests.
 - Imports never install a runtime.
 - The full-file hash identifies the client artifact.
-- The hash of the inner reader, connectors and bundled tool sources identifies the selected runtime.
+- The inner-source hash identifies the selected runtime.
 
 ## Selection
 
 - Each Unix user has a private runtime.
 - Its directory is `~/.multiprompt-runtime`.
 - `active.json` contains `protocol`, `generation`, and `sha256`.
-- Protocol 1 and the three existing metadata fields remain unchanged.
-- `RUNTIME_GENERATION` is derived from the bundle hash, not maintained by hand.
-- Its integer uses bit 52 plus 52 hash bits, above legacy counters and within JSON safe-integer range.
-- The full SHA-256 fingerprint, not integer ordering, decides whether a runtime differs.
+- Protocol 1 starts at generation 1.
+- Every inner-source edit increments `RUNTIME_GENERATION`.
+- Generations increase monotonically.
 - A lock serializes selection.
 - Readers use owner-only permissions.
 - Each reader is stored as `<sha256>.py`.
 - Publishing syncs a temporary file.
 - An atomic rename publishes it.
-- Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
-- Fingerprinted launchers replace a different selection with their own bundle.
-- Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
-- Identical bundles keep the existing selection without rewriting its metadata.
+- Older launchers select the installed newer reader.
+- Equal generations with a different hash replace the stale selection with this
+  client's own source, so one missing bump cannot wedge every client.
 - Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
 
@@ -49,26 +47,6 @@
 - Owner and held-worker calls also use it.
 - Runtime errors return history error frames.
 - They never execute older code instead.
-
-## Saved live state (SOFT-1872)
-
-- Generation 134 adds opt-in `events_subscribe` with `snapshot: true`.
-- A cold cursor receives `result.live_snapshot` with `seq`, `events`, and `requests`.
-- `events` holds the current turn, up to 96 live items, and host settings and status.
-- `requests` holds only open approvals, questions, and plans.
-- `plan.snapshot` supplies plan text without reopening its card.
-- The client replaces live state atomically, then resumes events after `seq`.
-- Legacy subscriptions keep their existing response shape.
-- Older servers ignore the opt-in field and keep replaying events.
-- Saved state and event cursors commit with each event.
-- An upgraded store reconstructs only the latest turn and request decisions, not every past turn.
-
-Each reader checks maintenance every minute.
-A transaction keeps the last 2,000 events per chat once per UTC day, after saving current state.
-Canonical messages, connector facts, and transcripts remain intact.
-A pruned live cursor receives a fresh snapshot.
-A pruned queue cursor receives `resync_required: true`; clients must discard the replica and fetch `message_snapshot`.
-Reverting the reader generation stops future cleanup but cannot restore deleted events.
 
 ## Hosted chats and other tools
 

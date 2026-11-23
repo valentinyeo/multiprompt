@@ -110,11 +110,6 @@
     "size": "MAX_REPO_ROWS"
   },
   {
-    "name": "workspace_server",
-    "base": "SEARCH_WORKSPACE_SERVER_ROW_OFFSET",
-    "size": "WORKSPACE_SERVER_SLOT_COUNT"
-  },
-  {
     "name": "pi_models",
     "base": "SEARCH_PI_MODEL_ROW_OFFSET",
     "size": "MAX_PI_MODELS"

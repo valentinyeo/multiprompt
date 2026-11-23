@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import readline from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate, earlyCaptureDue, tornFrame, finalCaptureDue, searchMainWindows } from './lib.mjs';
+import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate, earlyCaptureDue, tornFrame, finalCaptureDue } from './lib.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);
@@ -162,7 +162,7 @@ async function run({ requestedExe, config, out, installable }) {
     previousTime = now;
   }
   async function start(instance) {
-    const before = new Set(await searchMainWindows(execute));
+    const before = new Set((await execute('xdotool', ['search', '--name', 'multiprompt v']).catch(() => ({ stdout: '' }))).stdout.trim().split(/\s+/).filter(Boolean));
     const batch = `chat-bench-launch-${instance.index}.cmd`;
     atomic(path.join(prefix, 'drive_c', batch), `@echo off\r\nset "APPDATA=${winPath(instance.appdata)}"\r\n"${winPath(exe)}" --name bench-${instance.index} --no-window-restore\r\n`);
     instance.child = spawn('wine', ['C:\\windows\\system32\\cmd.exe', '/c', `C:\\${batch}`],
@@ -177,7 +177,7 @@ async function run({ requestedExe, config, out, installable }) {
     const deadline = performance.now() + config.startupSeconds * 1000;
     while (performance.now() < deadline) {
       await pump();
-      const ids = await searchMainWindows(execute);
+      const ids = (await execute('xdotool', ['search', '--name', 'multiprompt v']).catch(() => ({ stdout: '' }))).stdout.trim().split(/\s+/).filter(Boolean);
       instance.window ||= ids.find(id => !before.has(id));
       const log = parseLog(instance.text);
       if (instance.window && log.heartbeat?.tabs === instance.tabs.length) {

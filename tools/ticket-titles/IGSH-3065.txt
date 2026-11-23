@@ -1,1 +1,0 @@
-Ctrl+K lists commands above the matching session

@@ -1,3 +1,4 @@
+"""Capture only scratch native SessionStart identity, independently of the reader."""
 import json
 import os
 from pathlib import Path

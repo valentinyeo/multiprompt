@@ -45,11 +45,7 @@ export const verbs = {
   "SEARCH_THREADTITLE_OFFSET": "rename",
   "SEARCH_WORKSPACE_COLOR_OFFSET": "workspace",
   "SEARCH_WSMOVE_NEW_OFFSET": "workspace",
-  "SEARCH_WSMOVE_OFFSET": "move",
-  "SEARCH_MOVE_WORKSPACE_SERVER_OFFSET": "workspace",
-  "SEARCH_NEW_TAB_ON_SERVER_OFFSET": "open",
-  "SEARCH_WORKSPACE_SERVER_ROW_OFFSET": "open",
-  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open"
+  "SEARCH_WSMOVE_OFFSET": "move"
 };
 
 export const screen = {
@@ -174,7 +170,6 @@ export const screen = {
   "SEARCH_OPENFOLDER_OFFSET": "focus",
   "SEARCH_OPEN_SESSION_MENU_OFFSET": "menu",
   "SEARCH_PICK_REPO_BACK_OFFSET": "menu",
-  "SEARCH_WORKSPACE_SERVER_BACK_OFFSET": "menu",
   "SEARCH_PICK_REPO_OFFSET": "focus",
   "SEARCH_PI_MODEL_ROW_OFFSET": "menu",
   "SEARCH_PI_MODELS_BACK_OFFSET": "menu",
@@ -195,7 +190,6 @@ export const screen = {
   "SEARCH_REMOVE_SERVER_2_OFFSET": "account",
   "SEARCH_REMOVE_SERVER_3_OFFSET": "account",
   "SEARCH_REOPEN_OFFSET": "local",
-  "SEARCH_REOPEN_SERVER_SHELL_OFFSET": "menu",
   "SEARCH_RESTART_OFFSET": "local",
   "SEARCH_ROOM_ROW_OFFSET": "focus",
   "SEARCH_SERVERS_OFFSET": "account",

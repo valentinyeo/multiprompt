@@ -287,7 +287,6 @@ const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
-const SEARCH_REOPEN_SERVER_SHELL_OFFSET = @import("app_state.zig").SEARCH_REOPEN_SERVER_SHELL_OFFSET;
 const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
 const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
@@ -357,19 +356,10 @@ const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_B
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const pickRepoPresentedRows = @import("command_palette.zig").pickRepoPresentedRows;
-const pickRepoFolderName = @import("command_palette.zig").pickRepoFolderName;
-const pickRepoColumns = @import("command_palette.zig").pickRepoColumns;
 const workspaceFolderCurrent = @import("command_palette.zig").workspaceFolderCurrent;
 const activeWorkspaceSlot = @import("command_palette.zig").activeWorkspaceSlot;
 const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
 const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
-const SEARCH_MOVE_WORKSPACE_SERVER_OFFSET = @import("app_state.zig").SEARCH_MOVE_WORKSPACE_SERVER_OFFSET;
-const SEARCH_NEW_TAB_ON_SERVER_OFFSET = @import("app_state.zig").SEARCH_NEW_TAB_ON_SERVER_OFFSET;
-const SEARCH_WORKSPACE_SERVER_BACK_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_BACK_OFFSET;
-const SEARCH_WORKSPACE_SERVER_ROW_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_SERVER_ROW_OFFSET;
-const WORKSPACE_SERVER_SLOT_COUNT = @import("app_state.zig").WORKSPACE_SERVER_SLOT_COUNT;
-const MOVE_WORKSPACE_SERVER_LABEL = @import("command_palette.zig").MOVE_WORKSPACE_SERVER_LABEL;
-const NEW_TAB_ON_SERVER_LABEL = @import("command_palette.zig").NEW_TAB_ON_SERVER_LABEL;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
@@ -1234,30 +1224,10 @@ pub fn applyPendingGroup() void {
     saveSession();
 }
 
-const FrozenPlace = struct {
-    shell_id: u32,
-    place: u64,
-};
-
-var g_frozen_places: [MAX_SHELLS]FrozenPlace = undefined;
-var g_frozen_places_len: usize = 0;
-var g_freeze_rows: [MAX_ROWS]Row = undefined;
-
-inline fn frozenPlaceOf(shell_id: u32) u64 {
-    var lo: usize = 0;
-    var hi: usize = g_frozen_places_len;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        const frozen = g_frozen_places[mid];
-        if (frozen.shell_id == shell_id) return frozen.place;
-        if (frozen.shell_id < shell_id) lo = mid + 1 else hi = mid;
-    }
-    return 0;
-}
-
 inline fn sidebarUseKey(i: usize) u64 {
-    if (!app_state.g_sidebar_order_frozen or g_frozen_places_len == 0) return sidebarLiveUseKey(i);
-    return frozenPlaceOf(app_state.shells[i].shell_id);
+    if (!app_state.g_sidebar_order_frozen) return sidebarLiveUseKey(i);
+    if (app_state.shells[i].frozen_use_key == null) app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
+    return app_state.shells[i].frozen_use_key.?;
 }
 
 inline fn sidebarLiveUseKey(i: usize) u64 {
@@ -1265,31 +1235,16 @@ inline fn sidebarLiveUseKey(i: usize) u64 {
     return @max(viewed_ms, app_state.shells[i].last_used);
 }
 
-fn frozenPlaceBefore(_: void, a: FrozenPlace, b: FrozenPlace) bool {
-    return a.shell_id < b.shell_id;
-}
-
 pub fn freezeSidebarOrder() void {
     if (app_state.g_sidebar_order_frozen) return;
-    const row_count = layoutRows(&g_freeze_rows);
-    g_frozen_places_len = 0;
-    for (g_freeze_rows[0..row_count]) |row| {
-        if (row.kind != .tab or row.shell_idx >= app_state.shell_count) continue;
-        if (g_frozen_places_len >= MAX_SHELLS) break;
-        g_frozen_places[g_frozen_places_len] = .{
-            .shell_id = app_state.shells[row.shell_idx].shell_id,
-            .place = @intCast(MAX_SHELLS - g_frozen_places_len),
-        };
-        g_frozen_places_len += 1;
-    }
-    std.mem.sort(FrozenPlace, g_frozen_places[0..g_frozen_places_len], {}, frozenPlaceBefore);
     app_state.g_sidebar_order_frozen = true;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
 }
 
 pub fn thawSidebarOrder() bool {
     if (!app_state.g_sidebar_order_frozen) return false;
     app_state.g_sidebar_order_frozen = false;
-    g_frozen_places_len = 0;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = null;
     return true;
 }
 
@@ -2804,8 +2759,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 L("Search Pi models...")
             else if (app_state.g_search_pick_repo_mode)
                 if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
-            else if (app_state.g_search_workspace_server_mode != 0)
-                if (app_state.g_search_workspace_server_mode == 1) L("Move workspace to server...") else L("New tab on server...")
             else if (app_state.g_search_openall_host_mode)
                 L("Choose a VPS...")
             else if (app_state.g_workspace_color_target != null)
@@ -2999,12 +2952,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_usage_login = is_usage_login_primary or is_usage_login_inne;
                     const is_endtmux = result_idx == SEARCH_END_TMUX_OFFSET;
                     const is_reopen = result_idx == SEARCH_REOPEN_OFFSET;
-                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_CURSOR_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET or result_idx == SEARCH_REOPEN_SERVER_SHELL_OFFSET;
+                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_CURSOR_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
                     const is_pick_repo_row = result_idx >= SEARCH_PICK_REPO_ROW_OFFSET and result_idx < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS;
                     const is_pick_repo_back = result_idx == SEARCH_PICK_REPO_BACK_OFFSET;
-                    const is_workspace_server_row = result_idx >= SEARCH_WORKSPACE_SERVER_ROW_OFFSET and result_idx < SEARCH_WORKSPACE_SERVER_ROW_OFFSET + WORKSPACE_SERVER_SLOT_COUNT;
-                    const is_workspace_server_back = result_idx == SEARCH_WORKSPACE_SERVER_BACK_OFFSET;
-                    const is_workspace_server_menu = result_idx == SEARCH_MOVE_WORKSPACE_SERVER_OFFSET or result_idx == SEARCH_NEW_TAB_ON_SERVER_OFFSET;
                     const is_urlpick = result_idx == SEARCH_URLPICK_OFFSET;
                     const is_closetab = result_idx == SEARCH_CLOSETAB_OFFSET;
                     const is_favorite = result_idx == SEARCH_FAVORITE_OFFSET;
@@ -4105,49 +4055,20 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const repo_count = repo_rows.len;
                         const repo_idx = result_idx - SEARCH_PICK_REPO_ROW_OFFSET;
                         if (repo_idx < repo_count) {
+                            _ = SelectObject(hdc, palette_font);
                             const row = &repo_rows[repo_idx];
-                            const name = pickRepoFolderName(row.path[0..row.path_len]);
-                            var label_buf: [160]u8 = undefined;
-                            const label = std.fmt.bufPrint(&label_buf, "{s}{s}", .{ row.host_name[0..row.host_name_len], if (row.available) "" else "  Offline" }) catch "";
-                            var name_wide: [256]u16 = undefined;
-                            const name_len = std.unicode.utf8ToUtf16Le(&name_wide, name) catch 0;
-                            var host_wide: [160]u16 = undefined;
-                            const host_len = std.unicode.utf8ToUtf16Le(&host_wide, label) catch 0;
-                            _ = SelectObject(hdc, palette_font);
-                            const name_w = @import("dwrite_text.zig").measureWidth(hdc, name_wide[0..name_len]);
-                            _ = SelectObject(hdc, palette_hint_font);
-                            const host_w = @import("dwrite_text.zig").measureWidth(hdc, host_wide[0..host_len]);
-                            const columns = pickRepoColumns(text_left, ox + overlay_w, name_w, host_w);
-                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (row.available) primary_color else RGB(120, 120, 130));
-                            var name_rc = RECT{ .left = columns.name_left, .top = ry, .right = columns.name_right, .bottom = ry + row_h };
-                            if (name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &name_wide, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 180, .bottom = ry + row_h };
+                            drawAscii(hdc, row.path[0..row.path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, RGB(120, 120, 130));
-                            if (columns.path_right - columns.path_left >= 12) {
-                                var path_rc = RECT{ .left = columns.path_left, .top = ry, .right = columns.path_right, .bottom = ry + row_h };
-                                drawAscii(hdc, row.path[0..row.path_len], &path_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            }
-                            var host_rc = RECT{ .left = columns.host_left, .top = ry, .right = columns.host_right, .bottom = ry + row_h };
-                            if (host_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &host_wide, @intCast(host_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            var label_buf: [160]u8 = undefined;
+                            const label = std.fmt.bufPrint(&label_buf, "{s}{s}", .{ row.host_name[0..row.host_name_len], if (row.available) "" else "  Offline" }) catch "";
+                            var wide: [160]u16 = undefined;
+                            const wide_len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                            var host_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            if (wide_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(wide_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
-                    } else if (is_workspace_server_back) {
-                        _ = SelectObject(hdc, palette_font);
-                        _ = SetTextColor(hdc, primary_color);
-                        var wsb_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Back"), -1, &wsb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                    } else if (is_workspace_server_row) {
-                        const slot: u8 = @intCast(result_idx - SEARCH_WORKSPACE_SERVER_ROW_OFFSET);
-                        const label = @import("account_desktop.zig").accountServerPaletteName(slot);
-                        _ = SelectObject(hdc, palette_font);
-                        _ = SetTextColor(hdc, primary_color);
-                        var wss_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        drawAscii(hdc, label, &wss_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_workspace_server_menu) {
-                        _ = SelectObject(hdc, palette_font);
-                        _ = SetTextColor(hdc, primary_color);
-                        var wsm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        drawAscii(hdc, if (result_idx == SEARCH_MOVE_WORKSPACE_SERVER_OFFSET) MOVE_WORKSPACE_SERVER_LABEL else NEW_TAB_ON_SERVER_LABEL, &wsm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_PICK_REPO_OFFSET or result_idx == SEARCH_SET_FOLDER_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4186,7 +4107,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_NEW_TERMINAL_OFFSET => L("New terminal"),
                             SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => L("New Claude in terminal"),
                             SEARCH_OPEN_SESSION_MENU_OFFSET => L("Open session\u{2026}"),
-                            SEARCH_REOPEN_SERVER_SHELL_OFFSET => L("Reopen server shell"),
                             else => L("More shells\u{2026}"),
                         };
                         var ns_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
@@ -5737,73 +5657,6 @@ test "IGSH-2282 a click under the pointer does not move its row until the pointe
     try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
     try std.testing.expectEqual(@as(u32, 2), rows[4].shell_idx);
     try std.testing.expectEqual(@as(u32, 3), rows[5].shell_idx);
-}
-
-test "SOFT-2378 a clicked chat that is rebuilt keeps its row under the pointer" {
-    const saved_starred = app_state.g_starred_workspace;
-    const saved_single = app_state.g_single_window;
-    const saved_count = app_state.shell_count;
-    const saved_groups = app_state.group_count;
-    const saved_shells = app_state.shells[0..3].*;
-    const saved_collapsed = app_state.g_sidebar_collapsed;
-    const saved_inbox = app_state.g_inbox_row_count;
-    const saved_recents = app_state.g_recents_section_collapsed;
-    const saved_snoozed = app_state.g_ws_snoozed;
-    const saved_frozen = app_state.g_sidebar_order_frozen;
-    defer {
-        _ = thawSidebarOrder();
-        app_state.g_starred_workspace = saved_starred;
-        app_state.g_single_window = saved_single;
-        app_state.shell_count = saved_count;
-        app_state.group_count = saved_groups;
-        app_state.shells[0..3].* = saved_shells;
-        app_state.g_sidebar_collapsed = saved_collapsed;
-        app_state.g_inbox_row_count = saved_inbox;
-        app_state.g_recents_section_collapsed = saved_recents;
-        app_state.g_ws_snoozed = saved_snoozed;
-        app_state.g_sidebar_order_frozen = saved_frozen;
-    }
-    app_state.g_starred_workspace = true;
-    app_state.g_single_window = true;
-    app_state.g_sidebar_collapsed = false;
-    app_state.g_inbox_row_count = 0;
-    app_state.g_recents_section_collapsed = false;
-    app_state.g_ws_snoozed = @splat(false);
-    app_state.g_sidebar_order_frozen = false;
-    app_state.shell_count = 3;
-    app_state.group_count = 0;
-    for (0..3) |i| {
-        app_state.shells[i] = app_state.empty_shell;
-        app_state.shells[i].shell_id = @intCast(4500 + i);
-        app_state.shells[i].favorite = true;
-        app_state.shells[i].workspace = app_state.g_active_workspace;
-    }
-    app_state.shells[0].last_used = 10;
-    app_state.shells[1].last_used = 20;
-    app_state.shells[2].last_used = 30;
-    var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
-    try std.testing.expectEqual(@as(u32, 2), rows[1].shell_idx);
-    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
-    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
-
-    freezeSidebarOrder();
-    app_state.shells[1] = app_state.empty_shell;
-    app_state.shells[1].shell_id = 4501;
-    app_state.shells[1].favorite = true;
-    app_state.shells[1].workspace = app_state.g_active_workspace;
-    app_state.shells[1].last_used = 9_000_000_000;
-
-    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
-    try std.testing.expectEqual(@as(u32, 2), rows[1].shell_idx);
-    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
-    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
-
-    try std.testing.expect(thawSidebarOrder());
-    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
-    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
-    try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
-    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {
