@@ -124,6 +124,29 @@ class TabVerbs(unittest.TestCase):
             MODULE.tab_command(desktop, args)
         self.assertEqual(output.getvalue(), "pin Fixture\n")
 
+    def test_plain_shell_has_a_durable_key_through_close_and_restore(self):
+        desktop = Desktop()
+        desktop.view.update(instance=7, next_shell_id=42, users=["agent", "agent", "agent", ""])
+        desktop.view["hosts"].append("local")
+        opened = self.invoke_with(desktop, "open", dict(name=None, title="Local shell", kind="shell", host="3", workspace="Research"))
+        self.assertEqual(opened["tmux"], "@shell-7-42")
+        self.assertEqual(opened["host"], "local")
+        self.assertIsNone(opened["sid"])
+        closed = self.invoke_with(desktop, "close", dict(name="Local shell", host="3"))
+        self.assertTrue(closed["closed"])
+        restored = self.invoke_with(desktop, "restore", dict(name="Local shell", host="3"))
+        self.assertEqual(restored["tmux"], opened["tmux"])
+        self.assertFalse(restored["closed"])
+        self.assertEqual(restored["kind"], "shell")
+
+    def test_open_refuses_a_different_requested_placement(self):
+        desktop = Desktop()
+        before = copy.deepcopy(desktop.view)
+        with self.assertRaisesRegex(ValueError, "open keeps the existing workspace"):
+            self.invoke_with(desktop, "open", {"workspace": "Home"})
+        self.assertEqual(desktop.view, before)
+        self.assertEqual(desktop.writes, [])
+
     def test_ambiguous_target_never_writes(self):
         desktop = Desktop()
         other = copy.deepcopy(desktop.view["tabs"][0])

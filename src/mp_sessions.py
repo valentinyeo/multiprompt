@@ -245,7 +245,7 @@ def placement_listing(send):
 def confirm_open(send, target):
     args = argparse.Namespace(command="open", name=target["tmux"], host=None, json=True,
                               kind="chat", tmux=target["tmux"], sid=target["sid"],
-                              title=target.get("name"), workspace=target.get("workspace"),
+                              title=target.get("name"), workspace=target.get("workspace"), provider=target.get("provider"), folder=target.get("cwd") if "cwd" in target else target.get("folder"),
                               group=target.get("group"), position=target.get("position", 0))
     import contextlib
     import io
@@ -839,6 +839,8 @@ def parse(argv):
             action.add_argument("--tmux")
             action.add_argument("--title")
             action.add_argument("--sid")
+            action.add_argument("--folder")
+            action.add_argument("--provider", choices=("claude", "codex", "pi", "hax", "grok", "cursor"))
             action.add_argument("--workspace")
             action.add_argument("--group")
             action.add_argument("--position", type=int)

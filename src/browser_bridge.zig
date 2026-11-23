@@ -2414,7 +2414,7 @@ fn zsbShellOpen(argv: []const []const u8, out: []u8) usize {
     if (args.run) |command| {
         if (!setPendingRemoteRun(kind == .tmux, command)) return zsbWorkspaceError(out, "bad_args");
     }
-    if (!@import("console.zig").spawnBackgroundRemoteShell(host, ws, kind, tmux_session)) return zsbWorkspaceError(out, "spawn_failed");
+    if (!@import("console.zig").spawnBackgroundRemoteShell(host, ws, kind, tmux_session, null)) return zsbWorkspaceError(out, "spawn_failed");
     const placed = if (anchor) |index| zsbPlaceAfter(app_state.shell_count - 1, index) else app_state.shell_count - 1;
     const shell = &app_state.shells[placed];
     shell.group_id = gid;

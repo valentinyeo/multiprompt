@@ -214,7 +214,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
     }
     if (!include_local) for (app_state.g_tmux_closed.entries.items) |entry| {
         const state = entry.tab_state orelse continue;
-        if (entry.host > 2) continue;
+        if (entry.host > 2 or std.mem.startsWith(u8, state.tmux, "@shell-")) continue;
         var known_workspace = false;
         for (workspaces.items) |workspace| if (std.mem.eql(u8, workspace.name, state.workspace)) {
             known_workspace = true;

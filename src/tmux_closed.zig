@@ -73,7 +73,9 @@ pub const Closed = struct {
                 const state = item.object.get("tab_state") orelse continue;
                 if (state != .object or !std.mem.eql(u8, json_reader.string(json_reader.field(state, "host")) orelse "", "local")) continue;
             }
-            for (session.string) |c| {
+            const plain = std.mem.startsWith(u8, session.string, "@shell-");
+            if (plain and !item.object.contains("tab_state")) continue;
+            for (if (plain) session.string[1..] else session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }
             if (!self.contains(@intCast(slot), session.string)) {

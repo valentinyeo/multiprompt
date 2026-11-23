@@ -515,6 +515,11 @@ fn buildArchiveResurrectCommand(entry: *const ArchivedEntry, out: []u8) ?[]const
 
 pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool {
     loadArchiveFromDisk(true);
+    if (@import("tab_state_desktop.zig").restoreByKey(host, session)) |restored| {
+        if (restored and removeArchivedEntry(host, session)) _ = saveArchive();
+        return restored;
+    }
+
     const ar_idx = findArchivedEntry(host, session) orelse return false;
     const ar_copy = app_state.g_archived.items[ar_idx];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
@@ -1561,6 +1566,17 @@ pub fn buildSessionOverviewRows() void {
         _ = sessionOverviewAdd(.archived, 0, 0, e.tmux_host, name, sess, ctx_slice, 0, 0, false, aws);
     }
 
+    for (app_state.g_tmux_closed.entries.items) |entry| {
+        const state = entry.tab_state orelse continue;
+        if (!state.archived or state.closed or findArchivedEntry(entry.host, state.tmux) != null) continue;
+        var workspace: u8 = AS_ROW_OTHER;
+        for (0..app_state.g_lws_count) |wi| {
+            var buf: [32]u8 = undefined;
+            if (std.mem.eql(u8, state.workspace, workspaceDisplayName(@intCast(wi), &buf))) workspace = @intCast(wi);
+        }
+        _ = sessionOverviewAdd(.archived, 0, 0, entry.host, state.name, state.tmux, "", 0, 0, false, workspace);
+    }
+
     if (verboseLoggingEnabled()) {
         var oc: u32 = 0;
         var hc: u32 = 0;
@@ -1593,7 +1609,7 @@ pub fn buildSessionOverviewRows() void {
 }
 
 fn sessionOverviewHostLabel(host: u8) []const u8 {
-    return tmuxHostLongLabel(host);
+    return if (host == 3) "Local" else tmuxHostLongLabel(host);
 }
 
 fn allSessionsRowTab(row: *const SessionOverviewRow) u32 {

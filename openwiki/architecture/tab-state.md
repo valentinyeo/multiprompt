@@ -10,7 +10,7 @@ One `TabState` record describes a tab, including a closed tab. The desktop owns 
 | `pinned`, `archived`, `waiting`, `closed` | Explicit desired flags. Palette and CLI use the same desktop state. Close retains the record and its placement; only open or restore clears `closed`. |
 | `visible`, `hidden_reason` | Desktop-only observations, never client requests. `visible` means a sidebar row is currently shown. Hidden reason is null or the first applicable reason: closed, archived, waiting, workspace, group, filter. |
 
-The record also carries its stable terminal-session key (`tmux`) and display `name`. `(host, tmux)` identifies it. A record's revision is checked before applying a command. The PC-state view includes closed records and their last placement; an offline desktop is not an empty layout.
+The record also retains `shell`, `agent` and `cwd` as runtime metadata, so reopening PowerShell or a non-Claude chat cannot change its program. Desktop runtime discovery owns these values; tab verbs preserve them. It carries its stable terminal-session key (`tmux`) and display `name`. `(host, tmux)` identifies it. A tab without tmux has a reserved `@shell-` key saved with the tab, independent of its changing window id. The full expected record is compared before applying a command. The PC-state view includes closed records and their last placement; an offline desktop is not an empty layout.
 
 ## Apply and acknowledge
 
@@ -21,7 +21,7 @@ The record also carries its stable terminal-session key (`tmux`) and display `na
 
 ## Conflicts and compatibility
 
-The desktop serializes UI and CLI writes. An expected-state mismatch refuses without changes; callers reread and retry deliberately. Account sync may update a live record but cannot clear a close tombstone. Only an explicit open/restore can do that. Visibility always comes from the current desktop, never account sync or process health. If an acknowledgement is lost, report failure and reconcile with PC-state on retry; do not claim that a distributed timeout proves rollback.
+The desktop serializes UI and CLI writes. An expected-state mismatch refuses without changes; callers reread and retry deliberately. Account sync carries portable tmux records; local and plain SSH tabs remain in the desktop session layout. Account sync may update a live record but cannot clear a close tombstone. Only an explicit open/restore can do that. Visibility always comes from the current desktop, never account sync or process health. If an acknowledgement is lost, report failure and reconcile with PC-state on retry; do not claim that a distributed timeout proves rollback.
 
 Old clients may read the existing layout fields. New clients require the tab-state bridge and refuse to mutate through an older desktop. Android can keep reading portable layout fields; paired Android support must consume the optional tab-state record before offering these verbs.
 

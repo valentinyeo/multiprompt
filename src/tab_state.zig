@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const Kind = enum { chat, shell };
+pub const Shell = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 pub const Verb = enum { open, close, move, pin, unpin, archive, unarchive, wait, restore };
 pub const State = struct {
     host: []const u8,
@@ -10,6 +11,9 @@ pub const State = struct {
     position: u32,
     kind: Kind,
     sid: ?[]const u8 = null,
+    shell: Shell = .tmux,
+    agent: u8 = 0,
+    cwd: ?[]const u8 = null,
     pinned: bool = false,
     archived: bool = false,
     waiting: bool = false,
@@ -52,7 +56,7 @@ pub const Request = struct { verb: Verb, expected: ?State, state: State };
 
 pub fn equal(a: State, b: State) bool {
     inline for (std.meta.fields(State)) |field| {
-        if (comptime std.mem.eql(u8, field.name, "visible") or std.mem.eql(u8, field.name, "hidden_reason")) continue;
+        if (comptime std.mem.eql(u8, field.name, "visible") or std.mem.eql(u8, field.name, "hidden_reason") or std.mem.eql(u8, field.name, "cwd")) continue;
         const x = @field(a, field.name);
         const y = @field(b, field.name);
         if (field.type == []const u8) {
@@ -73,11 +77,13 @@ fn text(value: []const u8, max: usize) bool {
 
 pub fn validate(state: State) !void {
     if (!text(state.host, 255) or !text(state.workspace, 31) or !text(state.name, 255) or state.position >= 256) return error.InvalidState;
-    if (state.user.len > 32) return error.InvalidState;
+    if (state.user.len > 32 or state.agent > 7) return error.InvalidState;
+    if (state.cwd) |cwd| if (!text(cwd, 511)) return error.InvalidState;
     if (state.group) |group| if (!text(group, 255)) return error.InvalidState;
     if (state.sid) |sid| if (!text(sid, 39)) return error.InvalidState;
     if (state.tmux.len == 0 or state.tmux.len > 63) return error.InvalidState;
-    for (state.tmux) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.') return error.InvalidState;
+    const key = if (std.mem.startsWith(u8, state.tmux, "@shell-")) state.tmux[1..] else state.tmux;
+    for (key) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.') return error.InvalidState;
     if (state.archived and state.waiting) return error.InvalidState;
 }
 

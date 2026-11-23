@@ -2,13 +2,15 @@ const fields = ['host', 'user', 'workspace', 'group', 'position', 'kind', 'sid',
 const text = (value, max, empty = false) => typeof value === 'string' && (empty || value.length > 0) && value.length <= max && !/[\p{Cc}\p{Cs}]/u.test(value);
 
 export function validTabState(state, tab) {
-  return state && typeof state === 'object' && !Array.isArray(state) && Object.keys(state).sort().join(',') === [...fields].sort().join(',') &&
+  return state && typeof state === 'object' && !Array.isArray(state) && Object.keys(state).sort().join(',') === [...fields, ...['shell', 'agent', 'cwd'].filter(field => Object.hasOwn(state, field))].sort().join(',') &&
     text(state.host, 255) && text(state.user, 32, true) && text(state.workspace, 31) &&
     (state.group === null || text(state.group, 64)) && Number.isInteger(state.position) && state.position >= 0 && state.position < 256 &&
     ['chat', 'shell'].includes(state.kind) && (state.sid === null || text(state.sid, 39)) &&
     ['pinned', 'archived', 'waiting', 'closed', 'visible'].every(field => typeof state[field] === 'boolean') &&
     !(state.archived && state.waiting) && (state.hidden_reason === null || text(state.hidden_reason, 64)) &&
-    state.tmux === tab.tmux_session;
+    (!Object.hasOwn(state, 'shell') || ['cmd', 'pwsh', 'vps', 'tmux', 'vps2', 'bash', 'gitbash'].includes(state.shell)) &&
+    (!Object.hasOwn(state, 'agent') || Number.isInteger(state.agent) && state.agent >= 0 && state.agent <= 7) &&
+    (!Object.hasOwn(state, 'cwd') || state.cwd === null || text(state.cwd, 511)) && state.tmux === tab.tmux_session;
 }
 
 export function projectTabState(tab, position) {
