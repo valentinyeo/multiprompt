@@ -123,10 +123,14 @@ def session_catalog(send, listing):
             sid=sid,
             folder=config.get("cwd"),
             spawn_name=config.get("spawn_name"),
-            host=row.get("host"),
+            host=row.get("host") or config.get("spawn_host_name"),
             workspace=row.get("workspace") or config.get("spawn_workspace"),
             group=row.get("group") if "group" in row else config.get("spawn_group"),
         )
+        if not row.get("tab_open"):
+            after = config.get("spawn_after_tab")
+            if isinstance(after, int):
+                row["after_tab"] = after
         row["running"] = config.get("enabled") is True and alive
         row["busy"] = bool(state.get("inflight")) and alive
         if not row.get("name"):
@@ -184,18 +188,74 @@ def find_existing(send, listing, slot, display, folder):
     return None
 
 
-def ensure_visible(send, listing, target, display):
-    workspace = target.get("workspace")
+def placement_open(send, listing, tmux, display, workspace, host, target):
+    after_tab = target.get("after_tab")
+    group = target.get("group")
+    if isinstance(after_tab, int):
+        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=after_tab)
+    if group:
+        return send.open_visible_tab(listing, tmux, display, workspace, host, group=group)
+    anchor = workspace_anchor(listing, workspace)
+    if anchor is not None:
+        return send.open_visible_tab(listing, tmux, display, workspace, host, after_tab=anchor)
+    return dict(ok=False, error="no_placement")
+
+
+def resolve_workspace(send, listing, workspace):
+    note = None
+    if workspace and not send.workspace_known(listing, workspace):
+        note = workspace + " is gone; opened in the front workspace"
+        workspace = None
     if not workspace:
         workspace = default_workspace(listing)
+    return workspace, note
+
+
+def ensure_visible(send, listing, target, display):
+    workspace, note = resolve_workspace(send, listing, target.get("workspace"))
     host = target.get("host") or host_name(listing, host_slot())
     present = send.find_tab(listing, target["tmux"])[2]
     if target.get("tab_open") or present:
-        return dict(ok=True, tab=(present or {}).get("id") or target.get("tab_id"), existing=True)
-    anchor = None if target.get("group") else workspace_anchor(listing, workspace)
-    opened = send.open_visible_tab(listing, target["tmux"], display, workspace, host,
-                                   group=target.get("group"), after_tab=anchor)
+        result = dict(ok=True, tab=(present or {}).get("id") or target.get("tab_id"), existing=True)
+        if note:
+            result["placement_note"] = note
+        return result
+    opened = placement_open(send, listing, target["tmux"], display, workspace, host, target)
+    if note:
+        opened["placement_note"] = note
     return opened
+
+
+def persist_close_placement(send, listing, target):
+    provider = target.get("provider")
+    sid = target.get("sid")
+    if not provider or not sid:
+        return
+    path = send.host_root() / (send.host_config_key(provider, sid) + ".config.json")
+    config = send.read_json(path)
+    if not config:
+        return
+    workspace, group, tab = send.find_tab(listing, target["tmux"])
+    workspace = workspace or target.get("workspace")
+    if group is None and "group" in target:
+        group = target.get("group")
+    if workspace:
+        config["spawn_workspace"] = workspace
+    if group:
+        config["spawn_group"] = group
+    elif "spawn_group" in config:
+        del config["spawn_group"]
+    tab_id = (tab or {}).get("id") or target.get("tab_id")
+    if isinstance(tab_id, int) and workspace:
+        predecessor = send.tab_predecessor(listing, workspace, tab_id)
+        if predecessor is not None:
+            config["spawn_after_tab"] = predecessor
+        elif "spawn_after_tab" in config:
+            del config["spawn_after_tab"]
+    host = (tab or {}).get("host") or target.get("host")
+    if isinstance(host, str) and host.strip():
+        config["spawn_host_name"] = host
+    send.write_json(path, config)
 
 
 def start_host(send, provider, sid, folder, tmux):
@@ -485,8 +545,11 @@ def cmd_restart(args):
     start_host(send, provider, sid, folder, tmux)
     display = target.get("name") or tmux
     shown = ensure_visible(send, listing, target, display)
-    print(json.dumps(dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
-                          visible=shown.get("ok") is True, tab=shown.get("tab")), separators=(",", ":")))
+    result = dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
+                visible=shown.get("ok") is True, tab=shown.get("tab"))
+    if shown.get("placement_note"):
+        result["placement_note"] = shown["placement_note"]
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 
@@ -544,6 +607,7 @@ def cmd_close(args):
         return 0
     if target.get("busy") and not args.force:
         raise ValueError((target.get("name") or target["tmux"]) + " is busy; pass --force to close anyway")
+    persist_close_placement(send, listing, target)
     tab_closed = None
     if target.get("tab_id"):
         closed = send.zsb("session-close", "--tab", str(target["tab_id"]))

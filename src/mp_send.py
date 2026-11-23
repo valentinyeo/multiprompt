@@ -228,6 +228,38 @@ def find_tab(listing, tmux):
     return None, None, None
 
 
+def workspace_tab_ids(listing, workspace):
+    for ws in listing.get("workspaces") or []:
+        if ws.get("name") != workspace:
+            continue
+        order = []
+        for tab in ws.get("tabs") or []:
+            tab_id = tab.get("id")
+            if isinstance(tab_id, int):
+                order.append(tab_id)
+        for group in ws.get("groups") or []:
+            for tab in group.get("tabs") or []:
+                tab_id = tab.get("id")
+                if isinstance(tab_id, int):
+                    order.append(tab_id)
+        return order
+    return []
+
+
+def tab_predecessor(listing, workspace, tab_id):
+    if not isinstance(workspace, str) or not isinstance(tab_id, int):
+        return None
+    order = workspace_tab_ids(listing, workspace)
+    if tab_id not in order:
+        return None
+    index = order.index(tab_id)
+    return order[index - 1] if index > 0 else None
+
+
+def workspace_known(listing, name):
+    return isinstance(name, str) and any(ws.get("name") == name for ws in listing.get("workspaces") or [])
+
+
 def verify_tab(tmux):
     for attempt in range(VERIFY_TRIES):
         if attempt:

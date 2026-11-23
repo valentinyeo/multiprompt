@@ -37,15 +37,64 @@ if state_file and os.path.exists(state_file):
     state = json.loads(open(state_file, encoding="utf-8").read())
 if sys.argv[1] == "workspace-list":
     listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
-    if state.get("tabs"):
+    if state.get("listing"):
+        listing = state["listing"]
+    elif state.get("tabs"):
         listing["workspaces"][0]["tabs"] = state["tabs"]
     print(json.dumps(listing))
 elif sys.argv[1] == "session-open":
     tmux = sys.argv[sys.argv.index("--tmux") + 1]
-    state.setdefault("tabs", [])
-    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
+    title = sys.argv[sys.argv.index("--name") + 1]
+    host = sys.argv[sys.argv.index("--host") + 1]
+    tab_id = 55
+    if "--workspace" in sys.argv:
+        workspace = sys.argv[sys.argv.index("--workspace") + 1]
+        if workspace == "Home" and not state.get("listing"):
+            state.setdefault("tabs", [])
+            state["tabs"].append(dict(id=tab_id, title=title, host=host, tmux=tmux))
+            Path(state_file).write_text(json.dumps(state), encoding="utf-8")
+            print(json.dumps(dict(ok=True, created=True, tab=tab_id)))
+            raise SystemExit(0)
+        listing = state.get("listing")
+        if listing is None:
+            listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
+        tab_id = state.get("next_tab", 60)
+        state["next_tab"] = tab_id + 1
+        entry = dict(id=tab_id, title=title, host=host, tmux=tmux)
+        placed = False
+        for ws in listing.get("workspaces") or []:
+            if ws.get("name") != workspace:
+                continue
+            if "--after-tab" in sys.argv:
+                after = int(sys.argv[sys.argv.index("--after-tab") + 1])
+                for group in ws.get("groups") or []:
+                    gtabs = group.get("tabs") or []
+                    if any(tab.get("id") == after for tab in gtabs):
+                        index = next(i + 1 for i, tab in enumerate(gtabs) if tab.get("id") == after)
+                        group.setdefault("tabs", []).insert(index, entry)
+                        placed = True
+                        break
+                if not placed:
+                    utabs = ws.setdefault("tabs", [])
+                    index = next((i + 1 for i, tab in enumerate(utabs) if tab.get("id") == after), len(utabs))
+                    utabs.insert(index, entry)
+                    placed = True
+            elif "--group" in sys.argv:
+                group_name = sys.argv[sys.argv.index("--group") + 1]
+                for group in ws.get("groups") or []:
+                    if group.get("name") == group_name:
+                        group.setdefault("tabs", []).append(entry)
+                        placed = True
+                        break
+            if not placed:
+                ws.setdefault("tabs", []).append(entry)
+            break
+        state["listing"] = listing
+    else:
+        state.setdefault("tabs", [])
+        state["tabs"].append(dict(id=tab_id, title=title, host=host, tmux=tmux))
     Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
-    print(json.dumps(dict(ok=True, created=True, tab=55)))
+    print(json.dumps(dict(ok=True, created=True, tab=tab_id)))
 elif sys.argv[1] == "session-rename":
     tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
     for tab in state.get("tabs", []):
@@ -53,6 +102,24 @@ elif sys.argv[1] == "session-rename":
             tab["title"] = sys.argv[sys.argv.index("--name") + 1]
     Path(state_file).write_text(json.dumps(state), encoding="utf-8")
     print(json.dumps(dict(ok=True)))
+elif sys.argv[1] == "session-close":
+    tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
+    listing = state.get("listing")
+    if listing is None:
+        listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
+    removed = False
+    for ws in listing.get("workspaces") or []:
+        before = len(ws.get("tabs") or [])
+        ws["tabs"] = [tab for tab in (ws.get("tabs") or []) if tab.get("id") != tab_id]
+        removed = removed or len(ws["tabs"]) != before
+        for group in ws.get("groups") or []:
+            before = len(group.get("tabs") or [])
+            group["tabs"] = [tab for tab in (group.get("tabs") or []) if tab.get("id") != tab_id]
+            removed = removed or len(group["tabs"]) != before
+    state["listing"] = listing
+    state["tabs"] = [tab for tab in state.get("tabs", []) if tab.get("id") != tab_id]
+    Path(state_file).write_text(json.dumps(state), encoding="utf-8")
+    print(json.dumps(dict(ok=True, closed=removed, tab=tab_id)))
 else:
     print(json.dumps(dict(ok=True)))
 '''
@@ -360,6 +427,47 @@ class MpSessionsTest(unittest.TestCase):
         missing = self.run_sessions("send", "No such chat", "hello")
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
+
+    def test_SOFT_3131_close_restart_restores_workspace_group_and_tab_order(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Away", "--group", "Ops",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config.get("spawn_workspace"), "Away")
+        self.assertEqual(config.get("spawn_group"), "Ops")
+        self.mark_running(started)
+        listing_with_chat = json.loads(self.state_file.read_text(encoding="utf-8"))["listing"]
+        listing_after = json.dumps(listing_with_chat)
+        closed = self.parsed(self.run_sessions("close", "Field chat", MP_SESSIONS_TEST_LIST=listing_after))
+        self.assertTrue(closed.get("ok"))
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config.get("spawn_workspace"), "Away")
+        self.assertEqual(config.get("spawn_group"), "Ops")
+        self.assertEqual(config.get("spawn_after_tab"), 31)
+        restarted = self.parsed(self.run_sessions("restart", "Field chat", MP_SESSIONS_TEST_LIST=listing_after))
+        self.assertEqual(restarted.get("status"), "restarted")
+        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertIn("Away", reopen)
+        self.assertIn("--after-tab", reopen)
+        self.assertEqual(reopen[reopen.index("--after-tab") + 1], "31")
+        self.assertNotIn("Home", reopen)
+
+    def test_SOFT_3131_restart_uses_the_front_workspace_when_the_saved_one_is_gone(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Gone home", "--workspace", "Away",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        self.mark_running(started)
+        self.parsed(self.run_sessions("close", "Gone home",
+                                      MP_SESSIONS_TEST_LIST=json.dumps(json.loads(self.state_file.read_text())["listing"])))
+        only_home = dict(ok=True, hosts=["remote-1"], workspaces=[away_listing["workspaces"][0]])
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        state["listing"] = only_home
+        self.state_file.write_text(json.dumps(state), encoding="utf-8")
+        restarted = self.parsed(self.run_sessions("restart", "Gone home", MP_SESSIONS_TEST_LIST=json.dumps(only_home)))
+        self.assertIn("placement_note", restarted)
+        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertIn("Home", reopen)
 
     def test_SOFT_3093_list_json_shows_a_hosted_chat_with_no_terminal(self):
         key = "a" * 32

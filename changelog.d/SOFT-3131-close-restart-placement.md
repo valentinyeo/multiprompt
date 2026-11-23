@@ -1,0 +1,1 @@
+Closing a Multibot chat and starting it again puts its tab back in the same workspace, group, and order as before.
