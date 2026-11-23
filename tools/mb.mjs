@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { run as layoutRun, resolveTabHost } from './mp-layout.mjs';
+import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -39,7 +39,7 @@ host recorded when the chat was created. There is no default host.
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
   MULTIPROMPT_URL   account service address (default ${DEFAULT_URL})
-  MULTIPROMPT_SERVERS  path to the installed servers file
+  MULTIPROMPT_SERVERS_FILE  path to the installed servers file
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
@@ -238,7 +238,9 @@ async function list(ctx, flags) {
 
 async function placeShell(ctx, flags) {
   const session = sessionName(flags.tmux);
-  const host = resolveTabHost(ctx.env, session, flags.host);
+  let layoutHosts;
+  if (needsLayoutHosts(ctx.env, session, flags.host)) layoutHosts = (await readLayout(ctx)).data.layout?.hosts;
+  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts);
   const workspace = workspaceName(flags.workspace);
   const group = flags.group === undefined ? null : groupName(flags.group);
   const title = flags.title === undefined ? null : titleName(flags.title);

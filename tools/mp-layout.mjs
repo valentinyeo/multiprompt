@@ -2,6 +2,7 @@
 import { spawnSync, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, lstatSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync, constants } from 'node:fs';
+import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -24,7 +25,7 @@ host recorded when the chat was created. There is no default host.
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
   MULTIPROMPT_URL   account service address (default ${DEFAULT_URL})
-  MULTIPROMPT_SERVERS  path to the installed servers file
+  MULTIPROMPT_SERVERS_FILE  path to the installed servers file
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
@@ -66,7 +67,7 @@ const hostSlot = text => {
 };
 
 const HOST_RECORD = '.local/state/multiprompt/agent-host';
-const SERVERS_FILE = '.local/share/vstack/servers.json';
+const SERVERS_FILE = '.local/share/vstack/config/servers.json';
 
 function readRecord(file) {
   try {
@@ -75,43 +76,101 @@ function readRecord(file) {
   } catch { return null; }
 }
 
-function chatRecords(env, session) {
+function serversPath(env) {
+  if (env.MULTIPROMPT_SERVERS_FILE) return env.MULTIPROMPT_SERVERS_FILE;
+  if (env.MULTIPROMPT_SERVERS) return env.MULTIPROMPT_SERVERS;
+  if (!env.HOME) return null;
+  return join(env.HOME, SERVERS_FILE);
+}
+
+function osUser(env) {
+  const user = env.USER || env.LOGNAME || env.USERNAME;
+  return typeof user === 'string' && user ? user : userInfo().username;
+}
+
+function serverHostnames(server) {
+  const names = [];
+  if (server && typeof server.hostname === 'string' && server.hostname) names.push(server.hostname);
+  if (server && typeof server.previous_hostname === 'string' && server.previous_hostname) names.push(server.previous_hostname);
+  return names;
+}
+
+function machineNames(env, configs, facts) {
+  const names = new Set([hostname()]);
+  const servers = Array.isArray(facts?.servers) ? facts.servers : [];
+  for (const config of configs) {
+    if (typeof config.server !== 'string' || !config.server) continue;
+    const server = servers.find(item => item && item.id === config.server);
+    for (const name of serverHostnames(server)) names.add(name);
+  }
+  return names;
+}
+
+function agentConfigs(env, session) {
   const wanted = session.toLowerCase();
-  const records = [];
-  if (!env.HOME) return records;
+  const configs = [];
+  if (!env.HOME) return configs;
   const root = join(env.HOME, HOST_RECORD);
   let names = [];
   try { names = readdirSync(root); } catch { names = []; }
   for (const name of names.filter(entry => entry.endsWith('.config.json'))) {
     const config = readRecord(join(root, name));
     if (!config || typeof config.tmux !== 'string' || config.tmux.toLowerCase() !== wanted) continue;
-    if (Number.isInteger(config.spawn_host) && config.spawn_host >= 0 && config.spawn_host <= 2) records.push(config.spawn_host);
+    configs.push(config);
   }
-  const facts = readRecord(env.MULTIPROMPT_SERVERS || join(env.HOME, SERVERS_FILE));
-  if (!facts) return records;
-  const servers = Array.isArray(facts.servers) ? facts.servers : [];
-  for (const chat of Array.isArray(facts.chats) ? facts.chats : []) {
-    if (!chat || typeof chat.session !== 'string' || chat.session.toLowerCase() !== wanted) continue;
-    const server = servers.find(item => item && item.name === chat.server);
-    if (!server || !Number.isInteger(server.slot) || server.slot < 0 || server.slot > 2) continue;
-    if (!Array.isArray(server.users) || !server.users.includes(chat.user)) continue;
-    records.push(server.slot);
-  }
-  return records;
+  return configs;
 }
 
-export function resolveTabHost(env, session, explicit) {
-  const records = chatRecords(env, session);
-  const hosts = new Set(records);
+function recordedHosts(configs) {
+  return configs.map(config => config.spawn_host).filter(host => Number.isInteger(host) && host >= 0 && host <= 2);
+}
+
+function hostnamesMatch(left, right) {
+  return typeof left === 'string' && typeof right === 'string' && left.toLowerCase() === right.toLowerCase();
+}
+
+function slotFromServers(env, session, layoutHosts, configs) {
+  const path = serversPath(env);
+  if (!path) throw new Failure(`give --host: ${session} has no recorded host`);
+  const facts = readRecord(path);
+  if (!facts) throw new Failure(`give --host: ${session} has no recorded host`);
+  const user = osUser(env);
+  if (!user) throw new Failure(`give --host: ${session} has no recorded host`);
+  const servers = Array.isArray(facts.servers) ? facts.servers : [];
+  const machines = machineNames(env, configs, facts);
+  const matched = servers.filter(server => {
+    if (!server || !Array.isArray(server.users) || !server.users.includes(user)) return false;
+    return serverHostnames(server).some(name => machines.has(name));
+  });
+  if (matched.length > 1) throw new Failure(`give --host: ${session} matches more than one server`);
+  if (matched.length !== 1) throw new Failure(`give --host: ${session} has no matching server`);
+  const server = matched[0];
+  const hosts = Array.isArray(layoutHosts) ? layoutHosts : [];
+  const slots = hosts.filter(item => item && item.user === user && serverHostnames(server).some(name => hostnamesMatch(item.hostname, name)));
+  if (slots.length > 1) throw new Failure(`give --host: ${session} is on more than one listed server`);
+  if (slots.length !== 1) throw new Failure(`give --host: ${session} is not on any listed server`);
+  const slot = slots[0].slot;
+  if (!Number.isInteger(slot) || slot < 0 || slot > 2) throw new Failure(`give --host: ${session} is not on any listed server`);
+  return slot;
+}
+
+export function resolveTabHost(env, session, explicit, layoutHosts) {
+  const configs = agentConfigs(env, session);
+  const records = recordedHosts(configs);
   if (explicit !== undefined) {
     const slot = hostSlot(explicit);
     const conflicting = records.find(host => host !== slot);
     if (conflicting !== undefined) throw new Failure(`--host ${slot} contradicts the host ${conflicting} recorded for ${session}`);
     return slot;
   }
-  if (hosts.size === 1) return [...hosts][0];
-  if (hosts.size > 1) throw new Failure(`give --host: ${session} has conflicting recorded hosts`);
-  throw new Failure(`give --host: ${session} has no recorded host`);
+  if (records.length === 1) return records[0];
+  if (records.length > 1) throw new Failure(`give --host: ${session} has conflicting recorded hosts`);
+  if (layoutHosts === undefined) throw new Failure(`give --host: ${session} has no recorded host`);
+  return slotFromServers(env, session, layoutHosts, configs);
+}
+
+export function needsLayoutHosts(env, session, explicit) {
+  return explicit === undefined && recordedHosts(agentConfigs(env, session)).length === 0;
 }
 
 function normalizedGroup(value) {
@@ -220,7 +279,13 @@ async function open(ctx, flags) {
   const session = flags.tmux || positional[0];
   if (!session || positional.length > 1 || (flags.tmux && positional.length === 1 && positional[0] !== flags.tmux)) throw new Failure('give one session name');
   if (!/^[A-Za-z0-9_-]{1,63}$/.test(session)) throw new Failure('session names use letters, digits, - and _ (63 at most)');
-  const host = resolveTabHost(ctx.env, session, flags.host);
+  let layoutHosts;
+  if (needsLayoutHosts(ctx.env, session, flags.host)) {
+    const read = await call(ctx, 'GET');
+    if (read.status !== 200) throw refusal(read);
+    layoutHosts = read.data.layout.hosts;
+  }
+  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts);
   const title = flags.name || flags.title || session;
   const group = normalizedGroup(flags.group);
   ctx.features = flags.star ? 'groups,favorite' : 'groups';
