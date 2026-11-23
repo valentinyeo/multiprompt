@@ -1,0 +1,1 @@
+Switch AI now stays on the current AI when the new one fails to start, instead of leaving the chat without a running AI.
