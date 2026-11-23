@@ -17,6 +17,7 @@ Before launch the harness saves two stand-in tmux tabs on the replaced SSH bound
 
 ## Gotchas
 
+- To prove a published build, dispatch `verify.yml` with `feature=sidebar-click-row` and `-f tag=<release>`; the seeded sessions are stand-ins on the replaced SSH boundary only.
 - The pointer is never moved between the click and the second screenshot; `sidebar-row.json` records both screen positions.
 - The comparison uses the band the pointer sits on, so it does not depend on the rest of the sidebar. Rows are located from the screenshot, not from layout constants.
 - Only SSH is replaced; the sidebar, the click handling and the chat reopen run in the real app.

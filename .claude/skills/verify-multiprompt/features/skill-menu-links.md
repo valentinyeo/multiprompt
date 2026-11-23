@@ -18,6 +18,7 @@ Before launch the harness writes two skill folders under the isolated `USERPROFI
 
 ## Gotchas
 
+- To prove a published build, dispatch `verify.yml` with `feature=skill-menu-links` and `-f tag=<release>`; the fixture is still written under the isolated profile.
 - Skill discovery reads `USERPROFILE`, so the fixture lives in the isolated profile and never touches a user machine.
 - The palette rows are custom-painted; the journey relies on the app-painted screenshots plus the composer text it reads back, not on invented accessibility rows.
 - The local CMD session is enough: the menu and the insertion are local discovery, no AI agent or remote skill execution is involved.
