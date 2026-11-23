@@ -184,11 +184,11 @@ pub const History = struct {
             const role: md.Role = if (std.mem.eql(u8, m.role, "user")) .user else if (std.mem.eql(u8, m.role, "assistant")) .prose else continue;
             if (m.text.len == 0) return error.InvalidHistory;
             const client = if (m.client_id.len > 0) m.client_id else m.id;
-            if (role == .user and client.len > 0) {
+            const merge = m.id.len > 0 and std.mem.eql(u8, m.id, last_id.items) and role == last_role and segment == m.segment;
+            if (role == .user and m.client_id.len > 0 and !merge) {
                 if (users.contains(client)) continue;
                 try users.put(try tool_arena.allocator().dupe(u8, client), {});
             }
-            const merge = m.id.len > 0 and std.mem.eql(u8, m.id, last_id.items) and role == last_role and segment == m.segment;
             if (merge) {
                 try message.append(a, '\n');
             } else {
@@ -455,7 +455,7 @@ pub const History = struct {
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try rowIdentity(scratch, line, order.items.len);
+            const key = try self.rowIdentity(scratch, line, order.items.len);
             const slot = try incoming.getOrPut(key);
             if (!slot.found_existing) {
                 slot.value_ptr.* = .{ .index = order.items.len };
@@ -468,7 +468,7 @@ pub const History = struct {
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try rowIdentity(scratch, line, previous_matches.items.len);
+            const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
             const matched = incoming.getPtr(key);
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
             if (matched) |entry| {
@@ -538,13 +538,12 @@ pub const History = struct {
         end: u64,
         segment: u64,
         timestamp: []const u8,
-        text: []const u8,
         settlement: @FieldType(Message, "settlement"),
 
         const Context = struct {
             pub fn hash(_: @This(), key: RowIdentity) u64 {
                 var h = std.hash.Wyhash.init(key.segment);
-                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                inline for (.{ "role", "id", "timestamp" }) |field| {
                     const bytes = @field(key, field);
                     std.hash.autoHash(&h, bytes.len);
                     h.update(bytes);
@@ -560,7 +559,7 @@ pub const History = struct {
 
             pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
                 if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
-                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                inline for (.{ "role", "id", "timestamp" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
                 if (lhs.settlement) |fact| {
@@ -571,13 +570,14 @@ pub const History = struct {
         };
     };
 
-    fn rowIdentity(a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
+    fn rowIdentity(self: History, a: std.mem.Allocator, line: []const u8, ordinal: usize) !RowIdentity {
         const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
-        const id = if (m.id.len > 0) m.read_id orelse m.id else if (m.end > m.offset)
-            try std.fmt.allocPrint(a, "source:{d}:{d}", .{ m.offset, m.end })
+        const native_id = m.read_id orelse m.id;
+        const id = if (native_id.len > 0) native_id else if (m.end > m.offset)
+            try std.fmt.allocPrint(a, "source:{d}:{d}:{d}", .{ self.inode, m.offset, m.end })
         else
-            try std.fmt.allocPrint(a, "legacy:{d}", .{ordinal});
-        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = "", .text = "", .settlement = m.settlement };
+            try std.fmt.allocPrint(a, "legacy:{d}:{d}:{d}:{d}", .{ self.inode, self.start, self.offset, ordinal });
+        return .{ .role = m.role, .id = id, .offset = m.offset, .end = m.end, .segment = m.segment, .timestamp = m.timestamp, .settlement = m.settlement };
     }
 
     pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {
@@ -648,11 +648,11 @@ pub const History = struct {
         var merged: std.ArrayList(Item) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
-            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try rowIdentity(scratch, line, merged.items.len) });
+            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try self.rowIdentity(scratch, line, merged.items.len) });
         }
         var changed = false;
         for (rows) |row_bytes| {
-            const key = try rowIdentity(scratch, row_bytes, 0);
+            const key = try self.rowIdentity(scratch, row_bytes, 0);
             if (key.end <= key.offset) return error.InvalidHistory;
             if (key.end <= self.start) continue;
             var index: usize = from;
@@ -807,6 +807,7 @@ pub const Backfill = struct {
 
     pub fn finish(self: *Backfill, a: std.mem.Allocator, tail: History) !History {
         var result = tail.cursor();
+        result.start = self.start;
         errdefer result.deinit(a);
         var size = tail.rows.items.len;
         for (self.pages.items) |page| size += page.len;
@@ -823,7 +824,6 @@ pub const Backfill = struct {
         result.rows.deinit(a);
         result.rows = recent.rows;
         recent.rows = .empty;
-        result.start = self.start;
         result.revision +%= 1;
         try result.render(a);
         self.deinit(a);
