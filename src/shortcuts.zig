@@ -337,6 +337,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
+    .{ .a = "Ctrl+K -> Move workspace to server", .b = "Point this workspace default folder at the same path on another account server", .header = false },
+    .{ .a = "Ctrl+K -> New tab on server", .b = "Open one workspace tab on another account server without moving the workspace", .header = false },
     .{ .a = "Ctrl+K Remind Me", .b = "Snooze active tmux/Claude tab via quick presets (or type a time)", .header = false },
     .{ .a = "Ctrl+H", .b = "Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more", .header = false },
     .{ .a = "Alt+H", .b = "Remind Me: hide local tab, keep tmux running, return when due", .header = false },
