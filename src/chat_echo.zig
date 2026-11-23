@@ -327,18 +327,43 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
 
 pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
 
-pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
-    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
+pub fn v1PhaseUnconfirmed(phase: []const u8) bool {
+    return phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "sent");
+}
+
+pub fn v1NeedsResubmit(message_v1: bool, write_started: bool, phase: []const u8, state: OutboxState) bool {
+    if (!message_v1 or !write_started or state == .cancelled or state == .not_sent) return false;
+    return v1PhaseUnconfirmed(phase);
+}
+
+pub fn v1ChannelOrphaned(channel_pending: bool, send_job_active: bool) bool {
+    return channel_pending and !send_job_active;
+}
+
+pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, send_job_active: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    if (state != .sending or sent_tick_ms <= 0 or now_ms < sent_tick_ms) return false;
+    if (channel_pending and send_job_active) return false;
+    return now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
 }
 
 test "a host message left sending with no job settles after the deadline" {
-    try std.testing.expect(v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
-    try std.testing.expect(!v1SendingAbandoned(.sending, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 10));
+    try std.testing.expect(v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
+    try std.testing.expect(!v1SendingAbandoned(.sending, true, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(v1SendingAbandoned(.sending, true, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 0, V1_SENDING_DEADLINE_MS * 10));
     for ([_]OutboxState{ .queued, .not_sent, .delivered, .cancelled }) |state| {
-        try std.testing.expect(!v1SendingAbandoned(state, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+        try std.testing.expect(!v1SendingAbandoned(state, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
     }
+}
+
+test "SOFT-3038 a relaunched host message with an unconfirmed phase can submit again" {
+    try std.testing.expect(v1NeedsResubmit(true, true, "queued", .queued));
+    try std.testing.expect(v1NeedsResubmit(true, true, "sent", .sending));
+    try std.testing.expect(!v1NeedsResubmit(true, true, "accepted", .delivered));
+    try std.testing.expect(!v1NeedsResubmit(true, false, "queued", .queued));
+    try std.testing.expect(v1ChannelOrphaned(true, false));
+    try std.testing.expect(!v1ChannelOrphaned(true, true));
 }
 
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
