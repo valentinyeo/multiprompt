@@ -298,7 +298,7 @@ try {
     [void](Wait-For 'context Delete removes captured Beta' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 1 })
     Shot 'context-delete-beta'
     Focus
-    Palette 'delete session' 7112
+    Palette 'delete chat' 7112
     [void](Wait-For 'one Ctrl+K Delete stops Alpha' { $servers[0].process.HasExited })
     [void](Wait-For 'Alpha removed' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 0 })
     $requests=@(Get-Content (Join-Path $env:MP_VERIFY_STATE 'end-requests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })

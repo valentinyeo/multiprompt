@@ -1,6 +1,6 @@
 # Jump to the newest chat message
 
-Covers: palette:SEARCH_CHAT_NEWEST_OFFSET, shortcut:palette-actions/shift-g-twice-end-ctrl-k-jump-to-newest-message
+Covers: palette:SEARCH_CHAT_NEWEST_OFFSET, shortcut:palette-actions/shift-g-twice-end-ctrl-k-scroll-to-newest-message
 Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-newest.ps1, tools/chat-newest-proof.mjs
 
 ## Sub-features
@@ -20,7 +20,7 @@ Dispatch `gh workflow run verify.yml --ref <branch> -f feature=chat-newest`. Dow
 
 The existing chat-delivery boundary seeds an isolated saved tmux tab and a synthetic 50-message Claude transcript. The real app launches its production reader over the SSH stand-in. Native input opens Chat View. The driver requires a scrollable transcript, scrolls away from newest, and uses genuine SendInput typing to check `draftGG`, lowercase `gg` and slow capital `GG`. Native WM_GETTEXT must preserve those exact drafts, and the transcript must remain scrolled up.
 
-After clearing the composer, genuine Shift+G twice must produce a new bottom frame and an empty native composer. Scroll away once more. Real Ctrl+K search must select production row 6465 with the visible name `Jump to newest message`. Enter must return to newest again.
+After clearing the composer, genuine Shift+G twice must produce a new bottom frame and an empty native composer. Scroll away once more. Real Ctrl+K search must select production row 6465 with the visible name `Scroll to newest message`. Enter must return to newest again.
 
 `tools/chat-newest-proof.mjs` checks the raw observations and log ranges independently. A later palette jump cannot satisfy the earlier keyboard-jump assertion. It also checks input timing, owned executable identity, screenshots and zero-process cleanup. Its negative fixtures run on the hosted journey before desktop driving.
 

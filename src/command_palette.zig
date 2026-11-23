@@ -4566,6 +4566,7 @@ pub fn updateSearchResults() void {
             "owner@example.com",
             "primary claude account",
             "usage: sign in to primary claude account",
+            "usage: sign in to claude",
             "reconnect claude: primary",
             "reconnect claude primary telemetry",
             "secondary@example.com",

@@ -63,7 +63,7 @@ test('settings requests report refusal and show confirmed next values', () => {
 test('F1 and keyboard docs point at the Plus Menu for model and effort', () => {
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
     const text = read(file);
-    assert.ok(text.includes('Chat View: Plus Menu'), file);
+    assert.ok(text.includes('Plus menu'), file);
     assert.ok(text.includes('Model, Effort and, in a Claude chat, Permission level'), file);
   }
 });

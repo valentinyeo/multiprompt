@@ -2708,7 +2708,7 @@ test('SOFT-2762 session-actions expects the seven context ids the app appends', 
   const query = read('tools/verify-session-actions/drive.ps1').match(/Palette '([^']+)' 7112/);
   assert.ok(query, 'the driver reaches Delete session through the global palette');
   const deleteRow = rows.find(row => row.id === 7112);
-  assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()) || palette.includes(`"${query[1]}"`), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
+  assert.ok(deleteRow.label.toLowerCase().startsWith(query[1].toLowerCase()), `the global palette matches 7112 by "${deleteRow.label}", not "${query[1]}"`);
 });
 
 test('SOFT-2762 session-actions resumes deleted chats through the live All Sessions route', () => {
