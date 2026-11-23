@@ -654,6 +654,9 @@ jobs:
       - name: Build release executables for arm64
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
         run: zig build -Dtarget=aarch64-windows-gnu --summary all
+      - name: Cross-compile the Windows version label
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu
       - name: Prepare throwaway update-test signing key
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der
