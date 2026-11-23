@@ -48,10 +48,11 @@ function Proof-Check([string]$Ticket, [scriptblock]$Journey) {
     Save-Json $check ($Ticket + '-result.json')
 }
 
-Press @(0x11, 0x32) 'Ctrl+2: select the real server shell'
+Proof-Palette 'server shell proof' 1 'SOFT-3001-shell-row'
 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_session -ceq 'proof-shell' } 'proof-shell selected'
 
 Proof-Check 'SOFT-3001' {
+    Wait-Until { (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_attached}"' 'shell-attached').Trim() -eq '1' } 'real tmux shell transport attached before typing' 90
     Proof-Line 'python3 /home/mpverify/shell-proof.py'
     Wait-Until {
         try { $script:heartbeat = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'heartbeat-ready') | ConvertFrom-Json; return $script:heartbeat.tick -gt 0 } catch { return $false }
@@ -92,6 +93,7 @@ Proof-Check 'SOFT-3002' {
     Snapshot 'SOFT-3002-before-restart'
     Restart-SessionRestore 'SOFT-3002-restart' $false
     Wait-Until { @((Read-Session).tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'proof-shell' }).Count -eq 1 } 'the server shell tab returned after normal quit and restart' 60
+    Wait-Until { (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_attached}"' 'restored-attached').Trim() -eq '1' } 'restored tmux transport attached before typing' 90
     Proof-Line 'echo after-restart > /home/mpverify/shell-restore.txt; echo SOFT3002-ATTACHED-AFTER-RESTART'
     Wait-Until { (Read-ProofServer 'cat /home/mpverify/shell-restore.txt' 'restore-after-input').Trim() -ceq 'after-restart' } 'restored tab accepted real input'
     $afterRestart = (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' 'session-after-restart').Trim()
@@ -106,6 +108,7 @@ Proof-Check 'SOFT-3002' {
     Snapshot 'SOFT-3002-detached-row'
     Press @(0x0D) 'Enter: reopen the same proof-shell session'
     Wait-Until { $state = Read-Session; $tab = $state.tabs[$state.active_tab]; $tab.PSObject.Properties['tmux_session'] -and $tab.tmux_session -ceq 'proof-shell' } 'Reopen server shell selected proof-shell' 60
+    Wait-Until { (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_attached}"' 'reopened-attached').Trim() -eq '1' } 'reopened tmux transport attached before typing' 90
     Proof-Line 'echo reopened > /home/mpverify/shell-restore.txt; echo SOFT3002-REOPENED-SAME-SESSION'
     Wait-Until { (Read-ProofServer 'cat /home/mpverify/shell-restore.txt' 'reopened-input').Trim() -ceq 'reopened' } 'reopened shell accepted real input' 30
     $reopened = (Read-ProofServer 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' 'session-reopened').Trim()
@@ -115,10 +118,10 @@ Proof-Check 'SOFT-3002' {
 }
 
 Proof-Check 'SOFT-3003' {
-    Press @(0x11, 0x31) 'Ctrl+1: select the real server chat'
+    Proof-Palette 'runner server chat' 0 'SOFT-3003-chat-row'
     Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_session -ceq 'live-ci' } 'runner server chat selected'
-    Press @(0x12, 0x43) 'Alt+C: open the server chat view'
-    Wait-Until { (Read-SharedText $proofLog) -match '\[chat\] transcript load shell=\d+ ok' } 'real server chat transcript loaded' 90
+    if (-not (Read-Session).tabs[(Read-Session).active_tab].cv) { Press @(0x12, 0x43) 'Alt+C: open the server chat view' }
+    Wait-Until { (Read-SharedText $proofLog) -match '\[chat-live\] page shell=\d+ n=[1-9]\d*' -or (Read-SharedText $proofLog) -match '\[chat\] transcript load shell=\d+ ok' } 'real server chat transcript loaded' 90
     Snapshot 'SOFT-3003-server-chat'
     $before = Read-Session
     $count = @($before.tabs).Count
