@@ -122,6 +122,9 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
+const SEARCH_WORKSPACE_ALL_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ALL_OFFSET;
+const SEARCH_WORKSPACE_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FREQUENT_OFFSET;
+const SEARCH_WORKSPACE_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FAVORITES_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -494,6 +497,7 @@ fn tabPassesUnreadFilter(i: usize) bool {
 
 pub fn isTabHidden(idx: u32) bool {
     if (idx >= app_state.shell_count) return false;
+    if (app_state.g_sidebar_view != null) return !@import("workspaces.zig").sidebarViewShellVisible(idx);
     if (app_state.g_starred_workspace and !@import("workspaces.zig").starredShellVisible(idx)) return true;
     if (!app_state.g_starred_workspace and app_state.g_single_window and (app_state.shells[idx].workspace != app_state.g_active_workspace or app_state.g_ws_snoozed[app_state.shells[idx].workspace])) return true;
     if (!app_state.g_starred_workspace and app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention and idx != app_state.active_shell) return true;
@@ -1507,6 +1511,38 @@ fn sectionHeaderHeight() i32 {
     return if (app_state.g_sidebar_collapsed) SECTION_HEADER_H else uiScaled(42);
 }
 
+fn layoutViewRows(out: *[MAX_ROWS]Row, view: @import("workspace_view.zig").Builtin) u32 {
+    const inbox = @import("inbox.zig");
+    const now_ms = frequent.unixMs(inbox.nowFileTime() / 10_000);
+    var indices: [app_state.INBOX_MAX_ROWS]u32 = undefined;
+    var count: u32 = 0;
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |*row, i| {
+        if (row.ws >= app_state.g_inbox_ws_count or !inbox.rowVisibleInSplit(row, view.split(), now_ms)) continue;
+        indices[count] = @intCast(i);
+        count += 1;
+    }
+    const Order = struct {
+        split: u32,
+        now_ms: u64,
+
+        fn less(ctx: @This(), a: u32, b: u32) bool {
+            return @import("inbox.zig").rowLessForSplit(ctx.split, ctx.now_ms, app_state.g_inbox_rows[a], app_state.g_inbox_rows[b]);
+        }
+    };
+    std.mem.sort(u32, indices[0..count], Order{ .split = view.split(), .now_ms = now_ms }, Order.less);
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
+    var n: u32 = 0;
+    for (indices[0..count]) |ri| {
+        const session = app_state.g_inbox_rows[ri];
+        const local = app_state.g_inbox_ws[session.ws].hwnd == @intFromPtr(app_state.g_main_hwnd);
+        const idx = if (local) inbox.findShellById(session.sid) orelse continue else ri;
+        out[n] = .{ .kind = if (local) .tab else .inbox, .gidx = 0, .shell_idx = idx, .y = y };
+        n += 1;
+        y += tabRowH();
+    }
+    return n;
+}
+
 fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
@@ -1710,6 +1746,7 @@ fn appendRoomRows(out: *[MAX_ROWS]Row, count: *u32, y: *i32) void {
 }
 
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
+    if (app_state.g_sidebar_view) |view| return layoutViewRows(out, view);
     var rows: [app_state.MAX_SESSION_ROWS]Row = undefined;
     const count = layoutRowsInner(&rows);
     if (!@import("room_frontend.zig").enabled and (count == 0 or app_state.g_sidebar_collapsed)) {
@@ -2269,7 +2306,11 @@ fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry
     const top = g.center_y - @divTrunc(g.diameter, 2);
     const smooth = @import("smooth.zig");
     smooth.fillEllipse(hdc, .{ .left = left - g.ring, .top = top - g.ring, .right = left + g.diameter + g.ring, .bottom = top + g.diameter + g.ring }, background);
-    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
+    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) {
+        .disconnected => RGB(255, 145, 55),
+        .unread => RGB(137, 180, 248),
+        .favorite => RGB(240, 196, 75),
+    });
 }
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rect: RECT) void {
@@ -3387,6 +3428,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var frequent_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.palette_inbox_frequent), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_WORKSPACE_ALL_OFFSET or result_idx == SEARCH_WORKSPACE_FREQUENT_OFFSET or result_idx == SEARCH_WORKSPACE_FAVORITES_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var view_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        const label = if (result_idx == SEARCH_WORKSPACE_ALL_OFFSET) L("Workspace view: All") else if (result_idx == SEARCH_WORKSPACE_FREQUENT_OFFSET) L("Workspace view: Frequent") else L("Workspace view: Favorites");
+                        _ = paletteDrawText(hdc, label, -1, &view_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        const hint = if (result_idx == SEARCH_WORKSPACE_ALL_OFFSET) L("Alt+Shift+1") else if (result_idx == SEARCH_WORKSPACE_FREQUENT_OFFSET) L("Alt+Shift+2") else L("Alt+Shift+3");
+                        _ = paletteDrawText(hdc, hint, -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_STARRED_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
