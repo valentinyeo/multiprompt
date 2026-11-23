@@ -58,7 +58,9 @@ fn publishInboxStateNow() void { visit_publications += 1; }
 fn saveSession() void { saves += 1; }
 fn loadInboxModel() void {}
 fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: i32) i32 { return 1; }
-const InboxWs = struct { hwnd: usize = 2, attn: u32 = 0, name: [64]u8 = .{0} ** 64, name_len: u32 = 0 };
+const InboxWs = struct { hwnd: usize = 2, attn: u32 = 0, name: [64]u8 = .{0} ** 64, name_len: u32 = 0, id: [64]u8 = @splat(0), id_len: u32 = 0 };
+var g_workspaces = [_]struct { id: [64]u8 = @splat(0), id_len: u32 = 0, archived: bool = false }{.{}};
+var g_workspace_count: u32 = 0;
 var shells = [_]Shell{.{}} ** 6;
 var shell_count: u32 = 1;
 var g_restoring = false;
