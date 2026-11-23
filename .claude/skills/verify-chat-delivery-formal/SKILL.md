@@ -39,9 +39,9 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Source/model mapping was reviewed for SOFT-2380 at `274d220b695a9242b9a652d60169914c1742d7fa` and merged master `ee20a7eb83dec02a9dd0983e04ef33a6846b2ae6`. `src/app_state.zig` adds only the optional sidebar view and three palette IDs; `ChatOutboxEntry` is byte-for-byte unchanged. SOFT-2524 changes only the reader's outer runtime selection and bundle identity; `message_store_transaction`, `message_poll`, `message_poll_locked` and their callers are unchanged. All other covered files, the native probes, model, decision table, bounds and inherited findings are unchanged. Whole-file hashes include both reviewed changes; drift checks remain deliberate rather than recomputing expected hashes at check time.
+Source/model mapping was reviewed for SOFT-2380 at `8ed6172bfcc5c8ed5477c426a21d5d7cde124930` and merged master `bb75c5de00393705bd3cdfd275853682362357ce`. `src/app_state.zig` adds only the optional sidebar view and three palette IDs; `ChatOutboxEntry` is byte-for-byte unchanged. SOFT-2524 changes only the reader's outer runtime selection and bundle identity; `message_store_transaction`, `message_poll`, `message_poll_locked` and their callers are unchanged. All other covered files, the native probes, model, decision table, bounds and inherited findings are unchanged. Whole-file hashes include both reviewed changes; drift checks remain deliberate rather than recomputing expected hashes at check time.
 
-SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
+SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`; SOFT-3067 adds only tunnel notification identity storage there. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
 | Source | Covered behavior |
 | --- | --- |
