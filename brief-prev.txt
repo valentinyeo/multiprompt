@@ -1,0 +1,38 @@
+URGENT (Valentin's hard blocker). Tickets: SOFT-3053 "Inne chats: slash list misses /inne-mode" https://app.hypertask.ai/detail/project-2060/3053 and SOFT-3102 "Skill menu misses the chat folder's own skills" https://app.hypertask.ai/detail/project-2060/3102. Same root; fix both in ONE PR.
+Repo: valentinyeo/multiprompt, branch mbb-soft-3053-host from origin/master. Open ONE PR, title "SOFT-3053: Slash menu lists skills from the chat's own server and folder".
+
+Problem: in the desktop chat composer, typing "/inne-mode" in an inne chat shows "No matches" (screenshot https://screencast2.com/1d3yP.png). The inne chats run on a different server (the Hetzner box, Linux user "inne"); the inne-mode skill is installed THERE in ~/.claude/skills, not on the main VPS. Likewise "/verify-mul" in a chat whose folder has .claude/skills/verify-multiprompt shows "No matches" (SOFT-3102, screenshot https://screencast2.com/5bBZ8.png).
+PR 1265 (merged, commit 605610d5a) already embeds src/mp_complete.py + src/completer_sync_shim.py and runs the completer over ssh (src/chat_composer.zig ~line 1325-1420: tmuxSshTarget(ac_host), "--once"/persistent). It did NOT fix the case. Find out why from code: likely ac_host is the main VPS (the chat is relayed/owned via another host or user: look at how hosted chats owned by another server user are resolved, e.g. owner delegation in src/chat_history_reader.py and src/chat_session.zig host lookups), so the completer scans the wrong machine/user, and/or the request lacks the chat's cwd so <cwd>/.claude/skills is never scanned.
+Expected: the slash menu lists skills from the machine AND Linux user the chat actually runs as: that user's ~/.claude/skills, its installed plugin skills, ~/.claude/commands, plus <chat cwd>/.claude/skills and commands. Small typo tolerance ("/verfiy" finds verify-*), exact prefix ranks first.
+
+Do:
+1. Failing tests first (fail on master, pass after): a chat owned by another host/user routes completion to that host/user; folder skills listed for a cwd; typo match. Use existing test styles (tools/completer-deploy.test.js, tools/agent-notifications/test_mp_complete.py, node --test tools/*.test.js).
+2. Small fix. Keep old clients working. Cache scans per cwd with mtime check.
+3. tools/ticket-titles/IGSH-3053.txt (exact ticket title + newline), changelog.d/SOFT-3053-slash-menu-own-server.md with one plain end-user sentence. Commits start "SOFT-3053: ". No version bump, no Co-authored-by, code comment-free. PR body: root cause, both ticket links, "Author model: <family>/<model>".
+4. Do not merge. Push early so the PR link exists within 15 minutes, then keep pushing.
+End with: RESULT: <PR url> <green|red> <one sentence root cause>.
+
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
