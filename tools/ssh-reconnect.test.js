@@ -1024,11 +1024,10 @@ test('ISSUE-511 lifecycle and confirmation timeout execute pure production state
 });
 
 test('ISSUE-511 lifecycle oracles reject 9542152 state behavior', async () => {
-  const prior = spawnSync('git', ['show', '9542152332e0355927c3ca11d96c6b3cdd019fc2:src/ssh_reconnect.zig'], { cwd: root, encoding: 'utf8' });
-  assert.equal(prior.status, 0, prior.stderr);
+  const prior = fs.readFileSync(path.join(__dirname, 'fixtures/ISSUE-511/ssh_reconnect.zig'), 'utf8');
   const current = fs.readFileSync(path.join(root, 'src/ssh_reconnect.zig'), 'utf8');
   const tests = current.slice(current.indexOf('\nfn testGoneLifecycle('));
-  let baseline = prior.stdout.slice(0, prior.stdout.indexOf('\ntest "'));
+  let baseline = prior.slice(0, prior.indexOf('\ntest "'));
   baseline = baseline.replace('    healthy_attach: bool = false,', '    healthy_attach: bool = false,\n    ever_healthy: bool = false,\n    restored_session: bool = false,\n    creating_session: bool = false,');
   baseline = baseline.replace('process_alive: bool) bool {\n        const eligible', 'process_alive: bool, now: u64) bool {\n        _ = now;\n        const eligible');
   baseline = baseline.replace('    pub fn end(self: *State) void {', `    pub fn expireProbeWait(self: *State, now: u64, spawn_tick: u64) void {
