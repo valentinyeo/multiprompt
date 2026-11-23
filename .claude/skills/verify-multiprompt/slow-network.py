@@ -55,6 +55,12 @@ def send_frame(sock, value):
 
 
 def ssh_client(args):
+    # Real ssh answers -V locally. The app's ssh-path probe only allows 3 s, so
+    # the version query must not cross the delay the rest of the link carries.
+    if args == ['-V']:
+        sys.stdout.write('OpenSSH_verification\n')
+        sys.stdout.flush()
+        return 0
     sock = socket.create_connection(('127.0.0.1', PORT), timeout=30)
     sock.settimeout(None)
     send_frame(sock, args)

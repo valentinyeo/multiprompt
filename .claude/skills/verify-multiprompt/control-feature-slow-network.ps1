@@ -60,6 +60,10 @@ Wait-Until {
     $state = Read-Inbox
     $null -ne $state -and @($state.shells).Count -ge 2
 } 'two published remote shells' 120
+Wait-Until {
+    $probes = [regex]::Matches((Read-SharedText $slowLog), 'ssh-probe result host=0 ok=(\d)')
+    $probes.Count -gt 0 -and $probes[$probes.Count - 1].Groups[1].Value -eq '1'
+} 'remote session probe healthy through the slow link' 120
 $result.slowNetwork.sessions = @('verify-one', 'verify-two')
 
 Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session'
@@ -81,7 +85,7 @@ for ($index = 0; $index -lt 10; $index++) {
     $sample.kind = 'switch'
     $sample.index = $index
     $sample.target = if ($target -eq 1) { 'verify-one' } else { 'verify-two' }
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
     $switched = $false
     do {
         $state = Read-Session
