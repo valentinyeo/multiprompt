@@ -2792,7 +2792,8 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
-                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
+                      "Helper chats: `mp-helper --help`.\n"
+                      "Chats: `mp-sessions list --workspace mine`, `mp-sessions send`, `mp-sessions --help`.\n"
                       "Server shell tabs: `mp-shell --help` opens a VPS shell or attaches tmux on the desktop.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
@@ -4490,6 +4491,13 @@ def host_switch_handover(rows, provider, target):
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
+def host_switch_abort(target, new_sid, paths=None):
+    paths = paths if paths is not None else host_paths(target, new_sid)
+    pending = host_read(paths["config"])
+    if isinstance(pending, dict):
+        host_write(paths["config"], dict(pending, enabled=False))
+
+
 def host_switch_ai(provider, sid, target):
     moved = host_switch_follow(sid)
     if moved is not None:
@@ -4506,8 +4514,6 @@ def host_switch_ai(provider, sid, target):
         return dict(status="refused", reason="host_handed_over")
     if host_turn_busy(provider, sid):
         return dict(status="busy", reason="chat_busy")
-    if host_owned(provider, sid):
-        host_stop(provider, sid)
     try:
         rows = host_switch_rows(provider, sid, tmux)
         text = host_switch_handover(rows, provider, target)
@@ -4530,6 +4536,16 @@ def host_switch_ai(provider, sid, target):
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
+    except (OSError, ValueError, sqlite3.Error):
+        return dict(status="error", reason="switch_failed")
+    started = host_start(target, new_sid)
+    if started.get("status") not in ("started", "already"):
+        host_switch_abort(target, new_sid, paths)
+        if host_enabled(provider, sid) and not host_alive(provider, sid):
+            host_start(provider, sid)
+        return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
+                    running=HOST_AI_NAMES[provider], start=started)
+    try:
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -4543,9 +4559,12 @@ def host_switch_ai(provider, sid, target):
         host_write(host_switched_path(), moved_map)
         host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        host_stop(target, new_sid)
+        host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
+    if host_owned(provider, sid):
+        host_stop(provider, sid)
     host_log(provider, sid, "switched_ai", dict(to=target, sid=new_sid))
-    started = host_start(target, new_sid)
     return dict(status="switched", provider=target, sid=new_sid, tmux=tmux, start=started.get("status"))
 
 
@@ -5091,6 +5110,8 @@ def host_handle_request(provider, sid, tmux, session, request):
                     parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
+        session["exit_cause"] = "stop_requested"
+        host_log(provider, sid, "stop_requested")
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
@@ -6229,6 +6250,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
                             host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
+                        session["exit_cause"] = "agent_closed"
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
@@ -6304,6 +6326,9 @@ def host_main(provider, sid):
     except (OSError, ValueError) as error:
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
         return 4
+    except Exception as error:
+        host_log(provider, sid, "crash", dict(error=type(error).__name__))
+        raise
     finally:
         host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
@@ -6324,7 +6349,7 @@ def host_main(provider, sid):
         stopped["stopped"] = time.time()
         host_write(paths["state"], stopped)
         host_release(lock)
-        host_log(provider, sid, "stop")
+        host_log(provider, sid, "stop", dict(cause=session.get("exit_cause") if "session" in locals() else None))
 
 
 def host_nightly_day(now=None):
@@ -6412,6 +6437,7 @@ def host_rotate(provider, sid, session, agent):
     host_flush(provider, sid, host_chat_name(provider, sid), session)
     host_agent_stop(agent)
     session["agent"] = None
+    session["exit_cause"] = "host_update"
     host_log(provider, sid, "rotate", dict(runtime=runtime, generation=host_generation()))
     try:
         os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
@@ -8536,7 +8562,9 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
-    sys.exit(host_main(sys.argv[2], sys.argv[3]))
+    code = host_main(sys.argv[2], sys.argv[3])
+    host_log(sys.argv[2], sys.argv[3], "exit", dict(code=code))
+    sys.exit(code)
 elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
     print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
@@ -8559,7 +8587,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 144
+RUNTIME_GENERATION = 147
 
 if __name__ == '__main__':
     import base64 as _base64

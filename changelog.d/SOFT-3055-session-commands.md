@@ -1,0 +1,1 @@
+Chats on a server can start, restart and manage other Multibot chats from the command line without a layout key.

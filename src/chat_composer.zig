@@ -367,7 +367,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = left + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
+    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH();
     return .{
         .pane = slot,
         .transcript = .{
@@ -399,7 +399,7 @@ pub fn chatViewLayout() ChatViewLayout {
 }
 
 pub fn chatNewMessagesHeight() i32 {
-    return if (app_state.g_chat_new_messages.count() != 0) uiScaled(30) else 0;
+    return uiScaled(30);
 }
 
 pub fn chatNewMessagesRect() ?RECT {
@@ -2921,8 +2921,10 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     app_state.shell_count = 0;
     app_state.g_chat_scrolled_up = true;
     app_state.g_chat_new_messages = .{};
+    const initial = chatViewLayout();
     app_state.g_chat_new_messages.arrive(123, true);
     const layout = chatViewLayout();
+    try std.testing.expectEqualDeep(initial.transcript, layout.transcript);
     const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
     try std.testing.expect(pill.top >= layout.transcript.bottom);
     try std.testing.expect(pill.bottom <= layout.composer_card.top - chatWorkingIndicatorH());
