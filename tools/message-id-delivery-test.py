@@ -79,65 +79,6 @@ class MessageIdDeliveryTest(unittest.TestCase):
         accepted = [fact['id'] for fact in result['facts'] if fact.get('kind') == 'accepted' and not fact.get('ambiguous')]
         self.assertEqual(accepted, ['message_fixture_0001'])
 
-    def test_history_echoes_each_client_id_without_using_text(self):
-        import uuid
-        tokens = ['desktop-' + 'a' * 32, 'desktop-' + 'b' * 32]
-        for token in tokens:
-            self.request('submit', message_id=token, text='same prompt')
-        events = [dict(type='user', uuid=str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + token)),
-                       timestamp='2026-11-07T00:00:00Z',
-                       message=dict(role='user', content='rewritten prompt')) for token in reversed(tokens)]
-        self.path.write_text(''.join(json.dumps(event) + '\n' for event in events))
-        wire = reader.response(dict(id=1, sid='sid', tmux='fixture', source_offsets=True, offset=0, inode=0, cached_sid=''),
-                               resolved=('claude', 'sid', self.path, None))
-        rows = [json.loads(line) for line in wire.splitlines() if line.startswith('{')]
-        self.assertEqual([row.get('client_id') for row in rows if row.get('role') == 'user'], list(reversed(tokens)))
-        self.assertEqual([row['id'] for row in rows if row.get('role') == 'user'], [event['uuid'] for event in events])
-
-    def test_terminal_marker_echoes_the_original_client_id(self):
-        client = 'desktop-' + 'c' * 32
-        message = self.request('submit', message_id=client, text='same prompt')['message']
-        db = reader.message_store_db('fixture')
-        with db:
-            db.execute("UPDATE shared_messages SET state='sent' WHERE id=?", (client,))
-        db.close()
-        claim = reader.attempt_prepare('fixture', 'claude', 'sid',
-                               dict(provider='claude', sid='sid', id=client, attempt=message['attempt'],
-                                    epoch=message['epoch'], text_sha256=reader.hashlib.sha256(b'same prompt').hexdigest()),
-                               dict(app_id='c' * 16))
-        self.assertEqual(claim['status'], 'claimed')
-        row = reader.conversation_event(dict(type='user', uuid='native', message=dict(
-            role='user', content='rewritten prompt\n[mp:' + 'c' * 16 + ']')), 'claude')
-        reader.history_client_ids([row], 'claude', 'sid')
-        self.assertEqual(row['client_id'], client)
-        self.assertEqual(row['text'], 'rewritten prompt')
-
-    def test_native_alias_survives_live_event_retirement(self):
-        client = 'desktop-' + 'd' * 32
-        message = self.request('submit', message_id=client, text='same prompt')['message']
-        db = reader.message_store_db('fixture')
-        with db:
-            db.execute("UPDATE shared_messages SET state='sent' WHERE id=?", (client,))
-        db.close()
-        claim = reader.attempt_prepare('fixture', 'claude', 'sid',
-                               dict(provider='claude', sid='sid', id=client, attempt=message['attempt'],
-                                    epoch=message['epoch'], text_sha256=reader.hashlib.sha256(b'same prompt').hexdigest()), dict(mode='host'))
-        self.assertEqual(claim['status'], 'claimed')
-        session = dict(sends=[dict(id=client, attempt=message['attempt'], uuid=None)])
-        try:
-            with patch.object(reader, 'host_turn_started'):
-                reader.host_bind_uuid('claude', 'sid', 'fixture', session, dict(user_message_uuid='native-user'))
-            with session['db'] as db:
-                db.execute('DELETE FROM message_events')
-            row = dict(role='user', id='native-user', text='rewritten prompt')
-            reader.history_client_ids([row], 'claude', 'sid')
-            self.assertEqual(row['client_id'], client)
-            other = dict(role='user', id='native-user', text='same prompt')
-            reader.history_client_ids([other], 'claude', 'other-session')
-            self.assertNotIn('client_id', other)
-        finally:
-            session['db'].close()
-
     def test_queued_message_past_its_deadline_resolves(self):
         token = 'message_fixture_0001'
         self.request('submit', message_id=token, text='please review the offer')

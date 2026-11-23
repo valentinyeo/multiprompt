@@ -1463,14 +1463,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
 fn browserFocusHotkey() void {
     const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
