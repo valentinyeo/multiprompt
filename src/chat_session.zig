@@ -1438,8 +1438,12 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
 var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
 
-pub fn chatFileOnReady() void {
+pub fn chatFileOnReadyOrDefer() void {
     if (!app_state.g_chat_ready_deferred.arrive(app_state.g_chat_browser_swap.shell_id != 0)) return;
+    chatFileOnReady();
+}
+
+pub fn chatFileOnReady() void {
     const key = chatCacheIdentity();
     var active_changed = false;
     var preview_changed = false;

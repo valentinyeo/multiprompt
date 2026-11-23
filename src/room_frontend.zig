@@ -2070,7 +2070,6 @@ fn enter() bool {
     @import("voice.zig").leavePrivateVoiceTarget();
     app_state.g_chat_browser_swap.cancel();
     _ = w.KillTimer(app_state.g_main_hwnd, w.TIMER_CHAT_BROWSER_SWAP);
-    @import("chat_session.zig").chatFileReadyDeferredFlush();
     @import("rename.zig").hideShellsForOverlay();
     return true;
 }
