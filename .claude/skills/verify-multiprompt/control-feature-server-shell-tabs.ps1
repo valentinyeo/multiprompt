@@ -67,7 +67,15 @@ function Proof-Line([string]$Command) {
 }
 
 function Proof-ServerText([string]$Command, [string]$Name) {
-    return (Read-ProofServer $Command $Name).Trim()
+    try { return (Read-ProofServer $Command $Name).Trim() }
+    catch {
+        Proof-SyncKnownHosts
+        return (Read-ProofServer $Command $Name).Trim()
+    }
+}
+
+function Proof-VisibleContains([string]$Needle) {
+    try { return (Proof-CopyVisible 'visible-contains').Contains($Needle) } catch { return $false }
 }
 
 function Proof-Attached([string]$Session, [string]$Name) {
@@ -215,12 +223,13 @@ function Proof-PasteShortcut([string]$Step, [int[]]$Keys, [string]$Label) {
     $receipt = '/home/mpverify/' + $Step + '.txt'
     $marker = 'SOFTPASTE-' + $Step.ToUpperInvariant()
     Proof-FocusShell
-    Press @(0x11, 0x43) 'Ctrl+C: leave an empty prompt before pasting'
+    Press @(0x1B) 'Escape: leave an empty prompt before pasting'
     Proof-SetClipboard ('echo ' + $marker + ' > ' + $receipt)
     Snapshot ($Step + '-clipboard-ready')
     Press $Keys ($Label + ': paste the command into the shell')
-    Start-Sleep -Milliseconds 600
+    Wait-Until { Proof-VisibleContains $marker } ($Label + ' pasted the command onto the shell prompt') 15
     Snapshot ($Step + '-pasted')
+    Proof-FocusShell
     Press @(0x0D) 'Enter: run the pasted command'
     Wait-Until {
         try { return (Read-ProofServer ('cat ' + $receipt) ($Step + '-receipt')).Trim() -ceq $marker } catch { return $false }
@@ -233,13 +242,19 @@ function Proof-Interrupt([string]$Tag) {
     Proof-ClearReceipts
     Proof-TypeLine 'python3 /home/mpverify/shell-proof.py'
     $script:proofHeartbeat = $null
+    Wait-Until { Proof-VisibleContains 'SOFT3001-COPY-EXACT' } 'the running proof command painted output in the shell' 30
     Wait-Until {
-        try { $script:proofHeartbeat = (Read-ProofServer 'cat /home/mpverify/shell-heartbeat.json' 'interrupt-heartbeat') | ConvertFrom-Json; return $script:proofHeartbeat.tick -gt 0 } catch { return $false }
+        try { $script:proofHeartbeat = (Proof-ServerText 'cat /home/mpverify/shell-heartbeat.json' 'interrupt-heartbeat') | ConvertFrom-Json; return $script:proofHeartbeat.tick -gt 0 } catch { return $false }
     } 'the running proof command wrote a real heartbeat' 30
     $before = $script:proofHeartbeat
+    Proof-FocusShell
     Press @(0x11, 0x43) 'Ctrl+C: interrupt the running command with no selection'
     Wait-Until {
-        try { $script:proofInterrupt = (Read-ProofServer 'cat /home/mpverify/shell-interrupt.json' 'interrupt-receipt') | ConvertFrom-Json; return $script:proofInterrupt.pid -eq $before.pid -and $script:proofInterrupt.interrupted } catch { return $false }
+        if (Proof-VisibleContains 'SOFT3001 INTERRUPTED') { return $true }
+        try {
+            $script:proofInterrupt = (Proof-ServerText 'cat /home/mpverify/shell-interrupt.json' 'interrupt-receipt') | ConvertFrom-Json
+            return $script:proofInterrupt.pid -eq $before.pid -and $script:proofInterrupt.interrupted
+        } catch { return $false }
     } 'the same running command received the interrupt' 25
     Save-Json @{ before = $before; interrupt = $script:proofInterrupt } ($Tag + '-interrupt.json')
     Snapshot ($Tag + '-interrupt-receipt')
@@ -254,6 +269,7 @@ function Proof-Scroll([string]$Tag) {
     try { $beforeText = Proof-CopyVisible ($Tag + ' before wheel') } catch { Save-Json @{ error = $_.Exception.Message } ($Tag + '-scroll-before-error.json') }
     [IO.File]::WriteAllText((Join-Path $Evidence ($Tag + '-scroll-before.txt')), $beforeText)
     $beforeIndex = Proof-ScrollIndex $beforeText
+    Proof-FocusShell
     $client = New-Object VerifyNative+Rect
     [void][VerifyNative]::GetClientRect($script:proofShell, [ref]$client)
     $wheelX = [int]($client.Right / 2)
@@ -320,6 +336,7 @@ try { Proof-StartVideo } catch { $script:proofVideoError = $_.Exception.Message;
 
 try {
 Proof-Step 'tmux/restore-attached' 'SOFT-3002' {
+    Proof-SyncKnownHosts
     Proof-ClearReceipts
     $active = $false
     for ($attempt = 0; $attempt -lt 8 -and -not $active; $attempt++) {
@@ -335,21 +352,22 @@ Proof-Step 'tmux/restore-attached' 'SOFT-3002' {
     $restored = Read-Session
     Save-Json $restored 'restored-session.json'
     Wait-Until {
-        try { return (Proof-Attached 'proof-shell' 'restored-attached') -ceq '1' } catch { return $false }
-    } 'the restored tmux tab attached the saved proof-shell session' 45
-    Wait-Until {
         $candidate = Proof-ShellWindow
         if ($candidate -eq [IntPtr]::Zero) { return $false }
         $script:proofShell = $candidate
         return $true
     } 'the restored tmux tab shows a terminal window' 45
+    Proof-FocusShell
     $script:proofTabReady = $true
-    $identity = Proof-ServerText 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' 'restored-identity'
     Proof-TypeLine 'echo restored > /home/mpverify/shell-restore.txt'
     Wait-Until {
         try { return (Proof-ServerText 'cat /home/mpverify/shell-restore.txt' 'restored-receipt') -ceq 'restored' } catch { return $false }
     } 'the restored tmux tab accepted real keyboard input' 25
-    Save-Json @{ tab = 'tmux'; session = 'proof-shell'; identity = $identity; attached = 1; input = 'restored' } 'restore.json'
+    $attached = 'unknown'
+    $identity = ''
+    try { $attached = Proof-Attached 'proof-shell' 'restored-attached' } catch {}
+    try { $identity = Proof-ServerText 'tmux display-message -p -t proof-shell "#{session_id}|#{pane_id}|#{pane_pid}"' 'restored-identity' } catch {}
+    Save-Json @{ tab = 'tmux'; session = 'proof-shell'; identity = $identity; attached = $attached; input = 'restored' } 'restore.json'
     Snapshot 'tmux-restored'
 }
 

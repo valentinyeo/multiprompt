@@ -1,1 +1,1 @@
-The server shell release journey fails with a named step and evidence instead of hanging until the workflow times out.
+The server shell release journey checks pasted commands on the visible prompt and fails with named steps instead of hanging until the workflow times out.
