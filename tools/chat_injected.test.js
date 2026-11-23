@@ -253,7 +253,7 @@ test "ISSUE-263 production tool geometry painting folding hit testing and open-a
 }
 
 `;
-function runHarness(oldColor = false) {
+function runHarness(oldColor = false, hideQuote = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh299-'));
   try {
     copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'chat_user_quote.zig', 'link_detect.zig'], dir);
@@ -263,6 +263,7 @@ function runHarness(oldColor = false) {
     let functions = paintNames.filter(name => source.includes(`fn ${name}(`)).map(body).join('\n');
     if (source.includes('fn chatPaintTableExpand(')) functions += '\nfn chatPaintTableExpand(_: HANDLE, _: RECT, _: ChatBlock) void {}\n';
     if (oldColor) functions = functions.replace('chat_style.bubbleColors(themeConsoleBg()).user', 'chat_style.bubbleColors(themeConsoleBg()).agent');
+    if (hideQuote) functions = functions.replaceAll('const body_display = display;', 'const body_display = display.slice(if (display.reply_ref) |reply_reference| reply_reference.body_start else 0);');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -276,6 +277,11 @@ test('IGSH-1811 sent user bubbles measure the name without the session marker', 
 test('executed production paint folds runner rows and preserves ordinary user bubbles', () => {
   const result = runHarness();
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('MUBO-237 quote regression rejects the old reply-only rendering path', () => {
+  const result = runHarness(false, true);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /TestExpectedEqual/);
 });
 test('paint oracle rejects assistant fill on user bubbles (positive control)', () => {
   const result = runHarness(true);
