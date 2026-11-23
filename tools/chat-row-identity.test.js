@@ -45,6 +45,36 @@ test "SOFT-3097 hosted pending retires above its reply without a transcript clie
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Checked"), h.text.items[reply.start..][0..reply.len]);
 }
 
+test "SOFT-2526 native transcript ids are not client ids" {
+    const a = std.testing.allocator;
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\thosted-session\t0\t200\t11\t0\tclaude\thosted-chat\t2000\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"native-user\",\"text\":\"Please check this\",\"timestamp\":\"2026-11-07T00:00:01Z\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1,
+        transcript.Identity.initTmux(1, 0, false, "hosted-chat", "hosted-session"));
+    try std.testing.expectEqual(@as(u64, 0), h.blocks.items[0].client_id);
+}
+
+ test "SOFT-2526 identified hosted echo retires pending above its reply" {
+    const a = std.testing.allocator;
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\thosted-session\t0\t200\t11\t0\tclaude\thosted-chat\t2000\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"native-user\",\"client_id\":\"desktop-user\",\"text\":\"Please check this\",\"timestamp\":\"2026-11-07T00:00:01Z\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"Checked\",\"timestamp\":\"2026-11-07T00:00:02Z\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1,
+        transcript.Identity.initTmux(1, 0, false, "hosted-chat", "hosted-session"));
+    const user = h.blocks.items[0];
+    const prompt = std.unicode.utf8ToUtf16LeStringLiteral("Please check this");
+    var pending = [_]echo.Pending{.{ .text = prompt, .prefix = prompt, .client_id = @import("chat_markdown.zig").rowKey("desktop-user"), .anchor = .{ .sent_ms = user.stamp_ms - 100 } }};
+    const blocks = [_]echo.UserBlock{.{ .text = h.text.items[user.start..][0..user.len], .stamp_ms = user.stamp_ms, .message_id = user.message_id, .client_id = user.client_id }};
+    var assigned: [1]?usize = undefined;
+    echo.assign(&pending, &blocks, false, &.{}, &assigned);
+    try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(.user, h.blocks.items[0].role);
+    try std.testing.expectEqual(.prose, h.blocks.items[1].role);
+}
+
 test "SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair" {
     var h: history.History = .{};
     defer h.deinit(std.testing.allocator);
@@ -79,4 +109,11 @@ test('SOFT-3097 hosted pending retires above its reply without a transcript clie
 
 test('SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair', () => {
   runZigTest('SOFT-3097 rereading id-less hosted rows after file replacement keeps one ordered pair');
+});
+test('SOFT-2526 native transcript ids are not client ids', () => {
+  runZigTest('SOFT-2526 native transcript ids are not client ids');
+});
+
+test('SOFT-2526 identified hosted echo retires pending above its reply', () => {
+  runZigTest('SOFT-2526 identified hosted echo retires pending above its reply');
 });

@@ -1,0 +1,61 @@
+name: Hosted chat row identity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - soft-2526-reland
+  pull_request:
+    paths:
+      - 'src/chat_echo.zig'
+      - 'src/chat_history.zig'
+      - 'src/chat_history_reader.py'
+      - 'src/chat_markdown.zig'
+      - 'src/chat_send.zig'
+      - 'tools/chat-row-identity*'
+      - 'tools/verify-chat-delivery/row-identity*'
+      - 'tools/verify-chat-delivery/boundary.py'
+      - 'tools/verify-chat-delivery/drive.ps1'
+      - '.github/workflows/chat-row-identity.yml'
+      - '.github/workflows/verify.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chat-row-identity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_row_identity_proof: true
+  regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned Zig
+        run: |
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Reconcile hosted rows and pending sends
+        run: timeout 600 node --test tools/chat-row-identity.test.js tools/chat-delivery.test.js
+      - name: Verify hosted reads and client identity mapping
+        run: |
+          timeout 120 python3 tools/verify-hosted-chat-reads.py
+          timeout 120 python3 tools/message-id-delivery-test.py
+      - name: Cross-compile Windows
+        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu

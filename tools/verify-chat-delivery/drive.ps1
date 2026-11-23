@@ -586,6 +586,7 @@ foreach ($plan in $plans) {
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
+        if ($env:CHAT_ROW_IDENTITY_PROOF -eq '1') { $seed.rowIdentityProof = $true }
         $standIn = $seed
         if ($isLiveDelivery) { $standIn.sessions = @('verify-agent', 'verify-background') }
         if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
@@ -700,7 +701,7 @@ foreach ($plan in $plans) {
         } elseif ($isModel) {
             . "$PSScriptRoot/model-settings.ps1"
         } elseif ($isRecall) {
-            . "$PSScriptRoot/recall-handed.ps1"
+            if ($env:CHAT_ROW_IDENTITY_PROOF -eq '1') { . "$PSScriptRoot/row-identity.ps1" } else { . "$PSScriptRoot/recall-handed.ps1" }
         } elseif ($isInstant) {
             . "$PSScriptRoot/instant-chat.ps1"
         } elseif ($isResync) {
@@ -1584,6 +1585,10 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 }
 if ($env:CHAT_CANCEL_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-cancel-proof.cjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_ROW_IDENTITY_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-row-identity-proof.cjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_RECALL_PROOF -eq '1') {
