@@ -99,9 +99,16 @@ for ($index = 0; $index -lt 10; $index++) {
 $result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
 $result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true }).Count -gt 0
 
+$composerRect = New-Object VerifyNative+Rect
+if (-not [VerifyNative]::GetClientRect($slowComposer, [ref]$composerRect) -or $composerRect.Right -le 0 -or $composerRect.Bottom -le 0) { throw 'Composer rectangle unavailable before typing' }
+Doctor
+Assert-Foreground
+Record 'Click the ownership-checked composer before the slow-network typing proof'
+[VerifyNative]::ClickClient($slowComposer, [int][Math]::Min(60, $composerRect.Right / 2), [int]($composerRect.Bottom / 2))
+Start-Sleep -Milliseconds 300
+Wait-ChatFocus 'Edit' 'slow-network-typing-focus'
 Press @(0x11, 0x41) 'Ctrl+A: select any composer draft before the typing proof'
 Press @(0x08) 'Backspace: clear the composer'
-Wait-ChatFocus 'Edit' 'slow-network-typing-focus'
 $typed = 'slowlink'
 $typing = New-Object System.Collections.Generic.List[object]
 foreach ($letter in $typed.ToCharArray()) {
