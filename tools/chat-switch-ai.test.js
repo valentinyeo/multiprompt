@@ -24,7 +24,7 @@ tmux = 'same-chat'
 
 def prepare(directory, provider='claude'):
     r['HOME'] = Path(directory)
-    config = dict(enabled=True, provider=provider, sid=sid, tmux=tmux, cwd=directory, permission_mode='bypassPermissions', model='sonnet', face='custom', login='same-agent')
+    config = dict(enabled=True, provider=provider, sid=sid, tmux=tmux, cwd=directory, permission_mode='bypassPermissions', model='sonnet', face='custom', login='same-agent', hypertask_agent_id='agent-one', hypertask_token_file='/fixture/session-agent-token', hypertask_agent_name='Same Chat', hypertask_desired_name='Same Chat')
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
     transcript = Path(directory) / 'old.jsonl'
     rows = [dict(role='user', text='OLD-QUESTION about the report', id='q1'), dict(role='assistant', text='OLD-ANSWER the report is finished', id='a1')]
@@ -57,6 +57,8 @@ with tempfile.TemporaryDirectory() as directory:
     config = r['host_config']('pi', new)
     assert config['tmux'] == tmux and config['cwd'] == directory and config['login'] == 'same-agent' and config['face'] == 'custom'
     assert config['permission_mode'] == 'bypassPermissions' and 'model' not in config
+    assert config['hypertask_agent_id'] == 'agent-one' and config['hypertask_token_file'] == '/fixture/session-agent-token'
+    assert config['hypertask_agent_name'] == config['hypertask_desired_name'] == 'Same Chat'
     assert r['host_config']('claude', sid) is None
     chats = [chat for chat in r['host_chats']() if chat['name'] == tmux]
     assert len(chats) == 1 and chats[0]['provider'] == 'pi' and chats[0]['sid'] == new, chats

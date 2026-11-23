@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import hashlib
+import http.client
 import importlib.machinery
 import importlib.util
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 PROVIDERS = ("claude", "codex", "pi", "cursor")
 
@@ -23,6 +27,140 @@ def load_send(session_api=True):
     if session_api and not callable(getattr(module, "zsb", None)):
         raise ValueError("session commands need a newer mp-send helper; update the desktop app and reconnect")
     return module
+
+
+def agent_token_id(token):
+    try:
+        payload = token.split(".")[1]
+        agent_id = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("agentId")
+    except (ValueError, IndexError, TypeError, AttributeError):
+        raise ValueError("invalid Hypertask agent token") from None
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        raise ValueError("Hypertask token must belong to an agent")
+    return agent_id
+
+
+def agent_request(method, path, token, body=None):
+    url = urlsplit(os.environ.get("HYPERTASKS_API_URL") or "https://api.hypertask.ai/api")
+    if url.scheme != "https" and not (url.scheme == "http" and url.hostname in ("127.0.0.1", "localhost", "::1")):
+        raise ValueError("Hypertask API requires HTTPS")
+    connection = (http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection)(url.hostname, url.port, timeout=5)
+    try:
+        connection.request(method, url.path.rstrip("/") + path,
+                           body=json.dumps(body).encode() if body is not None else None,
+                           headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+        response = connection.getresponse()
+        if response.status < 200 or response.status >= 300:
+            raise ValueError("Hypertask agent request failed (HTTP " + str(response.status) + "); no owner-login fallback")
+        data = json.loads(response.read(1024 * 1024))
+        if not isinstance(data, dict) or data.get("success") is not True:
+            raise ValueError("Hypertask agent request was not confirmed")
+        return data
+    except (OSError, http.client.HTTPException, json.JSONDecodeError):
+        raise ValueError("Hypertask agent API unavailable") from None
+    finally:
+        connection.close()
+
+
+def sync_agent(send, path, name=None, archive=False):
+    import fcntl
+    root = send.host_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (root / "hypertask-agents.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        config = send.read_json(path)
+        if not config or not isinstance(config.get("tmux"), str):
+            raise ValueError("chat session record unavailable")
+        tmux = config["tmux"]
+        if not tmux or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for c in tmux):
+            raise ValueError("invalid chat address")
+        if name is not None:
+            config["hypertask_desired_name"] = name
+        if archive:
+            config.update(hypertask_archive_pending=True, hypertask_closed=True)
+        def save():
+            latest = send.read_json(path) or {}
+            latest.update({key: value for key, value in config.items() if key.startswith("hypertask_")})
+            for key in ("hypertask_create_pending", "hypertask_archive_pending"):
+                if key not in config:
+                    latest.pop(key, None)
+            if latest != send.read_json(path):
+                send.write_json(path, latest)
+
+        save()
+        desired = (name or send.published_names().get(tmux) or config.get("hypertask_desired_name")
+                   or config.get("spawn_display") or config.get("helper_name") or config.get("spawn_name") or tmux)
+        credentials = Path.home() / ".config/hypertask-agents/credentials/sessions"
+        token_file = Path(config.get("hypertask_token_file") or credentials / (tmux + "-agent-token"))
+        token = token_file.read_text().strip() if token_file.is_file() else None
+        agent_id = config.get("hypertask_agent_id")
+        if token:
+            token_id = agent_token_id(token)
+            if agent_id and token_id != agent_id:
+                raise ValueError("chat agent id does not match its token")
+            agent_id = token_id
+        if agent_id:
+            for other_path in root.glob("*.config.json"):
+                if other_path == path:
+                    continue
+                other = send.read_json(other_path) or {}
+                other_token = other.get("hypertask_token_file") or credentials / (str(other.get("tmux", "")) + "-agent-token")
+                other_id = other.get("hypertask_agent_id")
+                if not other_id and other_token and Path(other_token).is_file():
+                    other_id = agent_token_id(Path(other_token).read_text().strip())
+                if other_id == agent_id and other.get("tmux") != tmux:
+                    raise ValueError("Hypertask agent is already linked to another chat")
+        if config.get("hypertask_archived"):
+            return dict(id=agent_id, archived=True)
+        if not agent_id:
+            if config.get("hypertask_archive_pending"):
+                return dict(archived=True)
+            key = os.environ.get("HYPERTASK_MANAGEMENT_KEY", "").strip()
+            if not key.startswith("htmk_"):
+                raise ValueError("creating a chat agent requires an explicit Hypertask management key")
+            if config.get("hypertask_create_pending"):
+                raise ValueError("Hypertask agent creation needs recovery; refusing to create a second agent")
+            config["hypertask_create_pending"] = True
+            save()
+            data = agent_request("POST", "/mcp/admin/agents", key, dict(display_name=desired, role="write"))
+            agent_id = (data.get("agent") or {}).get("id")
+            token = data.get("token")
+            if not isinstance(token, str) or agent_token_id(token) != agent_id:
+                raise ValueError("Hypertask agent creation returned no matching token")
+            credentials.mkdir(mode=0o700, parents=True, exist_ok=True)
+            descriptor = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(token)
+                stream.flush()
+                os.fsync(stream.fileno())
+            config["hypertask_agent_name"] = desired
+        if not token:
+            raise ValueError("chat agent token unavailable")
+        config.update(hypertask_agent_id=agent_id, hypertask_token_file=str(token_file))
+        config.pop("hypertask_create_pending", None)
+        save()
+        endpoint = "/mcp/agents/" + quote(agent_id, safe="")
+        if config.get("hypertask_archive_pending"):
+            data = agent_request("POST", endpoint + "/archive", token)
+            if (data.get("agent") or {}).get("id") != agent_id or (data.get("agent") or {}).get("archived") is not True:
+                raise ValueError("Hypertask agent archive was not confirmed")
+            config["hypertask_archived"] = True
+            config.pop("hypertask_archive_pending", None)
+        elif config.get("hypertask_agent_name") != desired:
+            data = agent_request("PATCH", endpoint, token, dict(display_name=desired))
+            agent = data.get("agent") or {}
+            if agent.get("id") != agent_id or agent.get("display_name") != desired:
+                raise ValueError("Hypertask agent rename was not confirmed")
+            config["hypertask_agent_name"] = desired
+        save()
+        return dict(id=agent_id, name=config.get("hypertask_agent_name"), archived=config.get("hypertask_archived", False))
+
+
+def cmd_sync_agent(args):
+    send = load_send(session_api=False)
+    path = send.host_root() / (send.host_config_key(args.provider, args.sid) + ".config.json")
+    print(json.dumps(sync_agent(send, path, name=args.name, archive=args.archive), separators=(",", ":")))
+    return 0
 
 
 def display_name(name):
@@ -123,6 +261,7 @@ def session_catalog(send, listing):
             sid=sid,
             folder=config.get("cwd"),
             spawn_name=config.get("spawn_name"),
+            hypertask_closed=config.get("hypertask_closed", False),
             host=row.get("host"),
             workspace=row.get("workspace") or config.get("spawn_workspace"),
             group=row.get("group") if "group" in row else config.get("spawn_group"),
@@ -172,6 +311,8 @@ def pick_target(send, listing, target):
 def find_existing(send, listing, slot, display, folder):
     token = display.casefold()
     for row in session_catalog(send, listing):
+        if row.get("hypertask_closed"):
+            continue
         if row.get("spawn_name") == token:
             matched = True
         elif row.get("sid") and send.squash(row.get("name") or "") == send.squash(display):
@@ -437,11 +578,16 @@ def cmd_start(args):
         sid, tmux = session_identity(slot, display)
         path = send.host_root() / (send.host_config_key(provider, sid) + ".config.json")
         prior = send.read_json(path)
+        if prior and prior.get("hypertask_closed"):
+            sid = str(uuid.uuid4())
+            tmux = "live-" + sid.replace("-", "")
+            path = send.host_root() / (send.host_config_key(provider, sid) + ".config.json")
+            prior = None
         if prior and prior.get("helper_parent"):
             raise ValueError("that name is already a helper chat; pick another name")
         if prior and (prior.get("cwd") != folder or prior.get("tmux") != tmux):
             raise ValueError("host configuration collision for " + repr(display))
-        config = dict(enabled=False, cwd=folder, tmux=tmux, sid=sid, provider=provider, spawn_workspace=workspace,
+        config = dict(prior or {}, enabled=False, cwd=folder, tmux=tmux, sid=sid, provider=provider, spawn_workspace=workspace,
                       spawn_name=display.casefold(), spawn_display=display, spawn_group=group, spawn_host=slot,
                       spawn_host_name=host)
         send.write_json(path, config)
@@ -471,6 +617,8 @@ def cmd_restart(args):
     send = load_send()
     listing = send.zsb("workspace-list")
     target = pick_target(send, listing, args.name)
+    if target.get("hypertask_closed"):
+        raise ValueError("chat was closed for good; use mp-sessions start for a new chat")
     if not target.get("sid"):
         raise ValueError("chat has no session id yet; use mp-sessions start")
     provider = target["provider"]
@@ -500,7 +648,14 @@ def cmd_rename(args):
     renamed = send.zsb("session-rename", "--tab", str(target["tab_id"]), "--name", new_name)
     if renamed.get("ok") is not True:
         raise ValueError("rename failed: " + str(renamed.get("error") or renamed.get("message")))
-    print(json.dumps(dict(ok=True, name=new_name, tmux=target["tmux"], tab=target["tab_id"]), separators=(",", ":")))
+    result = dict(ok=True, name=new_name, tmux=target["tmux"], tab=target["tab_id"])
+    if target.get("provider") and target.get("sid"):
+        path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
+        try:
+            result["hypertask_agent"] = sync_agent(send, path, name=new_name)
+        except (OSError, ValueError) as error:
+            result["agent_error"] = str(error)
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 
@@ -539,9 +694,6 @@ def cmd_close(args):
     target = pick_target(send, listing, args.name)
     if not target.get("sid"):
         raise ValueError("chat has no session id")
-    if not target.get("tab_open") and not target.get("running"):
-        print(json.dumps(dict(ok=True, status="closed", name=target.get("name"), tmux=target["tmux"]), separators=(",", ":")))
-        return 0
     if target.get("busy") and not args.force:
         raise ValueError((target.get("name") or target["tmux"]) + " is busy; pass --force to close anyway")
     tab_closed = None
@@ -551,14 +703,26 @@ def cmd_close(args):
         if closed.get("ok") is not True and closed.get("error") != "unknown_tab":
             raise ValueError("tab close failed: " + str(closed.get("error") or closed.get("message")))
     stopped = send.reader_cli("stop", target["provider"], target["sid"])
-    print(json.dumps(dict(ok=stopped.get("status") == "stopped", status="closed", name=target.get("name"),
-                          tmux=target["tmux"], tab_closed=tab_closed), separators=(",", ":")))
+    result = dict(ok=stopped.get("status") == "stopped", status="closed", name=target.get("name"),
+                  tmux=target["tmux"], tab_closed=tab_closed)
+    if result["ok"]:
+        path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
+        try:
+            result["hypertask_agent"] = sync_agent(send, path, archive=True)
+        except (OSError, ValueError) as error:
+            result["agent_error"] = str(error)
+    print(json.dumps(result, separators=(",", ":")))
     return 0 if stopped.get("status") == "stopped" else 3
 
 
 def parse(argv):
     parser = argparse.ArgumentParser(prog="mp-sessions", description="List, start, restart and manage Multibot chats on this server without an account key.")
     commands = parser.add_subparsers(dest="command")
+    sync = commands.add_parser("sync-agent", help="reconcile a chat's Hypertask agent by session id")
+    sync.add_argument("provider")
+    sync.add_argument("sid")
+    sync.add_argument("--name")
+    sync.add_argument("--archive", action="store_true")
     listing = commands.add_parser("list", help="list live chats (default)")
     listing.add_argument("--json", action="store_true")
     listing.add_argument("--workspace", default=None)
@@ -589,7 +753,7 @@ def parse(argv):
     ending.add_argument("--force", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
-    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "-h", "--help"}:
+    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "sync-agent", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -611,7 +775,7 @@ def main(argv=None):
     command = args.command or "list"
     send = load_send(session_api=False)
     handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
-                    close=cmd_close, send=cmd_send)
+                    close=cmd_close, send=cmd_send, **{"sync-agent": cmd_sync_agent})
     try:
         if command == "send":
             tail = argv[1:] if argv and argv[0] == "send" else argv

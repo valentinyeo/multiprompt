@@ -25,6 +25,7 @@ def sessions_module():
     spec = importlib.util.spec_from_file_location('agent_sessions', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.__file__ = str(ROOT / 'src/mp_sessions.py')
     return module
 
 
@@ -50,11 +51,24 @@ class AgentTest(unittest.TestCase):
         self.requests = []
         self.agents = {CHAT['agent_id']: dict(id=CHAT['agent_id'], display_name=CHAT['name'], archived=False)}
         self.reject = 0
+        self.layout = dict(schema=1, workspaces=[dict(name='Work')], tabs=[dict(kind='tmux', name=CHAT['name'], tmux_session=CHAT['tmux'], tmux_host=0, workspace='Work')])
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('X-Layout-Features', 'groups')
+                self.end_headers()
+                self.wfile.write(json.dumps(dict(revision=1, layout=owner.layout)).encode())
+
+            def do_PUT(self):
+                owner.layout = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['layout']
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"revision":2}')
 
             def do_PATCH(self):
                 self.respond()
@@ -167,6 +181,62 @@ class AgentTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'token'):
             self.sync('New display')
         self.assertEqual(self.requests, [])
+
+    def reader(self):
+        spec = importlib.util.spec_from_file_location('agent_reader', ROOT / 'src/chat_history_reader.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.HOME = self.home
+        return module
+
+    def test_mb_rename_reaches_hypertask_through_runtime_name_publication(self):
+        env = dict(os.environ, MULTIPROMPT_KEY='layout-fixture', MULTIPROMPT_URL='http://127.0.0.1:' + str(self.server.server_port))
+        renamed = subprocess.run(['node', str(ROOT / 'tools/mb.mjs'), 'rename', CHAT['name'], CHAT['renamed']],
+                                 env=env, text=True, capture_output=True, timeout=10)
+        self.assertEqual(renamed.returncode, 0, renamed.stderr)
+        self.assertEqual(self.layout['tabs'][0]['name'], CHAT['renamed'])
+        reader = self.reader()
+        reader.chat_names_publish([dict(tmux=CHAT['tmux'], name=self.layout['tabs'][0]['name'])])
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        for source, target in [('mp_sessions.py', 'mp-sessions'), ('mp_send.py', 'mp-send')]:
+            (runtime / target).write_bytes((ROOT / 'src' / source).read_bytes())
+        reader.host_hypertask_sync(CHAT['provider'], CHAT['sid'])
+        self.assertEqual(self.agents['agent-one']['display_name'], CHAT['renamed'])
+        self.assertEqual(self.requests[-1][2], 'Bearer ' + token('agent-one'))
+
+    def test_runtime_reconciles_while_the_chat_is_busy(self):
+        reader = self.reader()
+        stopped = unittest.mock.Mock()
+        stopped.wait.side_effect = [False, True]
+        with patch.object(reader, 'host_hypertask_sync', side_effect=lambda *args: self.sync(CHAT['renamed'])):
+            reader.host_hypertask_watch(CHAT['provider'], CHAT['sid'], stopped)
+        self.assertLessEqual(stopped.wait.call_args_list[0].args[0], 60)
+        self.assertEqual(self.agents['agent-one']['display_name'], CHAT['renamed'])
+
+    def test_child_environment_contains_only_its_own_agent_token(self):
+        reader = self.reader()
+        with patch.dict(os.environ, HYPERTASK_MANAGEMENT_KEY='htmk_owner-must-not-leak'):
+            environment = reader.host_agent_env(CHAT['provider'], CHAT['sid'])
+        self.assertEqual(environment['HT_TOKEN'], token('agent-one'))
+        self.assertEqual(environment['HYPERTASKS_JWT_TOKEN'], token('agent-one'))
+        self.assertNotIn('HYPERTASK_MANAGEMENT_KEY', environment)
+        self.token_file.unlink()
+        environment = reader.host_agent_env(CHAT['provider'], CHAT['sid'])
+        self.assertNotIn('HT_TOKEN', environment)
+        self.assertNotIn('HYPERTASKS_JWT_TOKEN', environment)
+
+    def test_creation_failure_is_not_retried_as_a_second_agent(self):
+        self.token_file.unlink()
+        self.send.write_json(self.path, dict(enabled=True, tmux=CHAT['tmux'], spawn_display=CHAT['name']))
+        self.reject = 503
+        with patch.dict(os.environ, HYPERTASK_MANAGEMENT_KEY='htmk_fixture'):
+            with self.assertRaisesRegex(ValueError, '503'):
+                self.sync()
+            self.reject = 0
+            with self.assertRaisesRegex(ValueError, 'recovery'):
+                self.sync()
+        self.assertEqual(len(self.requests), 1)
 
     def test_missing_management_key_never_uses_parent_or_saved_login(self):
         self.token_file.unlink()

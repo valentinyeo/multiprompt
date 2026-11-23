@@ -3685,9 +3685,44 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_hypertask_sync(provider, sid, archive=False):
+    tool = HOME / HOST_RUNTIME_TOOLS / "mp-sessions"
+    if not tool.is_file():
+        return
+    command = [sys.executable, str(tool), "sync-agent", provider, sid]
+    if archive:
+        command.append("--archive")
+    try:
+        reply = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=10)
+        if reply.returncode:
+            host_log(provider, sid, "hypertask_agent_error", dict(error=reply.stderr.strip()[:300]))
+    except (OSError, subprocess.SubprocessError):
+        host_log(provider, sid, "hypertask_agent_error", dict(error="sync_unavailable"))
+
+
+def host_hypertask_watch(provider, sid, stopped):
+    while not stopped.wait(20):
+        config = host_config(provider, sid)
+        if config is None or config.get("hypertask_archive_pending") or config.get("hypertask_archived"):
+            return
+        host_hypertask_sync(provider, sid)
+
+
 def host_agent_env(provider, sid):
     config = host_config(provider, sid) or {}
     env = dict(os.environ)
+    for key in ("HT_TOKEN", "HYPERTASKS_JWT_TOKEN", "HYPERTASK_MANAGEMENT_KEY"):
+        env.pop(key, None)
+    token_file = config.get("hypertask_token_file")
+    if config.get("hypertask_agent_id") and isinstance(token_file, str):
+        try:
+            token = Path(token_file).read_text().strip()
+            payload = token.split(".")[1]
+            identity = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+            if identity.get("agentId") == config["hypertask_agent_id"]:
+                env.update(HT_TOKEN=token, HYPERTASKS_JWT_TOKEN=token)
+        except (OSError, ValueError, IndexError, AttributeError):
+            pass
     tools = str(HOME / HOST_RUNTIME_TOOLS)
     path = env.get('PATH', '')
     env['PATH'] = tools + (':' + path if path else '')
@@ -4433,7 +4468,8 @@ def host_fresh_resume(provider, sid, tmux, session):
 
 HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi")
 HOST_SWITCH_TARGETS = ("claude", "codex", "pi")
-HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
+HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch",
+                           "hypertask_agent_id", "hypertask_token_file", "hypertask_agent_name", "hypertask_desired_name")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
 HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
@@ -6497,6 +6533,7 @@ def host_main(provider, sid):
     paths = host_paths(provider, sid)
     server = None
     agent = None
+    agent_sync_stopped = threading.Event()
     try:
         host_reap_agent(provider, sid)
         try:
@@ -6523,6 +6560,9 @@ def host_main(provider, sid):
         mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
         if mode in HOST_SAVED_PERMISSION_MODES:
             host_save_permission_mode(provider, sid, mode)
+        host_hypertask_sync(provider, sid)
+        if (HOME / HOST_RUNTIME_TOOLS / "mp-sessions").is_file():
+            threading.Thread(target=host_hypertask_watch, args=(provider, sid, agent_sync_stopped), daemon=True).start()
         try:
             agent = host_agent_start(provider, sid, mode)
             reason = "agent_not_found" if agent is None else None
@@ -6551,6 +6591,7 @@ def host_main(provider, sid):
         host_log(provider, sid, "crash", dict(error=type(error).__name__))
         raise
     finally:
+        agent_sync_stopped.set()
         host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
             server.close()
@@ -6789,10 +6830,15 @@ def host_cli(argv):
         return dict(status="enabled", sid=sid, tmux=config.get("tmux"), cwd=config.get("cwd"))
     if command == "disable":
         host_stop(provider, sid)
-        try:
-            paths["config"].unlink()
-        except OSError:
-            pass
+        config = host_read(paths["config"]) or {}
+        if config.get("hypertask_agent_id"):
+            host_write(paths["config"], dict(config, enabled=False, hypertask_archive_pending=True, hypertask_closed=True))
+            host_hypertask_sync(provider, sid, archive=True)
+        else:
+            try:
+                paths["config"].unlink()
+            except OSError:
+                pass
         host_backoff_clear(provider, sid)
         host_log(provider, sid, "disabled")
         return dict(status="disabled", sid=sid)
