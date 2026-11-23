@@ -18,6 +18,14 @@ const VERIFIER_MODELS = [
   { engine: 'openai', family: 'openai' },
   { engine: 'deepseek', family: 'deepseek' },
 ];
+const LADDER_LANE_FAMILIES = {
+  'opencode-go': 'deepseek',
+  'vercel-ai-gateway': 'deepseek',
+  'vercel-ai-gateway-zai': 'google',
+  openrouter: 'deepseek',
+  google: 'google',
+  cursor: 'cursor',
+};
 const MAX_FILE_CHARS = 6000;
 const ARTIFACT_ATTEMPTS = 5;
 const ARTIFACT_RETRY_MS = 3000;
@@ -314,9 +322,15 @@ function modelFamily(model) {
   return '';
 }
 
-function pickVerifier(body) {
-  const authors = [...String(body || '').matchAll(/^Author model:\s*(\S+)\s*$/gim)].map(match => match[1]);
-  if (!authors.length) return { problem: 'missing Author model line' };
+function authorModelLines(...texts) {
+  const authors = [];
+  for (const text of texts) authors.push(...[...String(text || '').matchAll(/^Author model:\s*(\S+)\s*$/gim)].map(match => match[1]));
+  return [...new Set(authors)];
+}
+
+function pickVerifier(body, commitMessages = []) {
+  const authors = authorModelLines(body, ...(Array.isArray(commitMessages) ? commitMessages : []));
+  if (!authors.length) return { engine: 'claude', unknownAuthorModel: true };
   const families = authors.map(modelFamily);
   const unknown = authors[families.indexOf('')];
   if (unknown) return { problem: `unknown model family in Author model line: ${unknown}` };
@@ -325,18 +339,26 @@ function pickVerifier(body) {
   return { engine: verifier.engine };
 }
 
+function ladderFamily(lane) {
+  const name = String(lane || '').trim();
+  if (!name) return '';
+  return LADDER_LANE_FAMILIES[name] || modelFamily(name);
+}
+
 function judgeLabel(engine, lane = '') {
   if (lane) return `ladder ${lane}`;
   if (engine === 'openai') return `openai ${CODEX_MODEL}`;
   return engine === 'claude' ? 'claude' : 'none';
 }
 
-function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', lane = '', jobs = {}, infrastructure = [], modelProblem = '' }) {
+function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'claude', lane = '', jobs = {}, infrastructure = [], modelProblem = '', authorModelUnknown = false, judgeRetryBlockedReason = '' }) {
   const rows = journeyRows(summary, selection.features);
   const ran = rows.filter(row => row.head !== 'missing');
   const notes = [];
   let final = VERDICTS.includes(verdict?.verdict) ? verdict.verdict : 'BLOCKED';
-  if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid assessment.');
+  if (!VERDICTS.includes(verdict?.verdict)) {
+    notes.push(judgeRetryBlockedReason || 'The verifier returned no valid assessment.');
+  }
   const inherited = rows.filter(row => row.inherited);
   const regressed = rows.filter(row => row.head === 'failed' && !row.inherited);
   const blocked = rows.filter(row => row.blocked || (row.head !== 'passed' && row.head !== 'failed' && !row.inherited));
@@ -383,6 +405,7 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     final = 'FAIL';
     notes.unshift('A repair PR with no desktop journey needs a CI workflow receipt that shows base failed and head passed.');
   }
+  if (authorModelUnknown) notes.push('Author model: unknown (not in the pull request body or commit messages).');
   if (modelProblem) {
     final = 'FAIL';
     notes.unshift(`No verifier ran: ${modelProblem}.`);
@@ -438,6 +461,14 @@ function recoveryReport(run, headSha, comments) {
   return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
 }
 
+function cancelledRunWasSuperseded(run, pr, runs) {
+  if (run.conclusion !== 'cancelled') return false;
+  const title = run.display_title || `verify PR ${pr.number}`;
+  return runs.some(candidate => Number(candidate.id) > Number(run.id) &&
+    candidate.display_title === title &&
+  !['completed', 'cancelled'].includes(candidate.status));
+}
+
 function cancelledRunNeedsRetry(run, pr, checks, runs) {
   if (run.conclusion !== 'cancelled' || pr.state !== 'open' || pr.draft) return false;
   const head = pr.head.sha;
@@ -484,12 +515,14 @@ function recover(env) {
   const { pr, checks, comments, tests } = githubState(env, { number });
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
   const headSha = pr.head.sha;
+  const verifierRuns = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '[.workflow_runs[] | {id, display_title, head_sha, event, status}]']));
   if (run.conclusion === 'cancelled') {
-    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '[.workflow_runs[] | {id, display_title, head_sha, event, status}]']));
-    if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
+    if (cancelledRunNeedsRetry(run, pr, checks, verifierRuns)) {
       gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
+      return;
     }
+    if (cancelledRunWasSuperseded(run, pr, verifierRuns)) return;
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
@@ -531,6 +564,7 @@ function resolve(env) {
   if (!/^\d+$/.test(number)) throw new Error('A pull request number is required');
   const repo = env.REPO;
   const pr = JSON.parse(gh(['pr', 'view', number, '--repo', repo, '--json', 'number,state,isDraft,isCrossRepository,headRefOid,baseRefName,commits,title,labels,body']));
+  const commitMessages = (pr.commits || []).flatMap(commit => [commit.messageHeadline, commit.messageBody].filter(Boolean));
   const dispatched = env.EVENT_NAME === 'workflow_dispatch';
   const eligible = pr.state === 'OPEN' && !pr.isCrossRepository && (dispatched || !pr.isDraft);
   if (eligible) gh(['api', `repos/${repo}/statuses/${pr.headRefOid}`, '-X', 'POST', '-f', 'context=pstack-verifier', '-f', 'state=pending', '-f', 'description=Verification is checking current PR metadata and evidence']);
@@ -538,8 +572,17 @@ function resolve(env) {
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
-  const { engine = '', problem = '' } = pickVerifier(pr.body);
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
+  const picked = pickVerifier(pr.body, commitMessages);
+  setOutputs({
+    eligible: String(eligible),
+    number: String(pr.number),
+    head_sha: pr.headRefOid,
+    base_sha: baseSha,
+    base_ref: pr.baseRefName,
+    engine: picked.engine || 'claude',
+    author_model_problem: picked.problem || '',
+    author_model_unknown: String(!!picked.unknownAuthorModel),
+  });
 }
 
 function availableFeatures(env) {
@@ -754,6 +797,12 @@ function parseLadderAnswer(env) {
   const text = ladderMessageContent(payload);
   if (!text) throw new Error(`ladder-call returned empty content (${payload.choices?.[0]?.finish_reason || 'no finish reason'})`);
   const verdict = parseModelJson(text, 'ladder-call');
+  if (!VERDICTS.includes(verdict?.verdict)) {
+    const family = ladderFamily(lane);
+    if (!family) throw new Error(`ladder lane ${lane || '(missing)'} has no model family for retry`);
+    setOutputs({ ladder_needs_retry: family, ladder_invalid_reason: oneLine(verdict?.verdict || 'empty verdict') });
+    return;
+  }
   const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES - 1).map(line => oneLine(line));
   const structured = JSON.stringify({ verdict: String(verdict.verdict ?? ''), evidence: [LADDER_SCREENSHOTS_NOTE, ...evidence] });
   setOutputs({ structured_output: structured, ladder_lane: lane });
@@ -1022,7 +1071,25 @@ async function main(argv, env) {
     } catch {
       verdict = null;
     }
-    const { final, body } = finalize({ verdict, headSha: env.HEAD_SHA, summary, selection, runUrl: env.RUN_URL, engine: env.ENGINE, lane: env.LADDER_LANE, jobs, infrastructure, modelProblem: env.AUTHOR_MODEL_PROBLEM });
+    let judgeRetryBlockedReason = '';
+    if (env.LADDER_RETRY_FAILED === 'true') {
+      judgeRetryBlockedReason = oneLine(env.LADDER_INVALID_REASON) ||
+        'The ladder judge returned no valid assessment on two lanes; verification is BLOCKED.';
+    }
+    const { final, body } = finalize({
+      verdict,
+      headSha: env.HEAD_SHA,
+      summary,
+      selection,
+      runUrl: env.RUN_URL,
+      engine: env.ENGINE,
+      lane: env.LADDER_LANE,
+      jobs,
+      infrastructure,
+      modelProblem: env.AUTHOR_MODEL_PROBLEM,
+      authorModelUnknown: env.AUTHOR_MODEL_UNKNOWN === 'true',
+      judgeRetryBlockedReason,
+    });
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'comment.md'), body);
     setOutputs({ result: final, conclusion: checkConclusion(final) });
@@ -1031,7 +1098,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, cancelledRunWasSuperseded, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, LADDER_LANE_FAMILIES, modelFamily, authorModelLines, pickVerifier, ladderFamily, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

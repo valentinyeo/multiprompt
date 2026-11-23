@@ -28,6 +28,13 @@ jobs:
       - name: Report feature journey coverage
         continue-on-error: true
         run: node tools/check-feature-coverage.mjs
+      - name: Report fix-to-release timing
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FIX_TIME_DAYS: 7
+        run: node tools/fix-time.mjs --summary >> "$GITHUB_STEP_SUMMARY"
       - name: Keep at most one maintenance pull request open
         id: pending
         env:

@@ -299,19 +299,41 @@ test('the verifier family differs from every Author model line in the pull reque
   assert.deepEqual(verifier.pickVerifier('Author model: deepseek/deepseek-v4.1-flash\nAuthor model: anthropic/claude-sonnet\n'), { engine: 'openai' });
   assert.deepEqual(verifier.pickVerifier('Author model: composer/composer-2.5\nAuthor model: anthropic/claude-sonnet\nAuthor model: deepseek/deepseek-v4.1-flash\n'), { engine: 'openai' });
   assert.deepEqual(verifier.pickVerifier('Author model: deepseek/deepseek-v4.1-flash\nAuthor model: anthropic/claude-sonnet\nAuthor model: openai/gpt-6.1-sol\nAuthor model: cursor/composer-2.5\n'), { problem: 'no verifier from another model family' });
-  assert.deepEqual(verifier.pickVerifier('Body without a model line\n'), { problem: 'missing Author model line' });
-  assert.deepEqual(verifier.pickVerifier(''), { problem: 'missing Author model line' });
+  assert.deepEqual(verifier.pickVerifier('Body without a model line\n'), { engine: 'claude', unknownAuthorModel: true });
+  assert.deepEqual(verifier.pickVerifier(''), { engine: 'claude', unknownAuthorModel: true });
+  assert.deepEqual(verifier.pickVerifier('Body\n', ['Author model: anthropic/claude-sonnet\n']), { engine: 'openai' });
   assert.match(verifier.pickVerifier('Author model: acme/some-model\n').problem, /unknown model family/);
 });
 
 test('a pull request with no independent verifier FAILs and names the reason', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
-  for (const [problem, reason] of [['no verifier from another model family', /no verifier from another model family/], ['missing Author model line', /missing Author model line/]]) {
-    const { final, body } = verifier.finalize({ verdict: null, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: '', modelProblem: problem });
-    assert.equal(final, 'FAIL');
-    assert.match(body, reason);
-    assert.match(body, /^Judge: none$/m);
-  }
+  const { final, body } = verifier.finalize({
+    verdict: null,
+    headSha: head,
+    summary,
+    selection: selection(['appearance']),
+    runUrl: 'u',
+    engine: '',
+    modelProblem: 'no verifier from another model family',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /no verifier from another model family/);
+  assert.match(body, /^Judge: none$/m);
+});
+
+test('a missing Author model line BLOCKS with an unknown note instead of FAIL', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: [] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance']),
+    runUrl: 'u',
+    authorModelUnknown: true,
+  });
+  assert.equal(final, 'PASS');
+  assert.match(body, /Author model: unknown/);
+  assert.doesNotMatch(body, /No verifier ran/);
 });
 
 test('the ladder verdict uses the same format and names its lane', () => {
@@ -367,16 +389,47 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the judge order is ladder-call then Codex then Claude with one ladder-call step', () => {
-  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
+test('the judge order is ladder-call then Codex then Claude with ladder retry before fallbacks', () => {
+  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 2);
   assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
-  assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
+  assert.match(workflow, /id: ladder_call_retry\n[\s\S]*?exclude-families: \$\{\{ steps\.ladder\.outputs\.ladder_needs_retry \}\}/);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == ''\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == '' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder_retry\.outputs\.ladder_lane \|\| steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
+  assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder_retry\.outputs\.structured_output \|\| steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
   assert.doesNotMatch(workflow, /ladder_backup/);
+});
+
+test('an invalid ladder verdict requests the next lane and BLOCKED names both attempts', () => {
+  const answer = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-answer-')), 'answer.json');
+  fs.writeFileSync(answer, JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ verdict: 'MAYBE', evidence: ['uncertain'] }) } }],
+  }));
+  const prev = process.env.GITHUB_OUTPUT;
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-out-'));
+  process.env.GITHUB_OUTPUT = path.join(output, 'out');
+  try {
+    verifier.parseLadderAnswer({ LADDER_ANSWER_FILE: answer, LADDER_LANE: 'opencode-go' });
+    const lines = Object.fromEntries(fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8').trim().split('\n').map(line => line.split('=')));
+    assert.equal(lines.ladder_needs_retry, 'deepseek');
+    assert.equal(lines.ladder_invalid_reason, 'MAYBE');
+    assert.equal('structured_output' in lines, false);
+    const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+    const blocked = verifier.finalize({
+      verdict: null,
+      headSha: head,
+      summary,
+      selection: selection(['appearance']),
+      runUrl: 'u',
+      judgeRetryBlockedReason: 'The ladder judge returned no valid assessment on two lanes; verification is BLOCKED.',
+    });
+    assert.equal(blocked.final, 'BLOCKED');
+    assert.match(blocked.body, /two lanes/);
+  } finally {
+    process.env.GITHUB_OUTPUT = prev;
+  }
 });
 
 test('a ladder answer is turned into the same verdict shape', () => {
@@ -421,8 +474,11 @@ test('selection is deterministic and ladder keys are always available to the fir
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/);
   assert.doesNotMatch(workflow, /needs\.resolve\.outputs\.engine ==/);
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
-  assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
+  assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}\n      author_model_unknown: \$\{\{ steps\.pr\.outputs\.author_model_unknown \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
+  assert.match(workflow, /AUTHOR_MODEL_UNKNOWN: \$\{\{ needs\.resolve\.outputs\.author_model_unknown \}\}/);
+  assert.match(workflow, /LADDER_RETRY_FAILED:/);
+  assert.match(workflow, /Post the verdict[\s\S]*!cancelled\(\)/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);
 });
 

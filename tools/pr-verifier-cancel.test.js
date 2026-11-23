@@ -12,6 +12,14 @@ const retry = (cancelled = run, pull = pr, checks = [], runs = []) => {
   return verifier.cancelledRunNeedsRetry(cancelled, pull, checks, runs);
 };
 
+test('a cancelled run superseded by a newer verifier run does not need recovery', () => {
+  assert.equal(typeof verifier.cancelledRunWasSuperseded, 'function');
+  const title = `verify PR ${pr.number}`;
+  assert.equal(verifier.cancelledRunWasSuperseded(run, pr, [{ id: 2, display_title: title, status: 'in_progress' }]), true);
+  assert.equal(verifier.cancelledRunWasSuperseded(run, pr, [{ id: 2, display_title: title, status: 'completed' }]), false);
+  assert.equal(verifier.cancelledRunWasSuperseded({ ...run, conclusion: 'failure' }, pr, [{ id: 2, display_title: title, status: 'queued' }]), false);
+});
+
 test('a cancelled run queues the latest uncovered head once', () => {
   assert.equal(retry(), true);
   assert.equal(retry({ ...run, head_sha: 'b'.repeat(40) }), true);

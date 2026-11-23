@@ -68,6 +68,7 @@ jobs:
       base_ref: ${{ steps.pr.outputs.base_ref }}
       engine: ${{ steps.pr.outputs.engine }}
       author_model_problem: ${{ steps.pr.outputs.author_model_problem }}
+      author_model_unknown: ${{ steps.pr.outputs.author_model_unknown }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -217,14 +218,36 @@ jobs:
           LADDER_ANSWER_FILE: ${{ steps.ladder_call.outputs.answer-file }}
           LADDER_LANE: ${{ steps.ladder_call.outputs.lane }}
         run: node verifier-tools/tools/pr-verifier.cjs parse-ladder-answer verifier-out
+      - name: Judge the evidence with ladder-call again
+        id: ladder_call_retry
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outputs.ladder_needs_retry != ''
+        continue-on-error: true
+        uses: valentinyeo/token-ladder/.github/actions/ladder-call@main
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          request-file: verifier-out/ladder-request.json
+          purpose: pr-verifier-retry
+          exclude-families: ${{ steps.ladder.outputs.ladder_needs_retry }}
+      - name: Record the ladder retry verdict
+        id: ladder_retry
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder_call_retry.outcome == 'success'
+        continue-on-error: true
+        env:
+          LADDER_ANSWER_FILE: ${{ steps.ladder_call_retry.outputs.answer-file }}
+          LADDER_LANE: ${{ steps.ladder_call_retry.outputs.lane }}
+        run: node verifier-tools/tools/pr-verifier.cjs parse-ladder-answer verifier-out
       - name: Install pinned Codex client
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outputs.structured_output == '' && steps.ladder_retry.outputs.structured_output == ''
         env:
           CLIENTS: ${{ runner.temp }}/clients
         run: npm install --prefix "$CLIENTS" --no-audit --no-fund @openai/codex@0.169.0
       - name: Judge the evidence with OpenAI Codex
         id: openai
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outputs.structured_output == '' && steps.ladder_retry.outputs.structured_output == ''
         continue-on-error: true
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -235,7 +258,7 @@ jobs:
         run: node verifier-tools/tools/pr-verifier.cjs judge-openai verifier-out
       - name: Judge the evidence against the Done-when lines
         id: claude
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && steps.openai.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outputs.structured_output == '' && steps.ladder_retry.outputs.structured_output == '' && steps.openai.outcome != 'success'
         continue-on-error: true
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
@@ -278,25 +301,28 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           JOB_RESULTS: ${{ toJSON(needs) }}
           PR_NUMBER: ${{ needs.resolve.outputs.number || inputs.pr || github.event.pull_request.number }}
-          JUDGE_RESULT: ${{ steps.ladder.outcome == 'success' && steps.ladder.outcome || steps.openai.outcome == 'success' && steps.openai.outcome || steps.claude.outcome }}
-          VERDICT: ${{ steps.ladder.outputs.structured_output || steps.openai.outputs.structured_output || steps.claude.outputs.structured_output }}
-          ENGINE: ${{ steps.ladder.outcome == 'success' && 'ladder' || steps.openai.outcome == 'success' && 'openai' || steps.claude.outcome == 'success' && 'claude' || '' }}
-          LADDER_LANE: ${{ steps.ladder.outputs.ladder_lane || '' }}
+          JUDGE_RESULT: ${{ steps.ladder_retry.outputs.structured_output != '' && steps.ladder_retry.outcome || steps.ladder.outputs.structured_output != '' && steps.ladder.outcome || steps.openai.outcome == 'success' && steps.openai.outcome || steps.claude.outcome }}
+          VERDICT: ${{ steps.ladder_retry.outputs.structured_output || steps.ladder.outputs.structured_output || steps.openai.outputs.structured_output || steps.claude.outputs.structured_output }}
+          ENGINE: ${{ steps.ladder_retry.outputs.structured_output != '' && 'ladder' || steps.ladder.outputs.structured_output != '' && 'ladder' || steps.openai.outcome == 'success' && 'openai' || steps.claude.outcome == 'success' && 'claude' || '' }}
+          LADDER_LANE: ${{ steps.ladder_retry.outputs.ladder_lane || steps.ladder.outputs.ladder_lane || '' }}
           AUTHOR_MODEL_PROBLEM: ${{ needs.resolve.outputs.author_model_problem }}
+          AUTHOR_MODEL_UNKNOWN: ${{ needs.resolve.outputs.author_model_unknown }}
+          LADDER_RETRY_FAILED: ${{ steps.ladder.outputs.ladder_needs_retry != '' && steps.ladder_retry.outputs.structured_output == '' && 'true' || '' }}
+          LADDER_INVALID_REASON: ${{ steps.ladder.outputs.ladder_invalid_reason || '' }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha || github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node verifier-tools/tools/pr-verifier.cjs finalize verifier-out/selection.json verifier-out/summary.json verifier-out
           cat verifier-out/comment.md >> "$GITHUB_STEP_SUMMARY"
       - name: Post the verdict on the pull request
-        if: always() && steps.final.outputs.result != ''
+        if: always() && !cancelled() && steps.final.outputs.result != ''
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number || inputs.pr || github.event.pull_request.number }}
         run: gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file verifier-out/comment.md
       - name: Record the verdict on the pull request head
-        if: always() && steps.final.outputs.result != ''
+        if: always() && !cancelled() && steps.final.outputs.result != ''
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
