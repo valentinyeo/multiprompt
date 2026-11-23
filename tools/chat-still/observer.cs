@@ -39,7 +39,9 @@ public sealed class ChatStillObserver {
     Bitmap pixelImage, firstPixels;
     Graphics pixelGraphics;
     byte[] pixelBaseline, pixelCurrent;
-    int[] pixelRect;
+    int[] pixelRect, overlay;
+    string paintLog;
+    IntPtr owner;
     int pixelFrames;
     public static int[] ParseRect(string value) { return Array.ConvertAll(value.Split(','), Int32.Parse); }
     public static bool Same(int[] a, int[] b) {
@@ -51,10 +53,41 @@ public sealed class ChatStillObserver {
         if (dirty != 0 || width != layout) throw new InvalidOperationException("Half-laid-out transcript painted");
         if (!Same(baseline, current)) throw new InvalidOperationException("Newest visible message moved after its first frame");
     }
-    public static void AssertPixels(byte[] baseline, byte[] current) {
+    public static void AssertPixels(byte[] baseline, byte[] current, int width, int[] crop, int[] overlay) {
         if (baseline.Length != current.Length) throw new InvalidOperationException("Newest message pixel area changed");
-        for (int i = 0; i < baseline.Length; i++)
-            if (baseline[i] != current[i]) throw new InvalidOperationException("Newest message pixels changed after the first frame");
+        for (int i = 0; i < baseline.Length; i++) {
+            if (baseline[i] == current[i]) continue;
+            if (overlay == null) throw new InvalidOperationException("Newest message pixels changed after the first frame");
+            int pixel = i / 4, x = crop[0] + pixel % width, y = crop[1] + pixel / width;
+            if (x < overlay[0] || x >= overlay[2] || y < overlay[1] || y >= overlay[3]) throw new InvalidOperationException("Newest message pixels changed after the first frame");
+        }
+    }
+    public static int[] ParseOverlay(string text) {
+        int[] found = null;
+        foreach (string line in text.Split('\n')) {
+            var message = Regex.Match(line, @"\[chat\] new messages count=(\d+) visible=(\d+) up=(\d+) rect=(-?\d+,-?\d+,-?\d+,-?\d+)");
+            if (!message.Success) continue;
+            found = message.Groups[2].Value == "1" && message.Groups[1].Value != "0" ? ParseRect(message.Groups[4].Value) : null;
+        }
+        return found;
+    }
+    public static int[] Inflate(int[] rect, int margin) {
+        return new int[] { rect[0] - margin, rect[1] - margin, rect[2] + margin, rect[3] + margin };
+    }
+    public static int[] ScreenRect(IntPtr window, int[] rect) {
+        var origin = new Point();
+        if (!ClientToScreen(window, ref origin)) return null;
+        return new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
+    }
+    void RefreshOverlay() {
+        if (paintLog == null || owner == IntPtr.Zero) return;
+        string text;
+        try {
+            using (var stream = new FileStream(paintLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream)) text = reader.ReadToEnd();
+        } catch (IOException) { return; }
+        var declared = ParseOverlay(text);
+        overlay = declared == null ? null : ScreenRect(owner, Inflate(declared, 2));
     }
     void CapturePixels(int[] screen, Rect client, Point origin, Dictionary<string, object> sample) {
         var clip = new int[] { Math.Max(screen[0], origin.X), Math.Max(screen[1], origin.Y + viewTop), Math.Min(screen[2], origin.X + client.Right), Math.Min(screen[3], origin.Y + Math.Min(client.Bottom, viewHeight)) };
@@ -83,10 +116,16 @@ public sealed class ChatStillObserver {
             if (!detail) throw new InvalidOperationException("Newest message first-frame pixels have no visible detail");
             pixelBaseline = (byte[])pixelCurrent.Clone();
         }
-        try { AssertPixels(pixelBaseline, pixelCurrent); }
+        RefreshOverlay();
+        sample["pixel_overlay"] = overlay;
+        try { AssertPixels(pixelBaseline, pixelCurrent, pixelImage.Width, pixelRect, overlay); }
         catch {
-            pixelImage.Save(Path.Combine(evidence, "chat-still-changed-message.png"), ImageFormat.Png);
-            throw;
+            RefreshOverlay();
+            try { AssertPixels(pixelBaseline, pixelCurrent, pixelImage.Width, pixelRect, overlay); }
+            catch {
+                pixelImage.Save(Path.Combine(evidence, "chat-still-changed-message.png"), ImageFormat.Png);
+                throw;
+            }
         }
     }
     IntPtr Transcript(int pid, IntPtr owner) {
@@ -163,6 +202,8 @@ public sealed class ChatStillObserver {
     public void Start(int pid, IntPtr owner, string log, long offset, string shell, string state, string output) {
         if (thread != null) throw new InvalidOperationException("Observer already started");
         evidence = output;
+        paintLog = log;
+        this.owner = owner;
         thread = new Thread(delegate() {
             try {
                 IntPtr view = Transcript(pid, owner);
