@@ -452,10 +452,17 @@ pub const History = struct {
         var incoming = std.HashMap(RowIdentity, struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }, RowIdentity.Context, 80).init(scratch);
         var order: std.ArrayList(RowIdentity) = .empty;
         var previous_matches: std.ArrayList(?usize) = .empty;
+        var previous_keys: std.ArrayList(RowIdentity) = .empty;
+        var page_from: u64 = std.math.maxInt(u64);
+        var page_to: u64 = 0;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             const key = try self.rowIdentity(scratch, line, order.items.len);
+            if (key.end > key.offset) {
+                page_from = @min(page_from, key.offset);
+                page_to = @max(page_to, key.end);
+            }
             const slot = try incoming.getOrPut(key);
             if (!slot.found_existing) {
                 slot.value_ptr.* = .{ .index = order.items.len };
@@ -471,6 +478,7 @@ pub const History = struct {
             const key = try previous.rowIdentity(scratch, line, previous_matches.items.len);
             const matched = incoming.getPtr(key);
             try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
+            try previous_keys.append(scratch, key);
             if (matched) |entry| {
                 entry.known = true;
                 shared = true;
@@ -480,6 +488,7 @@ pub const History = struct {
             self.read_sid = self.sid;
             return;
         }
+        const drop_stale = page_from < page_to and self.inode == previous.inode and !self.more and !previous.restore_full;
         var rows: std.ArrayList(u8) = .empty;
         errdefer rows.deinit(a);
         var cursor_index: usize = 0;
@@ -488,6 +497,7 @@ pub const History = struct {
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             const matched = previous_matches.items[previous_index];
+            const previous_key = previous_keys.items[previous_index];
             previous_index += 1;
             if (if (matched) |index| incoming.getPtr(order.items[index]) else null) |replacement| {
                 while (cursor_index <= replacement.index) : (cursor_index += 1) {
@@ -499,7 +509,7 @@ pub const History = struct {
                 }
                 if (!replacement.used) try rows.appendSlice(a, replacement.rows.items);
                 replacement.used = true;
-            } else {
+            } else if (!keepsRetainedRow(drop_stale, previous_key, page_from, page_to)) {
                 try rows.appendSlice(a, line);
                 try rows.append(a, '\n');
             }
@@ -507,6 +517,56 @@ pub const History = struct {
         for (order.items) |key| {
             const entry = incoming.getPtr(key).?;
             if (!entry.used) try rows.appendSlice(a, entry.rows.items);
+        }
+        self.rows.deinit(a);
+        self.rows = rows;
+        try self.orderRowsBySource(a);
+    }
+
+    fn keepsRetainedRow(drop_stale: bool, key: RowIdentity, from: u64, to: u64) bool {
+        if (!drop_stale or key.end <= key.offset) return true;
+        return key.offset < from or key.offset >= to;
+    }
+
+    const PositionedRow = struct {
+        line: []const u8,
+        segment: u64,
+        offset: u64,
+        index: usize,
+
+        fn before(_: void, a: PositionedRow, b: PositionedRow) bool {
+            if (a.offset != b.offset) return a.offset < b.offset;
+            if (a.segment != b.segment) return a.segment < b.segment;
+            return a.index < b.index;
+        }
+    };
+
+    fn orderRowsBySource(self: *History, a: std.mem.Allocator) !void {
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        var items: std.ArrayList(PositionedRow) = .empty;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        var misplaced = false;
+        var previous: ?PositionedRow = null;
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, line, .{ .ignore_unknown_fields = true });
+            if (key.end <= key.offset) return;
+            const item = PositionedRow{ .line = line, .segment = key.segment, .offset = key.offset, .index = items.items.len };
+            if (previous) |last| {
+                if (PositionedRow.before({}, item, last)) misplaced = true;
+            }
+            try items.append(scratch, item);
+            previous = item;
+        }
+        if (!misplaced) return;
+        std.mem.sort(PositionedRow, items.items, {}, PositionedRow.before);
+        var rows: std.ArrayList(u8) = .empty;
+        errdefer rows.deinit(a);
+        for (items.items) |item| {
+            try rows.appendSlice(a, item.line);
+            try rows.append(a, '\n');
         }
         self.rows.deinit(a);
         self.rows = rows;
@@ -2293,6 +2353,51 @@ test "IGSH-934 a partial tail retains earlier streamed fragments of the same mes
         "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:01Z\",\"text\":\"second part\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("first part")) != null);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("second part")) != null);
+}
+
+test "SOFT-3097 a row the refreshed transcript no longer has cannot sit above newer messages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(3097, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"q1\",\"text\":\"the first question\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"a1\",\"text\":\"the answer\",\"offset\":100,\"end\":300}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t400\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"q1\",\"text\":\"the first question\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"user\",\"id\":\"q2\",\"text\":\"the second question\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"a2\",\"text\":\"the second answer\",\"offset\":200,\"end\":400}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("the first questionthe second questionthe second answer"), h.text.items);
+    try std.testing.expectEqual(md.Role.user, h.blocks.items[0].role);
+    try std.testing.expectEqual(md.Role.user, h.blocks.items[1].role);
+    try std.testing.expectEqual(md.Role.prose, h.blocks.items[2].role);
+}
+
+test "SOFT-3097 a refresh whose rows arrive out of order still renders the question above its reply" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(3098, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"q\",\"text\":\"the question\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"r\",\"text\":\"the answer\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"r\",\"text\":\"the answer\",\"offset\":200,\"end\":300}\n" ++
+        "{\"role\":\"user\",\"id\":\"q\",\"text\":\"the question\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(md.Role.user, h.blocks.items[0].role);
+    try std.testing.expectEqual(md.Role.prose, h.blocks.items[1].role);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("the questionthe answer"), h.text.items);
+}
+
+test "SOFT-3097 a merge never reorders rows that carry no source position" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.rows.appendSlice(a, "{\"role\":\"user\",\"text\":\"second\"}\n{\"role\":\"user\",\"text\":\"first\"}\n");
+    try h.orderRowsBySource(a);
+    try std.testing.expectEqualStrings("{\"role\":\"user\",\"text\":\"second\"}\n{\"role\":\"user\",\"text\":\"first\"}\n", h.rows.items);
 }
 
 test "IGSH-1019 copying a request ID returns the original ID not its display hash" {
