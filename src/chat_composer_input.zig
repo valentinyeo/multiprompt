@@ -72,7 +72,10 @@ pub fn filterUtf8To16(out: []u16, text: []const u8, keep_newlines: bool) usize {
             continue;
         };
         i += size;
-        if (!allowedCodepoint(cp, keep_newlines)) continue;
+        if (!allowedCodepoint(cp, keep_newlines)) {
+            if (!keep_newlines and cp < 0x20) writeUtf16(out, &pos, ' ');
+            continue;
+        }
         writeUtf16(out, &pos, cp);
     }
     return pos;
@@ -154,6 +157,12 @@ test "SOFT-2459 emoji and CJK stay in composer text" {
     const back = std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, out[0..n]) catch unreachable;
     defer std.testing.allocator.free(back);
     try std.testing.expectEqualStrings(mixed, back);
+}
+
+test "IGSH-682 keepText wire mode still turns queue newlines into spaces" {
+    var out: [64]u16 = undefined;
+    const n = filterUtf8To16(&out, "three\nlines", false);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("three lines"), out[0..n]);
 }
 
 test "SOFT-2459 u16 draft sync strips CSI without touching words" {
