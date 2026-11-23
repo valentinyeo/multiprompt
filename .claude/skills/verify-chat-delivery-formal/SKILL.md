@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-SOFT-3141 adds a tab-state capability flag, a palette row id and a larger bridge argument buffer to `src/app_state.zig`. `ChatOutboxEntry` is byte-for-byte unchanged from the previous sync commit. All other covered file hashes are unchanged. The coverage record is refreshed; hosted CI reruns native decisions, mutations and counterexample replays.
+SOFT-3141 adds durable plain-tab keys, a tab-state capability flag, a palette row id and a larger bridge argument buffer to `src/app_state.zig`. `ChatOutboxEntry` is byte-for-byte unchanged from the previous sync commit. All other covered file hashes are unchanged. The coverage record is refreshed; hosted CI reruns native decisions, mutations and counterexample replays.
 
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 
