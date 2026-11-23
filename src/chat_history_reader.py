@@ -4826,7 +4826,12 @@ def host_assistant_event(provider, sid, tmux, session, event):
         elif block.get("type") in ("text", "thinking") and parent is None:
             kind = block["type"]
             indexed = entry["index"].get(index)
-            opened = indexed if isinstance(indexed, dict) and indexed["kind"] == kind else (host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind))
+            if isinstance(indexed, dict) and indexed["kind"] == kind:
+                opened = indexed
+            else:
+                opened = host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind)
+                if index not in entry["index"]:
+                    entry["index"][index] = opened
             if session["pending"].pop(opened["item"], None) is not None and not opened["done"] and opened["text"]:
                 host_event(provider, sid, tmux, session, opened["kind"] + ".delta", dict(text=opened["text"], done=False), opened["item"])
             text = block.get("text") if kind == "text" else block.get("thinking")
