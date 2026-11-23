@@ -38,7 +38,7 @@ $script:slowInputErrors = New-Object System.Collections.Generic.List[string]
 function Save-SlowTimings {
     $actions = @($script:slowActions.ToArray())
     $worst = if ($actions.Count -gt 0) { [int](($actions | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum) } else { 0 }
-    $hung = @($actions | Where-Object { $_.hung -eq $true -or $_.inputError }).Count
+    $hung = @($actions | Where-Object { $_.hung -eq $true -or $_.hadError -eq $true }).Count
     Save-Json @{
         limitMs = $slowLimitMs
         delayMs = [int]$env:MP_VERIFY_SLOW_MS
@@ -48,8 +48,8 @@ function Save-SlowTimings {
         inputErrors = @($script:slowInputErrors.ToArray())
         passed = ($worst -le $slowLimitMs -and $hung -eq 0)
     } 'slow-network-timings.json'
-    $result.slowNetwork.worstMs = $worst
-    $result.slowNetwork.hungActions = $hung
+    $null = $result.slowNetwork.worstMs = $worst
+    $null = $result.slowNetwork.hungActions = $hung
 }
 
 function Measure-PumpWindow([scriptblock]$Action, [int]$WindowMs) {
@@ -67,13 +67,13 @@ function Measure-PumpWindow([scriptblock]$Action, [int]$WindowMs) {
         if ($timedOut -or [SlowNetPump]::Hung($script:window)) { $hung = $true }
         Start-Sleep -Milliseconds 10
     }
-    $entry = @{ startedAt = [DateTime]::UtcNow.ToString('o'); elapsedMs = [int]$started.ElapsedMilliseconds; maxPumpMs = [int][Math]::Ceiling($longest); samples = $samples; hung = $hung }
+    $entry = @{ startedAt = [DateTime]::UtcNow.ToString('o'); elapsedMs = [int]$started.ElapsedMilliseconds; maxPumpMs = [int][Math]::Ceiling($longest); samples = $samples; hung = $hung; hadError = ($script:slowActionError -ne '') }
     if ($script:slowActionError) {
         $entry.inputError = $script:slowActionError
         $script:slowInputErrors.Add($script:slowActionError)
     }
     $script:slowActions.Add($entry)
-    Save-SlowTimings
+    $null = Save-SlowTimings
     $entry
 }
 
@@ -102,7 +102,7 @@ for ($index = 0; $index -lt 10; $index++) {
     $sample.index = $index
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     $switched = $false
-    if (-not $sample.ContainsKey('inputError')) {
+    if ($sample.hadError -ne $true) {
         do {
             $trace = (Read-SharedText $slowLog).Substring($offset)
             $state = Read-Session
@@ -114,12 +114,12 @@ for ($index = 0; $index -lt 10; $index++) {
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
     }
-    if (-not $switched -and -not $sample.ContainsKey('inputError')) { throw "Session switch $index never changed the selected session under the slow link" }
+    if (-not $switched -and $sample.hadError -ne $true) { throw "Session switch $index never changed the selected session under the slow link" }
     $switches.Add($sample)
     if ($index -eq 4) { Snapshot 'slow-network-switch' }
 }
 $result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
-$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true -or $_.ContainsKey('inputError') }).Count -gt 0
+$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true -or $_.hadError -eq $true }).Count -gt 0
 
 Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session'
 Wait-Until {
@@ -162,7 +162,7 @@ foreach ($letter in $typed.ToCharArray()) {
 }
 if ([VerifyNative]::EditText($slowComposer) -cne $typed) { throw "Composer text after the slow-network typing proof was '$([VerifyNative]::EditText($slowComposer))'" }
 $result.slowNetwork.typingMaxPumpMs = [int](($typing | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
-$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true -or $_.ContainsKey('inputError') }).Count -gt 0
+$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true -or $_.hadError -eq $true }).Count -gt 0
 Snapshot 'slow-network-typing'
 
 Save-SlowTimings
