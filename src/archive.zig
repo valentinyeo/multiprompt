@@ -636,7 +636,7 @@ const RemoteKillOutcome = session_kills.Outcome;
 
 fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8, agent: u8, pending: ?session_kills.Token) RemoteKillOutcome {
     if (pending == null and @import("ui_thread.zig").busy()) {
-        return if (queuePendingSessionKill(session, host, sid, agent)) .retry else .retry;
+        return if (queuePendingSessionKill(session, host, sid, agent)) .retry else .unsafe;
     }
     if (!remoteTmuxTargetIsSafe(session)) {
         debugLog("killRemoteTmuxSession: unsafe session skipped");
