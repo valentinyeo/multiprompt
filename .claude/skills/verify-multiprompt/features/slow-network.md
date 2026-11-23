@@ -7,7 +7,7 @@
 - Each action records the longest message-pump wait measured with `SendMessageTimeout(WM_NULL)` and the Windows `IsHungAppWindow` state.
 - Pass requires the app window to answer every pump within 500 ms, report no not-responding state, complete every switch and show every typed character.
 
-This journey answers SOFT-3066 and SOFT-3067: slow internet to the remote session hosts must never freeze the window. The older pre-fix release is the red control: run the same journey with `-f tag=<release before the fix>` and expect a stall over 500 ms.
+This journey answers SOFT-3066 and SOFT-3067: slow internet to the remote session hosts must never freeze the window. Run it against a pre-fix release with `-f tag=<release before the fix>` to compare. On v0.28.1878 the worst pump was 9 ms and on v0.28.1849, which lacks the fixes, it was 8 ms: switching and typing over a 4 s round trip never stall the window in either build, so this journey guards the fixed behaviour instead of reproducing the freeze. The freeze needs a window-thread call that contends with an in-flight request (chat history, SSH resolve, tunnel notify, rooms join), and the actions here do not reach those.
 
 ## How to get to it (user POV)
 
