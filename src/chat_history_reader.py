@@ -2925,6 +2925,8 @@ HOST_CODEX_SANDBOXES = {'danger-full-access': {'type': 'dangerFullAccess'},
                         'workspace-write': {'type': 'workspaceWrite', 'writableRoots': [], 'networkAccess': False,
                                             'excludeTmpdirEnvVar': False, 'excludeSlashTmp': False}}
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+HOST_PUBLISH_ATTEMPTS = 60 if os.name == "nt" else 1
+HOST_PUBLISH_PAUSE = 0.02
 HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
 HOST_CHILDREN = []
 
@@ -2966,6 +2968,18 @@ def host_read(path):
         return None
 
 
+def host_publish(temporary, path):
+    attempts = HOST_PUBLISH_ATTEMPTS
+    for attempt in range(attempts):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(HOST_PUBLISH_PAUSE)
+
+
 def host_write(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name("." + path.name + "." + str(os.getpid()) + ".tmp")
@@ -2975,7 +2989,7 @@ def host_write(path, value):
             stream.write(json.dumps(value, separators=(",", ":"), sort_keys=True))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        host_publish(temporary, path)
         os.chmod(path, 0o600)
     finally:
         try:
@@ -4101,7 +4115,7 @@ def host_fresh_archive(provider, sid, tmux, session):
                                 append(dict(role="user", text=message[0], id=token))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        host_publish(temporary, path)
         session["state"]["display_history"] = True
         host_state_write(provider, sid, session["state"])
     finally:
@@ -4256,18 +4270,25 @@ def host_layout_publish_conversation(provider, sid, conversation_sid):
     return False
 
 
+def host_fresh_state_quiet(provider, sid, state):
+    try:
+        host_state_write(provider, sid, state)
+    except (OSError, ValueError):
+        pass
+
+
 def host_fresh_error(provider, sid, tmux, session, reason):
     fresh = session["state"].get("fresh_start")
     phase = fresh.get("phase") if isinstance(fresh, dict) else None
     if phase == "resume" and not fresh.get("resume_retried"):
         fresh.update(phase="resume_failed", started=time.time(), resume_retried=True)
         session.pop("fresh_resumed", None)
-        host_state_write(provider, sid, session["state"])
+        host_fresh_state_quiet(provider, sid, session["state"])
         host_log(provider, sid, "fresh_resume_retry", dict(reason=reason))
         return
     session["state"].pop("fresh_start", None)
     session.pop("fresh_resumed", None)
-    host_state_write(provider, sid, session["state"])
+    host_fresh_state_quiet(provider, sid, session["state"])
     host_event(provider, sid, tmux, session, "text.done",
                dict(text="Fresh start failed. " + reason + " Your previous work is saved."),
                "fresh-failed-" + uuid.uuid4().hex)
@@ -4304,6 +4325,21 @@ def host_fresh_send(provider, sid, tmux, session, text):
     host_turn_started(provider, sid, tmux, session, entry)
     host_state_write(provider, sid, session["state"])
     return True
+
+
+def host_fresh_request(provider, sid, tmux, session, handover_file=None):
+    try:
+        return host_fresh_start(provider, sid, tmux, session, handover_file)
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:
+        host_log(provider, sid, "fresh_start_failed", dict(reason="request_failed", error=type(error).__name__,
+                                                          message=str(error)[:400]))
+        if session["state"].get("fresh_start") or session["state"].get("fresh_start_queued"):
+            session["state"].pop("fresh_start_queued", None)
+            try:
+                host_fresh_error(provider, sid, tmux, session, "Could not start a fresh chat.")
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+        return dict(status="error", reason="fresh_start_failed")
 
 
 def host_fresh_start(provider, sid, tmux, session, handover_file=None):
@@ -5180,7 +5216,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
-        return host_fresh_start(provider, sid, tmux, session, request.get("handover_file"))
+        return host_fresh_request(provider, sid, tmux, session, request.get("handover_file"))
     if operation == "deliver" and session["state"].get("fresh_start"):
         return dict(status="busy", reason="fresh_start_pending")
     if operation in ("approval_reply", "question_reply", "plan_reply"):
@@ -6197,6 +6233,7 @@ def host_accept_client(provider, sid, tmux, session, server):
     except OSError:
         return
     reply = dict(status="error", reason="no_request")
+    operation = None
     with connection:
         connection.settimeout(HOST_DELIVERY_TIMEOUT)
         buffer = b""
@@ -6209,8 +6246,11 @@ def host_accept_client(provider, sid, tmux, session, server):
             if buffer.strip():
                 request = json.loads(buffer.split(b"\n", 1)[0].decode("utf-8"))
                 if isinstance(request, dict):
+                    operation = request.get("op") if isinstance(request.get("op"), str) else None
                     reply = host_handle_request(provider, sid, tmux, session, request)
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError) as error:
+            host_log(provider, sid, "request_failed", dict(op=operation, error=type(error).__name__,
+                                                          message=str(error)[:400]))
             reply = dict(status="error", reason="invalid_request")
         try:
             connection.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode("utf-8"))

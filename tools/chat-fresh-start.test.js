@@ -313,6 +313,95 @@ print('FRESH_START_PASS')
 `);
 });
 
+test('a reader holding the state file open never turns a fresh start into an invalid request', () => {
+  python(String.raw`
+import errno, io, os, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    r['HOST_PUBLISH_ATTEMPTS'] = 60
+    r['HOST_PUBLISH_PAUSE'] = 0.005
+    provider, sid, tmux = 'claude', '11111111-2222-4333-8444-555555555555', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    r['host_write'](paths['config'], dict(enabled=True, tmux=tmux, cwd=directory))
+    state = dict(native_session=sid)
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    session['ready'] = True
+    holding = dict(open=True, refused=0)
+    publish = os.replace
+    def windows_publish(source, target):
+        if holding['open'] and str(target).endswith('.state.json'):
+            holding['refused'] += 1
+            if holding['refused'] >= 3:
+                holding['open'] = False
+            raise PermissionError(errno.EACCES, 'Access is denied', str(source), str(target))
+        return publish(source, target)
+    with patch.dict(r, conversation_path=lambda *args: None), patch.object(os, 'replace', windows_publish):
+        reply = r['host_handle_request'](provider, sid, tmux, session, dict(op='fresh_start'))
+    assert reply == dict(status='started'), reply
+    assert holding['refused'] == 3, holding
+    assert state['fresh_start']['phase'] == 'handover'
+    session['db'].close()
+print('FRESH_START_PASS')
+`);
+});
+
+test('a fresh start failure answers with its own reason and logs the real exception', () => {
+  python(String.raw`
+import errno, io, json, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+class Wire:
+    def __init__(self, request):
+        self.request = request
+        self.offset = 0
+        self.reply = b''
+    def settimeout(self, value):
+        pass
+    def recv(self, size):
+        chunk = self.request[self.offset:self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+    def sendall(self, data):
+        self.reply += data
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+class Server:
+    def __init__(self, connection):
+        self.connection = connection
+    def accept(self):
+        return self.connection, None
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    provider, sid, tmux = 'claude', '11111111-2222-4333-8444-555555555555', 'same-chat'
+    paths = r['host_paths'](provider, sid)
+    state = dict(native_session=sid, fresh_start=dict(phase='handover', text={}, started=0))
+    session = dict(state=state)
+    r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
+    wire = Wire((json.dumps(dict(op='fresh_start', provider=provider, sid=sid)) + chr(10)).encode())
+    def refused(*args, **kwargs):
+        raise PermissionError(errno.EACCES, 'Access is denied', 'state.json')
+    with patch.dict(r, host_fresh_start=refused):
+        r['host_accept_client'](provider, sid, tmux, session, Server(wire))
+    reply = json.loads(wire.reply.decode())
+    assert reply == dict(status='error', reason='fresh_start_failed'), reply
+    assert 'fresh_start' not in state, state
+    log = paths['log'].read_text(encoding='utf-8')
+    assert 'PermissionError' in log, log
+    assert 'Access is denied' in log, log
+    assert 'invalid_request' not in log, log
+    assert r['host_read'](paths['state']).get('native_session') == sid
+    session['db'].close()
+print('FRESH_START_PASS')
+`);
+});
+
 test('fresh start is discoverable without adding message chrome or changing the target tab', () => {
   const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
