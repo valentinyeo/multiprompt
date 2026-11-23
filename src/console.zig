@@ -1948,13 +1948,13 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
     const old_resurrect_len = app_state.g_pending_resurrect_len;
     app_state.g_pending_tmux_cmd_len = 0;
     app_state.g_pending_resurrect_len = 0;
-    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session);
+    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session, null);
     app_state.g_pending_tmux_cmd_len = old_cmd_len;
     app_state.g_pending_resurrect_len = old_resurrect_len;
     return ok;
 }
 
-pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8) bool {
+pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8) bool {
     const old_host = app_state.g_pending_tmux_host;
     const old_workspace = app_state.g_pending_background_workspace;
     defer {
@@ -1973,7 +1973,7 @@ pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux
         app_state.g_pending_tmux_cmd_len = 0;
         app_state.g_pending_resurrect_len = 0;
     }
-    return spawnShellWithSession(kind, tmux_session, null, null);
+    return spawnShellWithSession(kind, tmux_session, cwd, null);
 }
 
 fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
@@ -2827,6 +2827,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
             }
         }
     }
+    if (remember_closed) @import("tab_state_desktop.zig").rememberClose(idx);
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
@@ -2863,6 +2864,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.tmux_host = app_state.shells[idx].tmux_host;
         entry.name = app_state.shells[idx].name;
         entry.name_len = app_state.shells[idx].name_len;
+        entry.tab_key = app_state.shells[idx].tab_key;
+        entry.tab_key_len = app_state.shells[idx].tab_key_len;
         entry.tmux_session = app_state.shells[idx].tmux_session;
         entry.tmux_identity = app_state.shells[idx].tmux_identity;
         entry.tmux_identity_len = app_state.shells[idx].tmux_identity_len;

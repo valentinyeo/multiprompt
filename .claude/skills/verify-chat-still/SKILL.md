@@ -23,7 +23,9 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `608b7d62944fd39b79cbbaa2c83bc6e3251f590c`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `a011234bc0990a39aa0e0b2c1f7d2fb5b47d7792`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+
+SOFT-3140 restores the original single-file helper bundle in `src/chat_session.zig`, keeping health inside `mp_sessions.py`. All six covered functions and both types retain their canonical hashes after regeneration; no scroll expressions, callers, replay boundaries or model assumptions change.
 
 | Source and function | What the model uses |
 | --- | --- |
@@ -50,3 +52,5 @@ A counterexample lists old/new row tops, content height, viewport, divider, padd
 `--self-test` copies the real source into a temporary directory, breaks both production `held_y` guards so they discard the anchor, and requires all ten obligations to reject the scratch code. With `--replay`, those counterexamples must also match the production functions compiled from that scratch copy. The real checkout is never edited, and the original check then runs again. Its result must return to the same findings or pass it started with.
 
 When changing covered code, read the full functions, their callers and the runtime recipe before editing the model. `coverage.json` hashes normalized function bodies except the explicitly translated `held_y` declaration. Any other changed code stops with MODEL DRIFT. Update the translation, replay and bounds if semantics changed; recheck every mutation and the Windows journey. Move the sync commit and hashes forward only after confirming the verification still describes the code. A hash update alone is not that confirmation. Use `/maintain-formal-verification-skill` after covered changes shipped without this review.
+
+SOFT-3141 adds the tab-state helper to the runtime bundle. The six covered function hashes and both type hashes are unchanged; scroll decisions and replay boundaries are unchanged. Hosted CI reruns the existing proof.

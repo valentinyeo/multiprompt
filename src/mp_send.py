@@ -228,6 +228,63 @@ def find_tab(listing, tmux):
     return None, None, None
 
 
+def workspace_tab_ids(listing, workspace):
+    for ws in listing.get("workspaces") or []:
+        if ws.get("name") != workspace:
+            continue
+        order = []
+        for tab in ws.get("tabs") or []:
+            tab_id = tab.get("id")
+            if isinstance(tab_id, int):
+                order.append(tab_id)
+        for group in ws.get("groups") or []:
+            for tab in group.get("tabs") or []:
+                tab_id = tab.get("id")
+                if isinstance(tab_id, int):
+                    order.append(tab_id)
+        return order
+    return []
+
+
+def tab_predecessor(listing, workspace, tab_id):
+    if not isinstance(workspace, str) or not isinstance(tab_id, int):
+        return None
+    order = workspace_tab_ids(listing, workspace)
+    if tab_id not in order:
+        return None
+    index = order.index(tab_id)
+    return order[index - 1] if index > 0 else None
+
+
+def workspace_known(listing, name):
+    return isinstance(name, str) and any(ws.get("name") == name for ws in listing.get("workspaces") or [])
+
+
+def config_path_for_tmux(tmux):
+    if not isinstance(tmux, str):
+        return None, None
+    for path in sorted(host_root().glob("*.config.json")):
+        config = read_json(path)
+        if not config or config.get("helper_parent") or config.get("tmux") != tmux:
+            continue
+        return path, config
+    return None, None
+
+
+TAB_KINDS = frozenset({"chat", "shell"})
+
+
+def listing_tab_kind(tab=None, tmux=None):
+    if isinstance(tab, dict):
+        kind = tab.get("kind")
+        if kind in TAB_KINDS:
+            return kind
+        tmux = tab.get("tmux")
+    if isinstance(tmux, str) and tmux.startswith("live-"):
+        return "chat"
+    return "shell"
+
+
 def verify_tab(tmux):
     for attempt in range(VERIFY_TRIES):
         if attempt:
@@ -239,13 +296,14 @@ def verify_tab(tmux):
     return None
 
 
-def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_tab=None):
+def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_tab=None, tab_kind=None):
     if listing.get("ok") is not True:
         return dict(ok=False, error=listing.get("error") or "zsb_failed")
     existing = find_tab(listing, tmux)[2]
     if existing:
         return dict(ok=True, tab=existing.get("id"), existing=True)
-    common = ("--host", host, "--tmux", tmux, "--name", title)
+    kind = tab_kind if tab_kind in TAB_KINDS else listing_tab_kind(None, tmux)
+    common = ("--host", host, "--tmux", tmux, "--name", title, "--kind", kind)
     if after_tab is not None:
         opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(after_tab), *common)
     elif group:

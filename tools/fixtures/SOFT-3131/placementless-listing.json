@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "hosts": ["remote-1"],
+  "workspaces": [
+    {
+      "id": 1,
+      "name": "Empty",
+      "active": true,
+      "groups": [],
+      "tabs": []
+    }
+  ]
+}

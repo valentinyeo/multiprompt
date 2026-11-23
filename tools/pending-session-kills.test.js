@@ -42,8 +42,9 @@ test('IGSH-1516 offline end survives stale account layout and rejects an unaccep
   native(`const std = @import("std");
 const Closed = @import("tmux_closed.zig").Closed;
 const SessionIdentity = @import("session_identity.zig").Session;
+const tmux_identity = @import("tmux_identity.zig");
 const Outcome = enum { gone, retry, unsafe };
-const Shell = struct { shell_id: u32 = 7, kind: enum { tmux, vps, vps2, cmd } = .tmux, ai_agent: u8 = 2, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, tmux_host: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0 };
+const Shell = struct { shell_id: u32 = 7, chat_id: u64 = 101, kind: enum { tmux, vps, vps2, cmd } = .tmux, ai_agent: u8 = 2, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, tmux_host: u8 = 0, claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0 };
 const app_state = struct {
     var shells: [1]Shell = .{.{}};
     var shell_count: usize = 1;
@@ -51,7 +52,7 @@ const app_state = struct {
     var g_tmux_fetch_tick: u64 = 100;
     const g_main_hwnd: ?*anyopaque = null;
 };
-const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session: []const u8 }; };
+const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session: []const u8, tab_state: ?@import("tab_state.zig").State = null }; };
 var kill_outcome: Outcome = .retry;
 var admitted = true;
 var notices: usize = 0;
@@ -74,8 +75,10 @@ fn publishInboxState() void {}
 fn saveSession() void { saved += 1; }
 fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: i32) i32 { return 1; }
 ${end}
+var sync_closed = false;
 fn staleLayout(a: std.mem.Allocator) ![]session_layout.Tab {
-    var desired = struct { tabs: []const session_layout.Tab }{ .tabs = &.{ .{ .tmux_host = 0, .tmux_session = "SESSION-ONE" }, .{ .tmux_host = 1, .tmux_session = "session-one" } } };
+    const state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .tmux = "SESSION-ONE", .name = "Draft", .closed = true };
+    var desired = struct { tabs: []const session_layout.Tab }{ .tabs = &.{ .{ .tmux_host = 0, .tmux_session = "SESSION-ONE", .tab_state = if (sync_closed) state else null }, .{ .tmux_host = 1, .tmux_session = "session-one" } } };
 ${filter}
     return kept.items;
 }
@@ -119,6 +122,21 @@ test "full queue and unsafe target preserve tab, successful end needs no retry" 
     try std.testing.expectEqual(@as(usize, 0), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 0), queued);
     try std.testing.expect(!app_state.g_tmux_closed.contains(0, "session-one"));
+}
+test "SOFT-3141 synced close retains this desktop's unsent draft identity" {
+    reset();
+    sync_closed = true;
+    defer sync_closed = false;
+    defer {
+        app_state.g_tmux_closed.reopen(0, "session-one");
+        app_state.g_tmux_closed.entries.deinit(std.heap.page_allocator);
+        app_state.g_tmux_closed = .{};
+    }
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const kept = try staleLayout(arena.allocator());
+    try std.testing.expectEqual(@as(usize, 1), kept.len);
+    try std.testing.expectEqual(@as(u64, 101), app_state.g_tmux_closed.entries.items[0].tab_state.?.chat_id);
 }
 `, ['session_identity.zig', 'tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'fixtures/issue-415-frequent.json', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
 });

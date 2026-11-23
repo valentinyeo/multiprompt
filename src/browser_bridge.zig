@@ -1323,7 +1323,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
-        "version",          "workspace-list",
+        "version",          "workspace-list", "pc-state", "tab-action",
     };
     var remote_allowed = false;
     for (remote_verbs) |remote_verb| {
@@ -1347,7 +1347,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
-    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
+    if (std.mem.eql(u8, argv[0], "pc-state") or std.mem.eql(u8, argv[0], "tab-action") or std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
@@ -1942,6 +1942,19 @@ pub fn startTunnelInboundListener() void {
     }
 }
 
+const ZsbSessionOpenFlag = enum(u3) { workspace, group, host, tmux, name, after_tab, kind };
+
+fn zsbSessionOpenFlagFor(arg: []const u8) ?ZsbSessionOpenFlag {
+    if (std.mem.eql(u8, arg, "--workspace")) return .workspace;
+    if (std.mem.eql(u8, arg, "--group")) return .group;
+    if (std.mem.eql(u8, arg, "--host")) return .host;
+    if (std.mem.eql(u8, arg, "--tmux")) return .tmux;
+    if (std.mem.eql(u8, arg, "--name")) return .name;
+    if (std.mem.eql(u8, arg, "--after-tab")) return .after_tab;
+    if (std.mem.eql(u8, arg, "--kind")) return .kind;
+    return null;
+}
+
 const ZsbSessionOpenArgs = struct {
     workspace: []const u8,
     group: []const u8,
@@ -1949,36 +1962,41 @@ const ZsbSessionOpenArgs = struct {
     tmux: []const u8,
     name: []const u8,
     after_tab: ?u32 = null,
+    kind: ?[]const u8 = null,
 };
 
 fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
-    if (argv.len != 11 or !std.mem.eql(u8, argv[0], "session-open")) return error.BadArgs;
-    const flags = [_][]const u8{ "--workspace", "--group", "--host", "--tmux", "--name", "--after-tab" };
-    var values: [6][]const u8 = @splat("");
+    if (argv.len < 5 or !std.mem.eql(u8, argv[0], "session-open")) return error.BadArgs;
+    var values: [7]?[]const u8 = @splat(null);
     var i: usize = 1;
-    while (i < argv.len) : (i += 2) {
-        var matched = false;
-        for (flags, 0..) |flag, fi| {
-            if (!std.mem.eql(u8, argv[i], flag)) continue;
-            if (values[fi].len != 0 or argv[i + 1].len == 0) return error.BadArgs;
-            values[fi] = argv[i + 1];
-            matched = true;
-            break;
-        }
-        if (!matched) return error.BadArgs;
+    while (i < argv.len) {
+        const flag = zsbSessionOpenFlagFor(argv[i]) orelse return error.BadArgs;
+        const slot = @intFromEnum(flag);
+        if (i + 1 >= argv.len or values[slot] != null or argv[i + 1].len == 0) return error.BadArgs;
+        values[slot] = argv[i + 1];
+        i += 2;
     }
-    if ((values[1].len == 0) == (values[5].len == 0)) return error.BadArgs;
-    for ([_]usize{ 0, 2, 3, 4 }) |vi| if (values[vi].len == 0) return error.BadArgs;
-    try validateZsbTmux(values[3]);
-    try validateZsbName(values[4]);
+    const workspace = values[@intFromEnum(ZsbSessionOpenFlag.workspace)] orelse return error.BadArgs;
+    const host = values[@intFromEnum(ZsbSessionOpenFlag.host)] orelse return error.BadArgs;
+    const tmux = values[@intFromEnum(ZsbSessionOpenFlag.tmux)] orelse return error.BadArgs;
+    const name = values[@intFromEnum(ZsbSessionOpenFlag.name)] orelse return error.BadArgs;
+    const group = values[@intFromEnum(ZsbSessionOpenFlag.group)] orelse "";
+    const after_text = values[@intFromEnum(ZsbSessionOpenFlag.after_tab)];
+    const kind = values[@intFromEnum(ZsbSessionOpenFlag.kind)];
+    if ((group.len == 0) == (after_text == null)) return error.BadArgs;
+    try validateZsbTmux(tmux);
+    try validateZsbName(name);
+    if (kind) |text| {
+        if (!std.mem.eql(u8, text, "chat") and !std.mem.eql(u8, text, "shell")) return error.BadArgs;
+    }
     var after_tab: ?u32 = null;
-    if (values[5].len != 0) {
-        for (values[5]) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
-        const tab = std.fmt.parseInt(u32, values[5], 10) catch return error.BadArgs;
+    if (after_text) |tab_text| {
+        for (tab_text) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+        const tab = std.fmt.parseInt(u32, tab_text, 10) catch return error.BadArgs;
         if (tab == 0) return error.BadArgs;
         after_tab = tab;
     }
-    return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4], .after_tab = after_tab };
+    return .{ .workspace = workspace, .group = group, .host = host, .tmux = tmux, .name = name, .after_tab = after_tab, .kind = kind };
 }
 
 fn validateZsbTmux(tmux: []const u8) !void {
@@ -2064,11 +2082,14 @@ fn zsbUnknownName(out: []u8, code: []const u8, names: []const []const u8) usize 
     return pos;
 }
 
-fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
+const zsbSidebarHiddenReason = @import("tab_state_desktop.zig").hiddenReason;
+
+fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32, sidebar_tabs: []const bool) bool {
     if (!appendAsciiBuf(out, pos, "[")) return false;
     var first_tab = true;
     for (app_state.shells[0..app_state.shell_count], 0..) |shell, i| {
-        if (shell.workspace != workspace or shell.group_id != group) continue;
+        const reported_group = if (@import("sidebar.zig").findGroupIdx(shell.group_id) != null) shell.group_id else 0;
+        if (shell.workspace != workspace or reported_group != group) continue;
         if (!first_tab and !appendAsciiBuf(out, pos, ",")) return false;
         first_tab = false;
         if (!appendAsciiBuf(out, pos, "{")) return false;
@@ -2085,18 +2106,45 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
         if (shell.tmux_session_len > 0) {
             if (!zsbAppendJsonString(out, pos, shell.tmux_session[0..shell.tmux_session_len])) return false;
         } else if (!appendAsciiBuf(out, pos, "null")) return false;
+        if (!diagJsonStringField(out, pos, &first, "kind", if (shell.chat_view_on) "chat" else "shell")) return false;
         if (!diagJsonBoolField(out, pos, &first, "active", i == app_state.active_shell)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "cv", shell.chat_view_on)) return false;
+        const hidden_reason = zsbSidebarHiddenReason(i, sidebar_tabs[i]);
+        if (!diagJsonBoolField(out, pos, &first, "visible", hidden_reason == null)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "waiting", shell.inbox_archived and !shell.needs_attention)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "pinned", @import("sidebar.zig").effPinnedTop(i))) return false;
+        if (!diagJsonBoolField(out, pos, &first, "archived", false)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "user_hidden", app_state.g_hide_sidebar or (app_state.g_sidebar_view != null and shell.inbox_excluded))) return false;
+        if (!diagJsonFieldPrefix(out, pos, &first, "hidden_reason")) return false;
+        if (hidden_reason) |reason| {
+            if (!zsbAppendJsonString(out, pos, reason)) return false;
+        } else if (!appendAsciiBuf(out, pos, "null")) return false;
         if (@import("capacity.zig").remoteHostForShell(&shell) != null) {
             if (!zsbAppendSessionState(out, pos, &shell)) return false;
         } else if (!appendAsciiBuf(out, pos, ",\"state\":null")) return false;
+        if (!@import("tab_state_desktop.zig").appendState(out, pos, i)) return false;
         if (!appendAsciiBuf(out, pos, "}")) return false;
     }
     return appendAsciiBuf(out, pos, "]");
 }
 
 fn zsbWorkspaceList(out: []u8) usize {
+    var rows: [app_state.MAX_ROWS]app_state.Row = undefined;
+    const row_count = @import("sidebar.zig").layoutRows(&rows);
+    var sidebar_tabs = [_]bool{false} ** app_state.MAX_SHELLS;
+    for (rows[0..row_count]) |row| {
+        if (row.kind == .tab and row.shell_idx < app_state.shell_count) sidebar_tabs[row.shell_idx] = true;
+    }
     var pos: usize = 0;
-    if (!appendAsciiBuf(out, &pos, "{\"ok\":true,\"hosts\":[")) return 0;
+    var first_field = true;
+    if (!appendAsciiBuf(out, &pos, "{")) return 0;
+    if (!diagJsonBoolField(out, &pos, &first_field, "ok", true)) return 0;
+    var active_name: [32]u8 = undefined;
+    const active_workspace = workspaceDisplayName(app_state.g_active_workspace, &active_name);
+    if (!diagJsonStringField(out, &pos, &first_field, "active_workspace", active_workspace)) return 0;
+    const view = if (app_state.g_sidebar_view) |v| v.name() else if (app_state.g_starred_workspace) "Starred" else active_workspace;
+    if (!diagJsonStringField(out, &pos, &first_field, "sidebar_view", view)) return 0;
+    if (!appendAsciiBuf(out, &pos, ",\"hosts\":[")) return 0;
     for ([_]u8{ TMUX_HOST_DE, TMUX_HOST_UK, TMUX_HOST_INNE }, 0..) |host, i| {
         if (i > 0 and !appendAsciiBuf(out, &pos, ",")) return 0;
         if (!zsbAppendJsonString(out, &pos, tmuxSshTarget(host))) return 0;
@@ -2120,14 +2168,27 @@ fn zsbWorkspaceList(out: []u8) usize {
             const group_len = std.unicode.utf16LeToUtf8(&group_name, group.name[0..group.name_len]) catch return 0;
             if (!diagJsonStringField(out, &pos, &group_first, "name", group_name[0..group_len])) return 0;
             if (!appendAsciiBuf(out, &pos, ",\"tabs\":")) return 0;
-            if (!zsbWorkspaceTabs(out, &pos, @intCast(wi), group.id)) return 0;
+            if (!zsbWorkspaceTabs(out, &pos, @intCast(wi), group.id, &sidebar_tabs)) return 0;
             if (!appendAsciiBuf(out, &pos, "}")) return 0;
         }
         if (!appendAsciiBuf(out, &pos, "],\"tabs\":")) return 0;
-        if (!zsbWorkspaceTabs(out, &pos, @intCast(wi), 0)) return 0;
+        if (!zsbWorkspaceTabs(out, &pos, @intCast(wi), 0, &sidebar_tabs)) return 0;
         if (!appendAsciiBuf(out, &pos, "}")) return 0;
     }
-    if (!appendAsciiBuf(out, &pos, "]}\n")) return 0;
+    if (!appendAsciiBuf(out, &pos, "],\"archived_sessions\":[")) return 0;
+    @import("archive.zig").loadArchiveIfNeeded();
+    for (app_state.g_archived.items, 0..) |entry, i| {
+        if (i > 0 and !appendAsciiBuf(out, &pos, ",")) return 0;
+        if (!appendAsciiBuf(out, &pos, "{")) return 0;
+        var first = true;
+        if (!diagJsonStringField(out, &pos, &first, "tmux", entry.tmux_session[0..entry.tmux_session_len])) return 0;
+        if (!diagJsonStringField(out, &pos, &first, "host", tmuxSshTarget(entry.tmux_host))) return 0;
+        if (!diagJsonStringField(out, &pos, &first, "title", entry.name[0..entry.name_len])) return 0;
+        if (!appendAsciiBuf(out, &pos, "}")) return 0;
+    }
+    if (!appendAsciiBuf(out, &pos, "]")) return 0;
+    if (!@import("tab_state_desktop.zig").appendClosed(out, &pos)) return 0;
+    if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
     return pos;
 }
 
@@ -2168,6 +2229,14 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
         if (std.mem.eql(u8, host_names[hi], args.host)) host_id = host;
     }
     const host = host_id orelse return zsbUnknownName(out, "unknown_host", &host_names);
+    const chat_view = @import("chat_view.zig");
+    const old_chat_view = app_state.g_pending_chat_view;
+    defer app_state.g_pending_chat_view = old_chat_view;
+    if (args.kind) |kind| {
+        app_state.g_pending_chat_view = std.mem.eql(u8, kind, "chat");
+    } else if (chat_view.isLive(args.tmux)) {
+        app_state.g_pending_chat_view = true;
+    }
     if (findLocalTmuxTab(host, args.tmux)) |existing| {
         const shell = &app_state.shells[existing];
         const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"existing\":true,\"tab\":{d},\"workspace\":", .{shell.shell_id}) catch return 0;
@@ -2345,7 +2414,7 @@ fn zsbShellOpen(argv: []const []const u8, out: []u8) usize {
     if (args.run) |command| {
         if (!setPendingRemoteRun(kind == .tmux, command)) return zsbWorkspaceError(out, "bad_args");
     }
-    if (!@import("console.zig").spawnBackgroundRemoteShell(host, ws, kind, tmux_session)) return zsbWorkspaceError(out, "spawn_failed");
+    if (!@import("console.zig").spawnBackgroundRemoteShell(host, ws, kind, tmux_session, null)) return zsbWorkspaceError(out, "spawn_failed");
     const placed = if (anchor) |index| zsbPlaceAfter(app_state.shell_count - 1, index) else app_state.shell_count - 1;
     const shell = &app_state.shells[placed];
     shell.group_id = gid;
@@ -2629,6 +2698,10 @@ pub fn handleZsbWorkspaceRequest() void {
     const out = &app_state.g_zsb_workspace_response;
     var len = if (std.mem.eql(u8, args[0], "workspace-list"))
         if (args.len == 1) zsbWorkspaceList(out) else zsbWorkspaceError(out, "bad_args")
+    else if (std.mem.eql(u8, args[0], "pc-state"))
+        if (args.len == 1) @import("tab_state_desktop.zig").pcState(out) else zsbWorkspaceError(out, "bad_args")
+    else if (std.mem.eql(u8, args[0], "tab-action"))
+        @import("tab_state_desktop.zig").command(args, out)
     else if (std.mem.eql(u8, args[0], "session-status"))
         zsbSessionStatus(args, out)
     else if (std.mem.eql(u8, args[0], "shell-open"))
@@ -3062,6 +3135,7 @@ test "workspace-list includes inactive workspaces grouped and ungrouped tabs wit
     defer saved.deinit();
     var out: [8192]u8 = undefined;
     _ = zsbSessionOpen(&zsb_workspace_test_args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    app_state.shells[1].chat_view_on = true;
     const len = zsbWorkspaceList(&out);
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out[0..len], .{});
     defer parsed.deinit();
@@ -3073,17 +3147,105 @@ test "workspace-list includes inactive workspaces grouped and ungrouped tabs wit
     try std.testing.expect(local.object.get("host").? == .null);
     try std.testing.expect(local.object.get("tmux").? == .null);
     try std.testing.expect(local.object.get("active").?.bool);
+    try std.testing.expect(!local.object.get("cv").?.bool);
     const group = workspaces[1].object.get("groups").?.array.items[0];
     try std.testing.expectEqual(@as(i64, 7), group.object.get("id").?.integer);
     const tab = group.object.get("tabs").?.array.items[0];
     try std.testing.expectEqualStrings("Agent 🧪", tab.object.get("title").?.string);
     try std.testing.expectEqualStrings("remote-1", tab.object.get("host").?.string);
     try std.testing.expectEqualStrings("runner-7", tab.object.get("tmux").?.string);
+    try std.testing.expect(tab.object.get("cv").?.bool);
     try std.testing.expect(!tab.object.get("active").?.bool);
     try std.testing.expect(local.object.get("state").? == .null);
     try std.testing.expectEqualStrings("connecting", tab.object.get("state").?.string);
     var tiny: [8]u8 = undefined;
     try std.testing.expectEqual(@as(usize, 0), zsbWorkspaceList(&tiny));
+}
+
+test "SOFT-3140 workspace-list reports actual sidebar membership and reasons without changing the view" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    const old_unread = app_state.g_unread_only;
+    const old_hidden = app_state.g_hide_sidebar;
+    const old_view = app_state.g_sidebar_view;
+    const old_starred = app_state.g_starred_workspace;
+    const old_collapsed = app_state.g_sidebar_collapsed;
+    const old_recents = app_state.g_recents_section_collapsed;
+    const old_pinned = app_state.g_pinned_section_collapsed;
+    const old_inbox_count = app_state.g_inbox_row_count;
+    const old_snoozed = app_state.g_ws_snoozed[0];
+    defer {
+        app_state.g_unread_only = old_unread;
+        app_state.g_hide_sidebar = old_hidden;
+        app_state.g_sidebar_view = old_view;
+        app_state.g_starred_workspace = old_starred;
+        app_state.g_sidebar_collapsed = old_collapsed;
+        app_state.g_recents_section_collapsed = old_recents;
+        app_state.g_pinned_section_collapsed = old_pinned;
+        app_state.g_inbox_row_count = old_inbox_count;
+        app_state.g_ws_snoozed[0] = old_snoozed;
+    }
+    app_state.g_sidebar_view = null;
+    app_state.g_starred_workspace = false;
+    app_state.g_hide_sidebar = false;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_pinned_section_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_ws_snoozed[0] = false;
+    app_state.g_unread_only = false;
+    app_state.shell_count = 2;
+    app_state.shells[1] = app_state.empty_shell;
+    app_state.shells[1].shell_id = 42;
+    app_state.shells[1].pinned_top = true;
+    const Case = struct { reason: ?[]const u8, waiting: bool = false };
+    const cases = [_]Case{
+        .{ .reason = null },
+        .{ .reason = "filtered: unread only" },
+        .{ .reason = "other workspace" },
+        .{ .reason = "collapsed group" },
+        .{ .reason = "collapsed section" },
+        .{ .reason = "waiting", .waiting = true },
+        .{ .reason = "user-hidden" },
+        .{ .reason = "filtered: sidebar view" },
+        .{ .reason = "not in sidebar layout: missing group" },
+    };
+    for (cases, 0..) |case, ci| {
+        app_state.g_unread_only = ci == 1;
+        app_state.shells[1].workspace = if (ci == 2) 1 else 0;
+        app_state.shells[1].group_id = if (ci == 3) 7 else if (ci == 8) 999 else 0;
+        app_state.shells[1].pinned_top = ci == 0;
+        app_state.g_recents_section_collapsed = ci == 4;
+        app_state.shells[1].inbox_archived = ci == 5;
+        app_state.g_hide_sidebar = ci == 6;
+        app_state.g_sidebar_view = if (ci == 7) .favorites else null;
+        var out: [16384]u8 = undefined;
+        const len = zsbWorkspaceList(&out);
+        try std.testing.expect(len > 0);
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out[0..len], .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings("Home", parsed.value.object.get("active_workspace").?.string);
+        try std.testing.expectEqualStrings(if (ci == 7) "Favorites" else "Home", parsed.value.object.get("sidebar_view").?.string);
+        const workspace = parsed.value.object.get("workspaces").?.array.items[app_state.shells[1].workspace];
+        const tabs = if (ci == 3) workspace.object.get("groups").?.array.items[0].object.get("tabs").?.array.items else workspace.object.get("tabs").?.array.items;
+        const tab = tabs[tabs.len - 1];
+        try std.testing.expectEqual(@as(i64, 42), tab.object.get("id").?.integer);
+        try std.testing.expectEqual(case.reason == null, tab.object.get("visible").?.bool);
+        try std.testing.expectEqual(case.waiting, tab.object.get("waiting").?.bool);
+        try std.testing.expectEqual(ci == 0, tab.object.get("pinned").?.bool);
+        try std.testing.expect(!tab.object.get("archived").?.bool);
+        if (case.reason) |reason| {
+            try std.testing.expectEqualStrings(reason, tab.object.get("hidden_reason").?.string);
+        } else try std.testing.expect(tab.object.get("hidden_reason").? == .null);
+        try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
+        try std.testing.expectEqual(@as(u8, 0), app_state.g_active_workspace);
+    }
+    app_state.g_sidebar_view = null;
+    app_state.shells[1].group_id = 0;
+    app_state.g_ws_snoozed[0] = true;
+    try std.testing.expectEqualStrings("workspace snoozed", zsbSidebarHiddenReason(1, false).?);
+    app_state.g_ws_snoozed[0] = false;
+    try std.testing.expectEqualStrings("not in sidebar layout", zsbSidebarHiddenReason(1, false).?);
 }
 
 const ZsbTabTestOps = struct {

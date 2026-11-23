@@ -6,6 +6,7 @@ pub const Entry = struct {
     host: u8,
     name: [64]u8 = @splat(0),
     len: usize,
+    tab_state: ?@import("tab_state.zig").State = null,
     face: ?u8 = null,
     color: ?u8 = null,
 
@@ -22,6 +23,10 @@ pub const Entry = struct {
         if (self.color) |color| {
             try json.objectField("color");
             try json.write(color);
+        }
+        if (self.tab_state) |state| {
+            try json.objectField("tab_state");
+            try json.write(state);
         }
         try json.endObject();
     }
@@ -48,6 +53,7 @@ pub const Closed = struct {
     pub fn reopen(self: *Closed, host: u8, name: []const u8) void {
         for (self.entries.items, 0..) |entry, i| {
             if (same(entry.host, entry.name[0..entry.len], host, name)) {
+                if (entry.tab_state) |state| state.deinit(std.heap.page_allocator);
                 _ = self.entries.orderedRemove(i);
                 return;
             }
@@ -62,8 +68,14 @@ pub const Closed = struct {
             const host = item.object.get("host") orelse continue;
             const session = item.object.get("session") orelse continue;
             const slot = json_reader.unsigned(host, 256);
-            if (slot > 2 or session != .string or session.string.len > 63) continue;
-            for (session.string) |c| {
+            if (slot > 3 or session != .string or session.string.len > 63) continue;
+            if (slot == 3) {
+                const state = item.object.get("tab_state") orelse continue;
+                if (state != .object or !std.mem.eql(u8, json_reader.string(json_reader.field(state, "host")) orelse "", "local")) continue;
+            }
+            const plain = std.mem.startsWith(u8, session.string, "@shell-");
+            if (plain and !item.object.contains("tab_state")) continue;
+            for (if (plain) session.string[1..] else session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }
             if (!self.contains(@intCast(slot), session.string)) {
@@ -72,6 +84,12 @@ pub const Closed = struct {
                     const entry = &self.entries.items[self.entries.items.len - 1];
                     const face = json_reader.uintDefault(item, "face", 20);
                     const color = json_reader.uintDefault(item, "color", @import("session_layout.zig").color_count);
+                    if (item.object.get("tab_state")) |state_value| {
+                        const parsed = std.json.parseFromValue(@import("tab_state.zig").State, a, state_value, .{ .allocate = .alloc_always }) catch continue;
+                        defer parsed.deinit();
+                        @import("tab_state.zig").validate(parsed.value) catch continue;
+                        entry.tab_state = try parsed.value.dupe(std.heap.page_allocator);
+                    }
                     entry.face = if (face < 20) @intCast(face) else null;
                     entry.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
                 }
@@ -114,6 +132,28 @@ test "IGSH-1043 saved close intent restores without erasing newer local closes" 
     try std.testing.expect(restored.contains(2, "runner-one"));
     try std.testing.expect(restored.contains(0, "newer-close"));
     try std.testing.expectEqual(@as(usize, 2), restored.entries.items.len);
+}
+
+test "SOFT-3141 closed canonical records retain draft and runtime identity on disk" {
+    const a = std.testing.allocator;
+    var closed = Closed{};
+    defer closed.entries.deinit(a);
+    try closed.close(a, 0, "live-draft");
+    const state = @import("tab_state.zig").State{ .host = "remote-1", .user = "agent", .workspace = "Home", .position = 0, .kind = .chat, .agent = 5, .chat_id = 101, .cwd = "/work/draft", .tmux = "live-draft", .name = "Draft", .closed = true };
+    closed.entries.items[0].tab_state = try state.dupe(std.heap.page_allocator);
+    defer closed.reopen(0, "live-draft");
+    const encoded = try std.json.Stringify.valueAlloc(a, closed.entries.items, .{});
+    defer a.free(encoded);
+    var parsed = try json_reader.parse(a, encoded);
+    defer parsed.deinit();
+    var restored = Closed{};
+    defer restored.entries.deinit(a);
+    try restored.restore(a, parsed.value);
+    defer restored.reopen(0, "live-draft");
+    const actual = restored.entries.items[0].tab_state.?;
+    try std.testing.expectEqual(@as(u64, 101), actual.chat_id);
+    try std.testing.expectEqual(@as(u8, 5), actual.agent);
+    try std.testing.expectEqualStrings("/work/draft", actual.cwd.?);
 }
 
 test "IGSH-1043 restored close intent validates host and native session names" {

@@ -1,21 +1,29 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { run as layoutRun } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
-const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
+const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo,tab_state';
 const USAGE = `usage: mb <command> [options]
 
 commands:
   list [--json]
-  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
-  close <name> [--host N]
+  open [name] [--kind shell|chat --tmux <name> --workspace <name>] [--sid ID] [--group <group>] [--title <text>] [--host N] [--json]
+  close <name> [--host N] [--json]
+  pin <name> [--host N] [--json]
+  unpin <name> [--host N] [--json]
+  archive <name> [--host N] [--json]
+  unarchive <name> [--host N] [--json]
+  wait <name> [--host N] [--json]
+  restore <name> [--host N] [--json]
+  restart <name> [--host N]
   rename <name> <title> [--host N]
-  move <name> [--group <group>] [--workspace <name>] [--host N]
+  move <name> [--group <group>] [--workspace <name>] [--position N] [--host N] [--json]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
@@ -32,6 +40,7 @@ commands:
   group rename <old> <new>
   group delete <name>
   roster apply <file> [--dry-run]
+  health [--json] [--ping]
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
@@ -63,7 +72,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux'].includes(name)) flags[name] = true;
+    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -289,21 +298,28 @@ async function open(ctx, flags) {
   return placeShell(ctx, flags);
 }
 
-async function close(ctx, flags) {
-  const name = flags._[0];
-  if (!name || flags._.length !== 1) throw new Failure('give one session name');
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  const owners = readOwners(ctx);
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, name, host);
-    if (!tab) return null;
-    layout.tabs = layout.tabs.filter(item => item !== tab);
-    return layout;
-  });
-  const session = name;
-  const owned = Object.values(owners.sessions).find(item => item.owner === 'mb' && (item.session.toLowerCase() === clean(session).toLowerCase() || clean(item.name || '').toLowerCase() === clean(session).toLowerCase()) && (host === null || item.host === host));
-  if (owned) await releaseOwned(ctx, owners, owned);
-  ctx.out(`${result.changed ? 'closed' : 'already closed'} ${clean(name)}${result.changed ? ` (revision ${result.revision})` : ''}`);
+function mpSessionsBin(env) {
+  const home = env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  for (const candidate of [join(home, '.multiprompt-runtime/mp-sessions'), join(home, '.local/bin/mp-sessions')]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Failure('mp-sessions is not installed');
+}
+
+async function restartSession(ctx, flags) {
+  if (flags._.length !== 1) throw new Failure('restart needs a session name');
+  const bin = mpSessionsBin(ctx.env);
+  const done = spawnSync('python3', [bin, 'restart', clean(flags._[0])], { encoding: 'utf8', env: ctx.env });
+  if (done.status !== 0) {
+    const message = (done.stderr || done.stdout || 'mp-sessions restart failed').trim().split('\n').pop();
+    throw new Failure(message.replace(/^mp-sessions: /, ''));
+  }
+  let payload;
+  try { payload = JSON.parse(done.stdout.trim()); } catch { throw new Failure('invalid mp-sessions response'); }
+  if (!payload.ok) throw new Failure('restart failed');
+  const word = payload.status === 'already' ? 'already restarted' : payload.status === 'waiting' ? 'waiting to restart' : 'restarted';
+  ctx.out(`${word} ${clean(flags._[0])}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -331,28 +347,10 @@ async function renameSession(ctx, flags) {
     if (!tab) throw new Failure('no such session');
     if (tab.name === title) return null;
     tab.name = title;
+    if (tab.tab_state) tab.tab_state.name = title;
     return layout;
   });
   ctx.out(result.changed ? `renamed ${flags._[0]} (revision ${result.revision})` : `already renamed ${flags._[0]}`);
-}
-
-async function moveSession(ctx, flags) {
-  if (flags._.length !== 1) throw new Failure('move needs one session');
-  if (flags.group === undefined && flags.workspace === undefined) throw new Failure('give --group or --workspace');
-  const group = flags.group === undefined ? null : groupName(flags.group);
-  const workspace = flags.workspace === undefined ? null : workspaceName(flags.workspace);
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  if (group !== null) requireFeature(await readLayout(ctx), 'groups');
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, flags._[0], host);
-    if (!tab) throw new Failure('no such session');
-    if (workspace && !layout.workspaces.some(item => item.name === workspace)) throw new Failure(`workspace ${workspace} not found or not visible to this key`);
-    let changed = false;
-    if (workspace && tab.workspace !== workspace) { tab.workspace = workspace; changed = true; }
-    if (group !== null && (tab.group || null) !== group) { tab.group = group; changed = true; }
-    return changed ? layout : null;
-  });
-  ctx.out(result.changed ? `moved ${flags._[0]} (revision ${result.revision})` : `already moved ${flags._[0]}`);
 }
 
 async function style(ctx, flags) {
@@ -797,6 +795,35 @@ async function pull(ctx, flags) {
   await list(ctx, flags);
 }
 
+function mpSessionsScript(env) {
+  const runtime = join(env.HOME || '', '.multiprompt-runtime/mp-sessions');
+  const talk = join(env.HOME || '', '.local/share/multiprompt-talk/mp_sessions.py');
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'mp-sessions');
+  for (const candidate of [env.MULTIPROMPT_MP_SESSIONS, runtime, talk, checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
+}
+
+async function health(ctx, flags) {
+  if (flags._.length) throw new Failure('health takes no arguments');
+  const args = ['health'];
+  if (flags.json) args.push('--json');
+  if (flags.ping) args.push('--ping');
+  const script = mpSessionsScript(ctx.env);
+  const home = ctx.env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  const result = spawnSync('python3', [script, ...args], {
+    encoding: 'utf8',
+    env: { ...ctx.env, HOME: home, PATH: ctx.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }
+  });
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const err = (result.stderr || '').trimEnd();
+  if (err) ctx.err(err);
+  return result.status ?? 1;
+}
+
 export async function run(argv, overrides = {}) {
   const env = overrides.env || process.env;
   const out = overrides.out || (line => process.stdout.write(line + '\n'));
@@ -804,6 +831,21 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (['list', 'open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore'].includes(command)) {
+      const sessions = overrides.sessions || ((args) => spawnSync('python3', [mpSessionsScript(env), ...args], {
+        encoding: 'utf8', env, timeout: 60000
+      }));
+      const result = sessions([command, ...rest]);
+      if (result.stdout?.trimEnd()) out(result.stdout.trimEnd());
+      if (result.stderr?.trimEnd()) err(result.stderr.trimEnd());
+      return result.status ?? 1;
+    }
+    if (command === 'health') {
+      const flags = parse(rest);
+      const home = env.HOME;
+      if (!home) throw new Failure('HOME is required');
+      return await health({ env, out, err }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;
@@ -828,7 +870,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, restart: restartSession, rename: renameSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;
