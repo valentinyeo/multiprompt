@@ -417,6 +417,8 @@ $process = [pscustomobject]@{ Id = 42 }
 $script:recover = $false
 $script:loseOnRecord = $false
 $script:sleeps = 0
+$Evidence = $PSScriptRoot
+function Snapshot([string]$Name) {}
 function Doctor {}
 function Record($Label) { if ($script:loseOnRecord) { [VerifyNative]::Foreign() } }
 function Start-Sleep([int]$Milliseconds) {
@@ -519,9 +521,9 @@ test('pane layout samples the grouped row below the permanent workspace header',
   const { runInNewContext } = require('node:vm');
   const S = (value, dpi, scale) => Math.trunc(value * dpi * scale / 9600);
   const context = { client: { Top: 0 }, gap: 8, hidePills: true, dpi: 96, scale: 100, S };
-  assert.equal(runInNewContext(expression, context), 88);
-  assert.equal(runInNewContext(expression, { ...context, hidePills: false }), 122);
-  assert.equal(runInNewContext(expression, { ...context, client: { Top: 30 } }), 118);
+  assert.equal(runInNewContext(expression, context), 102);
+  assert.equal(runInNewContext(expression, { ...context, hidePills: false }), 136);
+  assert.equal(runInNewContext(expression, { ...context, client: { Top: 30 } }), 132);
 });
 
 function assertsPaneFocusGeometry(source, workflowText) {
@@ -2425,7 +2427,7 @@ test('group proof samples and clicks below the workspace picker at every support
       (value, d, s) => Math.trunc(value * d * s / 9600)), expected,
     `group headline must clear the workspace picker: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
     assert.equal(rowTop({ Top: 31 }, Math.trunc(8 * dpi * scale / 9600), dpi, scale, hidePills,
-      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + 28,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + Math.trunc(42 * dpi * scale / 9600),
     `pane icon scan must follow the group headline: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
   }
 });
@@ -2437,6 +2439,8 @@ test('native group pixel proof reports the current header and member rectangles'
   const source = read(skill + 'control-native.cs');
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
   const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'), source.indexOf('public static class CodeFontProof {'));
+  const headerHeight = Number(read('src/sidebar.zig').match(/return if \(app_state\.g_sidebar_collapsed\) GROUP_HEADER_H else uiScaled\((\d+)\);/)[1]);
+  const rowHeight = Number(read('src/browser_pane.zig').match(/!app_state\.g_sidebar_collapsed\) (\d+)/)[1]);
   const script = `$ErrorActionPreference = 'Stop'
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -2459,8 +2463,10 @@ $origin.X = 208; $origin.Y = 231
 foreach ($collapsed in @($false, $true)) {
     $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed, 300)
     if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
-    $second = if ($collapsed) { 153 } else { 269 }
-    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 144)) { throw 'Member rectangles do not track group collapse' }
+    if ($proof.headerHeight -ne ${headerHeight} -or $proof.rowHeight -ne ${rowHeight}) { throw ('Group proof heights must follow the app sidebar: ' + ($proof | ConvertTo-Json -Compress)) }
+    $second = $proof.headerTops[0] + $proof.headerHeight + $(if ($collapsed) { 0 } else { 2 * $proof.rowHeight })
+    if ($proof.headerTops[1] -ne $second) { throw ('Second group must start below the first group members: ' + ($proof | ConvertTo-Json -Compress)) }
+    if ($proof.sidebarRect[3] -ne ($second + $proof.headerHeight + 2 * $proof.rowHeight)) { throw ('Member rectangles do not track group collapse: ' + ($proof | ConvertTo-Json -Compress)) }
     if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
 }
 $frame.Left = 0; $frame.Top = 0
