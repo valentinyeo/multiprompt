@@ -2389,8 +2389,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             var leave_client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &leave_client);
             const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
-            const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
-                @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
+            const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
             if (!pointer_in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
