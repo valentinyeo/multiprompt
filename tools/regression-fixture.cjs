@@ -109,11 +109,18 @@ function checkBugFixtureErrors({ base, root = '.', pr, files }) {
   return errors;
 }
 
+function substantiveBaseFailure(log) {
+  const text = String(log || '');
+  if (!text || /MODULE_NOT_FOUND|Cannot find module/.test(text)) return false;
+  return /AssertionError|checkBugFixtureErrors|tools\/fixtures\/|expected the bug-fix fixture gate/i.test(text);
+}
+
 function provenFixtureRepro(item) {
   return item &&
     Number.isInteger(item.base_exit_code) &&
     item.base_exit_code !== 0 &&
-    item.head_exit_code === 0;
+    item.head_exit_code === 0 &&
+    substantiveBaseFailure(item.base_log);
 }
 
 function fixtureReproFromSummary(summary) {

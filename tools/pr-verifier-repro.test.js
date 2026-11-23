@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const verifier = require('./pr-verifier.cjs');
 
-const fixtureRepro = [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0 }];
+const fixtureRepro = [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: expected the bug-fix fixture gate on base before this repair', head_log: 'ok 1' }];
 
 function finish(pr, masterFails = false, headStatus = 'passed', extra = {}) {
   const selection = verifier.validateSelection({ features: ['appearance'] }, ['appearance'], pr);
@@ -85,7 +85,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.doesNotMatch(selected, /repro_features|base_features/);
     const selectionFile = path.join(dir, 'selection.json');
     const summary = path.join(dir, 'summary.json');
-    fs.writeFileSync(summary, JSON.stringify({ head: {}, fixtureRepro: [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0 }] }));
+    fs.writeFileSync(summary, JSON.stringify({ head: {}, fixtureRepro: [{ ticket: 'IGSH-1', base_exit_code: 1, head_exit_code: 0, base_log: 'AssertionError: expected the bug-fix fixture gate on base before this repair', head_log: 'ok 1' }] }));
     assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=PASS\+NOTES/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -94,7 +94,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
 
 const ciFix = { title: 'SOFT-2728: Fix master red checks' };
 const ciSelection = (extra = {}) => ({ ...verifier.validateSelection({ features: [] }, ['appearance'], ciFix), ciWorkflows: ['ci-repair-receipt.yml'], unmapped: [], ...extra });
-const fixtureProof = [{ ticket: 'IGSH-2728', base_exit_code: 1, head_exit_code: 0 }];
+const fixtureProof = [{ ticket: 'IGSH-2728', base_exit_code: 1, head_exit_code: 0, base_log: 'tools/fixtures/IGSH-2728/', head_log: 'ok 1' }];
 const ciReceipt = (extra = {}) => ({ head: {}, ciRepro: [{ workflow: 'ci-repair-receipt.yml', part: 'tools', base_exit_code: 1, head_exit_code: 0, ...extra }], fixtureRepro: fixtureProof });
 const ciFinish = (selection, summary) => verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40), summary, selection, runUrl: 'https://example.test/run' });
 const passing = { head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] } };
@@ -150,9 +150,23 @@ test('SOFT-3144 a bug fix passes when fixture repro shows base red and head gree
 
 test('SOFT-3144 fixture repro fails when base stayed green or head stayed red', () => {
   for (const row of [{ base_exit_code: 0, head_exit_code: 0 }, { base_exit_code: 1, head_exit_code: 1 }]) {
-    const result = ciFinish(ciSelection(), { head: {}, fixtureRepro: [{ ticket: 'IGSH-2728', ...row }] });
+    const result = ciFinish(ciSelection(), { head: {}, fixtureRepro: [{ ticket: 'IGSH-2728', ...row, base_log: 'tools/fixtures/', head_log: 'ok 1' }] });
     assert.equal(result.final, 'FAIL', JSON.stringify(row));
   }
+});
+
+test('SOFT-3144 fixture repro fails when base failure is only a missing module', () => {
+  const result = ciFinish(ciSelection(), {
+    head: {},
+    fixtureRepro: [{
+      ticket: 'IGSH-2728',
+      base_exit_code: 1,
+      head_exit_code: 0,
+      base_log: "Error: Cannot find module './regression-fixture.cjs'\nMODULE_NOT_FOUND",
+      head_log: 'ok 1',
+    }],
+  });
+  assert.equal(result.final, 'FAIL');
 });
 
 test('summarize carries the repro of each selected CI workflow from its raw summary', () => {

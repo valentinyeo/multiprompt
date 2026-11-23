@@ -198,7 +198,7 @@ jobs:
         if: steps.evidence.outcome == 'success'
         env:
           BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
-        run: node verifier-tools/tools/regression-repro-runner.mjs run ${{ needs.resolve.outputs.base_sha }} verifier-out/summary.json
+        run: node verifier-tools/tools/regression-repro-runner.mjs run ${{ needs.resolve.outputs.base_sha }} verifier-out/summary.json --pr-json verifier-out/pr.json
       - name: Build ladder judge request
         if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
         run: node verifier-tools/tools/pr-verifier.cjs build-ladder-request verifier-out

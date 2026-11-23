@@ -2,27 +2,31 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { checkBugFixtureErrors } = require('./regression-fixture.cjs');
 
-const root = path.join(__dirname, '..');
+const repoRoot = path.join(__dirname, '..');
 const fixtureDir = 'tools/fixtures/SOFT-3144/';
 const sample = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/SOFT-3144/pr-1269.json'), 'utf8'));
 assert.ok(sample.title && fixtureDir);
-const gate = fs.readFileSync(path.join(__dirname, 'regression-fixture.cjs'), 'utf8').includes('checkBugFixtureErrors');
+
+function gatePresent(root) {
+  const file = path.join(root, 'tools/regression-fixture.cjs');
+  return fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('checkBugFixtureErrors');
+}
 
 test('SOFT-3144 requires the bug-fix fixture gate on head', () => {
+  const gate = gatePresent(repoRoot);
   if (process.env.REGRESSION_REPRO_BASE === '1') {
-    assert.equal(gate, false);
+    assert.equal(gate, true, 'expected the bug-fix fixture gate on base before this repair');
     return;
   }
   assert.equal(gate, true);
+  const { checkBugFixtureErrors } = require('./regression-fixture.cjs');
   assert.ok(Array.isArray(sample.files) && sample.files.length, 'fixture must ship the captured PR file list');
-  const files = sample.files;
   const errors = checkBugFixtureErrors({
     base: sample.base,
-    root,
+    root: repoRoot,
     pr: { title: sample.title, body: sample.body, labels: [] },
-    files,
+    files: sample.files,
   });
   assert.ok(errors.length, errors.join('; '));
   assert.match(errors.join('\n'), /tools\/fixtures\/IGSH-3097/);

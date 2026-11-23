@@ -8,16 +8,25 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const fixture = require('./regression-fixture.cjs');
 
+function normalizePullRequest(pr) {
+  if (!pr) return null;
+  return {
+    title: pr.title || '',
+    body: pr.body || '',
+    labels: (pr.labels || []).map(label => (typeof label === 'string' ? label : label.name)).filter(Boolean),
+  };
+}
+
 function pullRequest() {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath || !fs.existsSync(eventPath)) return null;
   const event = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
   if (!event.pull_request) return null;
-  return {
-    title: event.pull_request.title,
-    body: event.pull_request.body || '',
-    labels: (event.pull_request.labels || []).map(label => label.name),
-  };
+  return normalizePullRequest(event.pull_request);
+}
+
+function pullRequestFile(file) {
+  return normalizePullRequest(JSON.parse(fs.readFileSync(file, 'utf8')));
 }
 
 function runCommand(command, cwd, env = {}) {
@@ -125,7 +134,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const jsonIndex = argv.indexOf('--pr-json');
     const jsonArg = jsonIndex >= 0 ? argv[jsonIndex + 1] : '';
     const pr = pullRequest() || (jsonIndex >= 0
-      ? JSON.parse(jsonArg.trimStart().startsWith('{') ? jsonArg : fs.readFileSync(jsonArg, 'utf8'))
+      ? (jsonArg.trimStart().startsWith('{')
+        ? normalizePullRequest(JSON.parse(jsonArg))
+        : pullRequestFile(jsonArg))
       : null);
     if (!base || !summaryPath || !pr) throw new Error('run needs base ref, summary path and pull request metadata');
     try {
