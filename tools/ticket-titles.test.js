@@ -71,6 +71,14 @@ test('SOFT title files load under the canonical ID and conflicting aliases fail'
   assert.throws(() => loadTicketTitles(url), /Conflicting titles for IGSH-2489/);
 });
 
+test('a ticket moved to the multiprompt board still resolves under its IGSH id', async () => {
+  const { resolveTicketTitles } = await load();
+  const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 13734, ticketNumber: 'MUBO-192', uniqueIndex: 192, title: 'Switch AI when a plan runs out' }] }) });
+  assert.deepEqual(await resolveTicketTitles(['IGSH-3110'], {}, 'token', request), { 'IGSH-3110': 'Switch AI when a plan runs out' });
+  const wrongBoard = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 11514, ticketNumber: 'HYCI-1', title: 'Other' }] }) });
+  await assert.rejects(resolveTicketTitles(['IGSH-3110'], {}, 'token', wrongBoard), /Unresolved title for IGSH-3110/);
+});
+
 test('a board 2060 ticket renumbered to SOFT still resolves under its IGSH id', async () => {
   const { resolveTicketTitles } = await load();
   const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-1920', title: 'Renamed board title' }] }) });

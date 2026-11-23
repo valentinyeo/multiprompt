@@ -170,10 +170,36 @@ def cross_owner_chat(cwd, supplied):
     return False
 
 
-def project_and_plugins(cwd, settings):
-    overrides = settings.get("skillOverrides") or {}
-    rows = scan(HOME / ".claude/skills", "", "S", overrides)
-    rows += scan(HOME / ".claude/commands", "", "C", overrides, True)
+PROJECT_SCAN_CACHE = {}
+
+
+def project_scan_key(cwd):
+    key = []
+    root = cwd
+    while True:
+        for sub in (".claude/skills", ".claude/commands"):
+            path = root / sub
+            try:
+                stamp = 0
+                if path.is_dir():
+                    stamps = [item.stat().st_mtime_ns for item in path.rglob("*.md")]
+                    stamp = max(stamps) if stamps else path.stat().st_mtime_ns
+                key.append((str(path), stamp))
+            except OSError:
+                key.append((str(path), None))
+        if root == HOME or root.parent == root:
+            break
+        root = root.parent
+    return tuple(key)
+
+
+def project_rows_for(cwd, overrides):
+    signature = project_scan_key(cwd)
+    key = str(cwd)
+    cached = PROJECT_SCAN_CACHE.get(key)
+    if cached and cached[0] == signature:
+        return list(cached[1])
+    rows = []
     root = cwd
     while True:
         rows += scan(root / ".claude/skills", "", "J", overrides)
@@ -181,6 +207,15 @@ def project_and_plugins(cwd, settings):
         if root == HOME or root.parent == root:
             break
         root = root.parent
+    PROJECT_SCAN_CACHE[key] = (signature, tuple(rows))
+    return list(rows)
+
+
+def project_and_plugins(cwd, settings):
+    overrides = settings.get("skillOverrides") or {}
+    rows = scan(HOME / ".claude/skills", "", "S", overrides)
+    rows += scan(HOME / ".claude/commands", "", "C", overrides, True)
+    rows += project_rows_for(cwd, overrides)
     installed = read_json(HOME / ".claude/plugins/installed_plugins.json").get("plugins", {})
     for key, records in installed.items():
         if (settings.get("enabledPlugins") or {}).get(key) is not True:
