@@ -1,0 +1,1 @@
+Grey chat messages stay pending forever after reopen
