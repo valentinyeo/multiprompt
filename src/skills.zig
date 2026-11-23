@@ -131,9 +131,18 @@ fn scanRoot(
 ) !void {
     var dir = std.Io.Dir.openDirAbsolute(io, root_path, .{ .iterate = true }) catch return;
     defer dir.close(io);
-    var walker = try dir.walk(allocator);
+    var walker = try dir.walkSelectively(allocator);
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
+        const linked_at_root = entry.kind == .sym_link and entry.depth() == 1;
+        if (entry.kind == .directory or linked_at_root) {
+            var target = entry;
+            target.kind = .directory;
+            walker.enter(io, target) catch |err| {
+                if (!linked_at_root or err == error.OutOfMemory) return err;
+            };
+            continue;
+        }
         if (entry.kind != .file or !std.ascii.eqlIgnoreCase(entry.basename, "SKILL.md")) continue;
         const bytes = entry.dir.readFileAlloc(io, entry.basename, allocator, .limited(1024 * 1024)) catch continue;
         const parent = std.fs.path.basename(std.fs.path.dirname(entry.path) orelse "");
@@ -273,6 +282,71 @@ test "SOFT-3086 a selected skill runs only while its command leads the message" 
     const only = try composeMessage(a, "/review", skill);
     defer a.free(only);
     try std.testing.expectEqualStrings("/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", only);
+}
+
+test "SOFT-2476 linked skill folders are discovered but nested links stay unvisited" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, ".claude/skills/ordinary");
+    try tmp.dir.createDirPath(io, "installed/nested");
+    try tmp.dir.createDirPath(io, "hidden");
+    try tmp.dir.writeFile(io, .{ .sub_path = ".claude/skills/ordinary/SKILL.md", .data = "Ordinary skill." });
+    try tmp.dir.writeFile(io, .{ .sub_path = "installed/SKILL.md", .data = "---\ndescription: Linked skill.\n---\nLinked instructions." });
+    try tmp.dir.writeFile(io, .{ .sub_path = "hidden/SKILL.md", .data = "Hidden instructions." });
+    tmp.dir.symLink(io, "../../installed", ".claude/skills/valentin-mode", .{ .is_directory = true }) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        else => return err,
+    };
+    try tmp.dir.symLink(io, "../hidden", "installed/hidden-link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "..", "installed/nested/loop", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "../../../hidden", ".claude/skills/ordinary/hidden-link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "missing", ".claude/skills/broken", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "self-loop", ".claude/skills/self-loop", .{ .is_directory = true });
+    const home = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home);
+    const items = try discover(allocator, io, home, &.{});
+    defer deinitAll(allocator, items);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expectEqualStrings("ordinary", items[0].name);
+    try std.testing.expectEqualStrings("valentin-mode", items[1].name);
+    try std.testing.expectEqualStrings("Linked skill.", items[1].description);
+    try std.testing.expectEqualStrings("Linked instructions.", items[1].body);
+    try std.testing.expectEqual(Source.harness, items[1].source);
+    try tmp.dir.writeFile(io, .{ .sub_path = ".claude/settings.json", .data = "{\"skillOverrides\":{\"valentin-mode\":false}}" });
+    const enabled = try discover(allocator, io, home, &.{});
+    defer deinitAll(allocator, enabled);
+    try std.testing.expectEqual(@as(usize, 1), enabled.len);
+    try std.testing.expectEqualStrings("ordinary", enabled[0].name);
+}
+
+test "SOFT-2476 linked plugin skill folders keep names and qualified overrides" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "skills");
+    try tmp.dir.createDirPath(io, "installed");
+    try tmp.dir.writeFile(io, .{ .sub_path = "installed/SKILL.md", .data = "---\nname: review\n---\nReview instructions." });
+    tmp.dir.symLink(io, "../installed", "skills/linked-review", .{ .is_directory = true }) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        else => return err,
+    };
+    const root = try tmp.dir.realPathFileAlloc(io, "skills", allocator);
+    defer allocator.free(root);
+    var items: std.ArrayList(Skill) = .empty;
+    defer {
+        for (items.items) |*skill| skill.deinit(allocator);
+        items.deinit(allocator);
+    }
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"example:review\":false}", .{});
+    defer parsed.deinit();
+    try scanRoot(allocator, io, root, &items, parsed.value, "example");
+    try std.testing.expectEqual(@as(usize, 0), items.items.len);
+    try scanRoot(allocator, io, root, &items, null, "example");
+    try std.testing.expectEqual(@as(usize, 1), items.items.len);
+    try std.testing.expectEqualStrings("review", items.items[0].name);
 }
 
 test "off skill overrides are excluded" {
