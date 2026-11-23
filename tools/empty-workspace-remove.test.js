@@ -104,7 +104,9 @@ test "an empty workspace is deletable without archiving" {
     try std.testing.expect(workspaceCanDelete(0));
     seed("ws-1", "", true);
     try std.testing.expect(workspaceCanDelete(0));
-    seed("ws-1", "other-window", false);
+    seed("ws-floating", "", false);
+    try std.testing.expect(workspaceCanDelete(0));
+    seed("ws-floating", "other-window", false);
     try std.testing.expect(!workspaceCanDelete(0));
     seed("ws-2", "", false);
     app_state.g_lws_count = 1;

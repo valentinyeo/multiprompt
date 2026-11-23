@@ -59,7 +59,7 @@ test('IGSH-1664 archive and restore are reachable while deletion no longer requi
   assert.match(palette, /g_remind_ws_id_len > 0 and labelsMatchQuery\(&\.\{"Archive workspace"\}/);
   assert.match(main, /g_search_workspace_action == \.archive[\s\S]*archiveWorkspaceByIndex/);
   assert.match(main, /g_search_workspace_action == \.restore[\s\S]*restoreArchivedWorkspaceByIndex/);
-  assert.match(main, /confirm_idx == workspace_idx[\s\S]*deleteWorkspaceByIndex/);
+  assert.match(read('src/workspace_delete_palette.zig'), /confirm_idx == workspace_idx[\s\S]*deleteWorkspaceByIndex/);
   for (const label of ['Archive workspace', 'Archived workspaces', 'Delete workspace']) {
     assert.ok(read('src/shortcuts.zig').includes(`Ctrl+K -> ${label}`));
   }
