@@ -26,17 +26,36 @@ public static class SlowNetPump {
 
 $slowLimitMs = 500
 $slowLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-$slowComposer = [IntPtr]::Zero
 $result.slowNetwork = @{
     delayMs = [int]$env:MP_VERIFY_SLOW_MS
     proxyPort = [int]$env:MP_VERIFY_SLOW_PORT
     boundary = 'Real app and native window driven through a local TCP delay proxy in front of the repository SSH/tmux stand-in; the delay is real TCP latency, the remote host is synthetic'
     stallLimitMs = $slowLimitMs
 }
+$script:slowActions = New-Object System.Collections.Generic.List[object]
+$script:slowInputErrors = New-Object System.Collections.Generic.List[string]
+
+function Save-SlowTimings {
+    $actions = @($script:slowActions.ToArray())
+    $worst = if ($actions.Count -gt 0) { [int](($actions | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum) } else { 0 }
+    $hung = @($actions | Where-Object { $_.hung -eq $true -or $_.inputError }).Count
+    Save-Json @{
+        limitMs = $slowLimitMs
+        delayMs = [int]$env:MP_VERIFY_SLOW_MS
+        actions = $actions
+        worstMs = $worst
+        hungActions = $hung
+        inputErrors = @($script:slowInputErrors.ToArray())
+        passed = ($worst -le $slowLimitMs -and $hung -eq 0)
+    } 'slow-network-timings.json'
+    $result.slowNetwork.worstMs = $worst
+    $result.slowNetwork.hungActions = $hung
+}
 
 function Measure-PumpWindow([scriptblock]$Action, [int]$WindowMs) {
     $started = [Diagnostics.Stopwatch]::StartNew()
-    & $Action
+    $script:slowActionError = ''
+    try { & $Action } catch { $script:slowActionError = $_.Exception.Message }
     $longest = 0.0
     $samples = 0
     $hung = $false
@@ -48,7 +67,14 @@ function Measure-PumpWindow([scriptblock]$Action, [int]$WindowMs) {
         if ($timedOut -or [SlowNetPump]::Hung($script:window)) { $hung = $true }
         Start-Sleep -Milliseconds 10
     }
-    @{ startedAt = [DateTime]::UtcNow.ToString('o'); elapsedMs = [int]$started.ElapsedMilliseconds; maxPumpMs = [int][Math]::Ceiling($longest); samples = $samples; hung = $hung }
+    $entry = @{ startedAt = [DateTime]::UtcNow.ToString('o'); elapsedMs = [int]$started.ElapsedMilliseconds; maxPumpMs = [int][Math]::Ceiling($longest); samples = $samples; hung = $hung }
+    if ($script:slowActionError) {
+        $entry.inputError = $script:slowActionError
+        $script:slowInputErrors.Add($script:slowActionError)
+    }
+    $script:slowActions.Add($entry)
+    Save-SlowTimings
+    $entry
 }
 
 Write-Host 'Wait: two remote sessions attached through the slow link'
@@ -65,6 +91,35 @@ Wait-Until {
     $probes.Count -gt 0 -and $probes[$probes.Count - 1].Groups[1].Value -eq '1'
 } 'remote session probe healthy through the slow link' 120
 $result.slowNetwork.sessions = @('verify-one', 'verify-two')
+
+$switches = New-Object System.Collections.Generic.List[object]
+for ($index = 0; $index -lt 10; $index++) {
+    $offset = (Read-SharedText $slowLog).Length
+    $before = (Read-Session).active_tab
+    $action = [Diagnostics.Stopwatch]::StartNew()
+    $sample = Measure-PumpWindow { Press @(0x11, 0x09) "Ctrl+Tab session switch $($index + 1) while the remote link is slow" } 3000
+    $sample.kind = 'switch'
+    $sample.index = $index
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    $switched = $false
+    if (-not $sample.ContainsKey('inputError')) {
+        do {
+            $trace = (Read-SharedText $slowLog).Substring($offset)
+            $state = Read-Session
+            if ($trace -match 'switchToShell: \d+ -> \d+' -or ($null -ne $state -and [int]$state.active_tab -ne [int]$before)) {
+                $sample.responseMs = [int]$action.ElapsedMilliseconds
+                $switched = $true
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+    }
+    if (-not $switched -and -not $sample.ContainsKey('inputError')) { throw "Session switch $index never changed the selected session under the slow link" }
+    $switches.Add($sample)
+    if ($index -eq 4) { Snapshot 'slow-network-switch' }
+}
+$result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
+$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true -or $_.ContainsKey('inputError') }).Count -gt 0
 
 Press @(0x12, 0x43) 'Alt+C: open Chat View for the selected remote session'
 Wait-Until {
@@ -107,58 +162,14 @@ foreach ($letter in $typed.ToCharArray()) {
 }
 if ([VerifyNative]::EditText($slowComposer) -cne $typed) { throw "Composer text after the slow-network typing proof was '$([VerifyNative]::EditText($slowComposer))'" }
 $result.slowNetwork.typingMaxPumpMs = [int](($typing | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
-$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true }).Count -gt 0
+$result.slowNetwork.typingHung = @($typing | Where-Object { $_.hung -eq $true -or $_.ContainsKey('inputError') }).Count -gt 0
 Snapshot 'slow-network-typing'
 
-function Select-SessionRow([int]$Row, [string]$Label) {
-    Doctor
-    Assert-Foreground
-    Record $Label
-    [VerifyNative]::ClickClient($script:window, 150, 96 + 60 * $Row)
-}
-
-$switches = New-Object System.Collections.Generic.List[object]
-for ($index = 0; $index -lt 10; $index++) {
-    $row = if ($index % 2 -eq 0) { 1 } else { 0 }
-    $offset = (Read-SharedText $slowLog).Length
-    $action = [Diagnostics.Stopwatch]::StartNew()
-    $sample = Measure-PumpWindow { Select-SessionRow $row "Click sidebar row $($row + 1): switch sessions while the remote link is slow" } 3000
-    $sample.kind = 'switch'
-    $sample.index = $index
-    $sample.target = if ($row -eq 0) { 'verify-one' } else { 'verify-two' }
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    $switched = $false
-    do {
-        $trace = (Read-SharedText $slowLog).Substring($offset)
-        if ($trace -match "switchToShell: \d+ -> $row\b") {
-            $sample.responseMs = [int]$action.ElapsedMilliseconds
-            $switched = $true
-            break
-        }
-        Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not $switched) { throw "Session switch $index never reached sidebar row $($row + 1) under the slow link" }
-    $switches.Add($sample)
-    if ($index -eq 4) { Snapshot 'slow-network-switch' }
-}
-$result.slowNetwork.switchMaxPumpMs = [int](($switches | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
-$result.slowNetwork.switchHung = @($switches | Where-Object { $_.hung -eq $true }).Count -gt 0
-
-$actions = @($switches.ToArray()) + @($typing.ToArray())
-$worst = [int](($actions | ForEach-Object { [int]$_.maxPumpMs } | Measure-Object -Maximum).Maximum)
-$hungActions = @($actions | Where-Object { $_.hung -eq $true }).Count
-Save-Json @{
-    limitMs = $slowLimitMs
-    delayMs = [int]$env:MP_VERIFY_SLOW_MS
-    actions = $actions
-    worstMs = $worst
-    hungActions = $hungActions
-    passed = ($worst -le $slowLimitMs -and $hungActions -eq 0)
-} 'slow-network-timings.json'
-$result.slowNetwork.worstMs = $worst
-$result.slowNetwork.hungActions = $hungActions
+Save-SlowTimings
+$worst = $result.slowNetwork.worstMs
+$hungActions = $result.slowNetwork.hungActions
 $result.checks += @{ name = 'slow-network'; sessions = 2; switches = $switches.Count; typed = $typed.Length; worstMs = $worst; limitMs = $slowLimitMs; hungActions = $hungActions; delayMs = [int]$env:MP_VERIFY_SLOW_MS }
 
+if ($hungActions -ne 0) { throw "Windows reported a not-responding window or refused input during $hungActions slow-network actions: $($script:slowInputErrors -join '; ')" }
 if ($worst -gt $slowLimitMs) { throw "UI stall ${worst}ms exceeded the ${slowLimitMs}ms limit with a $($env:MP_VERIFY_SLOW_MS)ms one-way slow link" }
-if ($hungActions -ne 0) { throw "Windows reported a not-responding window during $hungActions slow-network actions" }
 Write-Output "SLOW_NETWORK_OK worst=${worst}ms limit=${slowLimitMs}ms delay=$($env:MP_VERIFY_SLOW_MS)ms"
