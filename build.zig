@@ -347,6 +347,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&mp_talk_tests.step);
     const mp_helper_tests = b.addSystemCommand(&.{ "python3", "tools/mp-helper-test.py" });
     vps_test_step.dependOn(&mp_helper_tests.step);
+    const mp_sessions_tests = b.addSystemCommand(&.{ "python3", "tools/mp-sessions-test.py" });
+    vps_test_step.dependOn(&mp_sessions_tests.step);
     const mp_shell_tests = b.addSystemCommand(&.{ "python3", "tools/mp-shell-test.py" });
     vps_test_step.dependOn(&mp_shell_tests.step);
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js", "tools/session-link.test.js", "tools/session-link-click.test.js" });
