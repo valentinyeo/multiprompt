@@ -85,7 +85,7 @@ $dy = $origin.Y - $frame.Top
 WindowShot 'sidebar-row-locate'
 $bands = Get-SidebarBands (Join-Path $Evidence 'sidebar-row-locate.png') $dx $dy ($dy + 90) ([Math]::Min($dy + 430, $frame.Bottom - $frame.Top - 110))
 if ($bands.Count -lt 2) { throw ('Sidebar shows fewer than two session rows: ' + $bands.Count) }
-$row = $bands[$bands.Count - 1]
+$row = $bands[$bands.Count - 2]
 $clickX = $dx + 85
 $clickY = [int](($row.top + $row.bottom) / 2)
 Record ("Pointer target: sidebar row at client $clickX,$clickY spanning $($row.top)..$($row.bottom)")
