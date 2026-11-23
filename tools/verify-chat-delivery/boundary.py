@@ -1283,6 +1283,49 @@ def reader_namespace():
     return namespace
 
 
+def install_antigravity_worker(namespace):
+    import threading
+    from contextlib import closing
+
+    workers = {}
+    lock = threading.Lock()
+
+    def start(query, source, only_if_work=False):
+        if source is None:
+            return
+        key = (query['provider'], query['sid'])
+        with lock:
+            if key in workers:
+                workers[key].set()
+                return
+            wake = threading.Event()
+            workers[key] = wake
+
+        def run():
+            try:
+                while True:
+                    wake.clear()
+                    namespace['message_poll'](query['tmux'], *key)
+                    dispatched = namespace['message_store_request'](dict(message_protocol=1, tmux=query['tmux'], provider=key[0], sid=key[1], op='message_dispatch'))
+                    record('antigravity-worker.jsonl', stage='dispatch', provider=key[0], sid=key[1], message=dispatched.get('message'))
+                    with closing(namespace['message_store_db'](query['tmux'])) as db:
+                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
+                    with lock:
+                        if not pending and not wake.is_set():
+                            del workers[key]
+                            return
+                    wake.wait(0.1)
+            except Exception as error:
+                record('antigravity-worker.jsonl', stage='error', provider=key[0], sid=key[1], error=repr(error))
+                with lock:
+                    workers.pop(key, None)
+
+        record('antigravity-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='app reader thread; production poll and dispatch unchanged')
+        threading.Thread(target=run, daemon=True).start()
+
+    namespace['start_message_worker'] = start
+
+
 def run_message_worker():
     if os.name != "nt" or state().get("name") != "cancel-held" or len(ARGS) != 3:
         raise ValueError("message worker adapter requires the owned Windows cancellation fixture")
@@ -1625,49 +1668,6 @@ def install_antigravity_host(namespace):
     namespace["host_owned"] = owned
     namespace["host_deliver"] = deliver
     install_antigravity_worker(namespace)
-
-
-def install_antigravity_worker(namespace):
-    import threading
-    from contextlib import closing
-
-    workers = {}
-    lock = threading.Lock()
-
-    def start(query, source, only_if_work=False):
-        if source is None:
-            return
-        key = (query['provider'], query['sid'])
-        with lock:
-            if key in workers:
-                workers[key].set()
-                return
-            wake = threading.Event()
-            workers[key] = wake
-
-        def run():
-            try:
-                while True:
-                    wake.clear()
-                    namespace['message_poll'](query['tmux'], *key)
-                    dispatched = namespace['message_store_request'](dict(message_protocol=1, tmux=query['tmux'], provider=key[0], sid=key[1], op='message_dispatch'))
-                    record('antigravity-worker.jsonl', stage='dispatch', provider=key[0], sid=key[1], message=dispatched.get('message'))
-                    with closing(namespace['message_store_db'](query['tmux'])) as db:
-                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
-                    with lock:
-                        if not pending and not wake.is_set():
-                            del workers[key]
-                            return
-                    wake.wait(0.1)
-            except Exception as error:
-                record('antigravity-worker.jsonl', stage='error', provider=key[0], sid=key[1], error=repr(error))
-                with lock:
-                    workers.pop(key, None)
-
-        record('antigravity-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='app reader thread; production poll and dispatch unchanged')
-        threading.Thread(target=run, daemon=True).start()
-
-    namespace['start_message_worker'] = start
 
 
 def serve_reader():

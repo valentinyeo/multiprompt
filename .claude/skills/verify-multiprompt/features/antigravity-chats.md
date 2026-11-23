@@ -16,7 +16,7 @@ In a live Claude chat, Ctrl+K, type **switch ai to antigravity**, then choose th
 
 ## Driving it with control.ps1
 
-Dispatch `verify.yml` with `feature=antigravity-chats` on the branch, without a release tag. The workflow selects the chat-delivery driver and uploads `verify-antigravity-chats`.
+Dispatch `verify.yml` with `feature=antigravity-chats` on the branch, without a release tag. `control.ps1` runs the chat-delivery driver and the job uploads `verify-antigravity-chats`.
 
 One saved tmux tab and the stand-in remote shell are seeded before launch; only SSH is replaced. The app supplies its embedded reader unchanged and the fixture starts that reader's production host in an isolated home with a synthetic Python Claude process, so the first message and its reply run through the real host store. `agy.exe` is a repository fixture that speaks the Antigravity stream-json protocol; the runner has no real Antigravity CLI.
 
