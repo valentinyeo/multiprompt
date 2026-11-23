@@ -177,17 +177,27 @@ test('IGSH-857 the stand-in agent writes the todo before the baseline so the sta
 });
 
 
+test('SOFT-1966 accepts the hosted geometry with a stable new-message pill slot', async () => {
+  const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
+  const { host, status, composer, viewport } = require('./fixtures/SOFT-1966/chat-geometry.json');
+  assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
+    transcript: { left: 314, top: 90, width: 692, height: 538 },
+    rows: status,
+    working: { left: 314, top: 628, width: 692, height: 30 },
+  });
+});
+
 test('IGSH-1055 measures visible content inside the expanded transcript host', async () => {
   const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
   assert.equal(typeof transcriptGeometry, 'function', 'owned viewport measurement is available');
   const host = { left: 30, top: 40, width: 960, height: 800 };
   const status = { left: 30, top: 80, width: 960, height: 28 };
   const composer = { left: 80, top: 750, width: 800, height: 60 };
-  const viewport = { left: 30, top: 80, width: 960, height: 644 };
+  const viewport = { left: 30, top: 80, width: 960, height: 628 };
   assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
-    transcript: { left: 30, top: 108, width: 960, height: 616 },
+    transcript: { left: 30, top: 108, width: 960, height: 600 },
     rows: status,
-    working: { left: 30, top: 724, width: 960, height: 14 },
+    working: { left: 30, top: 708, width: 960, height: 30 },
   });
   assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
