@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,4 +98,47 @@ test('fails closed for missing arguments or unavailable revisions', t => {
   const { base, check } = fixture(t);
   assert.equal(check().status, 1);
   assert.equal(check(base, 'missing-revision').status, 1);
+});
+
+test('rejects the bad commit a master push introduces', t => {
+  const { base, commit, check } = fixture(t);
+  const before = commit({ parents: [base] });
+  const bad = commit({ message: 'SOFT-2776: Squash a branch\n\nCo-authored-by: Fixture <' + bot + '>\n', parents: [before] });
+  rejected(check(before, bad), /Co-authored-by lines are forbidden/);
+});
+
+test('accepts a master push whose new commit is clean', t => {
+  const { base, commit, check } = fixture(t);
+  const before = commit({ author: oldWorker, parents: [base] });
+  const head = commit({ message: 'SOFT-2776: Squash a branch\n\nUndo: revert this commit.\n', parents: [before] });
+  const result = check(before, head);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /OK \(1 commits\)/);
+});
+
+test('a branch that merged master checks only the commits it adds', t => {
+  const { base, commit, check } = fixture(t);
+  const master = commit({ author: oldWorker, committer: oldWorker, message: 'Old master commit\n\nCo-authored-by: Fixture <' + bot + '>\n', parents: [base] });
+  const branch = commit({ message: 'SOFT-2776: Fix the check', parents: [base] });
+  const merged = commit({ message: 'Merge master into the branch', parents: [branch, master] });
+  const result = check(master, merged);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('refuses a base that is not an ancestor of the head', t => {
+  const { base, commit, check } = fixture(t);
+  const left = commit({ message: 'Left', parents: [base] });
+  const right = commit({ message: 'Right', parents: [base] });
+  const result = check(left, right);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /is not an ancestor/);
+});
+
+test('master pushes run the identity check over only the pushed commits', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+  const step = workflow.split('- name: Check every pushed commit identity\n')[1]?.split('\n      - name: ')[0] ?? '';
+  assert.match(step, /github\.event_name == 'pull_request'.*github\.event_name == 'push'/);
+  assert.match(step, /github\.event\.before/);
+  assert.match(step, /git merge-base/);
+  assert.match(step, /node tools\/check-commit-identities\.mjs/);
 });

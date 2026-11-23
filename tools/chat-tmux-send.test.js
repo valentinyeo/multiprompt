@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -341,6 +342,7 @@ test('worker uses existing persistent reader and background settlement uses pure
 test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'question-wire-'));
   try {
+    copyZig(['session_identity.zig'], dir);
     const worker = body('chatQuestionTmuxThread')
       .replaceAll('@import("chat_transcript.zig").Identity', 'Identity')
       .replaceAll('@import("chat_options.zig").MAX_OPTIONS', 'MAX_OPTIONS')
@@ -348,11 +350,15 @@ test('IGSH-1063 question worker sends numeric key arrays through the reader prot
     const harness = String.raw`
 const std = @import("std");
 const MAX_OPTIONS = 4;
-const Identity = struct { host: u8 = 0, shell_id: u32 = 7, tmux: [8:0]u8 = "term-1\x00\x00".* };
+const Identity = struct {
+    host: u8 = 0, shell_id: u32 = 7, sid: [40]u8 = @splat(0), tmux: [64]u8 = "term-1".* ++ @as([58]u8, @splat(0)),
+    pub fn provider(_: @This()) []const u8 { return "claude"; }
+    pub fn checked(self: @This()) ?@import("session_identity.zig").Session { return @import("session_identity.zig").Session.checked(self); }
+};
 var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
 var recorded: std.ArrayList(u8) = .empty;
 fn debugLog(_: []const u8) void {}
-fn chatHistoryPersistent(_: u8, _: u32, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
+fn chatHistoryPersistent(_: @import("session_identity.zig").Session, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
     recorded.appendSlice(std.testing.allocator, query) catch unreachable;
     wire.appendSlice(std.heap.page_allocator, "@mp\t7\tquestion\tok\t-\t0\n") catch unreachable;
     return true;

@@ -21,7 +21,7 @@ test("Inbox reduction search matches every visible identity field", () => {
   for (const agent of ["claude", "codex", "pi", "kimi"]) {
     assert.match(matches, new RegExp(`"${agent}"`), `Inbox search must match ${agent} sessions`);
   }
-  assert.match(functionBody("inboxRowVisible", "inboxListTop"), /return inboxFilterMatches\(r\)/,
+  assert.match(functionBody("inboxRowVisible", "rowVisibleInSplit"), /return rowVisibleInSplit\(r, g_inbox_tab, [^;]+\) and inboxFilterMatches\(r\)/,
     "all count, paint, navigation, and mouse paths must share the reduction predicate");
 });
 
