@@ -22,9 +22,9 @@ SOFT-3053, the second account's own slash commands, is not part of this journey:
 gh workflow run verify.yml --ref <branch> -f feature=release-proof -f tag=v0.28.<n>
 ```
 
-The journey seeds two isolated saved tmux tabs once before launch and points the app's SSH path at the verification boundary. It focuses the first tab's native terminal, samples the caret pixels at 10 fps for five seconds, switches sessions with Ctrl+2 and back with Ctrl+1, and samples again. Both samples must keep toggling, and a magnified frame strip is written next to the frames.
+The journey seeds three isolated stand-in tmux tabs once before launch and points the app's SSH path at the verification boundary, which renders each tab as a plain server shell. It focuses the first tab's native terminal, samples the caret pixels at 10 fps for five seconds, switches sessions with Ctrl+2 and back with Ctrl+1, and samples again. Both samples must keep toggling, and a magnified frame strip is written next to the frames.
 
-Before restarting it switches the boundary to its plain server shell mode, shows the first tab's console, quits through WM_CLOSE, and relaunches the same verified executable in the same isolated profile. Both tabs must come back with their saved tmux session names, two fresh transports must name both sessions, and Ctrl+C in each restored console must reach its transport.
+Before restarting it shows the first tab's console, quits through WM_CLOSE, and relaunches the same verified executable in the same isolated profile. Both shell tabs must come back with their saved tmux session names, two fresh transports must name both sessions, and Ctrl+C in each restored console must reach its transport.
 
 Require `result.json` status `passed`, `server-shell-after-restart.png`, both `caret-strip-*.png` strips, the transport and input receipts, and a zero-process cleanup.
 
