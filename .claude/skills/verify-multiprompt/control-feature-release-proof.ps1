@@ -12,9 +12,10 @@ function Save-ReleaseCheck([string]$Name, [hashtable]$Values) {
 
 function Find-ConsoleWindow {
     Wait-Until {
-        $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal')
+        $candidate = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MPTerminal', $null)
+        if ($candidate -eq [IntPtr]::Zero) { $candidate = [VerifyNative]::FirstVisibleChild($script:window, 'MPTerminal') }
         $candidate -ne [IntPtr]::Zero
-    } 'visible hosted native terminal window' 60
+    } 'hosted native terminal window' 60
     return $candidate
 }
 
@@ -165,6 +166,8 @@ $preRestartTransports = Get-RemoteTransports
 Save-Json @{ step = 'before-restart'; verifyAgent1 = $preRestartTransports['verify-agent-1']; soft3039Two = $preRestartTransports['soft3039-two'] } 'server-shell-transports-before.json'
 Press @(0x11, 0x31) 'Ctrl+1: first server shell selected before quitting'
 Snapshot 'server-shell-before-restart'
+$shellState = [ordered]@{ name = 'server-shell-input'; fake = $false; mode = 'idle'; suggestion = ''; box = ''; queue = @(); sessions = @('verify-agent-1', 'live-slash', 'soft3039-two') }
+[IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $shellState -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Remove-Item (Join-Path $remoteState 'interrupt.json') -ErrorAction SilentlyContinue
 Restart-SessionRestore 'server-shell-restart' $false
 Wait-Until {
