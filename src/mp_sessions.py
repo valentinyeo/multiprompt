@@ -239,23 +239,18 @@ def persist_close_placement(send, listing, target):
     workspace = workspace or target.get("workspace")
     if group is None and "group" in target:
         group = target.get("group")
-    if workspace:
-        config["spawn_workspace"] = workspace
-    if group:
-        config["spawn_group"] = group
-    elif "spawn_group" in config:
-        del config["spawn_group"]
-    tab_id = (tab or {}).get("id") or target.get("tab_id")
-    if isinstance(tab_id, int) and workspace:
-        predecessor = send.tab_predecessor(listing, workspace, tab_id)
-        if predecessor is not None:
-            config["spawn_after_tab"] = predecessor
-        elif "spawn_after_tab" in config:
-            del config["spawn_after_tab"]
-    host = (tab or {}).get("host") or target.get("host")
-    if isinstance(host, str) and host.strip():
-        config["spawn_host_name"] = host
+    tab = tab if tab is not None else (dict(id=target.get("tab_id")) if isinstance(target.get("tab_id"), int) else None)
+    send.apply_spawn_placement(config, listing, workspace, group, tab, target.get("host"))
     send.write_json(path, config)
+
+
+def placement_listing(send):
+    if not callable(getattr(send, "zsb", None)):
+        return {}
+    listing = send.zsb("workspace-list")
+    if listing.get("ok") is True:
+        send.sync_tab_placements(listing)
+    return listing if isinstance(listing, dict) else {}
 
 
 def start_host(send, provider, sid, folder, tmux):
@@ -290,10 +285,10 @@ def caller_mark(send, listing, rows):
 
 
 def filter_workspace(rows, workspace):
-    wanted = workspace.strip()
+    wanted = workspace.strip().casefold()
     if not wanted:
         return rows
-    return [row for row in rows if (row.get("workspace") or "") == wanted]
+    return [row for row in rows if (row.get("workspace") or "").casefold() == wanted]
 
 
 def catalog_table(rows):
@@ -332,7 +327,7 @@ def session_message(send, target, text, sender=None):
     return dict(name=target.get("name"), tmux=tmux, sid=sid, id=message.get("id"), state=state)
 
 
-def live_catalog_rows(send):
+def live_table_rows(send):
     rows = []
     for chat in send.live_chats():
         rows.append(dict(
@@ -352,28 +347,27 @@ def live_catalog_rows(send):
 def cmd_list(args):
     workspace = getattr(args, "workspace", None)
     send = load_send(session_api=bool(workspace))
-    if workspace:
-        listing = send.zsb("workspace-list")
+    if not workspace and args.json:
+        print(json.dumps(send.live_chats(), separators=(",", ":")))
+        return 0
+    listing = placement_listing(send) if callable(getattr(send, "zsb", None)) else {}
+    if callable(getattr(send, "published_names", None)):
         rows = session_catalog(send, listing)
         caller, mine = caller_mark(send, listing, rows)
-        for row in rows:
-            row["self"] = caller is not None and row["tmux"] == caller
+    else:
+        rows = live_table_rows(send)
+        caller = send.own_tmux()
+        mine = None
+    for row in rows:
+        row["self"] = caller is not None and row["tmux"] == caller
+    if workspace:
         if workspace == "mine":
             if not mine:
                 raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
             workspace = mine
         rows = filter_workspace(rows, workspace)
-        if args.json:
-            print(json.dumps(rows, separators=(",", ":")))
-        else:
-            print(catalog_table(rows))
-        return 0
-    rows = live_catalog_rows(send)
-    caller = send.own_tmux()
-    for row in rows:
-        row["self"] = caller is not None and row["tmux"] == caller
     if args.json:
-        print(json.dumps(send.live_chats(), separators=(",", ":")))
+        print(json.dumps(rows, separators=(",", ":")))
     else:
         print(catalog_table(rows))
     return 0
@@ -384,7 +378,7 @@ def cmd_whoami(args):
     tmux = send.own_tmux()
     if not tmux:
         raise ValueError("cannot identify this chat; run from inside a Multibot chat")
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     if listing.get("ok") is not True:
         raise ValueError("cannot read this chat's current name; open the desktop app and retry")
     tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux]
@@ -443,7 +437,7 @@ def cmd_send(args):
     if text is None or not text.strip() or "\x00" in text:
         raise ValueError("empty message")
     send = load_send()
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     results = []
     if args.workspace == "mine":
         rows = session_catalog(send, listing)
@@ -480,7 +474,7 @@ def cmd_start(args):
     task = sys.stdin.read() if args.task == "-" else args.task
     if task is not None and (not task.strip() or "\x00" in task):
         raise ValueError("empty task")
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     slot = host_slot()
     host = host_name(listing, slot)
     workspace = (args.workspace or "").strip() or default_workspace(listing)
@@ -529,7 +523,7 @@ def cmd_start(args):
 
 def cmd_restart(args):
     send = load_send()
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     target = pick_target(send, listing, args.name)
     if not target.get("sid"):
         raise ValueError("chat has no session id yet; use mp-sessions start")
@@ -555,7 +549,7 @@ def cmd_restart(args):
 
 def cmd_rename(args):
     send = load_send()
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     target = pick_target(send, listing, args.name)
     new_name = display_name(args.new_name)
     if not target.get("tab_id"):
@@ -569,7 +563,7 @@ def cmd_rename(args):
 
 def cmd_move(args):
     send = load_send()
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     target = pick_target(send, listing, args.name)
     workspace = display_name(args.workspace)
     if not target.get("tab_id"):
@@ -598,7 +592,7 @@ def cmd_move(args):
 
 def cmd_close(args):
     send = load_send()
-    listing = send.zsb("workspace-list")
+    listing = placement_listing(send)
     target = pick_target(send, listing, args.name)
     if not target.get("sid"):
         raise ValueError("chat has no session id")

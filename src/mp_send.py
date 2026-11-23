@@ -260,6 +260,54 @@ def workspace_known(listing, name):
     return isinstance(name, str) and any(ws.get("name") == name for ws in listing.get("workspaces") or [])
 
 
+def config_path_for_tmux(tmux):
+    if not isinstance(tmux, str):
+        return None, None
+    for path in sorted(host_root().glob("*.config.json")):
+        config = read_json(path)
+        if not config or config.get("helper_parent") or config.get("tmux") != tmux:
+            continue
+        return path, config
+    return None, None
+
+
+def apply_spawn_placement(config, listing, workspace, group, tab, host):
+    if workspace:
+        config["spawn_workspace"] = workspace
+    if group:
+        config["spawn_group"] = group
+    elif "spawn_group" in config:
+        del config["spawn_group"]
+    tab_id = (tab or {}).get("id") if tab else None
+    if isinstance(tab_id, int) and workspace:
+        predecessor = tab_predecessor(listing, workspace, tab_id)
+        if predecessor is not None:
+            config["spawn_after_tab"] = predecessor
+        elif "spawn_after_tab" in config:
+            del config["spawn_after_tab"]
+    host_name = (tab or {}).get("host") if tab else None
+    if host_name is None:
+        host_name = host
+    if isinstance(host_name, str) and host_name.strip():
+        config["spawn_host_name"] = host_name
+
+
+def sync_tab_placements(listing):
+    if listing.get("ok") is not True:
+        return
+    for workspace, group, tab in iter_tabs(listing):
+        tmux = tab.get("tmux")
+        if not isinstance(tmux, str):
+            continue
+        path, config = config_path_for_tmux(tmux)
+        if not config or not path:
+            continue
+        prior = json.dumps(config, separators=(",", ":"), sort_keys=True)
+        apply_spawn_placement(config, listing, workspace, group, tab, tab.get("host"))
+        if json.dumps(config, separators=(",", ":"), sort_keys=True) != prior:
+            write_json(path, config)
+
+
 def verify_tab(tmux):
     for attempt in range(VERIFY_TRIES):
         if attempt:

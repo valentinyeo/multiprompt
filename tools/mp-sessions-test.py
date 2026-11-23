@@ -453,6 +453,55 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(reopen[reopen.index("--after-tab") + 1], "31")
         self.assertNotIn("Home", reopen)
 
+    def test_SOFT_3131_list_shows_workspace_and_filters_case_insensitively(self):
+        vstack = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "vstack-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Vstack", "--group", "Build",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(vstack)))
+        self.mark_running(started)
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        listing_after = json.dumps(state["listing"])
+        table = self.run_sessions("list", MP_SESSIONS_TEST_LIST=listing_after)
+        self.assertEqual(table.returncode, 0, table.stderr)
+        self.assertIn("Vstack", table.stdout)
+        self.assertIn("Build", table.stdout)
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config.get("spawn_workspace"), "Vstack")
+        self.assertEqual(config.get("spawn_group"), "Build")
+        self.assertEqual(config.get("spawn_after_tab"), 71)
+        filtered = self.parsed(self.run_sessions("list", "--workspace", "vstack", "--json",
+                                                 MP_SESSIONS_TEST_LIST=listing_after))
+        names = {row.get("name") for row in filtered}
+        self.assertIn("Field chat", names)
+        self.assertTrue(all(row.get("workspace") == "Vstack" for row in filtered))
+
+    def test_SOFT_3131_restart_uses_server_placement_without_close(self):
+        away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Remote chat", "--workspace", "Away", "--group", "Ops",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(away_listing)))
+        self.mark_running(started)
+        listing_after = json.dumps(json.loads(self.state_file.read_text(encoding="utf-8"))["listing"])
+        listed = self.run_sessions("list", MP_SESSIONS_TEST_LIST=listing_after)
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config.get("spawn_workspace"), "Away")
+        self.assertEqual(config.get("spawn_after_tab"), 31)
+        config["enabled"] = False
+        (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude")), encoding="utf-8")
+        listing_without = json.loads(listing_after)
+        for ws in listing_without.get("workspaces") or []:
+            for group in ws.get("groups") or []:
+                group["tabs"] = [tab for tab in (group.get("tabs") or []) if tab.get("tmux") != started["tmux"]]
+        restarted = self.parsed(self.run_sessions("restart", "Remote chat",
+                                                  MP_SESSIONS_TEST_LIST=json.dumps(listing_without)))
+        self.assertEqual(restarted.get("status"), "restarted")
+        reopen = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertIn("Away", reopen)
+        self.assertIn("--group", reopen)
+        self.assertEqual(reopen[reopen.index("--group") + 1], "Ops")
+
     def test_SOFT_3131_restart_uses_the_front_workspace_when_the_saved_one_is_gone(self):
         away_listing = json.loads((ROOT / "tools" / "fixtures" / "SOFT-3131" / "away-listing.json").read_text(encoding="utf-8"))
         started = self.parsed(self.run_sessions("start", "--name", "Gone home", "--workspace", "Away",
