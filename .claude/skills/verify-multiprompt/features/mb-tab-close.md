@@ -11,7 +11,7 @@ Source files: tools/mb.mjs, tools/mp-layout.mjs, .claude/skills/verify-multiprom
 
 ## How to get to it (user POV)
 
-- Close the proof tab with `mb close`.
+- Close the proof tab with `mb close` (prints `close <title>`).
 
 ## Driving it with control.ps1
 

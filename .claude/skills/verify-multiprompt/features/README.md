@@ -136,11 +136,11 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Mb tab open](mb-tab-open.md): `mb open` publishes the proof tab into Multiprompt and the sidebar shows it in `session.json`.
 - [Mb tab close](mb-tab-close.md): `mb close` removes the proof tab from the sidebar state.
 - [Mb tab move](mb-tab-move.md): `mb move` places the proof tab in workspace Other.
-- [Mb tab pin](mb-tab-pin.md): `mb pin on` pins the proof tab to the sidebar top.
-- [Mb tab unpin](mb-tab-unpin.md): `mb pin off` clears the pin on the proof tab.
-- [Mb tab archive](mb-tab-archive.md): `mb archive` archives the proof tab in saved session state.
-- [Mb tab unarchive](mb-tab-unarchive.md): `mb unarchive` brings the proof tab back from archive.
-- [Mb tab wait](mb-tab-wait.md): `mb wait on` moves the proof tab to Waiting in saved state.
+- [Mb tab pin](mb-tab-pin.md): `mb pin` pins the proof tab to the sidebar top.
+- [Mb tab unpin](mb-tab-unpin.md): `mb unpin` clears the pin on the proof tab.
+- [Mb tab archive](mb-tab-archive.md): `mb archive` removes the proof tab and records it in `closed_tmux`.
+- [Mb tab unarchive](mb-tab-unarchive.md): `mb unarchive` then `mb restore` brings the archived proof tab back.
+- [Mb tab wait](mb-tab-wait.md): `mb wait` moves the proof tab to Waiting in saved state.
 - [Mb tab restore](mb-tab-restore.md): `mb restore` clears Waiting on the proof tab.
 - [Mb tab layout sync](mb-tab-layout-sync.md): a tab closed through `mb` stays closed after an account layout sync bump.
 - [Mb tab idempotent](mb-tab-idempotent.md): running `mb star on` twice leaves the same starred state once.
