@@ -510,12 +510,16 @@ try {
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     }
+    $readySeconds = if ($Feature -eq 'fresh-start') { 180 } else { 60 }
     Wait-Until {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
+        if ($script:window -eq [IntPtr]::Zero) { throw 'main window handle is not published yet' }
         $state = Read-Inbox
-        $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
-    } 'owned main window and initialized CMD session' 60
+        if ($null -eq $state) { throw 'inbox-default.json is not readable yet' }
+        if (@($state.shells).Count -le 0) { throw 'inbox-default.json publishes no shell rows yet' }
+        $true
+    } 'owned main window and initialized CMD session' $readySeconds
     if ($UpdateFixtureRoot) {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
