@@ -1590,7 +1590,7 @@ pub fn chatFileOnReady() void {
             entry.next = GetTickCount64() + next_delay;
             entry.hidden_wait = background and !disk and next_delay > 1000;
             if (belongs_to_active) {
-                active_changed = active_changed or !entry.unchanged or history.revision != (app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15));
+                active_changed = active_changed or !entry.unchanged or history.revision +% (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15) != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
                 app_state.g_chat_switch_loading = history.more and entry.history.blocks.items.len == 0;
                 const idx = findShellById(key.shell_id) orelse continue;
@@ -1727,7 +1727,7 @@ fn refreshChatBlockCache(force: bool) bool {
     var live_blocks: [16]ChatBlock = undefined;
     if (!chatEnsureTranscriptCapacity(len + CHAT_LIVE_TEXT_ROOM, count + live_blocks.len)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
-    const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) ^ (live_revision *% 0x9E3779B97F4A7C15);
+    const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) +% (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
     const seen: []const @import("chat_markdown.zig").Block = if (from_file) entry.?.history.blocks.items else &.{};
     const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen);
