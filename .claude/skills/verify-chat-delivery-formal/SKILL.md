@@ -47,6 +47,8 @@ SOFT-2526 carries the existing client ID into history blocks and uses it for pen
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, and the sync commit names the fix.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one client-ID echo. These execute unchanged in native probes. |
