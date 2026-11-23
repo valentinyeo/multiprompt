@@ -420,6 +420,35 @@ fn findArchivedEntry(host: u8, session: []const u8) ?usize {
     return null;
 }
 
+pub fn sessionIsArchived(host: u8, session: []const u8) bool {
+    if (session.len == 0) return false;
+    loadArchiveFromDisk(false);
+    return findArchivedEntry(host, session) != null;
+}
+
+test "MUBO-234 sessionIsArchived follows archive.json entries" {
+    const a = std.testing.allocator;
+    const saved = app_state.g_archived;
+    const saved_count = app_state.g_archived_count;
+    defer {
+        app_state.g_archived.deinit(a);
+        app_state.g_archived = saved;
+        app_state.g_archived_count = saved_count;
+    }
+    app_state.g_archived = .empty;
+    app_state.g_archived_count = 0;
+    var entry = app_state.ArchivedEntry{};
+    @memcpy(entry.tmux_session[0..11], "live-8306994");
+    entry.tmux_session_len = 11;
+    entry.tmux_host = 1;
+    try app_state.g_archived.append(a, entry);
+    app_state.g_archived_count = 1;
+    app_state.g_archive_loaded = true;
+    try std.testing.expect(sessionIsArchived(1, "live-8306994"));
+    try std.testing.expect(!sessionIsArchived(1, "still-open"));
+    try std.testing.expect(!sessionIsArchived(0, "live-8306994"));
+}
+
 fn removeArchivedEntryAt(idx: usize) void {
     if (idx >= app_state.g_archived_count) return;
     _ = app_state.g_archived.orderedRemove(idx);

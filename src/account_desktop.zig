@@ -334,10 +334,38 @@ pub fn accountRecordClose(idx: u32) void {
 }
 fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !session_layout.Layout {
     const local = try captureSessionLayout(a, false);
-    const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count);
-    for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed) |c, *t|
+    @import("archive.zig").loadArchiveFromDisk(false);
+    var closed_extra: usize = 0;
+    for (app_state.g_archived.items[0..app_state.g_archived_count]) |entry| {
+        const session = entry.tmux_session[0..entry.tmux_session_len];
+        var seen = false;
+        for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |c| {
+            if (c.host == entry.tmux_host and c.len == session.len and std.mem.eql(u8, c.session[0..c.len], session)) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) closed_extra += 1;
+    }
+    const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count + closed_extra);
+    for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed[0..app_state.g_account_closed_count]) |c, *t| {
         t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
-    const kept = try account_layout.keepHeld(a, base, local, closed);
+    }
+    var wi = app_state.g_account_closed_count;
+    for (app_state.g_archived.items[0..app_state.g_archived_count]) |entry| {
+        const session = entry.tmux_session[0..entry.tmux_session_len];
+        var seen = false;
+        for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |c| {
+            if (c.host == entry.tmux_host and c.len == session.len and std.mem.eql(u8, c.session[0..c.len], session)) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+        closed[wi] = .{ .name = "", .tmux_session = session, .tmux_host = entry.tmux_host, .workspace = "" };
+        wi += 1;
+    }
+    const kept = try account_layout.keepHeld(a, base, local, closed[0..wi]);
     if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
     return kept;
 }
@@ -1746,7 +1774,9 @@ pub fn applyServerLayout(json: []const u8) !void {
     desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
     for (desired.tabs) |tab| {
-        if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
+        if (app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) continue;
+        if (@import("archive.zig").sessionIsArchived(tab.tmux_host, tab.tmux_session)) continue;
+        try kept.append(a, tab);
     }
     desired.tabs = kept.items;
     app_state.g_account_applying = true;

@@ -1,0 +1,1 @@
+Archived chats stay hidden after account sync until you restore them from the archive list.
