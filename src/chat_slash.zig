@@ -42,6 +42,23 @@ fn equals(wide: []const u16, ascii: []const u8) bool {
     return true;
 }
 
+pub fn bareClear(text: []const u16) bool {
+    const trimmed = std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' });
+    return trimmed.len == 6 and equals(trimmed[1..], "clear") and trimmed[0] == '/';
+}
+
+test "only a bare clear is a clear" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expect(bareClear(w("/clear")));
+    try std.testing.expect(bareClear(w("  /clear\n")));
+    try std.testing.expect(bareClear(w("/clear ")));
+    try std.testing.expect(!bareClear(w("/clear extra")));
+    try std.testing.expect(!bareClear(w("/cleared")));
+    try std.testing.expect(!bareClear(w("clear")));
+    try std.testing.expect(!bareClear(w("/Clear")));
+    try std.testing.expect(!bareClear(w("/clear-drop")));
+}
+
 pub fn modeRequest(allocator: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, mode: PermissionMode) ![]u8 {
     return std.json.Stringify.valueAlloc(allocator, .{ .op = "set_permission_mode", .id = id, .provider = provider, .sid = sid, .mode = @tagName(mode) }, .{});
 }

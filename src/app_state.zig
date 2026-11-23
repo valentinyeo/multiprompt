@@ -3122,6 +3122,7 @@ pub const WM_APP_CHAT_IMAGE_READY: u32 = WM_APP + 196;
 pub const WM_APP_CHAT_ATTACH: u32 = WM_APP + 197;
 pub const WM_APP_CHAT_ATTACH_FAILED: u32 = WM_APP + 198;
 pub const WM_APP_CHAT_SWITCH_AI: u32 = WM_APP + 225;
+pub const WM_APP_CHAT_RESTART_REFUSED: u32 = WM_APP + 227;
 pub const SEARCH_CHAT_ATTACH_OFFSET: usize = 6372;
 pub const SEARCH_CHAT_DICTATION_OFFSET: usize = 6468;
 
@@ -4084,6 +4085,9 @@ pub const ChatTmuxSendJob = struct {
     written: bool = false,
     rejected: bool = false,
     box_not_clear: bool = false,
+    clear_chat: bool = false,
+    clear_notice: [96]u8 = @splat(0),
+    clear_notice_len: u8 = 0,
     finished: std.atomic.Value(bool) = .init(false),
 };
 pub var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;

@@ -14,7 +14,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 $profile = Join-Path $env:RUNNER_TEMP ('server-chat-' + [guid]::NewGuid().ToString('N'))
 $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
-$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
+$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves the host starts a fresh AI session, the clear never reaches the AI as a message, and the next message runs on the new session.' }
 $job = $null
 $recorder = $null
 $writer = $null
@@ -118,14 +118,33 @@ try {
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
-    foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
+    $opened = Server-Snapshot 'open-server'
+    $contextBefore = $opened.host.context_session
+    $agentBefore = $opened.host.agent_pid
+    foreach ($case in @(@{ name = 'send'; text = 'windows send proof' })) {
         Send-Line $case.text
-        $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
-        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
+        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
         [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
+    $beforeClear = Server-Snapshot 'before-clear'
+    $sidBefore = @($beforeClear.inputs)[-1].sid
+    Send-Line '/clear'
+    [void](Wait-For 'host starts a new AI session' { $now = Server-Snapshot 'clear-server'; $now.host.context_session -and $now.host.context_session -ne $contextBefore -and $now.host.agent_pid -ne $agentBefore })
+    $cleared = Server-Snapshot 'clear-server'
+    if (@($cleared.inputs | Where-Object { $_.text.Trim() -ceq '/clear' }).Count -ne 0) { throw 'The clear reached the AI as a message' }
+    [void](Wait-For 'cleared chat shows the divider' { (Copy-Chat 'clear-copied').Contains('Chat cleared') } 30)
+    Shot 'clear'
+    $result.cases += @{ name = 'clear'; passed = $true; detail = 'The host cleared the AI context without delivering the clear to the AI as a message' }
+    Send-Line 'windows after clear'
+    [void](Wait-For 'server receipt for after-clear' { $snapshot = Server-Snapshot 'after-clear-server'; @($snapshot.inputs | Where-Object { $_.text -ceq 'windows after clear' }).Count -eq 1 })
+    $afterClear = Server-Snapshot 'after-clear-server'
+    $sidAfter = @($afterClear.inputs | Where-Object { $_.text -ceq 'windows after clear' })[0].sid
+    if ($sidAfter -ceq $sidBefore) { throw 'The cleared chat reused the AI session it was told to forget' }
+    [void](Wait-For 'painted reply for after-clear' { (Copy-Chat 'after-clear-copied').Contains('Server received: windows after clear') } 30)
+    Shot 'after-clear'
+    $result.cases += @{ name = 'after-clear'; passed = $true; detail = 'The next message ran on a fresh AI session and its reply was copied from the real UI' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {

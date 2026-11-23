@@ -49,7 +49,7 @@ var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
 const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
-var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 }{.{}};
+var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, ai_stopped: bool = false, ai_restart_tick: u64 = 0 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
 var shell_count: u32 = 1;
@@ -70,6 +70,7 @@ var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
     key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
+    clear_chat: bool = false, clear_notice: [96]u8 = @splat(0), clear_notice_len: u8 = 0,
     queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
     message_v1: bool = false, message_status: bool = false, message_reset: bool = false, message_dismiss: bool = false,
     reset_cutoff: u64 = 0, history_instance: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, reset_result_epoch: u64 = 0,
@@ -98,7 +99,11 @@ fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
     entry.state = .queued;
     return true;
 }
-fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+var clear_notices: usize = 0;
+const ChatRestartOutcome = struct { notice: []const u8, alive: bool };
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { clear_notices += 1; }
+const g_main_hwnd: ?*anyopaque = null;
+fn InvalidateRect(_: ?*anyopaque, _: ?*const anyopaque, _: u32) i32 { return 1; }
 fn debugLog(_: []const u8) void {}
 const CHAT_MESSAGE_SYNC_POLL_MS: u64 = 3000;
 const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
@@ -157,6 +162,16 @@ fn finishJob(written: bool, retry: bool, echo_id: u64) void {
     job.* = .{ .text = std.heap.page_allocator.dupe(u16, &.{'x'}) catch unreachable, .written = written, .retry = retry, .echo_id = echo_id };
     g_chat_tmux_send_job = job;
     storage[0].channel_pending = true;
+    chatTmuxSendFinish();
+}
+fn finishClear(notice: []const u8, rejected: bool) void {
+    const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch unreachable;
+    job.* = .{ .text = std.heap.page_allocator.dupe(u16, &.{'x'}) catch unreachable, .clear_chat = true, .echo_id = 5, .rejected = rejected };
+    @memcpy(job.clear_notice[0..notice.len], notice);
+    job.clear_notice_len = @intCast(notice.len);
+    g_chat_tmux_send_job = job;
+    shells[0].ai_stopped = true;
+    shells[0].ai_restart_tick = 99;
     chatTmuxSendFinish();
 }
 test "IGSH-1640 host upgrade captures admission before persistence and never refreshes it on retry" {
@@ -271,12 +286,36 @@ test "channel write failure falls back once but a written request or retry never
     reset(); finishJob(false, false, 999);
     try std.testing.expectEqual(@as(usize, 0), pastes);
 }
+test "SOFT-2420 a finished clear drops a stale stopped badge and never types into the pane" {
+    reset(); finishClear("Wait for this reply to finish, then clear the chat.", false);
+    try std.testing.expect(!shells[0].ai_stopped);
+    try std.testing.expectEqual(@as(u64, 0), shells[0].ai_restart_tick);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + local_pastes + starts);
+    try std.testing.expectEqual(@as(usize, 1), clear_notices);
+    try std.testing.expect(g_chat_tmux_send_job == null);
+    reset(); finishClear("The AI is not running, so the chat was not cleared.", true);
+    try std.testing.expect(shells[0].ai_stopped);
+    try std.testing.expectEqual(@as(u64, 0), shells[0].ai_restart_tick);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + local_pastes + starts);
+}
+test "SOFT-2420 a refused clear names the reason instead of leaving Not sent" {
+    try std.testing.expect(chatClearNotice("@mp\t7\tsend\tok\t-\t0\n") == null);
+    try std.testing.expectEqualStrings("Wait for this reply to finish, then clear the chat.", chatClearNotice("\tsend\terror\tchat_busy\t").?);
+    try std.testing.expectEqualStrings("The AI is not running, so the chat was not cleared.", chatClearNotice("\tsend\terror\tneeds_restart\t").?);
+    try std.testing.expectEqualStrings("Could not clear this chat. Check the connection and try again.", chatClearNotice("\tsend\terror\thost_unreachable\t").?);
+}
+test "SOFT-2420 a refused restart stops the badge at once and says why" {
+    try std.testing.expect(chatRestartAiOutcome("@mp\t4\trestart_ai\terror\tpane_busy\t0\n").alive);
+    try std.testing.expectEqualStrings("The AI is still running, so it was not restarted.", chatRestartAiOutcome("\tpane_busy\t").notice);
+    try std.testing.expect(!chatRestartAiOutcome("\tinvalid_session\t").alive);
+    try std.testing.expectEqualStrings("Could not restart the AI. Open the terminal and start it by hand", chatRestartAiOutcome("\tunknown\t").notice);
+}
 `;
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
     require('./fixtures/inline-stubs').writeChatMention(dir);
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute', 'chatClearNotice', 'chatRestartAiOutcome'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();
@@ -296,7 +335,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 10 tests passed/);
+  assert.match(result.stderr, /All 13 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);

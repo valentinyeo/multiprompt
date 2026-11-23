@@ -4041,6 +4041,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("chat_send.zig").chatModeFinish(lp);
             return 0;
         },
+        app_state.WM_APP_CHAT_RESTART_REFUSED => {
+            @import("chat_send.zig").chatRestartAiRefused(wp, lp);
+            return 0;
+        },
         app_state.WM_APP_CHAT_SWITCH_AI => {
             @import("command_palette.zig").finishSwitchAi(lp);
             return 0;
