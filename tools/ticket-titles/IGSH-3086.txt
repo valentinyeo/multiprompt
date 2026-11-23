@@ -1,0 +1,1 @@
+Skill name typed mid-sentence vanishes from the message

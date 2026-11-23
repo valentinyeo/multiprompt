@@ -61,6 +61,8 @@ jobs:
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat
         run: node --test tools/chat-send-now.test.js
+      - name: Preserve slash skill positions in agent input
+        run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
       - name: Guard the reader runtime generation
         env:
           BASE: ${{ github.event.before || '' }}
