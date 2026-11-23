@@ -1,0 +1,8 @@
+{
+  "RefuseBusy": true,
+  "DisableOldBeforeStart": true,
+  "OldStaysDisabledWhenStartFails": true,
+  "ReportSwitchedWhenStartFails": true,
+  "SkipLocatorDelete": false,
+  "Providers": "{\"claude\",\"codex\",\"pi\"}"
+}

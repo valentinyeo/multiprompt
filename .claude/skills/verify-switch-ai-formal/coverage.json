@@ -1,0 +1,21 @@
+{
+  "sync_commit": "d676860794a9d0571334cec49e38d16d21923b29",
+  "files": {
+    "src/chat_history_reader.py": "b9e8de820c8681c209a63e8537f1374514a8700470e7808994e006b9137ebc2c",
+    "tools/chat-switch-ai.test.js": "c74bbe32e825ad4f6dcf44ec4562afa59807dc0bb775e1837ca18f4bc85d511b"
+  },
+  "coverage": {
+    "src/chat_history_reader.py": [
+      "host_switch_ai",
+      "host_switch_handover",
+      "host_switch_rows",
+      "host_switch_follow",
+      "host_dispatch_switch"
+    ],
+    "tools/chat-switch-ai.test.js": [
+      "switch identity and locator tests",
+      "busy refusal",
+      "round-trip switch chain"
+    ]
+  }
+}
