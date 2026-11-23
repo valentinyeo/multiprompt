@@ -225,6 +225,20 @@ class MpSessionsHealthTest(unittest.TestCase):
                 self.assertEqual(row["hidden_reason"], reason)
                 self.assertEqual(row["in_layout"], in_layout)
 
+    def test_SOFT_3140_archived_chat_outside_layout_is_reported_as_archived(self):
+        report = json.loads((FIXTURE / "listing-healthy.json").read_text())
+        report["workspaces"][0]["tabs"] = []
+        report["archived_sessions"] = [dict(tmux="live-healthy", host="remote-1", title="Archived chat")]
+        env = self.visibility_env(report)
+        for command in ("list", "health"):
+            done = self.run_visibility(command, env, "--json")
+            self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+            row = json.loads(done.stdout)[0]
+            self.assertTrue(row["archived"])
+            self.assertFalse(row["in_layout"])
+            self.assertFalse(row["visible"])
+            self.assertEqual(row["hidden_reason"], "archived")
+
     def test_SOFT_3140_missing_tab_is_not_confused_with_hidden_sidebar_row(self):
         report = json.loads((FIXTURE / "listing-healthy.json").read_text())
         report["workspaces"][0]["tabs"] = []
