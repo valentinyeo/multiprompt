@@ -129,17 +129,17 @@ fn chatPaintAgentHeader(_: HANDLE, _: ChatBlock, _: RECT) void { headers += 1; }
 fn chatEchoBlockConfirmed(_: []const u16, _: ChatBlock) bool { return true; }
 `;
 const acceptance = `
-test "production compact reference paints only the reply body above its bubble" {
+test "production reply reference keeps its quote body and navigation preview" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     const text = w("> Original message\\n> Second source line\\n> Third source line\\n\\nMy answer");
     const block = ChatBlock{ .start = 0, .len = text.len, .role = .user };
     const rect = chatMeasureBlockRect(0, text, block, .single, 400, 10, null);
     chatPaintBlock(0, text, block, .single, rect);
-    try std.testing.expectEqualSlices(u16, w("My answer"), drawn[0..drawn_len]);
+    try std.testing.expectEqualSlices(u16, text, @import("chat_user_quote_ui.zig").painted);
     try std.testing.expectEqualSlices(u16, w("↩ Original message"), metadata[0..metadata_len]);
     try std.testing.expectEqual(rect.top + 24, filled.top);
     try std.testing.expectEqual(rect.bottom, filled.bottom);
-    try std.testing.expect(rect.bottom - rect.top < 100);
+    try std.testing.expectEqual(@as(i32, 108), rect.bottom - rect.top);
 }
 test "injected production folded rows and open body preserve ordinary user bubbles" {
     var text: [512]u16 = undefined;
@@ -258,7 +258,7 @@ function runHarness(oldColor = false) {
   try {
     copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'chat_user_quote.zig', 'link_detect.zig'], dir);
     require('./fixtures/inline-stubs').writeChatMention(dir);
-    fs.writeFileSync(path.join(dir, 'chat_user_quote_ui.zig'), 'pub fn measureNaturalWidth(_: anytype, _: anytype, _: anytype, _: anytype, max_w: i32) i32 { return max_w; }\npub fn measureHeight(_: anytype, _: anytype, _: anytype, _: anytype, _: i32) i32 { return 60; }\npub fn paint(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype) void {}\n');
+    fs.writeFileSync(path.join(dir, 'chat_user_quote_ui.zig'), 'pub fn measureNaturalWidth(_: anytype, _: anytype, _: anytype, _: anytype, max_w: i32) i32 { return max_w; }\npub fn measureHeight(_: anytype, _: anytype, _: anytype, _: anytype, _: i32) i32 { return 60; }\npub var painted: []const u16 = &.{};\npub fn paint(_: anytype, display: anytype, _: anytype, _: anytype, _: anytype) void { painted = display.text; }\n');
     const paintNames = ['chatReplyLineHeight', 'chatPaintReplyLine', 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatDisplayForBlock', 'chatMeasureBlockRect', 'chatMeasureProjectedBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatPaintProjectedBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'];
     let functions = paintNames.filter(name => source.includes(`fn ${name}(`)).map(body).join('\n');
     if (source.includes('fn chatPaintTableExpand(')) functions += '\nfn chatPaintTableExpand(_: HANDLE, _: RECT, _: ChatBlock) void {}\n';
