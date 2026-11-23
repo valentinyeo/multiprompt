@@ -76,6 +76,37 @@ function Send-Line([string]$Text) {
     Press @(0x0D) 'Enter: send to real server'
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
+function Submit-Line([string]$Text) {
+    $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Type-Text $Text
+    [void](Wait-For 'exact composer text' { [ChatDeliveryDesktop]::Text($composer) -ceq $Text })
+    Press @(0x1B) 'Escape: dismiss completion without changing the text'
+    Press @(0x0D) 'Enter: send to real server'
+    [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
+}
+function Same-ComposerText([string]$Left, [string]$Right) {
+    ($Left -replace "`r`n", "`n") -ceq ($Right -replace "`r`n", "`n")
+}
+function Normalize-JourneyText([string]$Text) {
+    ($Text -replace "`r`n", "`n").TrimEnd()
+}
+function Set-ClipboardText([string]$Text) {
+    $data = New-Object System.Windows.Forms.DataObject
+    [void]$data.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $Text)
+    [void][System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+}
+function Paste-Line([string]$Text) {
+    $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Set-ClipboardText $Text
+    $actions.Add(@{ input = 'paste'; text = $Text; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
+    Press @(0x11, 0x56) 'Ctrl+V: paste quoted skill message'
+    [void](Wait-For 'exact composer text' { Same-ComposerText ([ChatDeliveryDesktop]::Text($composer)) $Text })
+    Press @(0x1B) 'Escape: dismiss completion without changing the text'
+    Press @(0x0D) 'Enter: send to real server'
+    [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
+}
 function Server-Snapshot([string]$Name) {
     $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
     $snapshot = ($raw -join "`n") | ConvertFrom-Json
@@ -126,6 +157,35 @@ try {
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
+    $skillQuote = Get-Content "$PSScriptRoot/skill-quote.json" -Raw | ConvertFrom-Json
+    $skillText = ($skillQuote.compose -join "`n")
+    Submit-Line $skillQuote.busyPrime
+    $skillLogStart = (Log-Text).Length
+    Paste-Line $skillText
+    [void](Wait-For 'skill quote server receipt' {
+        $snapshot = Server-Snapshot 'skill-quote-server-poll'
+        @($snapshot.tables.shared_messages | Where-Object {
+            $row = Normalize-JourneyText $_.text
+            $row -match '/pstack:correct' -and $row -match [regex]::Escape($skillQuote.marker) -and $_.state -eq 'accepted'
+        }).Count -ge 1
+    })
+    [void](Wait-For 'skill quote reply painted' { (Copy-Chat 'skill-quote-copied').Contains($skillQuote.marker) } 60)
+    $skillSnapshot = Server-Snapshot 'skill-quote-server'
+    $skillCommands = @($skillSnapshot.commands | Where-Object {
+        $_.content -match '<command-name>/pstack:correct</command-name>' -and $_.content -match 'already delivered to it'
+    })
+    if ($skillCommands.Count -ne 1) { throw 'Provider transcript must retain one wrapped skill command with the mention wire note' }
+    $copied = [IO.File]::ReadAllText("$Evidence/skill-quote-copied.txt", [Text.UTF8Encoding]::new($false))
+    $command = [regex]::Escape($skillQuote.command)
+    if (([regex]::Matches($copied, $command)).Count -ne 1) { throw 'Quoted skill message must render once in Chat View' }
+    if ($copied.IndexOf($skillQuote.command) -ge $copied.LastIndexOf('Server received:')) { throw 'Skill quote message must sit above its reply' }
+    $tail = $copied.Substring($copied.LastIndexOf('Server received:'))
+    if (([regex]::Matches($tail, [regex]::Escape($skillQuote.marker))).Count -gt 1) { throw 'Skill quote must not remain as a waiting copy below its reply' }
+    [IO.File]::WriteAllText("$Evidence/skill-quote-post-send.log", (Log-Text).Substring($skillLogStart))
+    [void](Wait-For 'skill quote working settled' { (Log-Text).Substring($skillLogStart) -match '\[chat\] working timer stopped' } 60)
+    if ((Log-Text).Substring($skillLogStart) -match '\[chat\] working timer stopped[\s\S]*\[chat\] working timer started') { throw 'Busy dots returned after the skill quote reply' }
+    Shot 'skill-quote'
+    $result.cases += @{ name = 'skill-quote'; passed = $true; detail = 'One skill quote above its reply with wrapped transcript row and no lingering busy state' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
