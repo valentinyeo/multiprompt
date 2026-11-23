@@ -1,0 +1,59 @@
+name: Sign-in page
+
+on:
+  pull_request:
+    paths:
+      - 'service/**'
+      - '.github/workflows/signin-page.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signin-page-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signin-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove the page regression fails on the base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/base/service/test"
+          git show "$BASE_SHA:service/pages.js" > "$RUNNER_TEMP/base/service/pages.js"
+          cp service/package.json "$RUNNER_TEMP/base/service/"
+          cp service/test/signin-page.test.js "$RUNNER_TEMP/base/service/test/"
+          if timeout 60 node --test "$RUNNER_TEMP/base/service/test/signin-page.test.js" > "$RUNNER_TEMP/base-page.log" 2>&1; then
+            cat "$RUNNER_TEMP/base-page.log"
+            echo 'The page regression must fail on the base.' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/base-page.log"
+          grep -q 'the sign-in page has a get-started action group' "$RUNNER_TEMP/base-page.log"
+      - name: Run service tests on head
+        working-directory: service
+        run: |
+          timeout 180 npm ci --no-audit --no-fund
+          timeout 600 npm test
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: signin-page-worker
+          path: |
+            service/.build/
+            ${{ runner.temp }}/base-page.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
