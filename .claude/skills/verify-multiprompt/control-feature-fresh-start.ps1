@@ -102,15 +102,40 @@ try {
     $after.handoverSeen = $true
     Save-Json $after 'fresh-start-after.json'
     Snapshot 'after'
+    $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
+    $hostRows = @(Get-Content $hostJsonl | ForEach-Object { $_ | ConvertFrom-Json })
+    $visible = @($hostRows | Where-Object { $_.stage -eq 'handover_visible' })
+    $savedRows = @($hostRows | Where-Object { $_.stage -eq 'handover_saved' })
+    if ($visible.Count -lt 2) { throw "expected the agent to send its handover twice, saw $($visible.Count)" }
+    if ($savedRows.Count -ne 1) { throw "expected one saved handover, saw $($savedRows.Count)" }
+    $marker = 'Finish the saved draft.'
+    $draft = [string]$savedRows[0].text
+    if (([regex]::Matches($draft, [regex]::Escape($marker))).Count -ne 1) { throw 'saved handover repeated its own text' }
+    $draftBytes = [Text.Encoding]::UTF8.GetByteCount($draft)
+    if ($draftBytes -lt 4096 -or $draftBytes -gt 8192) { throw "saved handover is $draftBytes bytes, outside the repeated-handover window" }
+    $after.repeatHandoverSeen = $true
+    Save-Json $after 'fresh-start-after.json'
     if ($before.sid -cne $after.sid -or $before.tmux -cne $after.tmux -or $before.rowName -cne $after.rowName -or $before.csid -cne $after.csid) {
         throw 'Public chat identity changed across fresh start'
     }
     if ($before.native_session -ceq $after.native_session) { throw 'native_session did not rotate' }
     if ($after.matchingSidebarRows -ne 1) { throw "expected one sidebar row, found $($after.matchingSidebarRows)" }
+    Type-Text 'fresh-start after'
+    Press @(0x0D) 'Enter: send composer message after fresh start'
+    Wait-Until {
+        if (-not (Test-Path $hostJsonl)) { return $false }
+        @((Get-Content $hostJsonl -Raw) -split "`n" | Where-Object { $_ -match '"stage": "replied"' }).Count -ge 3
+    } 'hosted reply after fresh start' 90
+    $afterReply = Capture-Identity 'after-reply'
+    if ($afterReply.native_session -cne $after.native_session) { throw 'native_session rotated again after the fresh start reply' }
+    if ($afterReply.matchingSidebarRows -ne 1) { throw "expected one sidebar row after the reply, found $($afterReply.matchingSidebarRows)" }
+    $after.replySeen = $true
+    Save-Json $after 'fresh-start-after.json'
+    Snapshot 'after-reply'
     & node (Join-Path $PSScriptRoot '../../../tools/chat-fresh-start-proof.mjs') $Evidence
     if ($LASTEXITCODE -ne 0) { throw 'fresh-start proof checker failed' }
     $case.status = 'passed'
-    $case.detail = 'Fresh start kept sid, tmux and row name, rotated native_session, kept layout csid and showed the handover'
+    $case.detail = 'Fresh start kept sid, tmux and row name, rotated native_session once, saved one handover from two sends, kept layout csid and answered in the new chat'
 } catch {
     $case.detail = $_.Exception.Message
     throw
@@ -118,5 +143,7 @@ try {
     if (Test-Path $log) { Copy-Item $log (Join-Path $Evidence 'fresh-start-debug.log') }
     $boundary = Join-Path $remoteState 'fresh-start-host.jsonl'
     if (Test-Path $boundary) { Copy-Item $boundary (Join-Path $Evidence 'fresh-start-host.jsonl') }
+    $agentLog = Join-Path $remoteState 'fresh-start-agent.jsonl'
+    if (Test-Path $agentLog) { Copy-Item $agentLog (Join-Path $Evidence 'fresh-start-agent.jsonl') }
     if (Test-Path $hostRoot) { Copy-Item $hostRoot (Join-Path $Evidence 'agent-host') -Recurse -Force }
 }

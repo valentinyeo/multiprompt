@@ -28,6 +28,8 @@ gh workflow run verify.yml --ref <branch> -f feature=fresh-start
 
 The harness seeds one remote `verify-fresh-start` tab with two transcript rounds, enables production agent-host delivery through `fresh-start-host.py` and a scripted Claude process, then sends two composer messages, records `fresh-start-before.json`, runs **Chat View: Fresh start**, waits for host `fresh_start` completion (no `fresh_start` in state, new `native_session`, handover visible), and writes `fresh-start-after.json` plus `node tools/chat-fresh-start-proof.mjs`.
 
+The scripted Claude sends its handover twice in the same turn (SOFT-2604), so the run proves one saved handover and one fresh start. After the reopen the journey sends one more composer message and requires a hosted reply, so the new chat is alive, not just reopened. Two visible handover turns, one saved file, no repeated text and one post-fresh-start reply are checked before the run can pass.
+
 Retain before/after screenshots, `fresh-start-host.jsonl`, `agent-host` copies, `fresh-start-debug.log` and `result.json`.
 
 ## Gotchas

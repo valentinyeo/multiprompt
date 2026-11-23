@@ -4,11 +4,23 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HANDOVER = 'Finish the saved draft. Keep the same board login.';
+const MARKER = 'Finish the saved draft.';
+const REPEATED_HANDOVER_MIN = 4097;
+const REPEATED_HANDOVER_MAX = 8192;
 
 function listChecks(checks) {
   if (Array.isArray(checks)) return checks;
   if (checks && typeof checks === 'object' && checks.name) return [checks];
   return [];
+}
+
+function readRows(file) {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+}
+
+function countOf(text, needle) {
+  return text.split(needle).length - 1;
 }
 
 export function verifyFreshStart(evidenceDir) {
@@ -27,17 +39,39 @@ export function verifyFreshStart(evidenceDir) {
   assert.notEqual(before.native_session || '', after.native_session, 'native_session must change');
   assert.equal(after.matchingSidebarRows, 1, 'exactly one matching sidebar row');
   assert.ok(after.handoverSeen, 'handover text not observed in boundary or debug evidence');
+  assert.ok(after.repeatHandoverSeen, 'the agent did not send its handover twice');
+  assert.ok(after.replySeen, 'the new chat did not answer a message after the fresh start');
 
-  const hostJsonl = path.join(evidenceDir, 'fresh-start-host.jsonl');
-  if (fs.existsSync(hostJsonl)) {
-    const stages = fs.readFileSync(hostJsonl, 'utf8').trim().split('\n').map(JSON.parse);
-    assert.ok(stages.some(row => row.stage === 'completed' || row.stage === 'handover_visible'),
-              'hosted fresh start did not complete or show the handover');
+  const stages = readRows(path.join(evidenceDir, 'fresh-start-host.jsonl'));
+  const visible = stages.filter(row => row.stage === 'handover_visible');
+  const saved = stages.filter(row => row.stage === 'handover_saved');
+  assert.ok(visible.length >= 2, `expected two visible handover turns, saw ${visible.length}`);
+  for (const row of visible) assert.ok(String(row.text || '').includes(HANDOVER), 'visible handover text changed');
+  assert.equal(saved.length, 1, `expected exactly one saved handover, saw ${saved.length}`);
+  const draft = String(saved[0].text || '');
+  assert.equal(countOf(draft, MARKER), 1, 'saved handover repeated its own text');
+  const bytes = Buffer.byteLength(draft, 'utf8');
+  assert.ok(bytes >= REPEATED_HANDOVER_MIN && bytes <= REPEATED_HANDOVER_MAX,
+            `saved handover is ${bytes} bytes, outside the repeated-handover window`);
+  assert.ok(stages.some(row => row.stage === 'completed'), 'hosted fresh start did not complete');
+  assert.equal(stages.filter(row => row.stage === 'fresh_start_requested').length, 1,
+               'fresh start requested more than once');
+  const replies = stages.filter(row => row.stage === 'replied');
+  assert.ok(replies.length >= 3, `expected a reply after the fresh start, saw ${replies.length}`);
+
+  const agent = readRows(path.join(evidenceDir, 'fresh-start-agent.jsonl'));
+  if (agent.length) {
+    const resumed = agent.filter(row => row.carried === true && row.resumed === true);
+    assert.equal(resumed.length, 1, `expected one resumed turn carrying the handover, saw ${resumed.length}`);
+    const carriedAt = agent.indexOf(resumed[0]);
+    assert.ok(agent.slice(carriedAt + 1).some(row => row.event === 'user' && String(row.text || '').includes('fresh-start after')),
+              'no message followed the fresh start');
   }
+
   const debug = path.join(evidenceDir, 'fresh-start-debug.log');
   if (fs.existsSync(debug) && !after.handoverSeen) {
     const text = fs.readFileSync(debug, 'utf8');
-    assert.ok(text.includes(HANDOVER) || text.includes('Fresh start'), 'debug log missing handover or fresh start marker');
+    assert.ok(text.includes(MARKER) || text.includes('Fresh start'), 'debug log missing handover or fresh start marker');
   }
 
   return {
@@ -45,6 +79,7 @@ export function verifyFreshStart(evidenceDir) {
     status: 'passed',
     before: { sid: before.sid, tmux: before.tmux, native_session: before.native_session, rowName: before.rowName, csid: before.csid },
     after: { sid: after.sid, tmux: after.tmux, native_session: after.native_session, rowName: after.rowName, csid: after.csid },
+    repeatedHandover: { visibleTurns: visible.length, savedFiles: saved.length, savedBytes: bytes, replies: replies.length },
     boundary: 'Synthetic SSH/tmux and scripted Claude host; production composer, palette, session save and agent-host state.',
   };
 }

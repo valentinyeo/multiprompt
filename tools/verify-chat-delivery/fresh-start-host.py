@@ -5,7 +5,8 @@ import time
 from pathlib import Path
 
 HANDOVER = "Finish the saved draft. Keep the same board login."
-REPLIES = ("First fresh-start probe reply.", "Second fresh-start probe reply.")
+REPLIES = ("First fresh-start probe reply.", "Second fresh-start probe reply.",
+           "Still the same chat, keeping the saved handover.")
 
 
 def install(namespace, root, record):
