@@ -6419,6 +6419,40 @@ class NightlyChatRestartTest(unittest.TestCase):
         execv.assert_not_called()
         self.assertIsNotNone(session['agent'])
 
+    def test_rotating_an_execd_host_keeps_its_generation_for_every_provider(self):
+        source = base64.b64decode(base64.b64encode(reader.READER_SOURCE.encode())).decode()
+        host = types.ModuleType('agent_host_test')
+        host.READER_SOURCE = source
+        exec(compile(source, '<agent-host>', 'exec'), host.__dict__)
+        self.assertNotIn('__file__', host.__dict__)
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        published = runtime / 'reader.py'
+        published.write_text('pass\n')
+        active = runtime / 'active.json'
+        with patch.object(host, 'HOME', self.home):
+            for generation in (None, reader.RUNTIME_GENERATION + 1):
+                if generation is not None:
+                    active.write_text(json.dumps(dict(protocol=1, generation=generation, sha256='a' * 64)))
+                for provider in host.HOST_PROVIDERS:
+                    with self.subTest(provider=provider, published_generation=generation):
+                        host.host_restart_write(provider, self.sid)
+                        agent = types.SimpleNamespace(pid=4242)
+                        session = dict(pending={}, agent=agent, stop=False)
+                        with patch.object(host.os, 'execv') as execv, \
+                                patch.object(host, 'host_agent_stop') as stop:
+                            self.assertTrue(host.host_rotate(provider, self.sid, session, agent))
+                        stop.assert_called_once_with(agent)
+                        execv.assert_called_once_with(sys.executable,
+                                                      [sys.executable, '-u', str(published), '--agent-host', provider, self.sid])
+                        self.assertIsNone(session['agent'])
+                        self.assertEqual(session['exit_cause'], 'host_update')
+                        self.assertFalse(host.host_restart_requested(provider, self.sid))
+                        self.assertEqual(host.host_session_state(provider, self.sid)['nightly_day'], host.host_nightly_day())
+                        events = [json.loads(line) for line in host.host_paths(provider, self.sid)['log'].read_text().splitlines()]
+                        rotate = [event for event in events if event['event'] == 'rotate'][-1]
+                        self.assertEqual(rotate['detail']['generation'], reader.RUNTIME_GENERATION)
+
     def test_host_generation_reads_active_json_without_runtime_generation_global(self):
         self.need_restart()
         runtime = self.home / '.multiprompt-runtime'

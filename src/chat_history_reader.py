@@ -8606,8 +8606,9 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 150
+RUNTIME_GENERATION = 151
+READER_SOURCE = ('RUNTIME_GENERATION = ' + str(RUNTIME_GENERATION) + '\nCONNECTOR_SOURCES = ' +
+                 repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE)
 
 if __name__ == '__main__':
     import base64 as _base64
