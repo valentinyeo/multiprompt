@@ -16,6 +16,7 @@ public static class VerifyVersionLabel {
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr value);
     [DllImport("gdi32.dll")] static extern int SetBkMode(IntPtr dc, int mode);
     [DllImport("gdi32.dll")] static extern uint SetTextColor(IntPtr dc, uint color);
+    [DllImport("gdi32.dll")] static extern uint SetBkColor(IntPtr dc, uint color);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int DrawText(IntPtr dc, string text, int length, ref Rect rect, uint flags);
 
@@ -31,7 +32,8 @@ public static class VerifyVersionLabel {
                     IntPtr font = CreateFont(-fontHeight, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, "IBM Plex Sans");
                     IntPtr old = SelectObject(dc, font);
                     try {
-                        SetBkMode(dc, 1);
+                        SetBkMode(dc, 2);
+                        SetBkColor(dc, (uint)(background.R | background.G << 8 | background.B << 16));
                         SetTextColor(dc, (uint)(ink | ink << 8 | ink << 16));
                         var rect = new Rect { Right = width, Bottom = height };
                         if (DrawText(dc, version, version.Length, ref rect, 0x20 | 0x4 | 0x800 | 0x8000) == 0) throw new Exception("Expected version text could not be drawn");
