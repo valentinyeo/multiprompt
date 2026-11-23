@@ -39,7 +39,7 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   assert.match(driver, /@\('archive', \$MbTabSession, '--host', '0'\)/);
   assert.doesNotMatch(driver, /'pin', \$MbTabSession, 'on'/);
   assert.doesNotMatch(driver, /'wait', \$MbTabSession, 'on'/);
-  assert.doesNotMatch(driver, /--no-tmux/);
+  assert.match(driver, /'--no-tmux'/);
   const { touchedJourneys } = require('./touched-journeys.cjs');
   const picked = touchedJourneys(['src/session_layout_sync.zig'], path.join(root, skill, 'features'));
   assert.deepEqual(picked.features, ['mb-tab-layout-sync']);

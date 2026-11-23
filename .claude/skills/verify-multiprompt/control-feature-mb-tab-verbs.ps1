@@ -140,7 +140,7 @@ function Save-MbTabShot([string]$Path) {
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 
-$MbTabOpenArgs = @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0')
+$MbTabOpenArgs = @('open', '--kind', 'shell', '--tmux', $MbTabSession, '--title', $MbTabTitle, '--workspace', $MbTabWork, '--host', '0', '--no-tmux')
 
 function Ensure-MbTabOpen() {
     $env:MULTIPROMPT_KEY = [string]$secrets.admin_key
