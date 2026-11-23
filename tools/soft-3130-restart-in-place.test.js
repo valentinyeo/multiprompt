@@ -9,7 +9,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 test('SOFT-3130 wires restart in place through mp-sessions, palette, mb and shortcuts', () => {
   assert.match(read('src/mp_sessions.py'), /restart_host\(send, provider, sid\)/);
   assert.match(read('src/mp_sessions.py'), /if target\.get\("running"\)/);
-  assert.match(read('src/app_state.zig'), /pub const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE: usize = 7192;/);
+  assert.match(read('src/app_state.zig'), /pub const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE: usize = 7179;/);
   assert.match(read('src/command_palette.zig'), /startRestartChatInPlace/);
   assert.match(read('src/main.zig'), /SEARCH_TABCTX_CHAT_RESTART_IN_PLACE/);
   assert.match(read('src/sidebar.zig'), /tab_context_chat_restart_in_place/);
