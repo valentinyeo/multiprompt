@@ -67,7 +67,7 @@ def check():
         errors.extend(findings(text, relative))
     assert not errors, '\n'.join(errors)
     cfg = json.loads((ROOT / 'service/wrangler.jsonc').read_text())
-    assert cfg['account_id'] == 'YOUR_CLOUDFLARE_ACCOUNT_ID'
+    assert 'account_id' not in cfg
     assert cfg['d1_databases'][0]['database_id'] == 'YOUR_D1_DATABASE_ID'
     assert not {'ACCESS_TEAM', 'ACCESS_AUD'} & cfg['vars'].keys()
     print('PUBLIC_AUDIT_OK')
