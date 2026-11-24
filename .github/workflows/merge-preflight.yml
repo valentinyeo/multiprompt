@@ -1,0 +1,111 @@
+name: Merge preflight
+run-name: merge-preflight PR ${{ inputs.pr || github.event.pull_request.number }} ${{ inputs.request || github.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+      base:
+        description: Optional base SHA for replay (defaults to current master)
+        type: string
+      head:
+        description: Optional head SHA for replay (defaults to the PR head)
+        type: string
+      request:
+        description: Dispatch correlation ID
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/merge-preflight.yml
+      - tools/automerge-admit-run.js
+      - tools/automerge-admit-run.test.js
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test the squash merge helper builds its own title
+        run: node --test tools/automerge-admit-run.test.js
+      - name: Merge the PR onto the selected master without committing
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr || github.event.pull_request.number }}
+          BASE_INPUT: ${{ inputs.base }}
+          HEAD_INPUT: ${{ inputs.head }}
+        run: |
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]]
+          BASE=${BASE_INPUT:-$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)}
+          HEAD=${HEAD_INPUT:-$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)}
+          [[ "$BASE" =~ ^[0-9a-f]{7,40}$ && "$HEAD" =~ ^[0-9a-f]{7,40}$ ]]
+          git fetch origin "$BASE" "$HEAD"
+          BASE=$(git rev-parse "$BASE^{commit}")
+          HEAD=$(git rev-parse "$HEAD^{commit}")
+          printf 'BASE=%s\nHEAD=%s\n' "$BASE" "$HEAD" >> "$GITHUB_ENV"
+          printf 'Base: `%s`\n\nHead: `%s`\n' "$BASE" "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+          git config user.name 'software-factory-runners[bot]'
+          git config user.email '348741585+software-factory-runners[bot]@users.noreply.github.com'
+          git checkout --detach "$BASE"
+          git merge --no-commit --no-ff "$HEAD"
+      - name: Cap Zig source file size
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-file-size.mjs
+      - name: Check routing IDs
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-routing-ids.mjs
+      - name: Keep palette rows and shortcut documentation aligned
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node --test tools/palette-rows.test.js tools/shortcuts-doc.test.js
+      - name: Fail on any code comment in the whole repository
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/strip-comments.mjs --check
+      - name: Block new timer and sleep quick fixes
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-timer-ratchet.mjs
+      - name: Fail when the extension changed without a version bump
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-extension-version.mjs "$BASE" "$HEAD"
+      - name: Check every pushed commit identity
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: |
+          BASE=$(git merge-base "$BASE" "$HEAD")
+          node tools/check-commit-identities.mjs "$BASE" "$HEAD"
+      - name: Require journey evidence to survive every run
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-journey-evidence.mjs
+      - name: Reject raw desktop journey commands
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-journey-commands.mjs
+      - name: Require a cached, retried FFmpeg install
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-ffmpeg-install.mjs
+      - name: Require a slot per server in every servers file
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-servers-slots.mjs
+      - name: Guard the reader runtime fingerprint
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
+      - name: Check durable regression inputs
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/check-regression-inputs.mjs "$BASE"
+      - name: Check PowerShell host names
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1 -Root .
+      - name: Check version rule
+        if: success() || (failure() && steps.merge.outcome == 'success')
+        run: node tools/version-stamp.mjs check "$(git merge-base "$BASE" "$HEAD")" "$HEAD"

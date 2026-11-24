@@ -55,7 +55,15 @@ else if (args[0] === 'pr' && args[1] === 'view') console.log(JSON.stringify({hea
 else if (args[0] === 'api' && args[1].includes('/compare/')) console.log('0');
 else if (args[0] === 'api' && args[1].includes('/files')) console.log(JSON.stringify([[{filename: 'README.md'}]]));
 else if (args[0] === 'api' && args[1].includes('/commits/')) console.log('${master}');
-else if (args[0] === 'run' && args[1] === 'list') console.log('1');
+else if (args[0] === 'run' && args[1] === 'list') {
+  const dispatch = fs.readFileSync(process.env.CALL_LOG, 'utf8').trim().split('\\n').map(JSON.parse).find(call => call[0] === 'workflow' && call[2] === 'merge-preflight.yml');
+  const request = dispatch?.find(arg => arg.startsWith('request='))?.slice(8);
+  console.log(JSON.stringify([{ databaseId: 123, displayTitle: 'merge-preflight PR 42 ' + request }]));
+} else if (args[0] === 'run' && args[1] === 'watch') process.exit(process.env.PREFLIGHT_CONCLUSION === 'failure' ? 1 : 0);
+else if (args[0] === 'run' && args[1] === 'view') console.log(JSON.stringify({
+  status: 'completed', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success', url: 'https://github.com/owner/repo/actions/runs/123',
+  jobs: [{ name: 'fast-checks', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success', steps: [{ name: 'Cap Zig source file size', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success' }] }],
+}));
 else { console.error('Unexpected gh command: ' + JSON.stringify(args)); process.exit(2); }
 `, { mode: 0o755 });
   const run = () => {
@@ -211,6 +219,17 @@ for (const [field, type, extra, verdict] of [
   assert.ok(result.stdout.includes(verdict), result.stdout);
   assert.equal(f.calls().length, 3);
   assert.ok(f.calls()[1].some(arg => arg.includes(`... on ${type}`)));
+});
+
+test('MUBO-446 refuses a red combined-code preflight without merging or starting master checks', t => {
+  const merged = { data: { mergePullRequest: { pullRequest: { number: 42, merged: true, mergeCommit: { oid: master } } } } };
+  const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged), PREFLIGHT_CONCLUSION: 'failure' });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /merge preflight refused: Cap Zig source file size/);
+  assert.ok(f.calls().some(args => args[0] === 'workflow' && args[2] === 'merge-preflight.yml'));
+  assert.ok(!f.calls().some(args => args.some(arg => arg.includes('mergePullRequest(input:'))));
+  assert.ok(!f.calls().some(args => args[0] === 'workflow' && ['test.yml', 'no-comments.yml', 'gitleaks.yml'].includes(args[2])));
 });
 
 test('an atomic head-bound merge alone starts three master checks', t => {
