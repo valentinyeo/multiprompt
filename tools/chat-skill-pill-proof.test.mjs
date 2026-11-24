@@ -54,7 +54,7 @@ test('sent-message evidence excludes the composer without hiding real pills or m
     const accent = theme === 'dark' ? [110, 175, 245] : [30, 90, 170];
     const fill = theme === 'dark' ? [65, 74, 84] : [201, 209, 221];
     for (const stage of ['unknown-draft', 'plain-draft', 'plain-sent', 'mid-skill-draft', 'mid-skill-sent', 'end-skill-draft', 'end-skill-sent', 'skill-draft', 'skill-sent']) {
-      const expected = stage.startsWith('skill-');
+      const expected = !stage.startsWith('plain-') && !stage.startsWith('unknown-');
       const frame = image(accent, fill, expected, expected);
       const name = `${theme}-${stage}`;
       const capture = { name, theme, expected, rect };

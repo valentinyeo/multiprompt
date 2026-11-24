@@ -279,7 +279,7 @@
   "rename.zig": [
     "commitRename: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)"
   ],
-  "sidebar.zig": [
+  "sidebar_attention.zig": [
     "hideActiveTabUntilAttention: showHeaderNoticeAscii(\"Moved to Waiting until next blue dot\",2500,false)",
     "hideActiveTabUntilAttention: showHeaderNoticeAscii(\"Moved to Waiting until next blue dot\",2500,false)",
     "hideActiveTabUntilAttention: showHeaderNoticeAscii(\"Moved to Waiting until next blue dot\",2500,false)",
