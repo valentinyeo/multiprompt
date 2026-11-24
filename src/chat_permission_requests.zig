@@ -241,3 +241,28 @@ pub fn enterPalette() void {
     app_state.g_search_sel = 1;
     app_state.g_search_scroll = 0;
 }
+
+pub fn setMark(index: usize, open: bool) void {
+    if (index >= app_state.shell_count) return;
+    const shell = &app_state.shells[index];
+    if (open) {
+        if (shell.needs_attention and shell.last_blue_dot_source == .permission) {
+            shell.permission_marked = true;
+            return;
+        }
+        shell.permission_marked = true;
+        shell.needs_attention = true;
+        shell.last_blue_dot_source = .permission;
+        shell.last_blue_dot_time = @import("inbox.zig").nowFileTime();
+        @import("workspaces.zig").recordShellDiagEvent(index, "permission request", "open");
+        @import("window_layout.zig").invalidateSidebar();
+        @import("inbox.zig").publishInboxState();
+        return;
+    }
+    if (!shell.permission_marked) return;
+    shell.permission_marked = false;
+    @import("workspaces.zig").recordShellDiagEvent(index, "permission request", "closed");
+    if (shell.last_blue_dot_source == .permission) shell.needs_attention = false;
+    @import("window_layout.zig").invalidateSidebar();
+    @import("inbox.zig").publishInboxState();
+}

@@ -762,28 +762,6 @@ pub fn setBlueDot(i: usize, source: attention_rules.Source, done_after_activity:
     return true;
 }
 
-pub fn setPermissionRequestMark(i: usize, open: bool) void {
-    if (i >= app_state.shell_count) return;
-    const s = &app_state.shells[i];
-    if (open) {
-        if (s.permission_marked and s.needs_attention and s.last_blue_dot_source == .permission) return;
-        s.permission_marked = true;
-        s.needs_attention = true;
-        s.last_blue_dot_source = .permission;
-        s.last_blue_dot_time = nowFileTime();
-        recordShellDiagEvent(i, "permission request", "open");
-        invalidateSidebar();
-        publishInboxState();
-        return;
-    }
-    if (!s.permission_marked) return;
-    s.permission_marked = false;
-    recordShellDiagEvent(i, "permission request", "closed");
-    if (s.last_blue_dot_source == .permission) s.needs_attention = false;
-    invalidateSidebar();
-    publishInboxState();
-}
-
 pub fn noteRestoredBlueDot(i: usize) void {
     if (i >= app_state.shell_count or !app_state.shells[i].needs_attention) return;
     app_state.shells[i].needs_attention = false;
@@ -1434,9 +1412,7 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
                 for (0..app_state.shell_count) |j| {
                     if (tabGroupId(j) != gid) continue;
                     if (!tabInCurrentWorkspace(j)) continue;
-                    if (tabPassesUnreadFilter(j)) {
-                        g_pass += 1;
-                    }
+                    if (tabPassesUnreadFilter(j)) g_pass += 1;
                     if (!app_state.shells[j].muted) g_muted = false;
                 }
                 if (g_pass == 0) continue;
@@ -2376,9 +2352,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
     var preview: [128]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
     var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
-    if (len > 0) {
-        _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
+    if (len > 0) _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
@@ -5429,9 +5403,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         }
     }
 
-    if (app_state.g_snippet_create_active) {
-        paintSnippetCreateForm(hdc);
-    }
+    if (app_state.g_snippet_create_active) paintSnippetCreateForm(hdc);
 
     _ = SelectObject(hdc, old_font);
 }
