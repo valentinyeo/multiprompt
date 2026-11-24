@@ -48,7 +48,7 @@ Executable coverage: `tools/zsb-selftest.test.js`, `tools/zsb-explicit-tab.test.
 
 ## Workspace and tmux tabs
 
-`zsb workspace-list` lists every workspace (`id`, `name`, `active`), its shared group definitions (`id`, `name`, `tabs`), and ungrouped `tabs` as JSON. Each tab has `id`, `title`, `host` (SSH alias or null), `tmux` (session name or null), and `active`; top-level `hosts` lists valid SSH aliases. Workspace ids are numeric slots, while tab ids are stable shell ids.
+`zsb workspace-list` lists every workspace (`id`, `name`, `active`), its shared group definitions (`id`, `name`, `tabs`), and ungrouped `tabs` as JSON. Each tab has `id`, `title`, `host` (SSH alias or null), `tmux` (session name or null), and `active`; top-level `hosts` lists valid SSH aliases. Each tab also reports `pinned` for the view on screen, plus `pinned_top` and `starred_pinned_top` for the two pins. Workspace ids are numeric slots, while tab ids are stable shell ids.
 
 ```bash
 zsb session-open --workspace "Research" --group "Ops" --host "remote-1" --tmux "runner-7" --name "Runner 7"
@@ -82,12 +82,13 @@ zsb session-move --tab 42 --ungrouped
 zsb session-close --tab 42
 zsb session-pin --tab 42
 zsb session-unpin --tab 42
+zsb session-unpin --tab 42 --starred
 ```
 
 - `session-rename` sets a manual title (1–63 UTF-16 units, no control characters) and replies `{"ok":true,"renamed":true,"tab":42}`.
 - `session-rebind` points an existing remote tab at another tmux session and reconnects it, keeping its title, group and place. `--host` is optional and defaults to the tab's own host. It replies `{"ok":true,"rebound":true,"tab":42,"state":"connecting"}`; follow it with `session-status --tab 42`. A session another tab already uses returns `{"ok":false,"error":"duplicate_session","tab":43}` with that tab's id and changes nothing. A tab that is not a remote tab returns `not_remote_tab`, and a locked account returns `account_locked`.
 - `session-move` takes `--workspace`, `--group` or `--ungrouped` (one of them is required, `--group` and `--ungrouped` are exclusive) and matches names exactly, like `session-open`. Moving to another workspace without `--group` leaves the tab ungrouped. Unknown names return `unknown_workspace` or `unknown_group` with `valid_names`, and a snoozed workspace returns `workspace_snoozed`.
 - `session-close` closes one tab and replies `{"ok":true,"closed":true,"tab":42}`. It does not touch the remote tmux session.
-- `session-pin` pins one tab to the top of the sidebar in the view the app is showing, like the sidebar menu, and replies `{"ok":true,"pinned":true,"tab":42}`; `session-unpin` clears that pin and replies `{"ok":true,"unpinned":true,"tab":42}`. Unpinning leaves the tab's pin in the other view alone, so a starred pin survives an unpin from a workspace view and the other way round. Both work on the active tab, and running either twice leaves the same layout.
+- `session-pin` pins one tab to the top of the sidebar and replies `{"ok":true,"pinned":true,"tab":42}`; `session-unpin` clears that pin and replies `{"ok":true,"unpinned":true,"tab":42}`. Without `--starred` both act on the ordinary pin; `--starred` acts on the starred pin. The command never depends on which view the desktop shows, and unpinning one pin leaves the other alone. Both work on the active tab, and running either twice leaves the same layout.
 
 `session-move`, `session-rebind` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.

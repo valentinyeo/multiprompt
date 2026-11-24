@@ -1,1 +1,1 @@
-Unpinning a tab from the command line clears its pin only in the view on screen, the same as the sidebar.
+Unpinning or pinning a tab from the command line names which pin it changes, the ordinary one or the starred one.

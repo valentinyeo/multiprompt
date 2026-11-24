@@ -9,18 +9,18 @@ const LISTING = {
   ok: true,
   hosts: ['remote-1', 'remote-2', 'remote-3'],
   workspaces: [
-    { name: 'Home', groups: [], tabs: [{ id: 41, title: 'Home shell', host: 'remote-1', tmux: 'home-1', pinned: false }] },
+    { name: 'Home', groups: [], tabs: [{ id: 41, title: 'Home shell', host: 'remote-1', tmux: 'home-1', pinned: false, pinned_top: false, starred_pinned_top: false }] },
     {
       name: 'Work',
-      groups: [{ name: 'Ops', tabs: [{ id: 42, title: 'Fixture', host: 'remote-2', tmux: 'fixture-7', pinned: false }] }],
+      groups: [{ name: 'Ops', tabs: [{ id: 42, title: 'Fixture', host: 'remote-2', tmux: 'fixture-7', pinned: false, pinned_top: false, starred_pinned_top: false }] }],
       tabs: []
     },
     {
       name: 'Twins',
       groups: [],
       tabs: [
-        { id: 43, title: 'Twin', host: 'remote-1', tmux: 'twin-a', pinned: false },
-        { id: 44, title: 'Twin', host: 'remote-2', tmux: 'twin-b', pinned: false }
+        { id: 43, title: 'Twin', host: 'remote-1', tmux: 'twin-a', pinned: false, pinned_top: false, starred_pinned_top: false },
+        { id: 44, title: 'Twin', host: 'remote-2', tmux: 'twin-b', pinned: false, pinned_top: false, starred_pinned_top: false }
       ]
     }
   ]
@@ -44,16 +44,32 @@ def tabs():
 if args == ['workspace-list']:
     print(json.dumps(state))
     sys.exit(0)
-if args[0] in ('session-pin', 'session-unpin') and len(args) == 3 and args[1] == '--tab':
-    want = args[0] == 'session-pin'
-    for tab in tabs():
-        if str(tab['id']) == args[2]:
-            tab['pinned'] = want
-            json.dump(state, open(state_path, 'w'), sort_keys=True)
-            print(json.dumps({'ok': True, 'pinned': want, 'tab': int(args[2])}))
-            sys.exit(0)
-    print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
-    sys.exit(1)
+if args[0] in ('session-pin', 'session-unpin'):
+    rest = args[1:]
+    tab_id = None
+    starred = False
+    i = 0
+    while i < len(rest):
+        if rest[i] == '--starred':
+            starred = True
+            i += 1
+        elif rest[i] == '--tab' and i + 1 < len(rest) and rest[i + 1].isdigit():
+            tab_id = rest[i + 1]
+            i += 2
+        else:
+            tab_id = None
+            break
+    if tab_id is not None:
+        want = args[0] == 'session-pin'
+        field = 'starred_pinned_top' if starred else 'pinned_top'
+        for tab in tabs():
+            if str(tab['id']) == tab_id:
+                tab[field] = want
+                json.dump(state, open(state_path, 'w'), sort_keys=True)
+                print(json.dumps({'ok': True, 'pinned': want, 'tab': int(tab_id)}))
+                sys.exit(0)
+        print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
+        sys.exit(1)
 print(json.dumps({'ok': False, 'error': 'bad_args', 'message': 'unexpected ' + ' '.join(args)}))
 sys.exit(2)
 `;
@@ -89,7 +105,8 @@ test('pin twice leaves one pin and reports the same result', async t => {
   assert.equal(first.code, 0, first.errors.join('\n'));
   assert.deepEqual(first.lines, ['pinned Fixture']);
   const pinned = readFileSync(h.statePath, 'utf8');
-  assert.equal(JSON.parse(pinned).workspaces[1].groups[0].tabs[0].pinned, true);
+  assert.equal(JSON.parse(pinned).workspaces[1].groups[0].tabs[0].pinned_top, true);
+  assert.equal(JSON.parse(pinned).workspaces[1].groups[0].tabs[0].starred_pinned_top, false);
   const second = await h.calls(['pin', 'Fixture']);
   assert.equal(second.code, 0, second.errors.join('\n'));
   assert.deepEqual(second.lines, ['already pinned Fixture']);
@@ -97,7 +114,7 @@ test('pin twice leaves one pin and reports the same result', async t => {
   assert.deepEqual(h.bridge(), ['session-pin --tab 42']);
   const json = await h.calls(['pin', 'Fixture', '--json']);
   assert.equal(json.code, 0, json.errors.join('\n'));
-  assert.deepEqual(JSON.parse(json.lines[0]), { ok: true, verb: 'pin', changed: false, tab: 42, pinned: true });
+  assert.deepEqual(JSON.parse(json.lines[0]), { ok: true, verb: 'pin', changed: false, tab: 42, pinned: true, starred: false });
 });
 
 test('unpin twice leaves the tab unpinned and reports the same result', async t => {
@@ -108,7 +125,7 @@ test('unpin twice leaves the tab unpinned and reports the same result', async t 
   assert.equal(first.code, 0, first.errors.join('\n'));
   assert.deepEqual(first.lines, ['unpinned Fixture']);
   const unpinned = readFileSync(h.statePath, 'utf8');
-  assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].pinned, false);
+  assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].pinned_top, false);
   const second = await h.calls(['unpin', 'Fixture']);
   assert.equal(second.code, 0, second.errors.join('\n'));
   assert.deepEqual(second.lines, ['already unpinned Fixture']);
@@ -130,10 +147,73 @@ test('pin names its host when two tabs share a title and refuses an unknown tab'
   assert.equal(hosted.code, 0, hosted.errors.join('\n'));
   assert.deepEqual(hosted.lines, ['pinned Twin']);
   const state = JSON.parse(readFileSync(h.statePath, 'utf8'));
-  assert.equal(state.workspaces[2].tabs[0].pinned, false);
-  assert.equal(state.workspaces[2].tabs[1].pinned, true);
+  assert.equal(state.workspaces[2].tabs[0].pinned_top, false);
+  assert.equal(state.workspaces[2].tabs[1].pinned_top, true);
   assert.deepEqual(h.bridge(), ['session-pin --tab 44']);
   const refused = await h.calls(['pin', 'Fixture', 'extra']);
   assert.equal(refused.code, 1);
   assert.match(refused.errors[0], /pin needs one tab name/);
+});
+
+test('unpin without --starred keeps the starred pin, twice, whatever the sidebar shows', async t => {
+  const h = harness();
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+  for (const sidebarPinned of [true, false]) {
+    const before = JSON.parse(readFileSync(h.statePath, 'utf8'));
+    before.workspaces[1].groups[0].tabs[0].pinned_top = true;
+    before.workspaces[1].groups[0].tabs[0].starred_pinned_top = true;
+    before.workspaces[1].groups[0].tabs[0].pinned = sidebarPinned;
+    writeFileSync(h.statePath, JSON.stringify(before));
+    const first = await h.calls(['unpin', 'Fixture']);
+    assert.equal(first.code, 0, first.errors.join('\n'));
+    const unpinned = readFileSync(h.statePath, 'utf8');
+    assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].pinned_top, false);
+    assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].starred_pinned_top, true);
+    const second = await h.calls(['unpin', 'Fixture']);
+    assert.equal(second.code, 0, second.errors.join('\n'));
+    assert.deepEqual(second.lines, ['already unpinned Fixture']);
+    assert.equal(readFileSync(h.statePath, 'utf8'), unpinned);
+  }
+  assert.deepEqual(h.bridge(), ['session-unpin --tab 42', 'session-unpin --tab 42']);
+});
+
+test('unpin --starred keeps the ordinary pin, twice, whatever the sidebar shows', async t => {
+  const h = harness();
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+  for (const sidebarPinned of [true, false]) {
+    const before = JSON.parse(readFileSync(h.statePath, 'utf8'));
+    before.workspaces[1].groups[0].tabs[0].pinned_top = true;
+    before.workspaces[1].groups[0].tabs[0].starred_pinned_top = true;
+    before.workspaces[1].groups[0].tabs[0].pinned = sidebarPinned;
+    writeFileSync(h.statePath, JSON.stringify(before));
+    const first = await h.calls(['unpin', 'Fixture', '--starred']);
+    assert.equal(first.code, 0, first.errors.join('\n'));
+    const unpinned = readFileSync(h.statePath, 'utf8');
+    assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].pinned_top, true);
+    assert.equal(JSON.parse(unpinned).workspaces[1].groups[0].tabs[0].starred_pinned_top, false);
+    const second = await h.calls(['unpin', 'Fixture', '--starred']);
+    assert.equal(second.code, 0, second.errors.join('\n'));
+    assert.deepEqual(second.lines, ['already unpinned Fixture']);
+    assert.equal(readFileSync(h.statePath, 'utf8'), unpinned);
+  }
+  assert.deepEqual(h.bridge(), ['session-unpin --tab 42 --starred', 'session-unpin --tab 42 --starred']);
+});
+
+test('pin --starred sets only the starred pin, twice', async t => {
+  const h = harness();
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+  const first = await h.calls(['pin', 'Fixture', '--starred']);
+  assert.equal(first.code, 0, first.errors.join('\n'));
+  assert.deepEqual(first.lines, ['pinned Fixture']);
+  const pinned = readFileSync(h.statePath, 'utf8');
+  assert.equal(JSON.parse(pinned).workspaces[1].groups[0].tabs[0].pinned_top, false);
+  assert.equal(JSON.parse(pinned).workspaces[1].groups[0].tabs[0].starred_pinned_top, true);
+  const second = await h.calls(['pin', 'Fixture', '--starred']);
+  assert.equal(second.code, 0, second.errors.join('\n'));
+  assert.deepEqual(second.lines, ['already pinned Fixture']);
+  assert.equal(readFileSync(h.statePath, 'utf8'), pinned);
+  const json = await h.calls(['pin', 'Fixture', '--starred', '--json']);
+  assert.equal(json.code, 0, json.errors.join('\n'));
+  assert.deepEqual(JSON.parse(json.lines[0]), { ok: true, verb: 'pin', changed: false, tab: 42, pinned: true, starred: true });
+  assert.deepEqual(h.bridge(), ['session-pin --tab 42 --starred']);
 });

@@ -81,11 +81,11 @@ print_help() {
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
         echo '  The active tab is refused with active_tab; a snoozed workspace is refused with workspace_snoozed.'
         ;;
-      session-pin) echo 'usage: zsb session-pin --tab <id>'
-        echo '  Pins a background tab to the top of the sidebar in the view the app is showing, like the sidebar menu. An unknown tab returns unknown_tab.'
+      session-pin) echo 'usage: zsb session-pin --tab <id> [--starred]'
+        echo '  Pins a background tab to the top of the sidebar. Without --starred it pins the ordinary list; --starred pins the starred list. An unknown tab returns unknown_tab.'
         ;;
-      session-unpin) echo 'usage: zsb session-unpin --tab <id>'
-        echo '  Clears that pin in the view the app is showing and leaves the tab pinned in the other view. An unknown tab returns unknown_tab.'
+      session-unpin) echo 'usage: zsb session-unpin --tab <id> [--starred]'
+        echo '  Clears that pin, the ordinary one unless --starred names the starred list. An unknown tab returns unknown_tab.'
         ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
@@ -169,8 +169,9 @@ Commands and flags:
                                     Set a tab's manual title
   session-move --tab ID [--workspace NAME] [--group NAME | --ungrouped]
                                     Move a background tab to another workspace or group
-  session-pin --tab ID              Pin one background tab to the top of the sidebar
-  session-unpin --tab ID            Clear that pin
+  session-pin --tab ID [--starred]  Pin one background tab to the top of the sidebar
+  session-unpin --tab ID [--starred]
+                                    Clear that pin
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -600,12 +601,13 @@ elif args[0] in {"session-close", "session-rebind", "session-rename", "session-m
         "session-rename": ({"--tab", "--name"}, {"--tab", "--name"}),
         "session-rebind": ({"--tab", "--host", "--tmux"}, {"--tab", "--tmux"}),
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
-        "session-pin": ({"--tab"}, {"--tab"}),
-        "session-unpin": ({"--tab"}, {"--tab"}),
+        "session-pin": ({"--tab", "--starred"}, {"--tab"}),
+        "session-unpin": ({"--tab", "--starred"}, {"--tab"}),
     }
     allowed, required = edit_specs[args[0]]
     values = {}
     ungrouped = False
+    starred = False
     rest = args[1:]
     i = 0
     while i < len(rest):
@@ -613,6 +615,12 @@ elif args[0] in {"session-close", "session-rebind", "session-rename", "session-m
             if ungrouped:
                 fail("bad_args", "session-move takes --ungrouped once")
             ungrouped = True
+            i += 1
+            continue
+        if args[0] in {"session-pin", "session-unpin"} and rest[i] == "--starred":
+            if starred:
+                fail("bad_args", f"{args[0]} takes --starred once")
+            starred = True
             i += 1
             continue
         if i + 1 >= len(rest):

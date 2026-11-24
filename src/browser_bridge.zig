@@ -2122,6 +2122,8 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32, sidebar_t
         if (!diagJsonBoolField(out, pos, &first, "visible", hidden_reason == null)) return false;
         if (!diagJsonBoolField(out, pos, &first, "waiting", shell.inbox_archived and !shell.needs_attention)) return false;
         if (!diagJsonBoolField(out, pos, &first, "pinned", @import("sidebar.zig").effPinnedTop(i))) return false;
+        if (!diagJsonBoolField(out, pos, &first, "pinned_top", shell.pinned_top)) return false;
+        if (!diagJsonBoolField(out, pos, &first, "starred_pinned_top", shell.starred_pinned_top)) return false;
         if (!diagJsonBoolField(out, pos, &first, "archived", false)) return false;
         if (!diagJsonBoolField(out, pos, &first, "user_hidden", app_state.g_hide_sidebar or (app_state.g_sidebar_view != null and shell.inbox_excluded))) return false;
         if (!diagJsonFieldPrefix(out, pos, &first, "hidden_reason")) return false;
@@ -2437,6 +2439,7 @@ const ZsbTabArgs = struct {
     host: ?[]const u8 = null,
     tmux: ?[]const u8 = null,
     name: ?[]const u8 = null,
+    starred: bool = false,
 };
 
 const ZsbTabSpec = struct {
@@ -2444,6 +2447,7 @@ const ZsbTabSpec = struct {
     allowed: []const ZsbTabFlag,
     required: []const ZsbTabFlag,
     ungrouped: bool = false,
+    starred: bool = false,
 };
 
 fn zsbTabFlagFor(arg: []const u8) ?ZsbTabFlag {
@@ -2462,11 +2466,18 @@ fn parseZsbTabArgs(argv: []const []const u8, spec: ZsbTabSpec) !ZsbTabArgs {
     if (argv.len == 0 or !std.mem.eql(u8, argv[0], spec.verb)) return error.BadArgs;
     var values: [6]?[]const u8 = @splat(null);
     var ungrouped = false;
+    var starred = false;
     var i: usize = 1;
     while (i < argv.len) {
         if (spec.ungrouped and std.mem.eql(u8, argv[i], "--ungrouped")) {
             if (ungrouped) return error.BadArgs;
             ungrouped = true;
+            i += 1;
+            continue;
+        }
+        if (spec.starred and std.mem.eql(u8, argv[i], "--starred")) {
+            if (starred) return error.BadArgs;
+            starred = true;
             i += 1;
             continue;
         }
@@ -2484,6 +2495,7 @@ fn parseZsbTabArgs(argv: []const []const u8, spec: ZsbTabSpec) !ZsbTabArgs {
         .host = values[@intFromEnum(ZsbTabFlag.host)],
         .tmux = values[@intFromEnum(ZsbTabFlag.tmux)],
         .name = values[@intFromEnum(ZsbTabFlag.name)],
+        .starred = starred,
     };
     if (values[@intFromEnum(ZsbTabFlag.tab)]) |tab_text| {
         for (tab_text) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
@@ -2598,9 +2610,11 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
 }
 
 fn zsbTabPin(argv: []const []const u8, out: []u8, comptime ops: type, comptime pinned: bool) usize {
-    const args = parseZsbTabArgs(argv, .{ .verb = if (pinned) "session-pin" else "session-unpin", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
+    const args = parseZsbTabArgs(argv, .{ .verb = if (pinned) "session-pin" else "session-unpin", .allowed = &.{.tab}, .required = &.{.tab}, .starred = true }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
-    @import("sidebar.zig").setPinnedTop(@intCast(idx), pinned);
+    const sidebar = @import("sidebar.zig");
+    const view: sidebar.PinView = if (args.starred) .starred else .ordinary;
+    sidebar.setPinnedTopInView(@intCast(idx), pinned, view);
     ops.persist();
     return zsbTabReply(out, if (pinned) "pinned" else "unpinned", args.tab, null);
 }
@@ -3361,31 +3375,39 @@ test "session-close removes a background tab and refuses the active, pinned and 
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
 }
 
-test "session-pin and session-unpin touch only the current view's pin and refuse unknown tabs" {
+test "session-pin and session-unpin change the pin of the named view and refuse unknown tabs" {
     const saved = try ZsbWorkspaceTest.init();
     defer saved.deinit();
     const old_starred = app_state.g_starred_workspace;
     defer app_state.g_starred_workspace = old_starred;
-    app_state.g_starred_workspace = false;
     ZsbTabTestOps.reset();
     var out: [4096]u8 = undefined;
     try zsbTabTestOpen("runner-7", &out);
     const active = app_state.active_shell;
+    app_state.g_starred_workspace = true;
     try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
     try std.testing.expect(app_state.shells[1].pinned_top);
     try std.testing.expect(!app_state.shells[1].starred_pinned_top);
-    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expect(ZsbTabTestOps.persisted > 0);
     try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
     try std.testing.expect(app_state.shells[1].pinned_top);
-    try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.persisted);
+    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--starred", "--tab", "42" }, &out));
+    try std.testing.expect(app_state.shells[1].pinned_top);
+    try std.testing.expect(app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--starred", "--tab", "42" }, &out));
+    try std.testing.expect(app_state.shells[1].pinned_top);
+    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
     try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
     try std.testing.expect(!app_state.shells[1].pinned_top);
+    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "99" }, &out));
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42", "--name", "x" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42", "--starred", "--starred" }, &out));
     try std.testing.expectEqual(active, app_state.active_shell);
 }
 
-test "session-unpin of a starred tab keeps the ordinary pin, exactly as the sidebar unpin does" {
+test "session-unpin without --starred keeps the starred pin in either sidebar view" {
     const saved = try ZsbWorkspaceTest.init();
     defer saved.deinit();
     const old_starred = app_state.g_starred_workspace;
@@ -3393,23 +3415,40 @@ test "session-unpin of a starred tab keeps the ordinary pin, exactly as the side
     ZsbTabTestOps.reset();
     var out: [4096]u8 = undefined;
     try zsbTabTestOpen("runner-7", &out);
-    app_state.g_starred_workspace = true;
-    app_state.shells[1].pinned_top = true;
-    app_state.shells[1].starred_pinned_top = true;
-    @import("sidebar.zig").setPinnedTop(1, false);
-    const sidebar_starred = app_state.shells[1].starred_pinned_top;
-    const sidebar_plain = app_state.shells[1].pinned_top;
-    try std.testing.expect(!sidebar_starred);
-    try std.testing.expect(sidebar_plain);
-    app_state.shells[1].pinned_top = true;
-    app_state.shells[1].starred_pinned_top = true;
-    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
-    try std.testing.expectEqual(sidebar_starred, app_state.shells[1].starred_pinned_top);
-    try std.testing.expectEqual(sidebar_plain, app_state.shells[1].pinned_top);
-    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
-    try std.testing.expectEqual(sidebar_starred, app_state.shells[1].starred_pinned_top);
-    try std.testing.expectEqual(sidebar_plain, app_state.shells[1].pinned_top);
+    for ([_]bool{ true, false }) |view_on_screen| {
+        app_state.g_starred_workspace = view_on_screen;
+        app_state.shells[1].pinned_top = true;
+        app_state.shells[1].starred_pinned_top = true;
+        try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
+        try std.testing.expect(!app_state.shells[1].pinned_top);
+        try std.testing.expect(app_state.shells[1].starred_pinned_top);
+        try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
+        try std.testing.expect(!app_state.shells[1].pinned_top);
+        try std.testing.expect(app_state.shells[1].starred_pinned_top);
+    }
+    try std.testing.expectEqual(@as(usize, 4), ZsbTabTestOps.persisted);
+}
+
+test "session-unpin --starred keeps the ordinary pin in either sidebar view" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    const old_starred = app_state.g_starred_workspace;
+    defer app_state.g_starred_workspace = old_starred;
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    for ([_]bool{ true, false }) |view_on_screen| {
+        app_state.g_starred_workspace = view_on_screen;
+        app_state.shells[1].pinned_top = true;
+        app_state.shells[1].starred_pinned_top = true;
+        try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--starred", "--tab", "42" }, &out));
+        try std.testing.expect(app_state.shells[1].pinned_top);
+        try std.testing.expect(!app_state.shells[1].starred_pinned_top);
+        try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--starred", "--tab", "42" }, &out));
+        try std.testing.expect(app_state.shells[1].pinned_top);
+        try std.testing.expect(!app_state.shells[1].starred_pinned_top);
+    }
+    try std.testing.expectEqual(@as(usize, 4), ZsbTabTestOps.persisted);
 }
 
 test "session-rename sets a manual title with Unicode and keeps the active tab" {

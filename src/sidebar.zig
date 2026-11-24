@@ -1340,8 +1340,18 @@ fn sortShellsByRecency(ids: []usize) void {
     }
 }
 
+pub const PinView = enum { ordinary, starred };
+
+pub fn setPinnedTopInView(i: usize, pinned: bool, view: PinView) void {
+    switch (view) {
+        .ordinary => app_state.shells[i].pinned_top = pinned,
+        .starred => app_state.shells[i].starred_pinned_top = pinned,
+    }
+}
+
 pub fn setPinnedTop(i: usize, pinned: bool) void {
-    if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top = pinned else app_state.shells[i].pinned_top = pinned;
+    const view: PinView = if (app_state.g_starred_workspace) .starred else .ordinary;
+    setPinnedTopInView(i, pinned, view);
 }
 
 pub inline fn shellSidebarTier(i: usize) SidebarTier {

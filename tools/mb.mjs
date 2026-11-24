@@ -16,8 +16,8 @@ commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
-  pin <name> [--host N] [--json]
-  unpin <name> [--host N] [--json]
+  pin <name> [--host N] [--starred] [--json]
+  unpin <name> [--host N] [--starred] [--json]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -68,7 +68,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
+    } else if (['star', 'starred', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -355,10 +355,15 @@ async function pinSession(ctx, flags, pinned) {
   if (matches.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
   if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
   const tab = matches[0];
-  const changed = (tab.pinned === true) !== pinned;
-  if (changed) zsbCall(ctx, [pinned ? 'session-pin' : 'session-unpin', '--tab', String(tab.id)]);
+  const view = flags.starred ? 'starred_pinned_top' : 'pinned_top';
+  const changed = (tab[view] === true) !== pinned;
+  if (changed) {
+    const call = [pinned ? 'session-pin' : 'session-unpin', '--tab', String(tab.id)];
+    if (flags.starred) call.push('--starred');
+    zsbCall(ctx, call);
+  }
   const word = pinned ? 'pinned' : 'unpinned';
-  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed, tab: tab.id, pinned }));
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed, tab: tab.id, pinned, starred: flags.starred === true }));
   else ctx.out(`${changed ? word : 'already ' + word} ${tab.title}`);
 }
 
