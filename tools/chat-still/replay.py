@@ -11,7 +11,7 @@ const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 800, bottom: i32
 const chat_history = struct {
     pub const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 '''
-    for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll"):
+    for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll", "holdsReadPosition", "followsNewest", "openingScroll"):
         source += function(history, name) + "\n"
     source += '''pub const Anchor = struct { index: usize, offset: i32 };
 };
@@ -67,6 +67,7 @@ fn chatRelayout(_: i32) void {
     app_state.g_chat_content_h = {w['old_h']};
     app_state.g_chat_layout_top_pad = {w['pad']};
     app_state.g_chat_top_pad = {w['pad'] + w['delta']};
+    app_state.g_chat_scrolled_up = {str(w['scrolled_up'] != 0).lower()};
     app_state.g_chat_layout_rects[0] = .{{ .top = {w['old_top']}, .bottom = {w['old_newest']} }};
     app_state.g_chat_layout_rects[1] = .{{ .top = {w['old_newest']}, .bottom = {w['old_h']} }};
     app_state.g_chat_read_boundary = .{{ .index = {before} }};

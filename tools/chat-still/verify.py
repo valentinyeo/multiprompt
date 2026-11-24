@@ -93,20 +93,23 @@ def check(root, replay_code=False):
     witnesses = []
     for name, body in bodies.items():
         condition, anchor_expression, fallback = held(body)
+        follow_support = "follows_newest" in body
         for event in ("history/divider", "row measurement", "late top padding", "live append", "reconciliation"):
             old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta = z3.Ints("old_h new_h viewport old_top new_top old_scroll divider pad delta")
             before, after = z3.Ints("previous_boundary next_boundary")
             old_newest, new_newest = z3.Ints("old_newest new_newest")
+            scrolled_up = z3.Int("scrolled_up")
             offset = old_scroll - old_top - delta
+            follows = z3.And(old_h > viewport, scrolled_up == 0) if follow_support else z3.BoolVal(False)
             values = {"old_content_h": old_h, "viewport_h": viewport, "previous_boundary.index": before,
                       "app_state.g_chat_read_boundary.index": after, "top": new_top, "anchor_offset": offset,
                       "old_scroll_y": old_scroll, "old_y": old_scroll, "anchor.?.offset": old_scroll - old_top,
-                      "app_state.g_chat_layout_top_pad": pad + delta, "old_top_pad": pad}
+                      "app_state.g_chat_layout_top_pad": pad + delta, "old_top_pad": pad, "follows_newest": follows}
             expression = anchor_expression.replace("anchor.?.offset", "anchor_offset_value")
             values["anchor_offset_value"] = old_scroll - old_top
             drop = symbolic(condition, values)
             anchor = symbolic(expression, values)
-            selected = z3.If(drop, z3.If(after >= 0, divider - pad - delta, new_h - viewport), anchor)
+            selected = z3.If(follows, new_h - viewport, z3.If(drop, z3.If(after >= 0, divider - pad - delta, new_h - viewport), anchor))
             scroll = z3.If(new_h <= viewport, new_h - viewport, z3.If(selected < 0, 0, z3.If(selected > new_h - viewport, new_h - viewport, selected)))
             solver = z3.Solver()
             solver.add(viewport >= 100, viewport <= 1000, old_h > viewport, old_h <= 10000,
@@ -119,7 +122,9 @@ def check(root, replay_code=False):
                        old_newest > old_top, old_newest < old_scroll + viewport,
                        new_newest > new_top, new_newest < new_h,
                        new_newest + old_scroll - old_newest >= 0,
-                       new_newest + old_scroll - old_newest <= new_h - viewport)
+                       new_newest + old_scroll - old_newest <= new_h - viewport,
+                       scrolled_up >= 0, scrolled_up <= 1,
+                       z3.Implies(z3.Not(follow_support), scrolled_up == 1))
             if event == "late top padding":
                 solver.add(delta >= 1, delta <= 32, new_top == old_top + delta, new_h == old_h + delta, before == after)
             else:
@@ -134,12 +139,14 @@ def check(root, replay_code=False):
                 solver.add(before == after)
             if event == "live append":
                 solver.add(new_top == old_top, new_h >= old_h)
-            solver.add(new_newest - scroll != old_newest - old_scroll)
+            solver.add(z3.Or(z3.And(scrolled_up == 1, new_newest - scroll != old_newest - old_scroll),
+                             z3.And(scrolled_up == 0, scroll != new_h - viewport)) if follow_support
+                       else new_newest - scroll != old_newest - old_scroll)
             outcome = solver.check()
             label = name + "/" + event
             if outcome == z3.sat:
                 model = solver.model()
-                witness = {str(v): model.eval(v, model_completion=True).as_long() for v in (old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta, before, after, old_newest, new_newest)}
+                witness = {str(v): model.eval(v, model_completion=True).as_long() for v in (old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta, before, after, old_newest, new_newest, scrolled_up)}
                 witness.update(property=label, before_y=model.eval(old_newest - old_scroll).as_long(), after_y=model.eval(new_newest - scroll).as_long())
                 failures.append(label)
                 witnesses.append(witness)

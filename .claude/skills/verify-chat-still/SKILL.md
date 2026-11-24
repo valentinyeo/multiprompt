@@ -23,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `1618131e4eb9e550549c0cecf82a0767b181d21f`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `7995f22bbc0732fd5be0baf3f39ce9283de28e58`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
 
 SOFT-3140 restores the original single-file helper bundle in `src/chat_session.zig`, keeping health inside `mp_sessions.py`. All six covered functions and both types retain their canonical hashes after regeneration; no scroll expressions, callers, replay boundaries or model assumptions change.
 
@@ -33,7 +33,7 @@ SOFT-3140 restores the original single-file helper bundle in `src/chat_session.z
 | `src/chat_session.zig`, `chatRelayoutPreservingScroll` | Existing first-visible-row anchor, remeasurement and final held-scroll selection. |
 | `src/chat_history.zig`, `scrollAnchor`, `followBottom`, `scrollAfterLayout`, `openScroll`, `Anchor`, `ReadBoundary` | Anchor definition, exact bottom calculation, divider fallback, content clamp and replay types. |
 | `tools/chat-still/verify.py`, `symbolic`, `held`, `check` | Restricted scalar translation and Z3 obligations. |
-| `tools/chat-still/replay.py`, `replay` | Extracted production `scrollAnchor`, `followBottom`, `scrollAfterLayout`, `openScroll` and both callers, with a deterministic measurement boundary. |
+| `tools/chat-still/replay.py`, `replay` | Extracted production `scrollAnchor`, `followBottom`, `scrollAfterLayout`, `openScroll`, `holdsReadPosition`, `followsNewest`, `openingScroll` and both callers, with a deterministic measurement boundary. |
 
 Two ordered message rectangles represent the first visible row and the newest initially visible message. They are deliberately different. Preserving the first row does not imply that the newest message stays still if a row between them changes height.
 
@@ -44,6 +44,8 @@ Each passive event is checked through both callers. History may add a divider; m
 ## Read failures
 
 Master's SOFT-2557 fix in `5ce536b4` preserves the existing anchor when a divider first appears. The checker reads that changed `held_y` guard directly, and the divider obligation now passes. Six findings remain for row-height changes, padding compensation and reconciliation across both callers. Hosted run `44044096426` replayed all ten scratch counterexamples and all six current-source counterexamples through the extracted production functions. The sync commit records that confirmed source. Do not edit product behavior, omit event classes or relax the property to make this check green.
+
+MUBO-280 gives the opening hold a follow path. `refreshChatTranscript` now reads `follows_newest`, so the checker carries a reader-at-the-bottom input: while the reader is held, the first visible row must not move as before, and while the reader follows, the view must land on the newest message instead. Sources without that expression keep the held-only obligation, so this adds no finding to the previous model and the older counterexamples still replay. `chatRelayoutPreservingScroll` never follows, because a relayout applies no arriving message.
 
 A counterexample lists old/new row tops, content height, viewport, divider, padding and the newest message's before/after Y. Tell it as opening the chat, receiving that update, and painting the changed Y. For a model error, show the mismatching production operation or impossible geometry and repair the mapping; keep the invariant. For a real bug, link the failing coordinates and native replay to the product ticket. Do not confuse replaying a synthetic measurement boundary with proving a production UI path.
 
