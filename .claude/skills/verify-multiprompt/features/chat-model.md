@@ -1,6 +1,6 @@
 # Live chat model and effort
 
-Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-chat-delivery/model-settings.ps1, .github/workflows/click-through.yml
+Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, src/plus_menu.zig, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-chat-delivery/model-settings.ps1, .github/workflows/click-through.yml
 
 ## Sub-features
 
@@ -18,9 +18,9 @@ Dispatch `verify.yml` with `feature=chat-model` on the branch, without a release
 
 The saved tab, remote shell and tmux are fixture boundaries. The app supplies its embedded reader unchanged. The fixture starts that reader's production Python host in an isolated home and configures a synthetic Python Claude process. Windows-only fixture compatibility supplies file locks, notification polling and socket/pipe selection. The synthetic process records its actual arguments and emits a synthetic init and transcript. It makes no network or Claude calls.
 
-The real Windows app opens the plus menu and clicks each Haiku, Low, Medium and High choice through native mouse input. Each choice must retain the unsent draft, update the independently read host config, restart the synthetic process with the chosen flags and produce the host's model_effort_settings_applied event. Copied rendered history remains present before and after. The active model/effort/permission rows use the active style without a check mark. Inspect the actual native clicks and selected-row screenshot; a config write alone is insufficient.
+The real Windows app opens the plus menu and clicks each Haiku, Low, Medium and High choice through native mouse input. Each choice must retain the unsent draft, update the independently read host config, restart the synthetic process with the chosen flags and produce the host's model_effort_settings_applied event. It then opens the plus menu again, clicks the Auto permission level row, and requires the host config `permission_mode` to read `auto` with a `host.settings` event carrying `mode=auto`, keeping the same draft. Copied rendered history remains present before and after. The active model/effort/permission rows use the active style without a check mark. Inspect the actual native clicks and selected-row screenshot; a config write alone is insufficient.
 
-Inspect `model-before.png`, `model-plus-{haiku,low,medium,high}.png`, `model-plus-menu.png`, `model-plus-menu-active.png`, `model-settings/plus-active.json`, `model-after-{haiku,low,medium,high}.png`, `model-after.png`, `actions.json`, `doctor.json`, `build.json`, `cleanup.json`, and `model-settings/` config, argv, host log, copied history and observation files. A passing result needs screenshot inspection as well as the independent evidence checker.
+Inspect `model-before.png`, `model-plus-{haiku,low,medium,high}.png`, `model-plus-menu.png`, `model-plus-menu-active.png`, `model-plus-auto.png`, `model-settings/plus-active.json`, `model-after-{haiku,low,medium,high}.png`, `model-after-mode-auto.png`, `model-after.png`, `actions.json`, `doctor.json`, `build.json`, `cleanup.json`, and `model-settings/` config (including `config-mode-auto.json`), argv, host log, copied history and observation files. A passing result needs screenshot inspection as well as the independent evidence checker.
 
 ## Gotchas
 

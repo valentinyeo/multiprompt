@@ -36,7 +36,7 @@ function Plus-Cell([hashtable]$Rects, [string]$Item) {
         model_opus = @{first='model_opus'; index=0}; model_sonnet = @{first='model_opus'; index=1};
         model_haiku = @{first='model_opus'; index=2}; model_fable = @{first='model_opus'; index=3};
         effort_low = @{first='effort_low'; index=0}; effort_medium = @{first='effort_low'; index=1}; effort_high = @{first='effort_low'; index=2};
-        mode_ask = @{first='mode_ask'; index=0}; mode_edits = @{first='mode_ask'; index=1}; mode_plan = @{first='mode_ask'; index=2}; mode_bypass = @{first='mode_ask'; index=3}
+        mode_ask = @{first='mode_ask'; index=0}; mode_edits = @{first='mode_ask'; index=1}; mode_auto = @{first='mode_ask'; index=2}; mode_plan = @{first='mode_ask'; index=3}; mode_bypass = @{first='mode_ask'; index=4}
     }
     if (-not $anchors.ContainsKey($Item)) { throw "Unknown plus menu row $Item" }
     $spec = $anchors[$Item]
@@ -153,7 +153,7 @@ $plusRows = [Collections.Generic.List[object]]::new()
 $plusGroups = @(
     @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku', 'model_fable')},
     @{first='effort_low'; names=@('effort_low', 'effort_medium', 'effort_high')},
-    @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass')}
+    @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_auto', 'mode_plan', 'mode_bypass')}
 )
 foreach ($group in $plusGroups) {
     if (-not $plusRects.ContainsKey($group.first)) { continue }
@@ -188,6 +188,14 @@ foreach ($name in $plusActive) { if (-not (@($plusRows | Where-Object { $_.item 
 Save @{rows=$plusRows.ToArray(); expected_active=$plusActive; failures=$plusFailures.ToArray(); window=@{width=$plusWidth; height=$plusHeight}} "$caseDir/plus-active.json"
 Press @(0x1B) 'Escape: close plus menu'
 if ($plusFailures.Count) { throw ('Plus menu active rows: ' + ($plusFailures -join '; ')) }
+Plus-Click 'mode_auto' 'model-plus-auto'
+[void](Wait-For 'host config saved the Auto permission mode' {
+    $config = Read-Shared $configPath | ConvertFrom-Json
+    $config.permission_mode -ceq 'auto'
+} 20)
+Copy-Item $configPath "$caseDir/config-mode-auto.json"
+if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft changed after the permission mode change' }
+Shot 'model-after-mode-auto'
 Model-Copy 'after'
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft changed after history copy' }
 $observation.draft = [ChatDeliveryDesktop]::Text($composer)
