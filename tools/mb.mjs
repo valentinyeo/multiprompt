@@ -19,6 +19,7 @@ commands:
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
+  pin <session> <skill>|off [--host N]
   manual <name> on|off [--host N]
   settings <frequent|favorites|all|frequent_first> on|off
   pull [--json]
@@ -774,6 +775,40 @@ async function setTabBool(ctx, flags, field, feature, word) {
   ctx.out(`${result.changed ? word : 'already ' + word} ${value ? 'on' : 'off'} ${clean(flags._[0])}`);
 }
 
+function pinsPath(ctx) {
+  const base = ctx.env.APPDATA || ctx.env.HOME;
+  if (!base) throw new Failure('APPDATA or HOME is required');
+  return join(base, 'ZigShell', 'chat-pins.txt');
+}
+
+async function pinSkill(ctx, flags) {
+  if (flags._.length !== 2) throw new Failure('pin needs <session> <skill>|off');
+  const session = sessionName(flags._[0]);
+  const skill = String(flags._[1]);
+  if (skill !== 'off' && !/^[A-Za-z0-9_.:-]{1,80}$/.test(skill)) throw new Failure('invalid skill');
+  const host = defaultHost(ctx, flags);
+  const key = `${host}:${session.toLowerCase()}`;
+  const file = pinsPath(ctx);
+  let existing = '';
+  try { existing = readFileSync(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw new Failure('cannot read the pin file'); }
+  const pins = new Map();
+  for (const line of existing.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue;
+    const cut = line.indexOf('\t');
+    if (cut <= 0) continue;
+    pins.set(line.slice(0, cut), line.slice(cut + 1));
+  }
+  const before = pins.get(key) || null;
+  if (before === (skill === 'off' ? null : skill)) { ctx.out(`already ${skill === 'off' ? 'unpinned' : 'pinned'} ${session}`); return 0; }
+  if (skill === 'off') pins.delete(key);
+  else pins.set(key, skill);
+  const text = '# multiprompt pinned skills v1\n' + [...pins].map(([chat, name]) => `${chat}\t${name}`).join('\n') + (pins.size ? '\n' : '');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+  ctx.out(skill === 'off' ? `unpinned ${session}` : `pinned ${skill} ${session}`);
+  return 0;
+}
+
 const star = (ctx, flags) => setTabBool(ctx, flags, 'favorite', 'favorite', 'star');
 const mute = (ctx, flags) => setTabBool(ctx, flags, 'muted', 'muted', 'mute');
 const manual = (ctx, flags) => setTabBool(ctx, flags, 'manual', null, 'manual');
@@ -834,7 +869,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull, pin: pinSkill };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

@@ -122,6 +122,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Delete session | Delete the current session; stop its agent and keep its history |
 | Ctrl+K -&gt; Quit multi bot | Quit the app; keep server agents and saved chats |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Pin a skill to this chat | Keep that skill on every message you send here until you unpin |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |

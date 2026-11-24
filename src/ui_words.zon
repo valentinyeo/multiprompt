@@ -155,6 +155,8 @@
     .tab_context_mute = "Mute Tab",
     .tab_context_keep_alive_on = "Keep Alive: On",
     .tab_context_keep_alive_off = "Keep Alive: Off",
+    .tab_context_pin_skill = "Pin a Skill to this Chat",
+    .tab_context_unpin_skill = "Unpin the Skill This Chat Keeps",
     .tab_context_unpin = "Unpin from Top",
     .browser_pin_page = "Pin this page to this chat",
     .browser_unpin_page = "Unpin from this chat",

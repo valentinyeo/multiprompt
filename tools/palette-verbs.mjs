@@ -40,6 +40,8 @@ export const verbs = {
   "SEARCH_TABCTX_HIDE": "close",
   "SEARCH_TABCTX_MOVE_NEW_WS": "workspace",
   "SEARCH_TABCTX_MUTE": "mute",
+  "SEARCH_TABCTX_PIN_SKILL": "pin",
+  "SEARCH_TABCTX_UNPIN_SKILL": "pin",
   "SEARCH_TABCTX_RENAME": "rename",
   "SEARCH_TABCTX_WSMOVE": "move",
   "SEARCH_THREADTITLE_OFFSET": "rename",

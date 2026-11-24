@@ -253,6 +253,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Delete session", .b = "Delete the current session; stop its agent and keep its history", .header = false },
     .{ .a = "Ctrl+K -> Quit multi bot", .b = "Quit the app; keep server agents and saved chats", .header = false },
     .{ .a = "Ctrl+K -> Copy chat ID", .b = "Copy the chosen chat identity", .header = false },
+    .{ .a = "Ctrl+K -> Pin a skill to this chat", .b = "Keep that skill on every message you send here until you unpin", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
     .{ .a = "Alt+U", .b = "Mark active session unread / restore blue dot", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Never Show This Session", .b = "Toggle permanent Inbox exclusion for this tab (also right-click tab)", .header = false },

@@ -5637,7 +5637,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         showHeaderNoticeAscii("Could not load skills", 3500, true);
                         return 0;
                     }
-                    app_state.g_search_skills_mode = true;
+                    app_state.g_search_skills_mode = true; app_state.g_search_pin_skill_mode = false;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 1;
                     app_state.g_search_scroll = 0;
@@ -5646,7 +5646,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_SKILLS_BACK_OFFSET) {
-                    app_state.g_search_skills_mode = false;
+                    app_state.g_search_skills_mode = false; app_state.g_search_pin_skill_mode = false;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
                     app_state.g_search_scroll = 0;
@@ -5656,7 +5656,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target >= SEARCH_SKILL_ROW_OFFSET and target < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS) {
                     const skill_idx = target - SEARCH_SKILL_ROW_OFFSET;
-                    if (skill_idx >= app_state.g_palette_skills.len) return 0;
+                    if (skill_idx >= app_state.g_palette_skills.len) return 0; if (@import("chat_pin.zig").consumePick(app_state.g_palette_skills[skill_idx].name)) return 0;
                     const was_from_inbox = app_state.g_search_from_inbox;
                     app_state.g_search_active = false;
                     app_state.g_search_skills_mode = false;
@@ -7549,9 +7549,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or @import("chat_pin.zig").isAction(target) or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
+                    if (@import("chat_pin.zig").handleAction(target)) return 0;
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;

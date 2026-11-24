@@ -700,6 +700,7 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (@import("chat_pin.zig").label(target)) |label| return label;
     if (target == SEARCH_TABCTX_NEW_TAB_ON_SERVER) return NEW_TAB_ON_SERVER_LABEL;
     if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
     if (target == SEARCH_TABCTX_BROWSER) {
@@ -5796,6 +5797,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
             }
         }
     }
+    @import("chat_pin.zig").appendTabContextRows(tc_idx);
     const sel_count = selectedTabCount();
     const sel_mode = sel_count > 0;
     if (app_state.g_search_result_count < app_state.g_search_results.len) {

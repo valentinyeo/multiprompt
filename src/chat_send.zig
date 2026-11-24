@@ -3996,6 +3996,9 @@ fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool, sta
         a.destroy(job);
         return false;
     }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0 };
+    const pin = @import("chat_pin.zig").captureInto(idx, &job.pinned_name, &job.pinned_note);
+    job.pinned_name_len = @intCast(pin.name_len);
+    job.pinned_note_len = @intCast(pin.note_len);
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = app_state.g_chat_outbox.items[ei];
         if (!entry.message_v1 and app_state.shells[idx].ai_agent >= 2) { a.free(job.text); a.destroy(job); return false; }
@@ -4049,7 +4052,7 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         }
         var request_buf: [48]u8 = undefined;
         const request_id = std.fmt.bufPrint(&request_buf, "{x:0>16}{x:0>16}", .{ job.message_nonce, job.request_nonce }) catch return;
-        const query = std.json.Stringify.valueAlloc(a, .{ .op = if (job.message_reset) "message_reset" else if (job.message_dismiss) "message_dismiss" else if (job.message_status) "message_status" else if (job.retry) "message_retry" else "message_submit", .message_protocol = 1, .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .provider = job.key.provider(), .sid = std.mem.sliceTo(&job.key.sid, 0), .message_id = token, .text = text, .retry_id = request_id, .reset_id = request_id, .replaces = std.mem.sliceTo(&job.message_replaces, 0), .admission_epoch = job.message_admission_epoch }, .{}) catch return;
+        const query = std.json.Stringify.valueAlloc(a, .{ .op = if (job.message_reset) "message_reset" else if (job.message_dismiss) "message_dismiss" else if (job.message_status) "message_status" else if (job.retry) "message_retry" else "message_submit", .message_protocol = 1, .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .provider = job.key.provider(), .sid = std.mem.sliceTo(&job.key.sid, 0), .message_id = token, .text = text, .retry_id = request_id, .reset_id = request_id, .replaces = std.mem.sliceTo(&job.message_replaces, 0), .admission_epoch = job.message_admission_epoch, .pinned = .{ .name = job.pinned_name[0..job.pinned_name_len], .instructions = job.pinned_note[0..job.pinned_note_len] } }, .{}) catch return;
         defer a.free(query);
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
