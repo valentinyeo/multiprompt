@@ -187,7 +187,6 @@ const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusA
 const chatPaletteToggleKeyDown = @import("chat_composer.zig").chatPaletteToggleKeyDown;
 const postPaletteToggle = @import("chat_composer.zig").postPaletteToggle;
 const chatNewMessagesChanged = @import("chat_composer.zig").chatNewMessagesChanged;
-const chatNewMessagesLog = @import("chat_composer.zig").chatNewMessagesLog;
 const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
 const chatListMarkerLen = @import("chat_capture.zig").chatListMarkerLen;
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
@@ -2723,7 +2722,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&client);
-        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
+        app_state.g_chat_scroll_y = chat_history.openingScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y, false);
     }
 }
 
@@ -2753,10 +2752,7 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
     app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
     if (!app_state.g_chat_scrolled_up) _ = @import("chat_session.zig").chatReadMark(true);
-    if (before.value == app_state.g_chat_new_messages.value and was_scrolled_up == app_state.g_chat_scrolled_up) {
-        chatNewMessagesLog();
-        return;
-    }
+    if (before.value == app_state.g_chat_new_messages.value and was_scrolled_up == app_state.g_chat_scrolled_up) return @import("chat_composer.zig").chatNewMessagesLog();
     chatNewMessagesChanged(had_messages);
 }
 

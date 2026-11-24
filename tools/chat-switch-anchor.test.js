@@ -131,24 +131,20 @@ test "IGSH-1924 reader scroll releases the anchor and new content follows the bo
   refreshChatTranscript(false);
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
-test "IGSH-1924 caught-up opening stays still when a later reply arrives" {
+test "MUBO-280 caught-up reader at the bottom follows the later reply" {
   openTab(40);
   app_state.has_unread = false;
   app_state.g_chat_content_h = 0;
   chatRelayoutPreservingScroll(800, 600);
-  const first = app_state.g_chat_scroll_y;
   app_state.next_blocks = 48;
   refreshChatTranscript(false);
-  try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
-  try std.testing.expect(app_state.g_chat_scroll_y < app_state.g_chat_content_h - 600);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
-test "IGSH-1924 short unread keeps its clamped position as later replies arrive" {
+test "MUBO-280 short unread at the bottom follows later replies" {
   openTab(UNREAD_FROM + 1);
-  const first = app_state.g_chat_scroll_y;
-  try std.testing.expectEqual(app_state.g_chat_content_h - 600, first);
   app_state.next_blocks = 45;
   refreshChatTranscript(false);
-  try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
 test "IGSH-1924 a fitting cache opens the full conversation at its newest message" {
   openTab(1);
@@ -199,7 +195,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 8 tests passed/);
+  assert.match(result.stderr, /All 9 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {
@@ -219,7 +215,7 @@ test('IGSH-1924 production before this repair moves caught-up and short unread v
   const beforeHistory = history.slice(0, history.indexOf('pub fn openScroll(')) + beforeOpen + history.slice(history.indexOf('pub const MISSING_RETRY_MS'));
   const result = run(beforeScroll, beforeHistory);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
-  for (const name of ['caught-up opening stays still', 'short unread keeps its clamped position', 'relayout retains position']) {
+  for (const name of ['MUBO-280 short unread at the bottom follows later replies', 'relayout retains position']) {
     assert.match(result.stderr, new RegExp(name + String.raw`[^]*?FAIL \(TestExpectedEqual\)`));
   }
 });

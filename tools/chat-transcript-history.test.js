@@ -156,6 +156,7 @@ var captured_cache: std.ArrayList(u8) = .empty;
 var status_layout_calls: usize = 0;
 fn layoutChatControls() void { status_layout_calls += 1; _ = chatReadBoundary(); }
 fn chatNewMessagesChanged(_: bool) void {}
+fn chatNewMessagesLog() void {}
 const WM_APP_CHAT_FILE_READY = 1;
 var g_chat_cache_write_mutex: struct {
     fn tryLock(_: *@This()) bool { return true; }
@@ -524,7 +525,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_composer.zig").chatNewMessagesLog()', 'chatNewMessagesLog()').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -542,9 +543,9 @@ test('executed production switch/refresh/completion/layout code keeps cached ful
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
-test('IGSH-1924 a caught-up cached chat holds its visible message across a real history append', () => {
+test('MUBO-280 a caught-up cached chat at the bottom follows a real history append', () => {
   const cases = String.raw`
-test "cache-first switch-back IGSH-1924 caught-up append" {
+test "cache-first switch-back MUBO-280 caught-up append" {
     const a = std.heap.page_allocator;
     var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
     defer one.history.deinit(a);
@@ -557,12 +558,10 @@ test "cache-first switch-back IGSH-1924 caught-up append" {
         ("{\"role\":\"assistant\",\"text\":\"message\"}\n" ** 10) ++ "@@MP_END@@\n", 1, one.key);
     chatDeferTranscriptLoad();
     refreshChatTranscript(true);
-    const first = g_chat_scroll_y;
-    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, first);
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
     try one.history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"later reply\"}\n@@MP_END@@\n", 2, one.key);
     refreshChatTranscript(false);
-    try std.testing.expectEqual(first, g_chat_scroll_y);
-    try std.testing.expect(g_chat_scroll_y < g_chat_content_h - fake_viewport_h);
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
