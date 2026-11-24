@@ -38,6 +38,107 @@
             Save-Json (Read-Session) 'workspace-owner-new-session.json'
             Snapshot 'workspace-owner-new-chat'
             $result.checks += @{ name = 'workspace-reported-owner'; workspace = 'Example'; host = 0; cwd = '/home/owner/projects/sample'; boundary = 'Seeded provider-reported cwd and SSH stand-in; no real provider or server' }
+            $commandsFile = Join-Path $scratch 'roaming/ZigShell/commands.json'
+            $paletteLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            foreach ($folderHost in @(0, 1)) {
+                Set-Content -LiteralPath (Join-Path $env:MP_VERIFY_STATE ('workspace-server-folders-' + $folderHost + '.txt')) -Value '/home/owner/projects/sample' -Encoding ascii
+            }
+            $script:serverLogStart = 0
+            function Open-WorkspaceServerPicker([string]$Query, [string]$Target, [string]$Label) {
+                $script:serverLogStart = (Read-SharedText $paletteLog).Length
+                Press @(0x11, 0x4B) ('Ctrl+K: ' + $Label)
+                Type-Text $Query
+                $chars = $Query.Length
+                Wait-Until {
+                    $rows = [regex]::Matches((Read-SharedText $paletteLog).Substring($script:serverLogStart), ('\[palette\] rows chars=' + $chars + ' count=\d+ ids=([^\r\n]+)'))
+                    $rows.Count -gt 0 -and @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ') -contains $Target
+                } ($Label + ': palette offers the row')
+                $rows = [regex]::Matches((Read-SharedText $paletteLog).Substring($script:serverLogStart), ('\[palette\] rows chars=' + $chars + ' count=\d+ ids=([^\r\n]+)'))
+                $ids = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ')
+                $index = [Array]::IndexOf($ids, $Target)
+                Press @(0x24) 'Home: first palette row'
+                for ($i = 0; $i -lt $index; $i++) { Press @(0x28) ('Down: ' + $Label) }
+                Press @(0x0D) ('Enter: ' + $Label)
+                Wait-Until {
+                    $trace = (Read-SharedText $paletteLog).Substring($script:serverLogStart)
+                    $trace -match '\[palette\] rows chars=0 count=4 ids=6968 6970 6971 6972(?:\s|$)'
+                } 'workspace server picker lists Back and three servers'
+            }
+            Open-WorkspaceServerPicker 'move workspace to server' '6966' 'Move workspace to server'
+            Snapshot 'workspace-server-picker'
+            Type-Text 'server 3'
+            Wait-Until {
+                $trace = (Read-SharedText $paletteLog).Substring($script:serverLogStart)
+                $trace -match '\[palette\] rows chars=8 count=2 ids=6968 6972(?:\s|$)'
+            } 'filtered server without the folder is ready'
+            WindowShot 'workspace-server-missing-before'
+            $missingBeforeHash = (Get-FileHash (Join-Path $Evidence 'workspace-server-missing-before.png') -Algorithm SHA256).Hash
+            $missingBeforeTabs = @((Read-Session).tabs).Count
+            $missingBeforeCommands = Get-Content -LiteralPath $commandsFile -Raw
+            Press @(0x0D) 'Enter: choose a server without the folder'
+            Wait-Until {
+                WindowShot 'workspace-server-missing-after'
+                (Get-FileHash (Join-Path $Evidence 'workspace-server-missing-after.png') -Algorithm SHA256).Hash -ne $missingBeforeHash
+            } 'missing folder choice leaves the picker'
+            Snapshot 'workspace-server-missing-folder'
+            if (@((Read-Session).tabs).Count -ne $missingBeforeTabs) { throw 'Missing folder choice created a tab' }
+            if ((Get-Content -LiteralPath $commandsFile -Raw) -ne $missingBeforeCommands) { throw 'Missing folder choice moved the workspace folder' }
+            $result.checks += @{ name = 'workspace-server-missing-folder-rejected'; host = 2; cwd = '/home/owner/projects/sample'; tabs = $missingBeforeTabs }
+            Open-WorkspaceServerPicker 'move workspace to server' '6966' 'Move workspace to server again'
+            Type-Text 'server 2'
+            Wait-Until {
+                $trace = (Read-SharedText $paletteLog).Substring($script:serverLogStart)
+                $trace -match '\[palette\] rows chars=8 count=2 ids=6968 6971(?:\s|$)'
+            } 'filtered server with the folder is ready'
+            Press @(0x0D) 'Enter: move the workspace to the second server'
+            Wait-Until {
+                $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
+                @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Example' -and $_.PSObject.Properties['folder_host'] -and [string]$_.folder_host -eq '1' -and $_.cwd -eq '/home/owner/projects/sample' }).Count -ge 1
+            } 'workspace folder saved on the second server'
+            Save-Json (Read-Session) 'workspace-server-moved-session.json'
+            Snapshot 'workspace-server-moved'
+            $result.checks += @{ name = 'workspace-server-moved'; workspace = 'Example'; folder_host = 1; cwd = '/home/owner/projects/sample' }
+            $movedTabs = @((Read-Session).tabs).Count
+            Press @(0x11, 0x54) 'Ctrl+T: the moved workspace starts its chat on the second server'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $movedTabs + 1 -or $state.active_workspace -ne 1) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                $hostId -eq 1 -and $tab.cwd -eq '/home/owner/projects/sample'
+            } 'moved workspace chat starts on the second server'
+            Save-Json (Read-Session) 'workspace-server-moved-chat.json'
+            Snapshot 'workspace-server-moved-chat'
+            $result.checks += @{ name = 'workspace-server-moved-chat'; host = 1; cwd = '/home/owner/projects/sample' }
+            $newTabTabs = @((Read-Session).tabs).Count
+            Open-WorkspaceServerPicker 'new tab on server' '6967' 'New tab on server'
+            Type-Text 'server 1'
+            Wait-Until {
+                $trace = (Read-SharedText $paletteLog).Substring($script:serverLogStart)
+                $trace -match '\[palette\] rows chars=8 count=2 ids=6968 6970(?:\s|$)'
+            } 'filtered first server is ready'
+            Press @(0x0D) 'Enter: start one tab on the first server'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $newTabTabs + 1 -or $state.active_workspace -ne 1) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                $hostId -eq 0 -and $tab.cwd -eq '/home/owner/projects/sample'
+            } 'new tab server chat starts on the first server'
+            $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
+            $keptFolder = @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Example' })
+            $keptFolder = $keptFolder[$keptFolder.Count - 1]
+            if ([string]$keptFolder.folder_host -ne '1') { throw 'New tab on server moved the workspace folder' }
+            Save-Json (Read-Session) 'workspace-server-new-tab.json'
+            Snapshot 'workspace-server-new-tab'
+            $result.checks += @{ name = 'workspace-server-new-tab'; host = 0; cwd = '/home/owner/projects/sample'; workspaceFolderHost = 1 }
+            foreach ($extra in 1..2) {
+                $beforeExtra = @((Read-Session).tabs).Count
+                Invoke-JourneyCommand 'Archive chat' -Confirm {
+                    Press @(0x0D) 'Enter: hide a workspace server proof chat'
+                }
+                Wait-Until { @((Read-Session).tabs).Count -eq $beforeExtra - 1 } 'workspace server proof chat hidden'
+            }
             Invoke-JourneyCommand 'Archive chat' -Confirm {
                 Press @(0x0D) 'Enter: hide Example workspace chat'
             }

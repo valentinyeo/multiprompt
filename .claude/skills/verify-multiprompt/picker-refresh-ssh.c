@@ -6,9 +6,27 @@ int main(int argc, char **argv) {
     char root[MAX_PATH], path[MAX_PATH];
     if (!GetEnvironmentVariableA("MP_VERIFY_STATE", root, sizeof(root))) return 1;
     int listing = 0, host = 0;
+    const char *probe = NULL;
     for (int i = 1; i < argc; i++) {
         if (strstr(argv[i], "@@MP_REPOS_OK@@")) listing = 1;
         if (!strcmp(argv[i], "remote-3")) host = 2;
+        if (strstr(argv[i], "@@MP_FOLDER_OK@@")) probe = argv[i];
+    }
+    if (probe) {
+        int probe_host = strstr(probe, "remote-3") ? 2 : strstr(probe, "remote-2") ? 1 : 0;
+        snprintf(path, sizeof(path), "%s\\workspace-server-folders-%d.txt", root, probe_host);
+        FILE *folders = fopen(path, "rb");
+        if (!folders) return 1;
+        char line[512];
+        int present = 0;
+        while (fgets(line, sizeof(line), folders)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (line[0] && strstr(probe, line)) { present = 1; break; }
+        }
+        fclose(folders);
+        puts(present ? "\n@@MP_FOLDER_OK@@" : "\n@@MP_FOLDER_MISSING@@");
+        fflush(stdout);
+        return 0;
     }
     snprintf(path, sizeof(path), "%s\\picker-refresh-repos.txt", root);
     FILE *repos = listing && host == 2 ? fopen(path, "rb") : NULL;
