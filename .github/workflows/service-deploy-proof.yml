@@ -1,0 +1,95 @@
+name: Service deploy proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-deploy-proof
+  cancel-in-progress: true
+
+env:
+  PROOF_WORKER: multibot-cloud-proof
+  PROOF_DATABASE: multibot-cloud-proof
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: service-proof
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+      - name: Install the service dependencies
+        working-directory: service
+        run: npm ci --no-audit --no-fund --prefer-offline
+      - name: Find or create the proof D1 database
+        working-directory: service
+        run: |
+          set -euo pipefail
+          find_id() {
+            npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const start=s.indexOf("[{");const end=s.lastIndexOf("]");const rows=JSON.parse(s.slice(start,end+1));const row=rows.find(r=>r.name===process.env.PROOF_DATABASE);if(row)process.stdout.write(row.uuid||row.id||"")})'
+          }
+          id="$(find_id)"
+          if [ -z "$id" ]; then
+            npx wrangler d1 create "$PROOF_DATABASE"
+            id="$(find_id)"
+          fi
+          test -n "$id"
+          echo "PROOF_DATABASE_ID=$id" >> "$GITHUB_ENV"
+          echo "PROOF_AUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - name: Build the proof config from wrangler.jsonc
+        working-directory: service
+        run: |
+          set -euo pipefail
+          node -e 'const fs=require("node:fs");const config=JSON.parse(fs.readFileSync("wrangler.jsonc","utf8"));config.name=process.env.PROOF_WORKER;const db=config.d1_databases[0];db.database_name=process.env.PROOF_DATABASE;db.database_id=process.env.PROOF_DATABASE_ID;config.vars.BETTER_AUTH_SECRET=process.env.PROOF_AUTH_SECRET;fs.writeFileSync("wrangler.proof.jsonc",JSON.stringify(config,null,2))'
+      - name: Apply the migrations and deploy the Worker
+        working-directory: service
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply DB --remote --config wrangler.proof.jsonc
+          npx wrangler deploy --config wrangler.proof.jsonc | tee "$RUNNER_TEMP/deploy.log"
+      - name: Read the deployed URL
+        id: url
+        run: |
+          set -euo pipefail
+          url="$(grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1)"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url"
+      - name: Smoke-check the deployment
+        env:
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          set -euo pipefail
+          code=""
+          for attempt in $(seq 1 24); do
+            code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$URL/health" || true)"
+            if [ "$code" = 200 ]; then break; fi
+            sleep 5
+          done
+          test "$code" = 200
+          grep -q 'multiprompt-account' "$RUNNER_TEMP/health.json"
+          page="$(curl -sS -o "$RUNNER_TEMP/signin.html" -w '%{http_code}' "$URL/signin")"
+          test "$page" = 200
+          grep -q 'data-page="signin"' "$RUNNER_TEMP/signin.html"
+          auth="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/auth/ok" || true)"
+          {
+            echo "health: 200 $URL/health"
+            echo "sign-in page: 200 $URL/signin"
+            echo "auth endpoint: $auth $URL/api/auth/ok"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm the schema landed in the proof database
+        working-directory: service
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute DB --remote --json --config wrangler.proof.jsonc --command "SELECT count(*) AS tables FROM sqlite_master WHERE type='table' AND name IN ('devices','layouts','bot_photos')" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const start=s.indexOf("[{");const end=s.lastIndexOf("]");const tables=JSON.parse(s.slice(start,end+1))[0].results[0].tables;if(tables!==3){console.error("schema tables: "+tables);process.exit(1)}console.log("schema tables: "+tables)})'
