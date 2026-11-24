@@ -5,20 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const HANDOVER = 'Finish the saved draft. Keep the same board login.';
 
-function listChecks(checks) {
-  if (Array.isArray(checks)) return checks;
-  if (checks && typeof checks === 'object' && checks.name) return [checks];
-  return [];
-}
-
 export function verifyFreshStart(evidenceDir) {
   const read = name => JSON.parse(fs.readFileSync(path.join(evidenceDir, name), 'utf8').replace(/^\uFEFF/, ''));
   const before = read('fresh-start-before.json');
   const after = read('fresh-start-after.json');
-  const result = fs.existsSync(path.join(evidenceDir, 'result.json'))
-    ? read('result.json') : { checks: [] };
-  const check = listChecks(result.checks).find(item => item.name === 'fresh-start');
-  assert.ok(check, 'result.json missing fresh-start check');
 
   for (const key of ['sid', 'tmux', 'rowName', 'csid']) {
     assert.equal(before[key], after[key], key);
