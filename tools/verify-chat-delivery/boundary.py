@@ -1220,13 +1220,14 @@ def reader_namespace():
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
         fixture.install(namespace, ROOT, record)
-    if state().get("name") in ("working-live", "steady-live"):
+    if state().get("name") in ("working-live", "steady-live", "fresh-start-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
         spec = importlib.util.spec_from_file_location("working_host", fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live",
+                        fresh=state().get("name") == "fresh-start-live")
         original_push = namespace["events_push"]
 
         def working_push(subscriptions):
