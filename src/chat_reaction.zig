@@ -969,3 +969,15 @@ test "SOFT-2441 a code-free reaction anchors on the last paragraph block" {
     try std.testing.expectEqual(@as(u8, 0), view.mask(1));
     try std.testing.expectEqual(Emoji.like.bit(), view.mask(2));
 }
+
+test "MUBO-95 a thumbs up reply stays code free and ends on a whole word" {
+    const question = std.unicode.utf8ToUtf16LeStringLiteral("Same first words for this example for this example for this example for this example");
+    var line: [256]u16 = undefined;
+    const spoken_line = spoken(.like, question, &line).?;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("👍 to: Same first words for this example for this example for this example for this…"), spoken_line);
+    try std.testing.expect(std.mem.indexOfScalar(u16, spoken_line, '[') == null);
+    try std.testing.expectEqual(ELLIPSIS, spoken_line[spoken_line.len - 1]);
+    try std.testing.expect(spoken_line[spoken_line.len - 2] != ' ');
+    try std.testing.expect(parse(spoken_line) == null);
+    try std.testing.expect(parseSpoken(spoken_line) != null);
+}

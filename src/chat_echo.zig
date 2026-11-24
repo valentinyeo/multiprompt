@@ -1492,3 +1492,32 @@ test "SOFT-3097 a skill message with a quote matches the row the reader renders"
     try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
     try std.testing.expectEqual(@as(?usize, null), chosen[1]);
 }
+
+test "MUBO-95 two thumbs up replies in a row each confirm their own row" {
+    const reply = std.unicode.utf8ToUtf16LeStringLiteral("👍 to: Same first words for this example for this example for this example for this…");
+    try std.testing.expect(std.mem.indexOfScalar(u16, reply, '[') == null);
+    try std.testing.expectEqual(@as(u16, 0x2026), reply[reply.len - 1]);
+    try std.testing.expect(reply[reply.len - 2] != ' ');
+    const question = std.unicode.utf8ToUtf16LeStringLiteral("Same first words for this example for this example for this example for this example");
+    const first_code: u64 = 0x1111;
+    const second_code: u64 = 0x2222;
+    var blocks = [_]UserBlock{
+        .{ .text = question, .stamp_ms = 1000, .message_id = 1 },
+        .{ .text = reply, .stamp_ms = 2000, .message_id = 2 },
+        .{ .text = reply, .stamp_ms = 2000, .message_id = 3 },
+    };
+    var pending = [_]Pending{
+        .{ .prefix = reply, .text = reply, .anchor = .{ .after_ms = 1000, .sent_ms = 1500 } },
+        .{ .prefix = reply, .text = reply, .anchor = .{ .after_ms = 2000, .after_id = 3, .sent_ms = 2000, .user_count = 2, .counted = true } },
+    };
+    if (@hasField(Pending, "client_id")) {
+        pending[0].client_id = first_code;
+        pending[1].client_id = second_code;
+        blocks[1].client_id = first_code;
+        blocks[2].client_id = second_code;
+    }
+    var picked: [2]?usize = @splat(null);
+    assign(&pending, &blocks, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, 1), picked[0]);
+    try std.testing.expectEqual(@as(?usize, 2), picked[1]);
+}
