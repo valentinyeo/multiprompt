@@ -13,7 +13,8 @@ int main(int argc, char **argv) {
         if (strstr(argv[i], "@@MP_FOLDER_OK@@")) probe = argv[i];
     }
     if (probe) {
-        int probe_host = strstr(probe, "remote-3") ? 2 : strstr(probe, "remote-2") ? 1 : 0;
+        const char *command_line = GetCommandLineA();
+        int probe_host = strstr(command_line, "remote-3") ? 2 : strstr(command_line, "remote-2") ? 1 : 0;
         snprintf(path, sizeof(path), "%s\\workspace-server-folders-%d.txt", root, probe_host);
         FILE *folders = fopen(path, "rb");
         if (!folders) return 1;

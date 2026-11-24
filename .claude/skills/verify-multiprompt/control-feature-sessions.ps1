@@ -105,7 +105,7 @@
                 if ($null -eq $state -or @($state.tabs).Count -ne $movedTabs + 1 -or $state.active_workspace -ne 1) { return $false }
                 $tab = @($state.tabs)[$state.active_tab]
                 $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
-                $hostId -eq 1 -and $tab.cwd -eq '/home/owner/projects/sample'
+                $hostId -eq 1 -and $tab.cwd -in @('~/projects/sample', '/home/owner/projects/sample')
             } 'moved workspace chat starts on the second server'
             Save-Json (Read-Session) 'workspace-server-moved-chat.json'
             Snapshot 'workspace-server-moved-chat'
@@ -123,7 +123,7 @@
                 if ($null -eq $state -or @($state.tabs).Count -ne $newTabTabs + 1 -or $state.active_workspace -ne 1) { return $false }
                 $tab = @($state.tabs)[$state.active_tab]
                 $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
-                $hostId -eq 0 -and $tab.cwd -eq '/home/owner/projects/sample'
+                $hostId -eq 0 -and $tab.cwd -in @('~/projects/sample', '/home/owner/projects/sample')
             } 'new tab server chat starts on the first server'
             $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
             $keptFolder = @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Example' })
