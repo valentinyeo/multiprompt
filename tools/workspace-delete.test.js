@@ -90,6 +90,7 @@ fn unlockWorkspaceRegistry(_: u8) void {}
 fn mergeWorkspaceRegistryFromDisk() void {}
 fn findWorkspace(_: []const u8) ?u32 { return 0; }
 fn removeWorkspaceEntryAt(_: u32) void { removed = true; }
+fn workspaceChats(_: []const u8) u32 { return 0; }
 fn rememberRemovedWorkspace(_: []const u8) void {}
 fn writeWorkspaceRegistryFile() void {}
 fn workspaceDeleteStamp(_: *[32]u8) []const u8 { return "stamp"; }
