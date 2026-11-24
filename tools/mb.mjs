@@ -799,8 +799,10 @@ async function pinSkill(ctx, flags) {
   if (skill !== 'off' && !/^[A-Za-z0-9_.:-]{1,80}$/.test(skill)) throw new Failure('invalid skill');
   const layout = (await readLayout(ctx)).data.layout;
   const host = resolveTabHost(ctx.env, session, flags.host, layout?.hosts);
-  if (skill !== 'off' && !choose(layout, session, host)) throw new Failure(`pin needs a chat tab: ${session} has no chat key`);
-  const key = `${host}:${session.toLowerCase()}`;
+  const tab = choose(layout, session, host);
+  if (skill !== 'off' && !tab) throw new Failure(`pin needs a chat tab: ${session} has no chat key`);
+  const chat = tab ? tab.tmux_session : session;
+  const key = `${host}:${chat.toLowerCase()}`;
   const file = pinsPath(ctx);
   let existing = '';
   try { existing = readFileSync(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw new Failure('cannot read the pin file'); }
@@ -812,13 +814,13 @@ async function pinSkill(ctx, flags) {
     pins.set(line.slice(0, cut), line.slice(cut + 1));
   }
   const before = pins.get(key) || null;
-  if (before === (skill === 'off' ? null : skill)) { ctx.out(`already ${skill === 'off' ? 'unpinned' : 'pinned'} ${session}`); return 0; }
+  if (before === (skill === 'off' ? null : skill)) { ctx.out(`already ${skill === 'off' ? 'unpinned' : 'pinned'} ${chat}`); return 0; }
   if (skill === 'off') pins.delete(key);
   else pins.set(key, skill);
   const text = '# multiprompt pinned skills v1\n' + [...pins].map(([chat, name]) => `${chat}\t${name}`).join('\n') + (pins.size ? '\n' : '');
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, text);
-  ctx.out(skill === 'off' ? `unpinned ${session}` : `pinned ${skill} ${session}`);
+  ctx.out(skill === 'off' ? `unpinned ${chat}` : `pinned ${skill} ${chat}`);
   return 0;
 }
 
