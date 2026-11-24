@@ -7,6 +7,8 @@ const diff = @import("chat_diff.zig");
 
 const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, client_id: []const u8 = "", settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
+pub var settlement_parses: std.atomic.Value(usize) = .init(0);
+pub var source_rows_scanned: std.atomic.Value(usize) = .init(0);
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
@@ -32,8 +34,159 @@ pub const History = struct {
     more: bool = false,
     restore_full: bool = false,
     defer_render: bool = false,
+    settle: SettleCache = .{},
+    source: SourceCache = .{},
+
+    const cache_allocator = std.heap.page_allocator;
+
+    const SettleKind = enum { rejected, enqueue, pop_all, remove, other };
+    const SettleFact = struct { stamp: i64, kind: SettleKind, start: usize, len: usize, hash: u64 };
+
+    const SettleCache = struct {
+        facts: std.ArrayList(SettleFact) = .empty,
+        pool: std.ArrayList(u16) = .empty,
+        covered: usize = 0,
+        tag: u64 = 0,
+        failed: bool = false,
+
+        fn clear(self: *SettleCache) void {
+            self.facts.clearRetainingCapacity();
+            self.pool.clearRetainingCapacity();
+            self.covered = 0;
+            self.tag = 0;
+            self.failed = false;
+        }
+
+        fn deinit(self: *SettleCache) void {
+            self.facts.deinit(cache_allocator);
+            self.pool.deinit(cache_allocator);
+            self.* = .{};
+        }
+
+        fn content(self: *const SettleCache, fact: SettleFact) []const u16 {
+            return self.pool.items[fact.start..][0..fact.len];
+        }
+
+        fn parse(self: *SettleCache, rows: []const u8) !void {
+            var arena = std.heap.ArenaAllocator.init(cache_allocator);
+            defer arena.deinit();
+            var lines = std.mem.splitScalar(u8, rows, '\n');
+            while (lines.next()) |line| {
+                if (line.len == 0) continue;
+                if (std.mem.indexOf(u8, line, "\"settlement\"") == null) continue;
+                _ = settlement_parses.fetchAdd(1, .monotonic);
+                _ = arena.reset(.retain_capacity);
+                const scratch = arena.allocator();
+                const m = std.json.parseFromSliceLeaky(Message, scratch, line, .{}) catch {
+                    self.failed = true;
+                    continue;
+                };
+                const fact = m.settlement orelse continue;
+                const wide = try std.unicode.utf8ToUtf16LeAlloc(scratch, fact.content);
+                var normalized: [32768]u16 = undefined;
+                const norm = echo.normalize(wide, &normalized);
+                const op = fact.operation;
+                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
+                const start = self.pool.items.len;
+                try self.pool.appendSlice(cache_allocator, wide);
+                try self.facts.append(cache_allocator, .{ .stamp = echo.stampMs(m.timestamp), .kind = kind, .start = start, .len = wide.len, .hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm)) });
+            }
+        }
+    };
+
+    const SourceCache = struct {
+        sources: std.HashMapUnmanaged(SourcePosition, void, SourcePosition.Context, 80) = .empty,
+        covered: usize = 0,
+        tag: u64 = 0,
+        max_offset: ?u64 = null,
+        trailing_start: usize = 0,
+        row_index: usize = 0,
+
+        fn clear(self: *SourceCache) void {
+            self.sources.clearRetainingCapacity();
+            self.covered = 0;
+            self.tag = 0;
+            self.max_offset = null;
+            self.trailing_start = 0;
+            self.row_index = 0;
+        }
+
+        fn deinit(self: *SourceCache) void {
+            self.sources.deinit(cache_allocator);
+            self.* = .{};
+        }
+    };
+
+    fn sampleTag(rows: []const u8, end: usize) u64 {
+        const n = @min(end, 256);
+        var h = std.hash.Wyhash.init(end);
+        h.update(rows[0..n]);
+        h.update(rows[end - n .. end]);
+        if (end > 1024) h.update(rows[end / 2 ..][0..256]);
+        return h.final();
+    }
+
+    fn completeRows(rows: []const u8) usize {
+        return if (std.mem.lastIndexOfScalar(u8, rows, '\n')) |i| i + 1 else 0;
+    }
+
+    fn foldSource(max_offset: *?u64, trailing_start: *usize, row_index: *usize, key: SourcePosition) void {
+        if (key.end > key.offset) {
+            if (max_offset.*) |last| {
+                if (key.offset < last) trailing_start.* = row_index.*;
+            } else trailing_start.* = row_index.*;
+            max_offset.* = key.offset;
+        } else if (max_offset.* == null) {
+            trailing_start.* = row_index.* + 1;
+        }
+        row_index.* += 1;
+    }
+
+    fn settleRefresh(self: *History) !void {
+        const rows = self.rows.items;
+        const complete = completeRows(rows);
+        const cache = &self.settle;
+        var from: usize = 0;
+        if (cache.covered > 0 and cache.covered <= complete and cache.tag == sampleTag(rows, cache.covered)) {
+            from = cache.covered;
+        } else cache.clear();
+        if (from < complete) {
+            errdefer cache.clear();
+            try cache.parse(rows[from..complete]);
+        }
+        cache.covered = complete;
+        cache.tag = sampleTag(rows, complete);
+    }
+
+    fn sourceRefresh(self: *History) !void {
+        const rows = self.rows.items;
+        const complete = completeRows(rows);
+        const cache = &self.source;
+        var from: usize = 0;
+        if (cache.covered > 0 and cache.covered <= complete and cache.tag == sampleTag(rows, cache.covered)) {
+            from = cache.covered;
+        } else cache.clear();
+        if (from < complete) {
+            errdefer cache.clear();
+            var arena = std.heap.ArenaAllocator.init(cache_allocator);
+            defer arena.deinit();
+            var lines = std.mem.splitScalar(u8, rows[from..complete], '\n');
+            while (lines.next()) |old| {
+                if (old.len == 0) continue;
+                _ = arena.reset(.retain_capacity);
+                _ = source_rows_scanned.fetchAdd(1, .monotonic);
+                const old_key = try std.json.parseFromSliceLeaky(SourcePosition, arena.allocator(), old, .{ .ignore_unknown_fields = true });
+                if (old_key.end > old_key.offset) try cache.sources.put(cache_allocator, .{ .segment = old_key.segment, .offset = old_key.offset, .end = old_key.end }, {});
+                foldSource(&cache.max_offset, &cache.trailing_start, &cache.row_index, old_key);
+            }
+        }
+        cache.covered = complete;
+        cache.tag = sampleTag(rows, complete);
+    }
 
     pub fn deinit(self: *History, a: std.mem.Allocator) void {
+        self.settle.deinit();
+        self.source.deinit();
         self.rows.deinit(a);
         self.text.deinit(a);
         self.blocks.deinit(a);
@@ -240,57 +393,61 @@ pub const History = struct {
         return null;
     }
 
-    pub fn deliveryEvidence(self: History, a: std.mem.Allocator, pending: echo.Pending) !echo.DeliveryEvidence {
+    pub fn deliveryEvidence(self: *History, a: std.mem.Allocator, pending: echo.Pending) !echo.DeliveryEvidence {
+        try self.settleRefresh();
+        if (self.settle.failed) return error.InvalidHistory;
+        var tail: SettleCache = .{};
+        defer tail.deinit();
+        if (self.settle.covered < self.rows.items.len) {
+            try tail.parse(self.rows.items[self.settle.covered..]);
+            if (tail.failed) return error.InvalidHistory;
+        }
         var result: echo.DeliveryEvidence = .{};
         var complete = (self.start == 0 and !self.restore_full) or !ISSUE_349_STRICT_DEQUEUE;
         var queue: std.ArrayList(struct { hash: u64, matches: bool }) = .empty;
         defer queue.deinit(a);
-        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            if (std.mem.indexOf(u8, line, "\"settlement\"") == null) continue;
-            const parsed = try std.json.parseFromSlice(Message, a, line, .{});
-            defer parsed.deinit();
-            const m = parsed.value;
-            const fact = m.settlement orelse continue;
-            const content = try std.unicode.utf8ToUtf16LeAlloc(a, fact.content);
-            defer a.free(content);
-            const stamp = echo.stampMs(m.timestamp);
-            result.latest_ms = @max(result.latest_ms, stamp);
-            const fresh = echo.isNewBlock(pending.anchor, stamp, 0, true);
-            if (std.mem.eql(u8, fact.operation, "rejected")) {
-                if (fresh and echo.refusesCommand(content, pending.text)) result.refused = true;
-                continue;
-            }
-            var normalized: [32768]u16 = undefined;
-            const norm = echo.normalize(content, &normalized);
-            const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm));
-            const matches = fresh and echo.sameText(content, pending.text);
-            if (std.mem.eql(u8, fact.operation, "enqueue")) {
-                try queue.append(a, .{ .hash = hash, .matches = matches });
-                if (matches) result.removed_ms = 0;
-            } else if (std.mem.eql(u8, fact.operation, "popAll")) {
-                for (queue.items) |item| {
-                    if (complete and fresh and item.matches) result.removed_ms = stamp;
+        for ([_]*const SettleCache{ &self.settle, &tail }) |cache| {
+            for (cache.facts.items) |fact| {
+                const content = cache.content(fact);
+                const stamp = fact.stamp;
+                result.latest_ms = @max(result.latest_ms, stamp);
+                const fresh = echo.isNewBlock(pending.anchor, stamp, 0, true);
+                if (fact.kind == .rejected) {
+                    if (fresh and echo.refusesCommand(content, pending.text)) result.refused = true;
+                    continue;
                 }
-                queue.clearRetainingCapacity();
-                complete = true;
-            } else if (std.mem.eql(u8, fact.operation, "remove") or std.mem.eql(u8, fact.operation, "dequeue")) {
-                var index: ?usize = null;
-                if (content.len == 0) {
-                    if (complete and queue.items.len > 0) index = 0;
-                } else {
-                    for (queue.items, 0..) |item, i| {
-                        if (item.hash == hash) {
-                            index = i;
-                            break;
+                const matches = fresh and echo.sameText(content, pending.text);
+                switch (fact.kind) {
+                    .enqueue => {
+                        try queue.append(a, .{ .hash = fact.hash, .matches = matches });
+                        if (matches) result.removed_ms = 0;
+                    },
+                    .pop_all => {
+                        for (queue.items) |item| {
+                            if (complete and fresh and item.matches) result.removed_ms = stamp;
                         }
-                    }
+                        queue.clearRetainingCapacity();
+                        complete = true;
+                    },
+                    .remove => {
+                        var index: ?usize = null;
+                        if (content.len == 0) {
+                            if (complete and queue.items.len > 0) index = 0;
+                        } else {
+                            for (queue.items, 0..) |item, i| {
+                                if (item.hash == fact.hash) {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                        }
+                        if (index) |i| {
+                            const item = queue.orderedRemove(i);
+                            if (fresh and item.matches) result.removed_ms = stamp;
+                        } else if (matches) result.removed_ms = stamp;
+                    },
+                    else => {},
                 }
-                if (index) |i| {
-                    const item = queue.orderedRemove(i);
-                    if (fresh and item.matches) result.removed_ms = stamp;
-                } else if (matches) result.removed_ms = stamp;
             }
         }
         for (queue.items) |item| {
@@ -354,9 +511,9 @@ pub const History = struct {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
-        var sources = std.HashMap(SourcePosition, void, SourcePosition.Context, 80).init(scratch);
         var max_offset: ?u64 = null;
         var trailing_start: usize = 0;
+        var fragment: ?SourcePosition = null;
         var scanned_sources = false;
         var incoming = std.mem.splitScalar(u8, added, '\n');
         var overlap = false;
@@ -368,25 +525,19 @@ pub const History = struct {
             const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, line, .{ .ignore_unknown_fields = true });
             try added_rows.append(scratch, line);
             if (key.end > key.offset and !scanned_sources) {
-                var row_index: usize = 0;
-                var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
-                while (previous.next()) |old| {
-                    if (old.len == 0) continue;
-                    const old_key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
-                    if (old_key.end > old_key.offset) try sources.put(.{ .segment = old_key.segment, .offset = old_key.offset, .end = old_key.end }, {});
-                    if (old_key.end > old_key.offset) {
-                        if (max_offset) |last| {
-                            if (old_key.offset < last) trailing_start = row_index;
-                        } else trailing_start = row_index;
-                        max_offset = old_key.offset;
-                    } else if (max_offset == null) {
-                        trailing_start = row_index + 1;
-                    }
-                    row_index += 1;
+                try self.sourceRefresh();
+                max_offset = self.source.max_offset;
+                trailing_start = self.source.trailing_start;
+                if (self.source.covered < self.rows.items.len) {
+                    const old_key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, self.rows.items[self.source.covered..], .{ .ignore_unknown_fields = true });
+                    if (old_key.end > old_key.offset) fragment = old_key;
+                    var row_index = self.source.row_index;
+                    foldSource(&max_offset, &trailing_start, &row_index, old_key);
                 }
                 scanned_sources = true;
             }
-            overlap = overlap or (key.end > key.offset and sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }));
+            const position: SourcePosition = .{ .segment = key.segment, .offset = key.offset, .end = key.end };
+            overlap = overlap or (key.end > key.offset and (self.source.sources.contains(position) or (if (fragment) |tail| tail.segment == position.segment and tail.offset == position.offset and tail.end == position.end else false)));
             if (key.end <= key.offset) {
                 all_positioned = false;
             } else if (max_offset) |last| {
@@ -2295,4 +2446,68 @@ test "IGSH-1674 appending positioned rows does not decode settled message bodies
     const last = h.blocks.items[128];
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), h.text.items[last.start..][0..last.len]);
     try std.testing.expectEqual(@as(u64, 12800), last.source_offset);
+}
+
+test "MUBO-249 delivery evidence parses each settlement row once, not once per call" {
+    const a = std.testing.allocator;
+    var h = History{};
+    defer h.deinit(a);
+    for (0..1600) |i| {
+        const line = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"text\":\"message {d}\",\"timestamp\":\"2026-10-13T11:06:22.591Z\"}}\n", .{i});
+        defer a.free(line);
+        try h.rows.appendSlice(a, line);
+        if (i % 8 == 0) {
+            const fact = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-13T11:06:23.591Z\",\"settlement\":{{\"operation\":\"enqueue\",\"content\":\"queued {d}\"}}}}\n", .{i});
+            defer a.free(fact);
+            try h.rows.appendSlice(a, fact);
+        }
+    }
+    const pending = echo.Pending{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("queued 8"), .anchor = .{ .after_ms = echo.stampMs("2026-10-13T11:00:00Z") } };
+    const base = settlement_parses.load(.monotonic);
+    const cold_facts = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(cold_facts.enqueued);
+    const cold = settlement_parses.load(.monotonic) - base;
+    try std.testing.expectEqual(@as(usize, 200), cold);
+    _ = try h.deliveryEvidence(a, pending);
+    _ = try h.deliveryEvidence(a, pending);
+    try std.testing.expectEqual(cold, settlement_parses.load(.monotonic) - base);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-13T11:07:00.000Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"queued 8\"}}\n");
+    const after = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(!after.enqueued);
+    try std.testing.expect(after.removed_ms > 0);
+    try std.testing.expectEqual(cold + 1, settlement_parses.load(.monotonic) - base);
+}
+
+test "MUBO-249 appending positioned rows scans only the new rows, not the whole history" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    const total: usize = 1600 * 100;
+    const head = try std.fmt.allocPrint(a, "@mp\t1\thistory\tok\tsid\t0\t{d}\t9\t0\tclaude\tterm-1\n", .{total});
+    defer a.free(head);
+    try wire.appendSlice(a, head);
+    for (0..1600) |i| {
+        const line = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"message {d}\"}}\n", .{ i * 100, (i + 1) * 100, i });
+        defer a.free(line);
+        try wire.appendSlice(a, line);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, wire.items, 1, key);
+    var scanned_by_append: [2]usize = undefined;
+    for (&scanned_by_append, 0..) |*scanned, step| {
+        const start = total + step * 100;
+        var next = try h.suffix(a);
+        defer next.deinit(a);
+        const bytes = try std.fmt.allocPrint(a, "@mp\t{d}\thistory\tok\tsid\t{d}\t{d}\t9\t0\tclaude\tterm-1\n{{\"role\":\"user\",\"text\":\"new prompt {d}\",\"offset\":{d},\"end\":{d}}}\n@@MP_END@@\n", .{ step + 2, start, start + 100, step, start, start + 100 });
+        defer a.free(bytes);
+        try next.apply(a, bytes, @intCast(step + 2), key);
+        const before = source_rows_scanned.load(.monotonic);
+        try h.appendParsed(a, &next);
+        scanned.* = source_rows_scanned.load(.monotonic) - before;
+    }
+    try std.testing.expectEqual(@as(usize, 1602), h.blocks.items.len);
+    try std.testing.expect(scanned_by_append[1] < 16);
 }
