@@ -57,8 +57,46 @@ const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orels
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the automatic release stamps the version after merge';
 
-export function autoRevertBranch(env = process.env) {
-  return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
+const fullSha = /^[0-9a-f]{40}$/;
+
+function changedPaths(from, to) {
+  return git(['diff', '--name-only', '--no-renames', '-z', from, to]).split('\0').filter(Boolean).sort();
+}
+
+function treeEntries(rev, paths) {
+  return git(['ls-tree', '-z', '--full-tree', rev, '--', ...paths]).split('\0').filter(Boolean).map(entry => entry.replace('\t', ' ')).sort().join('\n');
+}
+
+function inverts(from, to, candidate, paths) {
+  try {
+    return treeEntries(from, paths) === treeEntries(candidate, paths) && treeEntries(to, paths) === treeEntries(`${candidate}^`, paths);
+  } catch {
+    return false;
+  }
+}
+
+function historyMatches(base, paths) {
+  const commits = [];
+  for (const line of git(['log', '--format=%H', '--name-only', '--no-renames', base, '--', ...paths]).split('\n')) {
+    if (fullSha.test(line)) commits.push({ sha: line, paths: [] });
+    else if (line && commits.length) commits.at(-1).paths.push(line);
+  }
+  return commits;
+}
+
+export function revertPullRequest(base, head) {
+  const commits = git(['rev-list', '--reverse', `${base}..${head}`]).split('\n').filter(Boolean);
+  if (!commits.length) return false;
+  return commits.every(commit => {
+    try {
+      const paths = changedPaths(`${commit}^`, commit);
+      if (!paths.length) return false;
+      const wanted = paths.join('\0');
+      return historyMatches(base, paths).some(candidate => candidate.paths.slice().sort().join('\0') === wanted && inverts(`${commit}^`, commit, candidate.sha, paths));
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function plainChange(line) {
@@ -437,8 +475,14 @@ function check(baseRev, headRev) {
     console.error(diff.split(/\r?\n/).filter(line => /^[+-](?![+-])/.test(line) && (/\bAPP_VERSION\s*=/.test(line) || /\.ver = /.test(line))).join('\n'));
     console.error(fixHint);
   }
-  if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
-  else if (kind === 'CODE') checkFragments(base, head, changed);
+  if (kind === 'CODE') {
+    try {
+      checkFragments(base, head, changed);
+    } catch (error) {
+      if (!revertPullRequest(baseRev, headRev)) throw error;
+      console.error('Changelog note not required: every commit undoes a commit already on master');
+    }
+  }
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;

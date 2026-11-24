@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { autoRevertBranch, classifyTrees } from './version-stamp.mjs';
+import { revertPullRequest, classifyTrees } from './version-stamp.mjs';
 import { nativeTestParts as splitNativeTests } from './native-test-parts.mjs';
 
 const [baseRef, headRef] = process.argv.slice(2);
@@ -91,8 +91,8 @@ try {
   console.log(`merge-base=${base} head=${head}`);
   if (changed.length && changed.every(file => docs.test(file))) {
     console.log('RED_RUN_NOT_REQUIRED documentation only');
-  } else if (autoRevertBranch()) {
-    console.log('RED_RUN_NOT_REQUIRED auto-revert branch undoes a master change');
+  } else if (revertPullRequest(base, head)) {
+    console.log('RED_RUN_NOT_REQUIRED revert undoes a commit on master');
   } else {
     for (const [dir, ref] of [[green, head], [red, base]]) {
       git('worktree', 'add', '--quiet', '--detach', dir, ref);

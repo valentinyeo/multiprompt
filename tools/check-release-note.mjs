@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { autoRevertBranch, checkFragments, classifyTrees, compareTags } from './version-stamp.mjs';
+import { checkFragments, classifyTrees, compareTags, revertPullRequest } from './version-stamp.mjs';
 
 const releaseTag = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const noteEscape = /^No-Note: \S/;
@@ -33,10 +33,6 @@ function readTree(rev) {
 }
 
 function run() {
-  if (autoRevertBranch()) {
-    console.log('SKIP auto-revert branch');
-    return;
-  }
   const tag = newestReleaseTag(git(['tag', '--merged', 'HEAD', '--list', 'v*']).split('\n').filter(Boolean));
   if (!tag) {
     console.log('SKIP no release tag');
@@ -45,6 +41,10 @@ function run() {
   const changed = git(['diff', '--name-only', '-z', tag, 'HEAD']).split('\0').filter(Boolean);
   if (!changed.some(shipped)) {
     console.log(`OK ${tag}: no shipped change`);
+    return;
+  }
+  if (revertPullRequest(tag, 'HEAD')) {
+    console.log(`REVERT ${tag}: a shipped change is undone`);
     return;
   }
   const lines = git(['log', '--format=%B', `${tag}..HEAD`]).split(/\r?\n/);
