@@ -5,24 +5,29 @@
 - Selection happens before requests.
 - Imports never install a runtime.
 - The full-file hash identifies the client artifact.
-- The inner-source hash identifies the selected runtime.
+- The hash of the inner reader, connectors and bundled tool sources identifies the selected runtime.
 
 ## Selection
 
 - Each Unix user has a private runtime.
 - Its directory is `~/.multiprompt-runtime`.
 - `active.json` contains `protocol`, `generation`, and `sha256`.
-- Protocol 1 starts at generation 1.
-- Every inner-source edit increments `RUNTIME_GENERATION`.
-- Generations increase monotonically.
+- Protocol 1 and the three existing metadata fields remain unchanged.
+- `RUNTIME_GENERATION` is derived from the bundle hash, not maintained by hand.
+- Its integer uses bit 52 plus 52 hash bits, above legacy counters and within JSON safe-integer range.
+- The full SHA-256 fingerprint, not integer ordering, decides whether a runtime differs.
 - A lock serializes selection.
 - Readers use owner-only permissions.
 - Each reader is stored as `<sha256>.py`.
 - Publishing syncs a temporary file.
 - An atomic rename publishes it.
-- Older launchers select the installed newer reader.
-- Equal generations with a different hash replace the stale selection with this
-  client's own source, so one missing bump cannot wedge every client.
+- Every tool listed in the runtime tool table is published executable.
+- Its mode is set on the temporary file before the rename.
+- An install removes leftover temporary files.
+- Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
+- Fingerprinted launchers replace a different selection with their own bundle.
+- Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
+- Identical bundles keep the existing selection without rewriting its metadata.
 - Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
 
@@ -73,6 +78,14 @@ Reverting the reader generation stops future cleanup but cannot restore deleted 
 - New live chats have no parking terminal or idle sleep process.
 - Their saved `tmux` field is a routing name, not proof of a terminal.
 - Host config stores the provider, session id, name and working directory.
+- For Claude, config `native_session` identifies the current provider conversation.
+  The host updates it from each Claude `system.init` event, including resumed conversations.
+- Hosted Claude transcript reads resolve config `native_session`, then the latest valid init event's session, then `sid`.
+  A missing current transcript never falls back to a different conversation.
+- Config `sid` remains the stable host routing id and history response id. Do not use it as the current Claude conversation id.
+- Older configs gain `native_session` when the updated host receives its next init event.
+  Existing history and message requests still use the stable `sid`.
+  Android client coordination is tracked in https://app.hypertask.ai/detail/project-2060/2681.
 - `python3 <reader> host list` lists those registered chats.
 - `host connect <name>` reconnects by that registry without creating tmux.
 - Desktop discovery combines the registry with existing terminal sessions.
@@ -178,6 +191,28 @@ Switch AI refuses a chat that is still replying. An idle live agent is stopped f
 The chat keeps its tmux name, so the registered chat name, picture, sidebar place and roster entry stay the same. The agent environment names its session from that tmux name, so the session name variables stay the same too. Other chats reach it by name through the message locator, which now points at the new session. Queued messages move with it. The old session is disabled and a redirect table sends late requests, history reads and event subscriptions from the old session id to the new one. Previous messages stay above a Switch AI divider. Switching back creates another new session under the first AI.
 
 The old AI does not write its own handover yet. The handover comes from the saved history only.
+
+## When a plan runs out
+
+A live chat moves itself to the next AI when its AI reports that the plan is used up.
+The host reads that from the provider's own error event: a Claude result that is an error, a Codex error notification, a Pi turn that stops with an error, or an Antigravity result that is not a success.
+The predicate looks for that provider's usage-limit, rate-limit or quota wording, so ordinary reply text never triggers it.
+
+The turn ends as failed with the reason `usage_limit`.
+The fallback order is Claude, then Codex, then Pi, then Antigravity, saved with the host config as `auto_switch`.
+The order travels with the chat, so a switch keeps it.
+An AI that just ran out is marked empty and skipped for one hour, so a chat never ping-pongs between two empty plans.
+A chat whose every AI is empty stays where it is and says so in one line.
+
+The switch waits for the chat to be idle, then uses the existing Switch AI path in a detached process.
+The old agent's config is disabled and its locator moves before the new AI starts, and the old agent is then stopped, so two AIs never work the same chat.
+The unanswered user message is queued again for the new AI and delivered after the handover is read.
+The divider says `Switched AI automatically: <old> ran out of plan`.
+
+Ctrl+K "Chat View: Auto-switch AI when a plan runs out" toggles this per chat and is on by default.
+There is no dedicated shortcut.
+The setting is `on` in the host config and is accepted while the host is stopped.
+The command-line form is `python3 <reader> host switch-ai <provider> <sid> --to <target>` with the same result; the automatic path adds no new provider or wire field.
 
 ## Saved permission level
 

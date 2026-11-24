@@ -200,6 +200,7 @@ const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_RE
 const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -503,28 +504,20 @@ fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
     return buf[0 .. appdata_len + rest.len];
 }
 
+const SessionIdentity = @import("session_identity.zig").Session;
+
 const ShellRow = struct { target: usize, keywords: []const u8 };
 
 const AdoptHostJob = struct {
-    id: u32 = 0,
-    host: u8 = 0,
-    sid: [36]u8 = std.mem.zeroes([36]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
+    identity: ?SessionIdentity = null,
     cwd: [256]u8 = std.mem.zeroes([256]u8),
     cwd_len: u16 = 0,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
 const MoveChatJob = struct {
-    id: u32 = 0,
-    host: u8 = 0,
+    identity: ?SessionIdentity = null,
     target: u8 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
     cwd: [256]u8 = std.mem.zeroes([256]u8),
     cwd_len: u16 = 0,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -536,14 +529,7 @@ const RestartChatJob = struct {
     fresh: bool = false,
     switch_to: u8 = 0,
     count: u8 = 0,
-    hosts: [RESTART_HOSTS]u8 = @splat(0),
-    ids: [RESTART_HOSTS]u32 = @splat(0),
-    provider: [8]u8 = std.mem.zeroes([8]u8),
-    provider_len: u8 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u8 = 0,
-    tmux: [64]u8 = std.mem.zeroes([64]u8),
-    tmux_len: u8 = 0,
+    identities: [RESTART_HOSTS]SessionIdentity = undefined,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
@@ -905,6 +891,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
+        app_state.SEARCH_WORKSPACE_ALL_OFFSET => "workspace view all sessions alt shift 1",
+        app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET => "workspace view frequent sessions alt shift 2",
+        app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET => "workspace view favorites sessions alt shift 3",
         SEARCH_GOINBOX_OFFSET => "go to inbox",
         SEARCH_SHOW_FREQUENT_OFFSET => "show frequent split",
         SEARCH_FREQUENT_FIRST_OFFSET => "frequent as first tab",
@@ -1025,6 +1014,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_CODEX_OFFSET => "Chat View: Switch AI to Codex keep chat name picture address history subscription",
         SEARCH_CHAT_SWITCH_PI_OFFSET => "Chat View: Switch AI to Pi keep chat name picture address history subscription",
+        SEARCH_CHAT_AUTO_SWITCH_OFFSET => "Chat View: Auto-switch AI when a plan runs out fallback next ai usage limit rate limit quota",
         SEARCH_CHAT_RESTART_OFFSET => "restart this chat on the newest version chat view restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "restart every idle chat chat view restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "more menu chat view more menu three dots approve stop rename history archive model",
@@ -1516,8 +1506,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
     if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return !app_state.g_search_ws_move_mode and !app_state.g_search_workspace_delete_mode;
     switch (target) {
-        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET,
-        SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, app_state.SEARCH_WORKSPACE_ALL_OFFSET, app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET, app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
         else => {},
     }
     if (target == SEARCH_FULLWIDTH_OFFSET) return false;
@@ -1550,7 +1539,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET or target == SEARCH_CHAT_MODE_BYPASS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_REOPEN_SERVER_SHELL_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
-        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, app_state.SEARCH_WORKSPACE_ALL_OFFSET, app_state.SEARCH_WORKSPACE_FREQUENT_OFFSET, app_state.SEARCH_WORKSPACE_FAVORITES_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
         SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
         SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
@@ -1895,7 +1884,7 @@ pub fn workspaceColorSlot() ?u8 {
         if (app_state.g_single_window) return null;
         return if (app_state.g_lws_count > 0) 0 else null;
     }
-    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_all_sessions_active) return null;
+    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_sidebar_view != null or app_state.g_all_sessions_active) return null;
     const slot = activeWorkspaceSlot();
     return if (slot < app_state.g_lws_count and slot < app_state.MAX_LWS) slot else null;
 }
@@ -2596,10 +2585,11 @@ fn adoptHostThread(job: *AdoptHostJob) void {
     defer finishAdoptHostJob(job);
     const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
-    const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
+    const identity = job.identity orelse return;
+    const request = adoptHostRequest(identity, job.cwd[0..job.cwd_len], &buf) orelse return;
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    _ = @import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null);
     if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
         if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
     } else {
@@ -2611,6 +2601,7 @@ fn adoptHostThread(job: *AdoptHostJob) void {
 pub fn startAdoptHost(tab: usize) bool {
     if (tab >= app_state.shell_count) return false;
     const shell = &app_state.shells[tab];
+    const identity = SessionIdentity.fromShell(shell.*) orelse return false;
     const job = std.heap.page_allocator.create(AdoptHostJob) catch return false;
     var cwd: [256]u8 = undefined;
     var cwd_len: usize = 0;
@@ -2619,9 +2610,7 @@ pub fn startAdoptHost(tab: usize) bool {
         cwd[i] = c;
         cwd_len = i + 1;
     }
-    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .sid_len = @intCast(@min(shell.claude_sid_len, 36)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
-    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    job.* = .{ .identity = identity, .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
     @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, adoptHostThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -2641,12 +2630,13 @@ fn moveChatThread(job: *MoveChatJob) void {
     const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
     const target: @import("agent_host.zig").MoveTarget = if (job.target == 1) .terminal else .chat;
-    const request = @import("agent_host.zig").moveRequest(&buf, target, job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len]) orelse return;
+    const identity = job.identity orelse return;
+    const request = @import("agent_host.zig").moveRequest(&buf, target, identity, job.cwd[0..job.cwd_len]) orelse return;
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    _ = @import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null);
     if (@import("agent_host.zig").movedReply(response.items)) {
-        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(job.id), @intCast(job.target));
+        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(identity.owner), @intCast(job.target));
     } else {
         const notice = a.dupeZ(u8, "Move chat: the chat did not move, see the tab") catch return;
         if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
@@ -2681,6 +2671,7 @@ pub fn startMoveChat(tab: usize, target: u8) bool {
     if (tab >= app_state.shell_count) return false;
     const shell = &app_state.shells[tab];
     if (!canMoveHostChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) return false;
+    const identity = SessionIdentity.fromShell(shell.*) orelse return false;
     const job = std.heap.page_allocator.create(MoveChatJob) catch return false;
     var cwd: [256]u8 = undefined;
     var cwd_len: usize = 0;
@@ -2689,9 +2680,7 @@ pub fn startMoveChat(tab: usize, target: u8) bool {
         cwd[i] = c;
         cwd_len = i + 1;
     }
-    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .target = target, .sid_len = @intCast(@min(shell.claude_sid_len, 40)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
-    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    job.* = .{ .identity = identity, .target = target, .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
     @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, moveChatThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -2806,7 +2795,11 @@ pub fn adoptedSwitch(allocator: std.mem.Allocator, body: []const u8, sid_out: []
     return .{ .agent = agent, .sid_len = fields.sid.len };
 }
 
-fn switchAiRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, to: []const u8) ?[]const u8 {
+fn switchAiRequest(out: []u8, identity: SessionIdentity, to: []const u8) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const provider = identity.provider();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
     if (provider.len == 0 or sid.len == 0 or to.len == 0) return null;
     return std.fmt.bufPrint(out, "{{\"op\":\"switch_ai\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"to\":\"{s}\"}}", .{ id, host, provider, sid, to }) catch null;
 }
@@ -2826,7 +2819,11 @@ test "IGSH-2280 a switch reply replaces the shell provider and sid" {
     try std.testing.expect(!switchAiVisible(agent, 3));
     try std.testing.expect(!switchAiVisible(1, 1));
     var buf: [256]u8 = undefined;
-    const request = switchAiRequest(&buf, 4, 0, switchAiName(agent), shell_sid[0..shell_sid_len], "claude") orelse return error.TestUnexpectedResult;
+    const request = switchAiRequest(&buf, blk: {
+        var key = @import("chat_transcript.zig").Identity.init(4, 0, false, shell_sid[0..shell_sid_len], "");
+        key.agent = agent;
+        break :blk key.checked().?;
+    }, "claude") orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, request, "\"provider\":\"pi\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, request, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee") != null);
     try std.testing.expect(std.mem.indexOf(u8, request, old) == null);
@@ -2899,7 +2896,7 @@ fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
                 restartChatNotice(switchAiDone(job.switch_to));
                 return;
             };
-            if (!postSwitchAdopt(job.ids[0], agent, fields.sid)) restartChatNotice(switchAiDone(agent));
+            if (!postSwitchAdopt(job.identities[0].owner, agent, fields.sid)) restartChatNotice(switchAiDone(agent));
             return;
         }
         restartChatNotice(if (std.mem.eql(u8, fields.status, "busy")) "Switch AI: wait for this reply to finish" else "Switch AI failed: this live chat cannot switch");
@@ -2942,24 +2939,25 @@ fn restartChatThread(job: *RestartChatJob) void {
     var buf: [512]u8 = undefined;
     var answered = false;
     if (job.all) {
-        for (job.hosts[0..job.count], job.ids[0..job.count]) |host_index, id| {
-            const request = agent_host.restartAllRequest(&buf, id, host_index) orelse continue;
+        for (job.identities[0..job.count]) |identity| {
+            const request = agent_host.restartAllRequest(&buf, identity) orelse continue;
             var response: std.ArrayList(u8) = .empty;
             defer response.deinit(a);
-            if (!@import("chat_session.zig").chatHistoryPersistent(host_index, id, request, 65536, &response, null)) continue;
+            if (!@import("chat_session.zig").chatHostPersistent(identity.host, request, 65536, &response)) continue;
             answered = true;
             restartChatReply(job, response.items);
         }
     } else {
+        const identity = job.identities[0];
         const request = if (job.switch_to != 0)
-            switchAiRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], switchAiName(job.switch_to)) orelse return
+            switchAiRequest(&buf, identity, switchAiName(job.switch_to)) orelse return
         else if (job.fresh)
-            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
+            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ identity.owner, identity.host.index(), identity.provider(), std.mem.sliceTo(&identity.sid, 0) }) catch return
         else
-            agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+            agent_host.restartRequest(&buf, identity) orelse return;
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
-        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
+        if (!@import("chat_session.zig").chatHistoryPersistent(identity, request, 65536, &response, null)) {
             restartChatNotice(if (job.switch_to != 0) "Switch AI failed: the server did not answer" else if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
             return;
         }
@@ -2991,12 +2989,12 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
             const shell = &app_state.shells[i];
             if (!canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) continue;
             var seen = false;
-            for (job.hosts[0..job.count]) |known| {
-                if (known == shell.tmux_host) seen = true;
+            const identity = @import("chat_session.zig").chatFileIdentityForShell(@intCast(i)).checked() orelse continue;
+            for (job.identities[0..job.count]) |known| {
+                if (known.host == identity.host) seen = true;
             }
             if (seen) continue;
-            job.hosts[job.count] = shell.tmux_host;
-            job.ids[job.count] = shell.shell_id;
+            job.identities[job.count] = identity;
             job.count += 1;
         }
         if (job.count == 0) {
@@ -3008,22 +3006,17 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
             std.heap.page_allocator.destroy(job);
             return false;
         }
-        const shell = &app_state.shells[tab];
         const key = @import("chat_session.zig").chatFileIdentityForShell(tab);
-        const provider = key.provider();
-        if (provider.len > job.provider.len or key.sid[0] == 0 or key.tmux[0] == 0) {
+        const identity = key.checked() orelse {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        };
+        if (key.sid[0] == 0 or key.tmux[0] == 0) {
             std.heap.page_allocator.destroy(job);
             return false;
         }
         job.count = 1;
-        job.hosts[0] = shell.tmux_host;
-        job.ids[0] = shell.shell_id;
-        job.provider_len = @intCast(provider.len);
-        @memcpy(job.provider[0..provider.len], provider);
-        job.sid_len = @intCast(@min(shell.claude_sid_len, 40));
-        @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
-        job.tmux_len = @intCast(@min(shell.tmux_session_len, 64));
-        @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+        job.identities[0] = identity;
     }
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, restartChatThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
@@ -3033,7 +3026,11 @@ fn startChatJob(all: bool, fresh: bool, switch_to: u8, tab: u32) bool {
     return true;
 }
 
-pub fn adoptHostRequest(id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8, out: []u8) ?[]const u8 {
+pub fn adoptHostRequest(identity: SessionIdentity, cwd: []const u8, out: []u8) ?[]const u8 {
+    const id = identity.owner;
+    const host = identity.host.index();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    const tmux = std.mem.sliceTo(&identity.tmux, 0);
     if (sid.len == 0 or sid.len > 80 or tmux.len == 0 or tmux.len > 80) return null;
     return std.fmt.bufPrint(out, "{{\"op\":\"host_adopt\",\"id\":{d},\"host\":{d},\"provider\":\"claude\",\"sid\":\"{s}\",\"tmux\":\"{s}\",\"cwd\":\"{s}\"}}", .{ id, host, sid, tmux, cwd }) catch null;
 }
@@ -3045,9 +3042,12 @@ test "IGSH-1266 moving a chat to the new mode needs an idle old-style Claude tab
     try std.testing.expect(!canAdoptHostTab(1, 0, 12, false));
     try std.testing.expect(!canAdoptHostTab(1, 36, 0, false));
     var buf: [512]u8 = undefined;
-    const request = adoptHostRequest(7, 0, "ffffffff-ffff-4fff-bfff-ffffffffffff", "term-abc", "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
+    var key = @import("chat_transcript.zig").Identity.init(7, 0, false, "ffffffff-ffff-4fff-bfff-ffffffffffff", "");
+    @memcpy(key.tmux[0..8], "term-abc");
+    const request = adoptHostRequest(key.checked().?, "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("{\"op\":\"host_adopt\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", request);
-    try std.testing.expect(adoptHostRequest(7, 0, "", "term-abc", "/home/x/proj", &buf) == null);
+    key.sid = @splat(0);
+    try std.testing.expect(adoptHostRequest(key.checked().?, "/home/x/proj", &buf) == null);
 }
 
 pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
@@ -3321,7 +3321,7 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
             const shell = &app_state.shells[ns];
             shell.chat_view_on = true;
             const started = live.starting(shell.shell_id, host, host_sid.?);
-            if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, host_sid.?);
+            if (shell.native_terminal) @import("native_session.zig").launch(SessionIdentity.fromShell(shell.*) orelse return false);
             if (app_state.active_shell == ns) {
                 if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
                 app_state.g_chat_screen_working = live.running(shell.shell_id);
@@ -3405,7 +3405,7 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
         const shell = &app_state.shells[ns];
         shell.chat_view_on = true;
         const started = live.starting(shell.shell_id, host, sid);
-        if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, sid);
+        if (shell.native_terminal) @import("native_session.zig").launch(SessionIdentity.fromShell(shell.*) orelse return false);
         if (app_state.active_shell == ns) {
             if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
             app_state.g_chat_screen_working = live.running(shell.shell_id);
@@ -4182,6 +4182,8 @@ pub fn updateSearchResults() void {
                 const archived = app_state.g_search_workspace_action == .restore;
                 if (e.archived != archived) continue;
             }
+            if (@import("workspaces.zig").workspaceDeleteMoveSource() != null and findMyWorkspaceSlot(e.id[0..e.id_len]) == null) continue;
+            if (@import("workspaces.zig").workspaceDeleteMoveSource()) |source| if (source == @as(u32, @intCast(wi))) continue;
             if (app_state.g_search_workspace_action == .archive and !@import("workspaces.zig").workspaceCanArchive(@intCast(wi))) continue;
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
                 if (app_state.g_ws_snoozed[slot] and !app_state.g_search_workspace_delete_mode) continue;
@@ -4640,12 +4642,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Open or fold all tool steps", "open or fold tool steps", "expand collapse tools" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TOOL_STEPS_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TOOL_STEPS_OFFSET, &[_][]const u8{ "Open or fold tool steps", "chat view open or fold all tool steps", "expand collapse tools" }, false);
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "Chat View: Scroll to newest message", "scroll to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4692,6 +4689,8 @@ pub fn updateSearchResults() void {
         }
     }
 
+    chatPaletteRow(SEARCH_CHAT_AUTO_SWITCH_OFFSET, &[_][]const u8{ "Chat View: Auto-switch AI when a plan runs out", "fallback next ai usage limit rate limit quota ran out of plan" }, true);
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "restart every idle chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4713,18 +4712,8 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TODO_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Copy Latest Code Block", "copy code", "ctrl shift d" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_CODE_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
+    chatPaletteRow(SEARCH_CHAT_TODO_OFFSET, &[_][]const u8{ "Toggle todo list", "Chat View: Toggle todo list", "todos tasks plan progress" }, false);
+    chatPaletteRow(SEARCH_CHAT_COPY_CODE_OFFSET, &[_][]const u8{ "Copy latest code block", "chat view copy latest code block", "copy code", "ctrl shift d" }, false);
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictate", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4842,6 +4831,8 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
+
+    @import("workspace_view_ui.zig").appendSearchResults();
 
     if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&.{ "Go to Starred workspace", "favorites", "alt 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -6225,7 +6216,16 @@ fn appendTmuxCacheRows() void {
     }
 }
 
-fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {
+fn chatPaletteRow(id: usize, labels: []const []const u8, needs_live: bool) void {
+    if (!app_state.g_chat_active or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    if (needs_live and !liveChatTab(app_state.active_shell)) return;
+    if (app_state.g_search_result_count >= app_state.g_search_results.len) return;
+    if (!labelsMatchQuery(labels, app_state.g_search_buf[0..app_state.g_search_len])) return;
+    app_state.g_search_results[app_state.g_search_result_count] = id;
+    app_state.g_search_result_count += 1;
+}
+
+pub fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {
     if (query.len == 0) return true;
     for (labels) |label| {
         if (asciiContainsQueryInsensitive(label, query)) return true;

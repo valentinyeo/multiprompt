@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: check-red-run-${{ github.event.pull_request.number || github.ref }}
+  group: check-red-run-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -67,7 +67,9 @@ jobs:
           echo "ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Install video validation tools
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+        uses: ./.github/actions/install-ffmpeg
+        with:
+          version: '7.1.1'
       - name: Test admission controls
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source

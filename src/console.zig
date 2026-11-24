@@ -1169,7 +1169,26 @@ fn probeSsh(candidate: []const u8) bool {
     return ok;
 }
 
+var g_ssh_resolve_thread = std.atomic.Value(bool).init(false);
+
+fn resolveSshPathWorker(force: bool) void {
+    defer g_ssh_resolve_thread.store(false, .release);
+    _ = resolveSshPath(force);
+}
+
 pub fn resolveSshPath(force: bool) bool {
+    if (@import("ui_thread.zig").busy()) {
+        if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
+        if (!g_ssh_resolve_thread.swap(true, .acq_rel)) {
+            @import("idle_budget.zig").bump(.thread_spawn);
+            const thread = std.Thread.spawn(.{}, resolveSshPathWorker, .{force}) catch {
+                g_ssh_resolve_thread.store(false, .release);
+                return false;
+            };
+            thread.detach();
+        }
+        return false;
+    }
     while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
     defer app_state.g_ssh_mutex.unlock();
     if (!force and app_state.g_ssh_resolved) return app_state.g_ssh_path_len != 0;
@@ -1373,10 +1392,23 @@ fn validTunnelId(raw: []const u8) ?[16]u8 {
 }
 
 fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
+    const on_ui = @import("ui_thread.zig").busy();
+    if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
+        const n = @min(app_state.g_tunnel_notify_id_len, out.len);
+        @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
+        return out[0..n];
+    }
     const mutex = CreateMutexW(null, 0, L("Local\\ZigShell-notify-laptop-id")) orelse return null;
     defer _ = CloseHandle(mutex);
-    const wait = WaitForSingleObject(mutex, 5000);
-    if (wait != 0 and wait != 0x80) return null;
+    const wait = WaitForSingleObject(mutex, if (on_ui) 0 else 5000);
+    if (wait != 0 and wait != 0x80) {
+        if (on_ui and app_state.g_tunnel_notify_id_len > 0) {
+            const n = @min(app_state.g_tunnel_notify_id_len, out.len);
+            @memcpy(out[0..n], app_state.g_tunnel_notify_id[0..n]);
+            return out[0..n];
+        }
+        return null;
+    }
     defer _ = ReleaseMutex(mutex);
     var dir_buf: [512]u8 = undefined;
     const dir = getSessionDir(&dir_buf) orelse return null;
@@ -1406,7 +1438,12 @@ fn tunnelSocketId(out: *[80]u8) ?[]const u8 {
     }
     var name: [48]u8 = undefined;
     const n = GetEnvironmentVariableA("COMPUTERNAME", &name, name.len);
-    return tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
+    const sock = tunnelSocketName(out, if (n > 0 and n < name.len) name[0..n] else "", &id);
+    if (sock.len > 0 and sock.len <= app_state.g_tunnel_notify_id.len) {
+        @memcpy(app_state.g_tunnel_notify_id[0..sock.len], sock);
+        app_state.g_tunnel_notify_id_len = sock.len;
+    }
+    return sock;
 }
 
 fn probeTunnelRelay(host: u8) void {
@@ -1996,7 +2033,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2039,6 +2076,9 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         debugLog("spawnShell refused: no title id");
         return false;
     };
+    if (app_state.g_sidebar_view != null and !app_state.g_restoring and background_workspace == null) {
+        if (app_state.g_single_window) @import("workspaces.zig").switchToWorkspace(app_state.g_active_workspace) else app_state.g_sidebar_view = null;
+    }
     const idx = app_state.shell_count;
     if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
@@ -2243,7 +2283,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2705,7 +2745,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (remember_closed) {
         if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
-        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len], @import("tmux_closed.zig").now()) catch debugLog("Could not remember closed tmux session");
         for (app_state.g_tmux_closed.entries.items) |*entry| {
             if (@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
                 entry.face = closing.face;
@@ -2812,6 +2852,13 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         if (app_state.active_shell > idx) app_state.active_shell -= 1;
         if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
         invalidateSidebar();
+        saveSession();
+        return;
+    }
+    if (app_state.g_sidebar_view != null) {
+        if (closing_active) app_state.active_shell = app_state.shell_count;
+        if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
+        @import("workspaces.zig").refreshSidebarView();
         saveSession();
         return;
     }
@@ -2930,6 +2977,8 @@ pub fn paneGuardKeepUser(requested: u32) void {
 }
 
 pub fn switchToShellByUser(idx: u32) void {
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and idx != app_state.active_shell)
+        @import("sidebar.zig").freezeSidebarOrder();
     const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
     if (idx < app_state.shell_count) {
         @import("room_frontend.zig").cancelRestoreForUser();
@@ -2947,6 +2996,10 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) {
+        _ = @import("sidebar.zig").thawSidebarOrder();
+        app_state.g_sidebar_view = null;
+    }
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -3036,7 +3089,7 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_voice_highlight = null;
     }
     if (!defer_browser) ecoqosReevaluateAll();
-    if (!app_state.g_restoring and app_state.g_single_window and idx < app_state.shell_count) {
+    if (!app_state.g_restoring and app_state.g_single_window and app_state.g_sidebar_view == null and idx < app_state.shell_count) {
         app_state.g_active_workspace = app_state.shells[idx].workspace;
         updateMainWindowTitle();
     }

@@ -7,9 +7,16 @@ const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_perf_test.zig'), 'utf8');
 const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
 
-const refWork = 6100 * 1200;
-const heaviestWork = 12_200 * 600;
-const smallWork = 2800 * 600;
+const refBlocks = 6100;
+const refBlockChars = 1200;
+
+function workUnits(blocks, blockChars) {
+  return blocks * (blockChars + refBlockChars);
+}
+
+const refWork = workUnits(refBlocks, refBlockChars);
+const heaviestWork = workUnits(12_200, 600);
+const smallWork = workUnits(2800, 600);
 const slack = 1.35;
 const floor = 50;
 const tick = 15.625;
@@ -21,6 +28,14 @@ function refFromSmallBaseline(baselineMs) {
 
 function budgetMs(referenceMs, units) {
   return Math.max(floor, referenceMs * (units / refWork) * slack);
+}
+
+function legacyWorkUnits(blocks, blockChars) {
+  return blocks * blockChars;
+}
+
+function legacyBudgetMs(referenceMs, units) {
+  return Math.max(floor, referenceMs * (units / (refBlocks * refBlockChars)) * slack);
 }
 
 function wouldPass(bestMs, referenceMs, units) {
@@ -42,15 +57,59 @@ test('CPU991 measures a same-volume reference before enforcing scaled budgets', 
   assert.match(source, /reference_per_call_ms/);
   assert.match(source, /ref_blocks: usize = 6100/);
   assert.match(source, /ref_block_chars: usize = 1200/);
-  assert.match(source, /heaviest_work_units: u64 = 12200 \* 600/);
+  assert.match(source, /heaviest_work_units: u64 = workUnits\(12200, 600\)/);
+  assert.match(source, /return b \* \(c \+ @as\(u64, @intCast\(ref_block_chars\)\)\)/);
+  assert.match(source, /IGSH-991 SOFT-3146 echo assign budget credits per-block scan alongside character volume/);
   assert.match(source, /slack_ratio: f64 = 1\.35/);
   assert.match(source, /absolute_floor_ms: i64 = 50/);
   assert.match(source, /CPU960 reference_per_call_ms=\{d:\.3\}/);
   assert.match(source, /CPU991 matching worst_ratio=\{d:\.3\}/);
-  const refWorkUnits = 6100 * 1200;
-  const heaviest = 12_200 * 600;
-  assert.equal(refWork, refWorkUnits, 'the reference history holds the same characters as the heaviest case');
-  assert.ok(heaviest / refWork > 0.99 && heaviest / refWork < 1.01, 'reference and heaviest case share one working set');
+  const refChars = 6100 * 1200;
+  const heavyChars = 12_200 * 600;
+  assert.equal(refChars, heavyChars, 'the reference history holds the same characters as the heaviest case');
+  assert.ok(heaviestWork / refWork > 1.4 && heaviestWork / refWork < 1.6, 'block-heavy histories weigh more than character volume alone');
+});
+
+test('CPU991 calibrates in the window it judges and runs the heaviest case first', () => {
+  assert.match(source, /const block_counts = \[_\]usize\{ 12200, 2800, 1200 \}/);
+  assert.match(source, /const block_chars = \[_\]usize\{ 600, 60 \}/);
+  assert.match(source, /CPU960 late calibrate/);
+  assert.match(source, /@max\(early_reference_per_call_ms, late_reference_per_call_ms\)/);
+  assert.match(source, /CPU960 window_reference_per_call_ms=\{d:\.3\}/);
+
+  const recorded = {
+    job: 'run 45108637392 job 137475644260 test-vps (1)',
+    reference: 33,
+    cases: [
+      { blocks: 1200, chars: 60, best: 0.392 },
+      { blocks: 1200, chars: 600, best: 3.226 },
+      { blocks: 2800, chars: 60, best: 0.917 },
+      { blocks: 2800, chars: 600, best: 7.571 },
+      { blocks: 12200, chars: 60, best: 4 },
+      { blocks: 12200, chars: 600, best: 58.5 },
+    ],
+  };
+  const ratios = recorded.cases.map(row => row.best / budgetMs(recorded.reference, workUnits(row.blocks, row.chars)));
+  const heaviestRatio = ratios[ratios.length - 1];
+  assert.ok(heaviestRatio <= 1, `${recorded.job} stays inside the block-aware budget at ratio ${heaviestRatio.toFixed(3)}`);
+  assert.ok(
+    ratios.slice(0, -1).every(ratio => ratio < 0.2),
+    `every case before the last stayed far inside its budget: ${ratios.slice(0, -1).map(r => r.toFixed(3)).join(' ')}`,
+  );
+  assert.ok(wouldPass(33, recorded.reference, heaviestWork), 'the same heavy case read 33 ms in the green run, so the shape is fine');
+  const soft3146 = { reference: 32, best: 62, blocks: 12200, chars: 600 };
+  const soft3146Units = workUnits(soft3146.blocks, soft3146.chars);
+  const legacyLimit = legacyBudgetMs(soft3146.reference, legacyWorkUnits(soft3146.blocks, soft3146.chars));
+  assert.ok(soft3146.best > legacyLimit, `legacy gate rejects ${soft3146.best} ms over ${legacyLimit.toFixed(3)} ms`);
+  assert.ok(soft3146.best <= budgetMs(soft3146.reference, soft3146Units), 'block-aware gate accepts the same VPS reading');
+  console.log('%s heavy_ratio=%s soft3146_budget=%s', recorded.job, heaviestRatio.toFixed(3), budgetMs(soft3146.reference, soft3146Units).toFixed(3));
+});
+
+test('SOFT-3146 a doubled heavy path still fails the block-aware gate', () => {
+  const reference = refFromSmallBaseline(15);
+  const budget = budgetMs(reference, heaviestWork);
+  assert.equal(wouldPass(92, reference, heaviestWork), false, `regressed 92 ms must exceed ${budget.toFixed(3)} ms`);
+  assert.ok(wouldPass(62, 32, heaviestWork), 'the recorded VPS hot path stays green');
 });
 
 test('every trial reads a batch of calls that spans many CPU clock ticks', () => {

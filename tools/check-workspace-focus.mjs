@@ -277,7 +277,9 @@ for (const [before, after] of [
   assert.throws(() => nativePaletteFocusContract(broken), assert.AssertionError, `reject focus regression: ${before}`);
 }
 const workflow = read('.github/workflows/verify.yml');
-assert.ok(read('.github/workflows/click-through.yml').includes(' tools '), 'the click-through gate reruns when the focus tool changes');
+const clickThrough = read('.github/workflows/click-through.yml');
+assert.match(clickThrough, /^  schedule:\n    - cron: '[^']+ \* \* \*'/m, 'the click-through gate reruns nightly so a focus tool change is re-verified');
+assert.match(clickThrough, /touchedJourneysForDiff\(process\.env\.BASE, process\.env\.HEAD\)/, 'the click-through gate still follows the changed files');
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
 function authorizationLifetimeContract(focus, shortcuts, main) {
   const clears = /app_state\.g_focus_authorized_hwnd = null;\s*app_state\.g_focus_authorized_until = 0;\s*app_state\.g_focus_browser_shell_id = 0;/;
@@ -325,7 +327,7 @@ function workspaceFocusLandingContract(focus, workspaces) {
   assert.match(landed, /app_state\.g_focus_browser_shell_id = 0;\s*@import\("workspaces.zig"\)\.captureWorkspaceFocus\(\);\s*\}\s*\}/, 'capture the observed landing before frame activation can obscure the console');
   assert.equal((landed.match(/captureWorkspaceFocus\(/g) || []).length, 1);
   const capture = workspaces.slice(workspaces.indexOf('pub fn captureWorkspaceFocus('), workspaces.indexOf('test "IGSH-522 workspace return'));
-  assert.match(capture, /if \(app_state\.g_restoring or app_state\.g_starred_workspace or app_state\.active_shell >= app_state\.shell_count\) return;/);
+  assert.match(capture, /if \(app_state\.g_restoring or app_state\.g_starred_workspace or app_state\.g_sidebar_view != null or app_state\.active_shell >= app_state\.shell_count\) return;/, 'a restore, the starred list, a workspace view and an empty selection all skip the capture');
   assert.match(capture, /if \(app_state\.g_single_window and shell\.workspace != app_state\.g_active_workspace\) return;/);
   assert.match(capture, /GetFocus\(\) == app_state\.g_chat_composer_hwnd\)\s*\.chat\s*else if \(@import\("focus.zig"\)\.activeShellHasForegroundFocus\(\)\)\s*\.shell\s*else\s*\.none;/);
   assert.match(workspaces, /if \(ws >= MAX_LWS or input == \.none\) return;/);
@@ -342,4 +344,7 @@ for (const [before, after] of [
   assert.notEqual(broken, focusSource);
   assert.throws(() => workspaceFocusLandingContract(broken, workspaces), assert.AssertionError);
 }
+const withoutViewGuard = workspaces.replace('app_state.g_sidebar_view != null or ', '');
+assert.notEqual(withoutViewGuard, workspaces, 'the workspace view guard must stay removable for the control');
+assert.throws(() => workspaceFocusLandingContract(focusSource, withoutViewGuard), assert.AssertionError, 'reject a capture that ignores an open workspace view');
 console.log('workspace-focus landed surface capture checks passed');

@@ -19,6 +19,7 @@ test('IGSH-923 reopening refreshes both triggers, errors back off, and failed re
   const state = fs.readFileSync('src/app_state.zig', 'utf8');
   const done = source.slice(source.indexOf('pub fn chatAcOnFetchDone('), source.indexOf('\nfn chatAcCatalog('));
   const afterSend = source.slice(source.indexOf('pub fn chatAcAfterSend('), source.indexOf('\npub fn chatAcOpenBrowse('));
+  const shellPath = source.slice(source.indexOf('fn chatAcShellPath('), source.indexOf('\nfn chatAcCompleterHost('));
   const policy = source.slice(source.indexOf('    if (opening and slot.pending', source.indexOf('fn chatAcOnComposerChanged(')), source.indexOf('\n}', source.indexOf('    if (opening and slot.pending', source.indexOf('fn chatAcOnComposerChanged('))));
   const slot = state.slice(state.indexOf('const ChatAcSlot = struct'), state.indexOf('\nconst ChatAc = struct'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-refresh-'));
@@ -46,6 +47,12 @@ const app_state = struct {
     const g_chat_transcript_hwnd: usize = 0;
     const g_main_hwnd: usize = 0;
 };
+const Shell = @TypeOf(app_state.shells[0]);
+fn shellKnownRemotePath(shell: *const Shell, _: u8) ?[]const u8 {
+    if (shell.claude_cwd_len == 0) return null;
+    return shell.claude_cwd[0..shell.claude_cwd_len];
+}
+${shellPath}
 var agent: chat_complete.Agent = .claude;
 fn chatAcAgent() chat_complete.Agent { return agent; }
 fn isRemoteShellKind(kind: @TypeOf(app_state.shells[0].kind)) bool { return kind != .local; }

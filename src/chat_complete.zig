@@ -81,6 +81,21 @@ pub fn parseResponse(bytes: []const u8, out: []Entry) ?Response {
     return .{ .header = .{ .id = id, .op = op, .status = status, .cwd = cwd, .count = count }, .n = count };
 }
 
+fn startsWithOneSwap(name: []const u8, query: []const u8) bool {
+    if (query.len < 3 or name.len < query.len) return false;
+    var swapped: [200]u8 = undefined;
+    if (query.len > swapped.len) return false;
+    var i: usize = 0;
+    while (i + 1 < query.len) : (i += 1) {
+        @memcpy(swapped[0..query.len], query);
+        const a = swapped[i];
+        swapped[i] = swapped[i + 1];
+        swapped[i + 1] = a;
+        if (std.ascii.startsWithIgnoreCase(name, swapped[0..query.len])) return true;
+    }
+    return false;
+}
+
 fn prefixAtWord(hay: []const u8, needle: []const u8, boundaries: []const u8) bool {
     for (hay, 0..) |c, i| {
         if (i == 0 or std.mem.indexOfScalar(u8, boundaries, hay[i - 1]) != null) {
@@ -95,6 +110,7 @@ pub fn score(name: []const u8, desc: []const u8, query: []const u8) ?u16 {
     if (query.len == 0) return 6;
     if (std.ascii.eqlIgnoreCase(name, query)) return 0;
     if (std.ascii.startsWithIgnoreCase(name, query)) return 1;
+    if (startsWithOneSwap(name, query)) return 2;
     if (prefixAtWord(name, query, ":-_/")) return 2;
     if (std.ascii.indexOfIgnoreCase(name, query) != null) return 3;
     if (prefixAtWord(desc, query, " \t.,:;()")) return 4;
@@ -196,6 +212,8 @@ test "response framing, rank and insertion" {
     try std.testing.expectEqualStrings("pospeak", entries[order[0]].name);
     try std.testing.expectEqual(@as(?u16, 1), score("compact", "", "co"));
     try std.testing.expectEqual(@as(?u16, 4), score("ticket", "Post updates", "pos"));
+    try std.testing.expectEqual(@as(?u16, 2), score("verify-multiprompt", "", "verfiy"));
+    try std.testing.expect(score("verify-multiprompt", "", "verify") != null and score("verify-multiprompt", "", "verify").? < score("verify-multiprompt", "", "verfiy").?);
     const commands = [_]Entry{
         .{ .kind = 'B', .name = "copy", .hint = "", .desc = "" },
         .{ .kind = 'B', .name = "context", .hint = "", .desc = "" },

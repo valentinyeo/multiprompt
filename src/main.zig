@@ -826,7 +826,6 @@ const ReleaseMutex = @import("win32.zig").ReleaseMutex;
 const windowOwnerProcessStillActive = @import("workspaces.zig").windowOwnerProcessStillActive;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
 const findAndFocusWorkspaceWindow = @import("workspaces.zig").findAndFocusWorkspaceWindow;
-const deleteWorkspaceByIndex = @import("workspaces.zig").deleteWorkspaceByIndex;
 const saveWorkspaceRegistry = @import("workspaces.zig").saveWorkspaceRegistry;
 const gcDefaultNamedWindowOnClose = @import("workspaces.zig").gcDefaultNamedWindowOnClose;
 const setWorkspaceRestoreAndSave = @import("workspaces.zig").setWorkspaceRestoreAndSave;
@@ -1438,52 +1437,9 @@ fn recordFrontVisit() void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
-fn resetSidebarDrag() void {
-    app_state.drag_id_count = 0;
-    app_state.drag_crossed = false;
-    app_state.drag_collapse = false;
-    app_state.drag_active = false;
-    app_state.drag_pending_materialize = false;
-    app_state.drag_is_group = false;
-    app_state.drag_section_only = false;
-    app_state.drag_detach_blocked = false;
-    invalidateSidebar();
-}
-
-fn sidebarDragValid() bool {
-    if (app_state.drag_starred != app_state.g_starred_workspace or
-        (!app_state.drag_starred and app_state.drag_workspace != app_state.g_active_workspace) or
-        app_state.drag_unread_only != app_state.g_unread_only or app_state.g_hide_sidebar or
-        app_state.drag_sidebar_collapsed != app_state.g_sidebar_collapsed or app_state.drag_single_window != app_state.g_single_window or
-        app_state.drag_pinned_collapsed != app_state.g_pinned_section_collapsed or app_state.drag_recents_collapsed != app_state.g_recents_section_collapsed or
-        (app_state.drag_id_count > 1 and app_state.drag_groups_token != @import("sidebar.zig").dragGroupsToken()) or
-        app_state.g_account_locked or @import("settings_panel.zig").isOpen() or
-        app_state.g_search_active or app_state.g_inbox_active or app_state.g_all_sessions_active or
-        app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
-        app_state.g_snippet_create_active) return false;
-    return @import("sidebar.zig").dragIdsInCurrentWorkspace(app_state.drag_ids[0..app_state.drag_id_count]);
-}
-
-fn clearSelectionForClick(hwnd: HANDLE, mx: i32, my: i32) void {
-    if (app_state.g_search_active) {
-        var rc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(hwnd, &rc);
-        const width = searchOverlayW();
-        const height = searchInputH() + @as(i32, @intCast(@min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows()))) * searchRowH() + searchFooterH();
-        const x = searchOverlayOx(rc.right - rc.left, width);
-        const y = searchOverlayOy(rc.bottom - rc.top, height);
-        if (mx >= x and mx < x + width and my >= y and my < y + height) return;
-    } else if (!@import("settings_panel.zig").isOpen() and !app_state.g_account_locked and !app_state.g_hide_sidebar and
-        !inboxButtonHitTest(mx, my) and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and
-        !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and
-        mx >= 0 and mx < SIDEBAR_W() - 4 and my >= @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight() and
-        !sidebarStickyCardHitTest(my) and !sidebarStickyCardHoverTest(mx, my) and updateCardHit(mx, my) == 0)
-    {
-        if (hitTestSidebar(mx, my + app_state.g_sidebar_scroll) == .tab) return;
-    }
-    app_state.drag_anchor = null;
-    if (clearTabSelection()) invalidateSidebar();
-}
+const resetSidebarDrag = @import("sidebar_input.zig").resetSidebarDrag;
+const sidebarDragValid = @import("sidebar_input.zig").sidebarDragValid;
+const clearSelectionForClick = @import("sidebar_input.zig").clearSelectionForClick;
 
 fn showPickRepoFailure(saving_folder: bool) void {
     const palette = @import("command_palette.zig");
@@ -1507,14 +1463,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
 fn browserFocusHotkey() void {
     const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
@@ -2379,6 +2328,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
                 return 0;
             }
+            if (msg == WM_MOUSEWHEEL and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].native_terminal) {
+                const target = app_state.shells[app_state.active_shell].hwnd;
+                if (target != null and pt.x >= SIDEBAR_W()) {
+                    _ = SendMessageW(target, msg, wp, lp);
+                    return 0;
+                }
+            }
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SETCURSOR => {
@@ -2425,12 +2381,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             var leave_client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &leave_client);
             const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
-            const rearm_sidebar_hover = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
+            const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
                 @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
-            if (rearm_sidebar_hover) {
-                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
-                _ = TrackMouseEvent(&tracking);
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            if (!pointer_in_sidebar and app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {
@@ -2467,7 +2420,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const pointer_in_sidebar = !app_state.g_hide_sidebar and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W();
             if (pointer_in_sidebar) {
                 @import("sidebar.zig").freezeSidebarOrder();
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            } else if (app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
@@ -4410,6 +4363,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
             loadSnippetsIfChanged();
+            @import("workspace_delete_palette.zig").takeRequested();
             if (app_state.g_search_pick_repo_mode) requestAllRepoRefresh();
             updateSearchResults();
             if (!was_search_active and !app_state.g_search_from_inbox) {
@@ -4524,7 +4478,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
-            if (wp == 0 and app_state.g_starred_workspace) return 0;
+            if (wp == 0 and (app_state.g_starred_workspace or app_state.g_sidebar_view != null)) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -5534,13 +5488,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                if (target == SEARCH_CHAT_RESYNC_OFFSET or target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    @import("chat_session.zig").chatResync();
+                    clearSearchBackdrop(); showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) _ = @import("chat_auto_switch.zig").startToggle(app_state.active_shell) else @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7203,6 +7156,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_sel = 0;
                     return 0;
                 }
+                if (@import("workspace_view_ui.zig").activatePalette(hwnd, target)) return 0;
                 if (target == SEARCH_STARRED_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -7430,21 +7384,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target >= SEARCH_WORKSPACE_DELETE_OFFSET and target < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) {
-                    const workspace_idx: u32 = @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET);
-                    if (app_state.g_search_workspace_delete_confirm) |confirm_idx| {
-                        if (confirm_idx == workspace_idx) {
-                            _ = deleteWorkspaceByIndex(workspace_idx);
-                            app_state.g_search_workspace_delete_confirm = null;
-                            app_state.g_search_len = 0;
-                            app_state.g_search_sel = 0;
-                            app_state.g_search_scroll = 0;
-                            updateSearchResults();
-                            _ = InvalidateRect(hwnd, null, 0);
-                            return 0;
-                        }
-                    }
-                    app_state.g_search_workspace_delete_confirm = workspace_idx;
-                    _ = InvalidateRect(hwnd, null, 0);
+                    @import("workspace_delete_palette.zig").confirm(hwnd, @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET));
                     return 0;
                 }
                 if (target == app_state.SEARCH_TABCTX_PIN_PAGE or target == app_state.SEARCH_TABCTX_UNPIN_PAGE) {
@@ -8332,6 +8272,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     armBrowserEdgeMaskRaise();
                 }
                 if (focusGuardComposerRepairAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
+                @import("session_caret.zig").repairActiveSessionCaret();
             }
             if (activePaneBorderOn() or chatViewOwnsInput()) {
                 _ = InvalidateRect(hwnd, null, 0);
@@ -8944,6 +8885,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         retry_delay = 100;
                     } else if (landed) {
                         app_state.g_refocus_remaining = 0;
+                        @import("session_caret.zig").repairActiveSessionCaret();
                     } else if (app_state.g_refocus_remaining > 0) {
                         app_state.g_refocus_remaining -= 1;
                         retry = true;
@@ -9020,6 +8962,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (@import("workspace_view_ui.zig").refreshSidebar(hwnd)) return 0;
                 if (app_state.g_starred_workspace and !app_state.g_inbox_active) {
                     loadInboxModel();
                     @import("workspaces.zig").refreshStarredWorkspace();

@@ -120,6 +120,8 @@ fn pollFonts() void {
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
     .replaceAll('@import("focus.zig").', '')
+    .replaceAll('@import("sidebar.zig").thawSidebarOrder()', 'thawSidebarOrder()')
+    .replaceAll('@import("sidebar.zig").freezeSidebarOrder()', 'freezeSidebarOrder()')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole')
     .replaceAll('@import("native_session.zig").restyle', 'nativeRestyle')
@@ -264,6 +266,8 @@ var g_chat_browser_swap: struct { shell_id: u32 = 0, fn cancel(_: *@This()) void
 var g_browser_focus_mode = false;
 var g_single_window = true;
 var g_starred_workspace = false;
+var g_sidebar_view: ?@import("workspace_view.zig").Builtin = null;
+fn refreshSidebarView() void { unreachable; }
 var g_starred_last_shell: u32 = 0;
 var g_inbox_step_context_active = false;
 const TIMER_INBOX_REFRESH = 1;
@@ -433,6 +437,8 @@ fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn openChatView() void { g_chat_active = true; }
 fn saveSession() void {}
 fn loadInboxModel() void {}
+fn thawSidebarOrder() bool { return false; }
+fn freezeSidebarOrder() void {}
 fn chatBenchEnabled() bool { return false; }
 fn chatViewOwnsInput() bool { return g_chat_active; }
 fn resetFontCache() void {}

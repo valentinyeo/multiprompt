@@ -10,11 +10,14 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Stop a running reply](chat-stop.md).
 - [Send and queue messages](chat-message-sending.md).
 - [Formal chat delivery](chat-delivery-formal.md).
+- [Formal Switch AI](chat-switch-ai-formal.md).
+- [Automatic AI switch](chat-auto-switch.md).
 - [CI repair receipt](ci-repair-receipt.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
-Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
+Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted real SSH/tmux `server-chat` journey indexed below; maps that need a real server consume it rather than duplicating it. Part A (`w-2567a`, SOFT-2567, real-size seeded data) never landed: [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070) was closed unmerged, so no real-size profile exists. A named synthetic journey is not live-server proof.
 
 ## User-facing features
 
@@ -54,13 +57,13 @@ Coverage is a report, not a gate. The weekly `maintain-verification.yml` pass ru
 
 - Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
 - A real branch build or checksum-verified release executable with matching embedded version.
-- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one owned single-window instance and an initialized CMD tab. Existing baseline recipes start empty; real-size coverage must use Part A's disclosed seeded profile. The harness must see the owned `ZigShell` HWND through UI Automation.
+- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one owned single-window instance and an initialized CMD tab. Existing baseline recipes start empty; there is no real-size seeded profile, because Part A was closed unmerged, so a real-size claim needs a fixture that lands first. The harness must see the owned `ZigShell` HWND through UI Automation.
 - Documented `MULTIPROMPT_NO_LOGIN=1` offline mode. Account login, device approval, sync, real AI agents, SSH/tmux and browser integration are not verified by this baseline.
-- Read-only Doctor passes before input. Never rewrite app state after launch, set app settings to bypass a user action or reuse a shared desktop. Part A owns all new real-size seed data; existing legacy fixtures retain their disclosed boundaries.
+- Read-only Doctor passes before input. Never rewrite app state after launch, set app settings to bypass a user action or reuse a shared desktop. Existing legacy fixtures retain their disclosed boundaries; no Part A real-size seed data exists.
 
 ## Driving conventions
 
-For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`. Which journeys a trigger runs comes from each map's `Verify on:` line: `appearance`, `chat-still` and `server-chat` declare `pull_request`; the 23 maps that declare `push` make up the nightly matrix. Every other map is dispatch-only. Pull requests normally get their journeys from `.github/workflows/pr-verifier.yml`, which selects by `Source files:` rather than by `Verify on:`. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without a model picker, capped at eight per pull request. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. A source file that more than five maps list, such as `src/main.zig` or `src/command_palette.zig`, is shared core and selects no journey by itself; when nothing is selected for a `src/` change, `appearance` runs as the one smoke journey. Journeys dropped over the cap are named in the verdict.
 
@@ -121,6 +124,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat send latency](chat-send-latency.md): send 20 messages from Chat View with real keystrokes and require each message to be drawn in the transcript within 100 ms of the send key.
 - [Relaunch saved sessions](relaunch-saved-sessions.md): the relaunch check. A seeded Starred workspace of 14 live sessions and 6 cached copies is launched and quit three times, the last two with every notification port occupied; each session must appear once and the selected chat must stay.
 - [Saved terminal binding](tmux-binding.md): adopted remote identities survive missing status text and five reopens.
+- [Server shell input](server-shell-input.md): VPS native terminal copy, interrupt and wheel scrollback match local shells.
 - [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
@@ -158,6 +162,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.
+- [Session caret](session-caret.md): console and Chat View carets blink while typing and return after focus steal.
 - [Composer buttons](composer-buttons.md): one-line and six-line working drafts retain equally round, bottom-aligned attach, microphone and Send controls.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
@@ -189,4 +194,4 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A ([PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070), `seed-profile.py`, `seed-profile.ps1`, the `chat-real-size` journey) was closed unmerged, so master still has no real-size seeded profile. Part B ([PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072)) merged on 2026-11-18 as the runner-owned SSH/tmux `server-chat` journey, which runs as `feature=server-chat`; use it rather than adding another server fixture. Do not add replacement real-size fixtures here until a Part A equivalent lands.
