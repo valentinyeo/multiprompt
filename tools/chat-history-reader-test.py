@@ -7989,6 +7989,28 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
         self.assertEqual(self.session['sends'], [target])
 
 
+class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'antigravity'
+
+    def antigravity_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='antigravity' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def test_an_antigravity_turn_reports_the_user_message_uuid_it_took(self):
+        self.session['sends'] = [dict(id='mp-antigravity-1', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input', user_message_uuid='um-antigravity-1')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1, 'the Antigravity turn must name the send it took')
+        self.assertEqual(started[0]['payload']['message_id'], 'mp-antigravity-1')
+        self.assertEqual(started[0]['payload']['uuids'], ['um-antigravity-1'])
+
+
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),

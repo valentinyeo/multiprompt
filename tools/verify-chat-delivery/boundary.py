@@ -1712,6 +1712,9 @@ def install_antigravity_host(namespace):
         reply = previous_switch_ai(provider, candidate, target, reason)
         record("antigravity-switch.jsonl", provider=provider, sid=candidate, target=target, status=reply.get("status"),
                reason=reply.get("reason"), switched_to=(reply.get("sid") if reply.get("status") == "switched" else None))
+        outbox = ROOT.parent / "roaming" / "ZigShell" / "chat-outbox.json"
+        if outbox.is_file():
+            (ROOT / ("antigravity-outbox-" + str(reply.get("status")) + ".json")).write_bytes(outbox.read_bytes())
         return reply
 
     namespace["host_dispatch_switch"] = dispatch_switch
