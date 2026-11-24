@@ -1620,6 +1620,8 @@ def transport_reader():
             close(cid)
 
 
+AGY_PANE_SESSION = "agy-pane|1700000000|0|/verify/work|agy|Antigravity\n"
+
 ANTIGRAVITY_RELEASE_EVENT = "Local\\multiprompt-verify-antigravity-release"
 
 
@@ -1829,6 +1831,15 @@ def ssh():
             if command.endswith("done"):
                 output += "@@ZS_END@@\n"
             record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
+        if kind == "capacity-poll" and state().get("name") == "antigravity-chats":
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += AGY_PANE_SESSION
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="antigravity pane inventory", argv=ARGS)
             sys.stdout.write(output)
             return 0
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)

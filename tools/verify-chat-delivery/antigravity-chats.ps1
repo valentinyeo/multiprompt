@@ -61,6 +61,12 @@ function Agent-Configs-Switched-From([string]$Provider) {
         ($_.provider -ceq 'claude') -and $null -ne $from -and ($from.provider -ceq $Provider)
     })
 }
+$paneCache = "$settings/poll-cache-vps.json"
+$agyPane = Wait-For 'app reported the agy tmux pane as Antigravity' {
+    try { @(((Read-Shared $paneCache) | ConvertFrom-Json).sessions | Where-Object { $_.name -ceq 'agy-pane' -and [int]$_.agent -eq 8 })[0] } catch { $null }
+} 90
+if ([int]$agyPane.agent -ne 8) { throw 'The app did not report the agy tmux pane as Antigravity' }
+Save @{pane=$agyPane.name; paneCommand='agy'; agent=[int]$agyPane.agent; label='Antigravity'; source='app-written poll-cache-vps.json'} "$caseDir/agy-pane-agent.json"
 Send-Composer $earlierText
 [void](Wait-For 'claude stand-in answered the earlier message' {
     $files = @(Get-ChildItem "$hostDir/*.history.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains($earlierText) })

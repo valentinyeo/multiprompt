@@ -48,6 +48,11 @@ function verify(root) {
   const doctor = json('doctor.json');
   assert.ok(Number.isSafeInteger(doctor.pid) && doctor.pid > 0, 'doctor identity missing');
   assert.equal(doctor.hwnd > 0, true);
+  const agyPane = json('agy-pane-agent.json');
+  assert.equal(agyPane.pane, 'agy-pane');
+  assert.equal(agyPane.paneCommand, 'agy');
+  assert.equal(agyPane.agent, 8, 'the app did not report the agy tmux pane as Antigravity');
+  assert.equal(agyPane.label, 'Antigravity');
 
   const menu = json('tab-menu.json');
   assert.equal(menu.source, 'chat tab right-click menu');
@@ -108,7 +113,7 @@ function verify(root) {
       {
         name: 'antigravity-chats',
         passed: true,
-        detail: { switched: config.switched_from.provider + ' to ' + config.provider, historyRows: history.length, newSession: fresh.tmux_session },
+        detail: { switched: config.switched_from.provider + ' to ' + config.provider, historyRows: history.length, newSession: fresh.tmux_session, agentPane: agyPane.pane + ' ' + agyPane.paneCommand + ' -> agent ' + agyPane.agent + ' ' + agyPane.label },
       },
       {
         name: 'switch-back-to-claude',
