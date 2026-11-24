@@ -61,7 +61,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         $main = Await 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
         [void](Await 'ten restored sessions and loaded transcript' {
             $state = Read-State
-            $null -ne $state -and @($state.tabs).Count -eq 10 -and ([EverydayPerformance]::Tail($log, 0)).Contains('[switch] chat content shown shell=')
+            $null -ne $state -and @($state.tabs).Count -eq 10 -and ([EverydayPerformance]::Tail($log, 0)).Contains('launch step=browser') -and ([EverydayPerformance]::Tail($log, 0)).Contains('[chat] position ')
         })
         Foreground
         $control = @(1..100 | ForEach-Object { [EverydayPerformance]::CompositorControl() })
@@ -83,6 +83,13 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             if ($i -ge 10) { Save-Sample 'switching' ($i - 10) $start $ms $offset "target=$target shell=$shell nonempty paint" }
             [EverydayPerformance]::ObserveFor(100)
         }
+        Foreground
+        $longShell = (Read-State).tabs[1].shell_id
+        $offset = [EverydayPerformance]::Length($log)
+        $start = [EverydayPerformance]::Tick()
+        [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
+        [void][EverydayPerformance]::AwaitLog($log, $offset, "[switch] chat content shown shell=$longShell ", '', $start, 30000)
+        if ((Read-State).active_tab -ne 1) { throw 'Long chat target mismatch' }
         Foreground
         $edit = [ChatDeliveryDesktop]::Composer($main)
         $expected = [ChatDeliveryDesktop]::Text($edit)
@@ -128,17 +135,19 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         [void](Await 'transcript focus' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view) })
         [ChatDeliveryDesktop]::Chord(@(0x23))
         [EverydayPerformance]::ObserveFor(500)
-        $workload = Get-Content "$root/state/workload.json" -Raw | ConvertFrom-Json
+        $streamPath = "$root/home/.claude/projects/C--verify-work1/a1b2c3d4-1068-4000-8000-000000000001.jsonl"
+        if (-not (Test-Path $streamPath)) { throw 'Long chat transcript missing' }
+        @{ shell=$longShell; transcriptBytes=(Get-Item $streamPath).Length; rounds=40; source='synthetic Claude cumulative assistant records; real native reader and layout' } | ConvertTo-Json | Set-Content "$directory/long-chat-workload.json"
         $streamText = ''
         $encoding = [Text.UTF8Encoding]::new($false)
         for ($i = 0; $i -lt ($Count + 10); $i++) {
             $streamText += " chunk-$i is the next piece of a live reply."
-            $row = @{ type='assistant'; timestamp=[DateTime]::UtcNow.ToString('o'); sessionId='a1b2c3d4-1068-4000-8000-000000000000'; uuid=[guid]::NewGuid().ToString(); isSidechain=$false; message=@{ role='assistant'; id="everyday-stream-$trial"; model='claude-opus-5-5'; content=@(@{ type='text'; text=$streamText }) } }
+            $row = @{ type='assistant'; timestamp=[DateTime]::UtcNow.ToString('o'); sessionId='a1b2c3d4-1068-4000-8000-000000000001'; uuid=[guid]::NewGuid().ToString(); isSidechain=$false; message=@{ role='assistant'; id="everyday-stream-$trial"; model='claude-opus-5-5'; content=@(@{ type='text'; text=$streamText }) } }
             $json = ($row | ConvertTo-Json -Depth 6 -Compress) + "`n"
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
-            [IO.File]::AppendAllText($workload.transcript, $json, $encoding)
-            $ms = [EverydayPerformance]::AwaitLog($log, $offset, '[chat] push shell=1 ', '[chat] position ', $start, 30000)
+            [IO.File]::AppendAllText($streamPath, $json, $encoding)
+            $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] push shell=$longShell ", '[chat] position ', $start, 30000)
             if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "cumulative update=$i bytes=$($encoding.GetByteCount($json))" }
             [EverydayPerformance]::ObserveFor(37 + (($i * 53) % 113))
         }

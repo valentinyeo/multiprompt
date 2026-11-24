@@ -17,6 +17,7 @@ on:
         default: ''
 permissions:
   contents: read
+  actions: read
 jobs:
   speed-baseline:
     runs-on: windows-latest
@@ -75,6 +76,16 @@ jobs:
           path: zig-out/bin
           run-id: ${{ inputs.binary_run }}
           github-token: ${{ github.token }}
+      - name: Record reused build provenance
+        if: inputs.binary_run != ''
+        shell: pwsh
+        env:
+          BINARY_RUN: ${{ inputs.binary_run }}
+        run: |
+          if ($env:BINARY_RUN -notmatch '^\d+$') { throw 'Expected numeric binary workflow run ID' }
+          $origin = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/actions/runs/$env:BINARY_RUN"
+          $builtRevision = $origin.head_sha
+          @{ builtRevision=$builtRevision; originatingRun=$origin.html_url; sourceTree=(git rev-parse "${builtRevision}:src").Trim(); build=(git rev-parse "${builtRevision}:build.zig").Trim(); sha256=(Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content zig-out/bin/measurement-build.json
       - name: Build exact requested revision in production configuration
         if: inputs.binary_run == ''
         shell: pwsh
@@ -85,14 +96,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          @{ builtRevision=(git rev-parse HEAD).Trim(); sourceTree=(git rev-parse HEAD:src).Trim(); build=(git rev-parse HEAD:build.zig).Trim(); sha256=(Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content zig-out/bin/measurement-build.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: speed-release
           path: zig-out/bin
           retention-days: 14
+      - name: Verify measured source identity
+        shell: pwsh
+        run: |
+          $built = Get-Content zig-out/bin/measurement-build.json -Raw | ConvertFrom-Json
+          if ($built.sourceTree -ne (git rev-parse HEAD:src).Trim() -or $built.build -ne (git rev-parse HEAD:build.zig).Trim()) { throw 'Reused binary has a different product source tree' }
+          if ($built.sha256 -ne (Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash) { throw 'Binary hash mismatch' }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          Copy-Item zig-out/bin/measurement-build.json evidence/build.json
       - name: Measure five everyday desktop actions
         shell: powershell
         run: ./tools/everyday-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence -Revision "${{ github.sha }}" -Count ${{ inputs.samples }} -Trials ${{ inputs.trials }}
+      - name: Validate baseline evidence and report percentiles
+        if: github.job == 'speed-baseline'
+        run: python tools/everyday-performance-report.py evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -162,9 +185,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          @{ builtRevision=(git rev-parse HEAD).Trim(); sourceTree=(git rev-parse HEAD:src).Trim(); build=(git rev-parse HEAD:build.zig).Trim(); sha256=(Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content zig-out/bin/measurement-build.json
+      - name: Verify measured source identity
+        shell: pwsh
+        run: |
+          $built = Get-Content zig-out/bin/measurement-build.json -Raw | ConvertFrom-Json
+          if ($built.sourceTree -ne (git rev-parse HEAD:src).Trim() -or $built.build -ne (git rev-parse HEAD:build.zig).Trim()) { throw 'Reused binary has a different product source tree' }
+          if ($built.sha256 -ne (Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash) { throw 'Binary hash mismatch' }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          Copy-Item zig-out/bin/measurement-build.json evidence/build.json
       - name: Measure five everyday desktop actions
         shell: powershell
         run: ./tools/everyday-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence -Revision "${{ github.sha }}" -Count ${{ inputs.samples }} -Trials 1 -Profile
+      - name: Validate baseline evidence and report percentiles
+        if: github.job == 'speed-baseline'
+        run: python tools/everyday-performance-report.py evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
