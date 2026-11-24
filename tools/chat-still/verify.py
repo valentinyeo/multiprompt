@@ -80,7 +80,7 @@ def check(root, replay_code=False):
     history = (root / "src/chat_history.zig").read_text()
     bodies = {name: function(session, name) for name in ("refreshChatTranscript", "chatRelayoutPreservingScroll")}
     covered = {**bodies, **{name: function(history, name) for name in ("scrollAnchor", "followBottom", "scrollAfterLayout", "openScroll")}}
-    recorded = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
+    recorded = json.loads(((root / "tools/chat-still/coverage.json") if (root / "tools/chat-still/coverage.json").exists() else (ROOT / "tools/chat-still/coverage.json")).read_text())
     for name, body in covered.items():
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
         if digest != recorded["functions"][name]["sha256"]:
@@ -168,6 +168,10 @@ def baseline_report(baseline, files):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(subprocess.check_output(
                 ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10))
+        coverage = root / "tools/chat-still/coverage.json"
+        coverage.parent.mkdir(parents=True, exist_ok=True)
+        coverage.write_bytes(subprocess.check_output(
+            ["git", "-C", str(ROOT), "show", baseline + ":tools/chat-still/coverage.json"], stderr=subprocess.PIPE, timeout=10))
         with contextlib.redirect_stdout(io.StringIO()):
             return check(root)
 

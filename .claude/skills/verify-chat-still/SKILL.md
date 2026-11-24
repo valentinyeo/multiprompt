@@ -13,7 +13,7 @@ From the checkout, run `bash tools/verify-chat-still --self-test --replay --outp
 
 The launcher installs `z3-solver==4.13.4.0` in an isolated cached Python environment. Python 3.12 and Zig 0.16.0 are the replay toolchain used by the GitHub check. This is a small focused check, not the desktop suite. By default, exit 0 means no modeled violation, 1 means a counterexample, and 2 means drift or an unavailable baseline. Read every reported property, not only the last line.
 
-CI adds `--inherit-from <base-commit>`. Findings then return exit 0 only when the same model run over that commit's covered source reports the same failures and the same counterexamples, after all requested mutation and replay checks complete. The JSON keeps every failure and witness and records `inherited_from`. Source that changes a finding, a missing baseline, drift and failed replay cannot inherit. This classifies existing findings without changing the invariant; the default command still fails on them.
+CI adds `--inherit-from <base-commit>`. Findings then return exit 0 only when the same model run over that commit's covered source reports the same failures and the same counterexamples, after all requested mutation and replay checks complete. The base source is checked against the coverage record committed with it, so a pull request may change a covered function and still classify the findings it did not introduce. The JSON keeps every failure and witness and records `inherited_from`. Source that changes a finding, a missing baseline, drift and failed replay cannot inherit. This classifies existing findings without changing the invariant; the default command still fails on them.
 
 Run the matching real Windows journey with `gh workflow run verify.yml --ref <branch> -f feature=chat-still`. Follow [verify-multiprompt](../verify-multiprompt/SKILL.md) and [the chat-still recipe](../verify-multiprompt/features/chat-still.md) to inspect frame samples, screenshots, streaming receipt, Doctor and cleanup. Run desktop code only on GitHub-hosted Windows. The [Chat stillness workflow](../../../.github/workflows/chat-still.yml) runs both checks for chat-related PR paths.
 
@@ -23,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `7995f22bbc0732fd5be0baf3f39ce9283de28e58`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `1df8a8a6f7b40ce57cd3d102abc4194aa03d66bf`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
 
 SOFT-3140 restores the original single-file helper bundle in `src/chat_session.zig`, keeping health inside `mp_sessions.py`. All six covered functions and both types retain their canonical hashes after regeneration; no scroll expressions, callers, replay boundaries or model assumptions change.
 
