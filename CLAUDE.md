@@ -53,6 +53,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Every installed chat tool is executable, and an install leaves no temporary files behind. | `tools/chat-shared-runtime.test.py` (`test_every_installed_chat_tool_runs`, `test_install_removes_leftover_temporary_files`) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| Emergency lane: when Valentin cannot reach or see his chats, or cannot work, the fix jumps the merge order, other merges pause, and it waits only on the journeys its files own. | `tools/check-emergency-lane.mjs`, `tools/check-emergency-lane.test.mjs`, `emergency-lane.yml` |
 | A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js`, `tools/mp-sessions-test.py` |
 | Every servers file the repo ships names a slot per server. | `tools/check-servers-slots.mjs`, `tools/check-servers-slots.test.js` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
