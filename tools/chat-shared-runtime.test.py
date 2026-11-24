@@ -202,7 +202,7 @@ class RuntimeTest(unittest.TestCase):
             ('MP_LAYOUT_SOURCE', 'src/mp_layout.mjs'),
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
-        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
+        prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode(((ROOT / 'src/mp_tab_state.py').read_bytes() + b'\n' if name == 'MP_SESSIONS_SOURCE' else b'') + (ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
         return prelude + reader
 
     def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
@@ -231,7 +231,8 @@ class RuntimeTest(unittest.TestCase):
                 self.assertTrue(link.is_symlink(), name)
                 target = runtime / os.readlink(link)
                 self.assertEqual(target.parent, runtime, name)
-                self.assertEqual(target.read_text(), (ROOT / file).read_text(), name)
+                expected = ((ROOT / 'src/mp_tab_state.py').read_text() + '\n' if name == 'mp-sessions' else '') + (ROOT / file).read_text()
+                self.assertEqual(target.read_text(), expected, name)
                 self.assertTrue(os.access(target, os.X_OK), name + ' is not executable')
                 self.assertTrue(os.access(link, os.X_OK), name + ' does not resolve to an executable file')
 
@@ -248,7 +249,8 @@ class RuntimeTest(unittest.TestCase):
         for name, file in (('mp-sessions', 'src/mp_sessions.py'), ('mp-layout', 'src/mp_layout.mjs')):
             published = runtime / name
             self.assertTrue(published.is_symlink(), name)
-            self.assertEqual(published.read_text(), (ROOT / file).read_text(), name)
+            expected = ((ROOT / "src/mp_tab_state.py").read_text() + "\n" if name == "mp-sessions" else "") + (ROOT / file).read_text()
+            self.assertEqual(published.read_text(), expected, name)
             self.assertTrue(os.access(published, os.X_OK), name)
         self.assertTrue(os.readlink(runtime / 'mp-layout').endswith('.mjs'), 'node must see the module extension')
 

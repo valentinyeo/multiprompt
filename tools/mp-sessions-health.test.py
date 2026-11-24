@@ -96,8 +96,7 @@ class MpSessionsHealthTest(unittest.TestCase):
         zsb.write_text("#!" + sys.executable + "\nprint(" + repr(json.dumps(listing)) + ")\n", encoding="utf-8")
         zsb.chmod(0o755)
         base = dict(os.environ, HOME=str(self.home), MULTIPROMPT_READER_SOURCE=str(self.reader),
-                    PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""), STUB_SID="",
-                    MULTIPROMPT_HOST="0")
+                    PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""), STUB_SID="")
         base.update(extra)
         return base
 

@@ -108,7 +108,7 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
 
 test('SOFT-2838 the runtime bundle publishes the session list and the layout tool', () => {
   const session = read('src/chat_session.zig');
-  assert.match(session, /const sessions = @embedFile\("mp_sessions\.py"\);/);
+  assert.match(session, /const sessions = @embedFile\("mp_tab_state\.py"\) \+\+ "\\n" \+\+ @embedFile\("mp_sessions\.py"\);/);
   assert.match(session, /MP_SESSIONS_SOURCE = '\{s\}'/);
   assert.match(session, /const layout = @embedFile\("mp_layout\.mjs"\);/);
   assert.match(session, /MP_LAYOUT_SOURCE = '\{s\}'/);
