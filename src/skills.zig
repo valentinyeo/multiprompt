@@ -268,6 +268,25 @@ test "skill-only sends match Android" {
     try std.testing.expectEqualStrings("/i-have-adhd\n\n<skill name=\"i-have-adhd\">\nbody of i-have-adhd\n</skill>", message);
 }
 
+test "MUBO-491 a skill typed mid-sentence starts and keeps every word" {
+    const a = std.testing.allocator;
+    const skill = Skill{ .name = @constCast("valentin-mode"), .description = @constCast(""), .body = @constCast("mode instructions"), .source = .multiprompt };
+    const typed = "why is this not done via /valentin-mode ?";
+    const sent = try composeMessage(a, typed, skill);
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("why is this not done via /valentin-mode ?\n\n/valentin-mode\n\n<skill name=\"valentin-mode\">\nmode instructions\n</skill>", sent);
+}
+
+test "MUBO-491 a skill word that is not the skill stays plain text" {
+    const a = std.testing.allocator;
+    const skill = Skill{ .name = @constCast("valentin-mode"), .description = @constCast(""), .body = @constCast("mode instructions"), .source = .multiprompt };
+    for ([_][]const u8{ "see https://x.test/valentin-mode", "/valentin-mode/path and /valentin-modex", "no skill here", "/tmp/notes.txt says hello" }) |text| {
+        const sent = try composeMessage(a, text, skill);
+        defer a.free(sent);
+        try std.testing.expectEqualStrings(text, sent);
+    }
+}
+
 test "SOFT-3086 a selected skill runs only while its command leads the message" {
     const a = std.testing.allocator;
     const skill = Skill{ .name = @constCast("review"), .description = @constCast(""), .body = @constCast("review instructions"), .source = .multiprompt };
