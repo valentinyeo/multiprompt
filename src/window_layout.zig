@@ -17,6 +17,9 @@ const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
 const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
 const TRANSPARENT = @import("win32.zig").TRANSPARENT;
 const RECT = @import("win32.zig").RECT;
+const POINT = @import("win32.zig").POINT;
+const ClientToScreen = @import("win32.zig").ClientToScreen;
+const GetWindowRect = @import("win32.zig").GetWindowRect;
 const IsIconic = @import("win32.zig").IsIconic;
 const IsWindowVisible = @import("win32.zig").IsWindowVisible;
 const GetClientRect = @import("win32.zig").GetClientRect;
@@ -81,6 +84,16 @@ pub fn paneOuterMargin() i32 {
 
 pub fn paneGap() i32 {
     return uiScaled(8);
+}
+
+fn shellPaneAtTarget(sh: HANDLE, left: i32, top: i32, w: i32, h: i32) bool {
+    if (sh == null or app_state.g_main_hwnd == null) return false;
+    var origin = POINT{ .x = 0, .y = 0 };
+    if (ClientToScreen(app_state.g_main_hwnd, &origin) == 0) return false;
+    var got: RECT = std.mem.zeroes(RECT);
+    if (GetWindowRect(sh, &got) == 0) return false;
+    return @abs(got.left - (origin.x + left)) <= 1 and @abs(got.top - (origin.y + top)) <= 1 and
+        @abs((got.right - got.left) - w) <= 1 and @abs((got.bottom - got.top) - h) <= 1;
 }
 
 pub const PaneRects = struct {
@@ -206,8 +219,11 @@ pub fn repositionActive() void {
         const w = if (full_width) pane.right - pane.left else col.width;
         const left = if (full_width) pane.left else col.left;
         _ = SetWindowRgn(sh, null, 1);
-        if (nudge) _ = SetWindowPos(sh, null, left, con_top, w, h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
-        _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
+        if (nudge or !shellPaneAtTarget(sh, left, con_top, w, h)) {
+            if (nudge) _ = SetWindowPos(sh, null, left, con_top, w, h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
+            _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
+            if (verboseLoggingEnabled()) debugLog("[pane-move] console");
+        }
         verifyShellWindowSize(sh, left, con_top, w, h);
         if (browserSlotReserved()) {
             if (@import("computer_pane.zig").selected()) hideAllBrowserChrome() else if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
