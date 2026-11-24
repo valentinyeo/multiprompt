@@ -6,6 +6,9 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
+// A server's pane port is held by the SSH tunnel, so the fixture names itself like it.
+const TUNNEL_TITLE = 'sshd: multiprompt-tunnel-fixture@notty';
+process.title = TUNNEL_TITLE;
 
 async function run(args, reply, script = wrapper, env = {}) {
   const sockets = new Set();
@@ -217,6 +220,7 @@ test('missing owner broker is reported with its socket path', { skip: process.pl
 
 test('a stale process on the pane port is named, not called a tunnel', { skip: process.platform === 'win32' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-stale-port-'));
+  process.title = 'python3 /home/inne/.local/share/zigshell/mp_notify_relay.py';
   const server = net.createServer(socket => {
     socket.on('error', () => {});
     socket.on('data', () => socket.end());
@@ -240,13 +244,23 @@ test('a stale process on the pane port is named, not called a tunnel', { skip: p
     assert.equal(reply.error, 'port_conflict');
     assert.equal(reply.holder.pid, process.pid);
     assert.match(reply.message, new RegExp(String(port)));
-    assert.match(reply.message, /not the multiprompt relay/);
+    assert.match(reply.message, /not by the Multiprompt SSH tunnel/);
+    assert.match(reply.message, /mp_notify_relay\.py/);
     assert.match(stderr, /multiprompt app not reachable/);
     assert.doesNotMatch(stdout, /tunnel_down/);
   } finally {
+    process.title = TUNNEL_TITLE;
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the SSH tunnel holding the pane port is not called a conflict', { skip: process.platform === 'win32' }, async () => {
+  const result = await run(['status'], '');
+  assert.equal(result.code, 1);
+  const reply = JSON.parse(result.stdout);
+  assert.equal(reply.error, 'empty_reply');
+  assert.doesNotMatch(result.stdout, /port_conflict/);
 });
 
 test('owner browser proof keeps disposable credentials outside evidence', () => {

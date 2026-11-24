@@ -340,7 +340,7 @@ class OwnerChatBrowserTest(unittest.TestCase):
         self.assertGreater(reply['holder']['pid'], 0)
         self.assertIn('stale_listener.py', reply['holder']['command'])
         self.assertIn(str(port), reply['message'])
-        self.assertIn('not the multiprompt relay', reply['message'])
+        self.assertIn('not by the Multiprompt SSH tunnel', reply['message'])
 
     def test_missing_owner_relay_is_named(self):
         result = self.zsb('status', env={'ZSB_SOCKET': '/tmp/mp-browser-4294967/control.sock'})
