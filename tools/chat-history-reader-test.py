@@ -8843,6 +8843,78 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertIn('PINEAPPLE', wire)
 
 
+class SOFT_3054_FreshHandoverTest(unittest.TestCase):
+    fixture = json.loads((ROOT / 'tools/fixtures/SOFT-3054/scenario.json').read_text(encoding='utf-8'))
+    provider = 'claude'
+    sid = 'a3054000-0000-4000-8000-000000003054'
+    tmux = 'soft-3054-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['config'], dict(enabled=True, tmux=self.tmux, cwd=self.temp.name))
+        self.history = paths['history']
+        self.stream = io.BytesIO()
+        self.session = dict(state=dict(display_history=True, native_session=self.sid))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.stream))
+        self.session['ready'] = True
+        for row in self.fixture['history_rows']:
+            reader.host_history_append(self.provider, self.sid, self.session, dict(row))
+        reader.host_state_write(self.provider, self.sid, self.session['state'])
+
+    def test_handover_usable_rejects_local_command_notices(self):
+        self.assertFalse(reader.host_fresh_handover_usable(self.fixture['handover_noise']))
+        self.assertFalse(reader.host_fresh_handover_usable(self.fixture['limit_notice']))
+        self.assertTrue(reader.host_fresh_handover_usable(self.fixture['handover_real']))
+
+    def test_handover_finish_keeps_the_real_reply_over_command_noise(self):
+        fresh = dict(phase='handover', text={}, started=time.time())
+        self.session['state']['fresh_start'] = fresh
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_noise']))
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_real']))
+        reader.host_fresh_finish(self.provider, self.sid, self.tmux, self.session, 'completed')
+        saved = reader.host_read(reader.host_paths(self.provider, self.sid)['root'] / fresh['file'])
+        self.assertIn('Super MCP', saved['text'])
+        self.assertNotIn('Reloaded skills', saved['text'])
+
+    def test_handover_finish_falls_back_to_recent_history_when_only_noise_arrives(self):
+        fresh = dict(phase='handover', text={}, started=time.time())
+        self.session['state']['fresh_start'] = fresh
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_noise']))
+        reader.host_fresh_finish(self.provider, self.sid, self.tmux, self.session, 'completed')
+        saved = reader.host_read(reader.host_paths(self.provider, self.sid)['root'] / fresh['file'])
+        self.assertIn('MCP adapter audit', saved['text'])
+        self.assertNotIn('Reloaded skills', saved['text'])
+
+    def test_valentin_resume_inlines_handover_instead_of_a_file_path(self):
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['root'] / 'saved.json', dict(text=self.fixture['handover_real']))
+        self.session['state'].update(valentin_mode=True,
+                                     fresh_start=dict(phase='resume', file='saved.json', started=time.time()))
+        reader.host_fresh_resume(self.provider, self.sid, self.tmux, self.session)
+        sent = json.loads(self.stream.getvalue().decode())
+        prompt = sent['message']['content'][0]['text']
+        self.assertIn('Super MCP wiring', prompt)
+        self.assertNotIn('read the handover at', prompt)
+
+    def test_resume_says_when_saved_handover_is_only_command_noise(self):
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['root'] / 'saved.json', dict(text=self.fixture['handover_noise']))
+        self.session['state']['fresh_start'] = dict(phase='resume', file='saved.json', started=time.time())
+        reader.host_fresh_resume(self.provider, self.sid, self.tmux, self.session)
+        sent = json.loads(self.stream.getvalue().decode())
+        prompt = sent['message']['content'][0]['text']
+        self.assertIn('did not contain usable text', prompt)
+        self.assertIn('MCP adapter audit', prompt)
+        self.assertNotIn('Reloaded skills', prompt)
+
 class MUBO_239_DisplayHistoryReplyIdTest(unittest.TestCase):
     provider = 'claude'
     sid = 'mubo-239-history'

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "hosts": ["remote-1", "remote-2"],
+  "active_workspace": "Yeo UX",
+  "sidebar_view": "Yeo UX",
+  "workspaces": [
+    {"id": 0, "name": "Other server", "active": false, "groups": [], "tabs": [
+      {"id": 50, "title": "Other chat", "host": "remote-2", "tmux": "live-healthy", "cv": false, "visible": true, "hidden_reason": null, "waiting": false, "pinned": true, "archived": false, "user_hidden": false}
+    ]},
+    {"id": 1, "name": "Yeo UX", "active": true, "groups": [], "tabs": [
+      {"id": 41, "title": "Design chat", "host": "remote-1", "tmux": "live-healthy", "cv": true, "visible": false, "hidden_reason": "not in sidebar layout", "waiting": false, "pinned": false, "archived": false, "user_hidden": false}
+    ]}
+  ],
+  "archived_sessions": [{"host": "remote-2", "tmux": "live-healthy", "title": "Other archived chat"}]
+}

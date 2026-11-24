@@ -1,6 +1,6 @@
 # Quit, archive and delete chats
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-actions.ps1, tools/verify-session-actions/*, tools/fixtures/SOFT-2762/*
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/archive.zig, src/account_desktop.zig, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-actions.ps1, tools/verify-session-actions/*, tools/fixtures/SOFT-2762/*
 
 ## Sub-features
 
