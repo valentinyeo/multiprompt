@@ -1730,7 +1730,7 @@ fn refreshChatBlockCache(force: bool) bool {
     const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) +% (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
     const seen: []const @import("chat_markdown.zig").Block = if (from_file) entry.?.history.blocks.items else &.{};
-    const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen);
+    const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen, source);
     if (live_revision != g_chat_live_drawn_revision) {
         g_chat_live_drawn_revision = live_revision;
         chatLiveLog("draw", shell_id, live_tail.text_len, @intCast(@min(live_tail.blocks, 255)));
