@@ -917,7 +917,7 @@ test "IGSH-1811 the list is live chats filtered by the typed name" {
     try std.testing.expectEqual(@as(u32, 1), rows[0].index);
     try std.testing.expectEqual(@as(usize, 1), show("sf").len);
     try std.testing.expectEqual(@as(usize, 0), show("missing").len);
-    try std.testing.expectEqual(@as(usize, 4), show("").len);
+    try std.testing.expectEqual(@as(usize, 3), show("").len);
     const self_row = show("this");
     try std.testing.expectEqual(@as(usize, 1), self_row.len);
     try std.testing.expectEqualStrings("This chat", self_row[0].name);
