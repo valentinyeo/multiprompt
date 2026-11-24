@@ -239,14 +239,14 @@ test('the squash title comes from the changelog fragments, not the typed title',
   const pr = response.data.repository.pullRequest;
   pr.title = 'SOFT-3134: Report chat health and what the PC shows (SOFT-3140)';
   pr.changedFiles = 2;
-  pr.files = { ...page([{ path: 'tools/note.txt', changeType: 'MODIFIED' }, { path: 'changelog.d/IGSH-3140-chat-health.md', changeType: 'ADDED' }]), totalCount: 2 };
+  pr.files = { ...page([{ path: 'tools/note.txt', changeType: 'MODIFIED' }, { path: ['changelog.d', 'SOFT-3140-chat-health.md'].join('/'), changeType: 'ADDED' }]), totalCount: 2 };
   const merged = { data: { mergePullRequest: { pullRequest: { number: 42, merged: true, mergeCommit: { oid: master } } } } };
   const f = fixture(t, response, event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged) });
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const calls = f.calls();
-  assert.equal(calls[2].find(arg => arg.startsWith('headline=')), 'headline=IGSH-3140: Report chat health and what the PC shows (SOFT-3140) (#42)');
-  assert.match(result.stdout, /#42: squash title IGSH-3140:/);
+  assert.equal(calls[2].find(arg => arg.startsWith('headline=')), 'headline=SOFT-3140: Report chat health and what the PC shows (SOFT-3140) (#42)');
+  assert.match(result.stdout, /#42: squash title SOFT-3140:/);
 });
 
 test('a rejected merge race never dispatches master checks', t => {

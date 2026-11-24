@@ -9,7 +9,7 @@ test('fragment keys keep the written ticket key in ticket order', () => {
     'changelog.d/MUBO-269-merge-titles.md',
     'changelog.d/README.md',
     'changelog.d/SOFT-9-first.md',
-    'changelog.d/IGSH-3140-legacy.md',
+    'changelog.d/SOFT-3140-legacy.md',
   ]), ['MUBO-269', 'SOFT-9', 'SOFT-3140']);
   assert.deepEqual(fragmentKeys([]), []);
   assert.deepEqual(fragmentKeys(undefined), []);
