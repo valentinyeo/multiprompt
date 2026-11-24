@@ -325,6 +325,7 @@ function modelFamily(model) {
   if (/anthropic|claude/i.test(name)) return 'anthropic';
   if (/composer|cursor/i.test(name)) return 'cursor';
   if (/google|gemini/i.test(name)) return 'google';
+  if (/zai|glm|zhipu/i.test(name)) return 'zai';
   if (/openai|gpt/i.test(name)) return 'openai';
   return '';
 }
