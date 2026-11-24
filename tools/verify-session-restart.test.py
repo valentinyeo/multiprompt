@@ -27,6 +27,11 @@ class SessionRestartJourneyTest(unittest.TestCase):
         ):
             self.assertIn(needle, DRIVE)
 
+    def test_close_runs_only_with_the_chat_tab_in_the_background(self):
+        before_close = DRIVE.split("Invoke-LinuxMpSessions @('close', $chatName)", 1)[0]
+        self.assertIn("Ctrl+1: leave the chat tab in the background", before_close)
+        self.assertIn("chat tab in the background", before_close)
+
     def test_uses_published_tools_and_keeps_reopened_view_untouched(self):
         self.assertIn("~/.multiprompt-runtime/mp-sessions", DRIVE)
         self.assertNotIn("MULTIPROMPT_READER_SOURCE=", DRIVE)

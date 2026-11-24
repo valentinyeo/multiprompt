@@ -240,6 +240,15 @@ try {
     Assert-ChatTab 'before-restart'
     Shot 'before-restart'
     $result.cases += @{ name = 'before-restart'; passed = $true; detail = 'Hosted chat with reply in named workspace and group' }
+    Press @(0x11, 0x31) 'Ctrl+1: leave the chat tab in the background'
+    [void](Wait-For 'chat tab in the background' {
+        $state = Read-SavedSession
+        $tab = Find-ChatTab $state
+        if ($null -eq $tab) { return $false }
+        if (-not $state.PSObject.Properties['active_shell_id']) { return $false }
+        if (-not $tab.PSObject.Properties['shell_id']) { return $false }
+        return $state.active_shell_id -ne $tab.shell_id
+    } 60)
     $closeJson = Invoke-LinuxMpSessions @('close', $chatName) 'mp-sessions-close'
     $closed = $closeJson | ConvertFrom-Json
     if ($closed.status -cne 'closed') { throw 'mp-sessions close failed: ' + $closeJson }
