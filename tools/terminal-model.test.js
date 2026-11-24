@@ -80,7 +80,7 @@ int main(void) {
     feed(t, "\033[8;40HY");
     assert(mp_terminal_cell(t, 7, 39, 0, &cell) && cell.chars[0] == 'Y');
     mp_terminal_free(t);
-    MPTerminal *t = mp_terminal_new(3, 20, capture, NULL);
+    t = mp_terminal_new(3, 20, capture, NULL);
     feed(t, "one\r\ntwo\r\nthree\r\nfour");
     assert(mp_terminal_history(t) >= 1);
     assert(mp_terminal_cell(t, 0, 0, 1, &cell) && cell.chars[0] == 'o');
