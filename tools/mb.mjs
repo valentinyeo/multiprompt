@@ -25,7 +25,7 @@ commands:
   workspace list
   workspace create <name> [--color N]
   workspace rename <old> <new>
-  workspace delete <name>
+  workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
   group list
   group create <name>
@@ -58,7 +58,7 @@ const REFUSALS = {
 
 function parse(argv) {
   const flags = { _: [] };
-  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo']);
+  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
@@ -432,17 +432,25 @@ async function workspaceCommand(ctx, sub, flags) {
     const owners = readOwners(ctx);
     const seen = await readLayout(ctx);
     if (!seen.data.layout.workspaces.some(item => item.name === name)) { ctx.out(`already deleted workspace ${name}`); return; }
-    if (owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
+    const chats = seen.data.layout.tabs.filter(tab => tab.workspace === name);
+    const moveTo = flags['move-to'] === undefined ? null : workspaceName(flags['move-to']);
+    if (chats.length > 0 && moveTo === null) throw new Failure(`workspace ${name} has ${chats.length} chat${chats.length === 1 ? '' : 's'}; give --move-to <workspace>`);
+    if (moveTo !== null) {
+      if (moveTo === name) throw new Failure('move-to must be a different workspace');
+      if (!seen.data.layout.workspaces.some(item => item.name === moveTo)) throw new Failure(`workspace ${moveTo} not found`);
+    }
+    if (chats.some(tab => owners.sessions[tabId(tab)]?.owner !== 'mb')) throw new Failure('not owned');
+    if (moveTo === null && owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
     const result = await edit(ctx, layout => {
-      const foreign = layout.tabs.some(tab => tab.workspace === name && owners.sessions[tabId(tab)]?.owner !== 'mb');
-      if (foreign) throw new Failure('not owned');
-      const next = layout.tabs.filter(tab => tab.workspace !== name);
-      if (next.length === layout.tabs.length && layout.workspaces.every(item => item.name !== name)) return null;
-      layout.tabs = next;
+      if (moveTo !== null) for (const tab of layout.tabs) if (tab.workspace === name) tab.workspace = moveTo;
+      layout.tabs = layout.tabs.filter(tab => tab.workspace !== name);
       layout.workspaces = layout.workspaces.filter(item => item.name !== name);
       return layout;
     });
-    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) await releaseOwned(ctx, owners, owned);
+    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) {
+      if (moveTo === null) await releaseOwned(ctx, owners, owned);
+      else owned.workspace = moveTo;
+    }
     delete owners.workspaces[name];
     writeOwners(ctx, owners);
     ctx.out(`deleted workspace ${name} (revision ${result.revision})`);
