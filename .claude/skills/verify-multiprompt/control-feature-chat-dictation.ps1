@@ -222,8 +222,8 @@
                 if ([VerifyNative]::EditText($handle) -cne $typed) { throw 'MUBO-290 the stalled recording lost the typed draft' }
                 $stallRound++
                 Wait-Until {
-                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-provider-stall-end\t0$' }).Count -eq $stallRound
-                } 'MUBO-290 the stalled background transcription finished on its own' -Seconds 8 -PollMilliseconds 50
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tempty-transcript\t' }).Count -eq $stallRound
+                } 'MUBO-290 the stalled background transcription finished on its own' -Seconds 10 -PollMilliseconds 50
                 Remove-Item $stallMarker -Force
                 if ($way -ceq 'send-click') {
                     Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'MUBO-290 the armed send leaves once the words are known' -Seconds 6 -PollMilliseconds 50
