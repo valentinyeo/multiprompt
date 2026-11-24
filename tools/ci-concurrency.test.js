@@ -93,3 +93,13 @@ test('a release-called secret scan has its own cancellation group', () => {
   const group = text.match(/^concurrency:\n  group: (.+)$/m)[1];
   require('node:assert').match(group, /inputs\.release_scan && 'release'/);
 });
+
+test('SOFT-3094: a nightly measurement run never cancels an unrelated one', () => {
+  for (const name of ['chat-bench-ab.yml', 'chat-table-bench.yml', 'check-red-run.yml', 'verify-reconnect.yml']) {
+    const text = read(name);
+    assert.doesNotMatch(onBlock(text), /pull_request/, `${name} has no pull request trigger`);
+    const group = topConcurrency(text).match(/^  group: (.+)$/m)[1];
+    assert.match(group, /github\.run_id/, `${name} isolates each run`);
+    assert.doesNotMatch(group, /github\.ref(?!_)/, `${name} does not key a shared group on the branch`);
+  }
+});

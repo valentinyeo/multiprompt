@@ -2033,7 +2033,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2283,7 +2283,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2745,7 +2745,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (remember_closed) {
         if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
-        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len], @import("tmux_closed.zig").now()) catch debugLog("Could not remember closed tmux session");
         for (app_state.g_tmux_closed.entries.items) |*entry| {
             if (@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
                 entry.face = closing.face;

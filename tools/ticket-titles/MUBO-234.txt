@@ -1,0 +1,1 @@
+Archived chats stay archived after a sync

@@ -23,7 +23,7 @@ After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publi
 
 ## Emergency lane
 
-Use this only when Valentin cannot reach or see his chats, or cannot work. The verification owner adds the GitHub label `emergency` to the fixing pull request; CI never creates that label. While the label is on an open pull request, the `emergency-lane` check fails on every other open pull request, and that pull request follows the same owned-journey-only verifier rule as a repair. After merge, a master push still runs `auto-release.yml`; measured workflow timeouts keep publication near 23 minutes and the five-minute in-app updater poll keeps the usual path under one hour from merge to install. Emergency merges skip the non-essential `resource-observation` release job only.
+Use this only when Valentin cannot reach or see his chats, or cannot work. The verification owner adds the GitHub label `emergency` to the fixing pull request; CI never creates that label. While the label is on an open pull request, the `emergency-lane` check fails on every other open pull request, and that pull request follows the same owned-journey-only verifier rule as a repair. After merge, a master push still runs `auto-release.yml`. Resource observation runs nightly, not on the release path, so the measured workflow timeouts plus the five-minute in-app updater poll keep a merge on his desktop inside one hour.
 
 ## Automatic desktop updates
 
