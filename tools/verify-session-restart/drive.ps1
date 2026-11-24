@@ -105,14 +105,15 @@ function Invoke-LinuxMpSessions([string[]]$CliArgs, [string]$Label) {
     $safe = ($CliArgs | ForEach-Object { "'" + ($_ -replace "'", "'\\''") + "'" }) -join ' '
     $remote = "export MULTIPROMPT_HOST=0 MULTIPROMPT_READER_SOURCE='$repo/src/chat_history_reader.py'; python3 '$repo/src/mp_sessions.py' $safe"
     $out = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', $remote) -Evidence $Evidence -Name $Label
-  $out.Trim()
+    $out.Trim()
 }
 function Find-ChatTab($state) {
     if ($null -eq $state -or -not $script:chatTmux) { return $null }
-    return @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq $script:chatTmux })[0]
+    return $state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq $script:chatTmux } | Select-Object -First 1
 }
 function Assert-ChatTab([string]$Stage) {
     $state = Read-SavedSession
+    Save $state "$Evidence/$Stage.layout.json"
     $tab = Find-ChatTab $state
     if ($null -eq $tab) { throw "$Stage : saved chat tab $chatTmux missing" }
     if (-not ($tab.PSObject.Properties['cv'] -and $tab.cv -eq $true)) { throw "$Stage : tab reopened as shell (cv=false), not a chat tab" }
@@ -160,7 +161,7 @@ try {
         single_window = $false
         shared_server_connection = $true
         chat_active = $false
-        tabs = @(@{ kind = 'tmux'; name = 'Anchor server'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 })
+        tabs = @(@{ kind = 'tmux'; name = 'Anchor server'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $true; pid = 0 })
     } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
@@ -171,7 +172,6 @@ try {
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--single-window', '--no-window-restore')
     $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     Press @(0x11, 0x31) 'Ctrl+1: open anchor server tab'
-    Press @(0x12, 0x43) 'Alt+C: anchor Chat View for shared relay'
     [void](Wait-For 'anchor transcript' { (Log-Text) -match '\[chat\] transcript load shell=\d+ ok' })
     [void](Wait-For 'shared connection saved' { (Read-SavedSession).shared_server_connection -eq $true } 60)
     [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'test -f ~/.local/state/multiprompt/relay-v1') -Evidence $Evidence -Name 'relay-ready')
@@ -200,11 +200,9 @@ try {
     })
     $layout = Read-SavedSession
     $groupRow = @($layout.groups | Where-Object { $_.name -ceq $groupName })[0]
-    if ($null -eq $groupRow) { $groupRow = @($layout.groups | Sort-Object { $_.id } -Descending)[0] }
-    $groupName = [string]$groupRow.name
+    if ($null -eq $groupRow) { throw 'Named group was not created' }
     $wsIndex = $layout.active_workspace
-    $workspaceName = $layout.workspaces[$wsIndex].name
-    if ([string]::IsNullOrWhiteSpace($workspaceName)) { $workspaceName = 'Workspace ' + ($wsIndex + 1) }
+    if ($layout.workspaces[$wsIndex].name -cne $workspaceName) { throw 'Named workspace was not created' }
     $result.workspace = $workspaceName
     $result.group = $groupName
     $folder = (Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'pwd') -Evidence $Evidence -Name 'remote-cwd').Trim()
@@ -218,7 +216,9 @@ try {
     Press @(0x11, 0x4B) 'Ctrl+K: select chat tab'
     Type-Text $chatName
     Press @(0x0D) 'Enter: focus restart chat'
-    Press @(0x12, 0x43) 'Alt+C: Chat View'
+    Press @(0x11, 0x4B) 'Ctrl+K: initial Chat View'
+    Type-Text 'Chat View on everywhere'
+    Press @(0x0D) 'Enter: initial Chat View on everywhere'
     Send-Line 'restart journey proof one'
     [void](Wait-For 'first server reply' {
         $snapshot = Server-Snapshot 'first-send'
@@ -237,16 +237,19 @@ try {
     if ($restarted.status -cne 'restarted' -and $restarted.status -cne 'already') { throw 'mp-sessions restart failed: ' + $restartJson }
     [void](Wait-For 'chat tab reopened' { $null -ne (Find-ChatTab (Read-SavedSession)) } 90)
     Assert-ChatTab 'after-mp-sessions-restart'
+    Press @(0x11, 0x4B) 'Ctrl+K: show restarted chat'
+    Type-Text $chatName
+    Press @(0x0D) 'Enter: show restarted chat'
+    [void](Wait-For 'restarted chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero })
     Shot 'after-mp-sessions-restart'
     $result.cases += @{ name = 'mp-sessions-close-restart'; passed = $true; detail = 'close then restart restored a chat tab with cv=true in the same workspace and group' }
-    Restart-DesktopApp
+    . Restart-DesktopApp
     [void](Wait-For 'chat after app restart' { $null -ne (Find-ChatTab (Read-SavedSession)) } 120)
     Assert-ChatTab 'after-app-restart'
     Shot 'after-app-restart'
     Press @(0x11, 0x4B) 'Ctrl+K: select chat after relaunch'
     Type-Text $chatName
     Press @(0x0D) 'Enter: focus restart chat after relaunch'
-    Press @(0x12, 0x43) 'Alt+C: Chat View after relaunch'
     Send-Line 'restart journey proof two'
     [void](Wait-For 'second server reply' {
         $snapshot = Server-Snapshot 'second-send'
@@ -259,7 +262,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.ToString()
-    Shot 'failure'
+    if ($null -ne $job) { Shot 'failure' }
     throw
 } finally {
     if ($null -ne $job) { $cleanup = $job.Stop(); $result.cleanup = @{ activeAfterStop = $cleanup.ActiveProcesses }; $job.Dispose() }
@@ -277,6 +280,7 @@ try {
         $result.cleanupError = ($result['cleanupError'], $_.ToString() -join "`n")
         $result.status = 'failed'
     }
+    if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$Evidence/final-session.json" }
     Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
     $result.keyRemoved = -not (Test-Path "$settings/ssh-key/multibot_ed25519")
     if (-not $result.keyRemoved) { $result.status = 'failed'; $result.error = 'Private key cleanup failed' }
