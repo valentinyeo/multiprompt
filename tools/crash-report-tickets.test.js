@@ -168,9 +168,15 @@ test('installed timer keeps the validated session identity without storing a tok
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'board'), '#!/bin/sh\n[ "$*" = "context --json" ]\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const env = { ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH, CLOUDFLARE_ACCOUNT_ID: 'test', SHIP_SESSION_NAME: 'Crash Reporter', CRASH_BOARD_COMMAND: path.join(bin, 'board'), CRASH_GH_COMMAND: 'gh', HT_TOKEN: 'not-for-storage' };
     const result = spawnSync('bash', [path.resolve(__dirname, 'install-crash-report-tickets.sh')], { env, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stdout + result.stderr);
+    const repo = path.join(home, 'projects/multiprompt-crash-report-tickets');
+    const unit = fs.readFileSync(path.join(home, '.config/systemd/user/crash-report-tickets.service'), 'utf8');
+    assert.match(unit, new RegExp('^ExecStart=/usr/bin/python3 ' + repo + '/service/crash-report-tickets.py$', 'm'));
+    assert.match(unit, new RegExp('^ExecStartPre=-/usr/bin/git -C ' + repo + ' fetch --depth 1 origin master$', 'm'));
+    assert.ok(!unit.includes('.local/share'));
     const config = fs.readFileSync(path.join(home, '.config/multiprompt/crash-report-tickets.env'), 'utf8');
     assert.match(config, /^SHIP_SESSION_NAME="Crash Reporter"$/m);
     assert.ok(!config.includes('not-for-storage'));

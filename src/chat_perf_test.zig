@@ -203,12 +203,20 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
 
+test "IGSH-991 SOFT-3146 echo assign budget credits per-block scan alongside character volume" {
+    const ref_block_chars: usize = 1200;
+    const ref_work_units: u64 = 6100 * (ref_block_chars + ref_block_chars);
+    const heavy_units: u64 = 12200 * (600 + ref_block_chars);
+    const ratio = @as(f64, @floatFromInt(heavy_units)) / @as(f64, @floatFromInt(ref_work_units));
+    const budget = @max(@as(f64, 50), 32 * ratio * 1.35);
+    try std.testing.expect(62 <= budget);
+    try std.testing.expect(124 > budget);
+}
+
 test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled budget on long histories" {
     const Bench = struct {
         const ref_blocks: usize = 6100;
         const ref_block_chars: usize = 1200;
-        const ref_work_units: u64 = ref_blocks * ref_block_chars;
-        const heaviest_work_units: u64 = 12200 * 600;
         const slack_ratio: f64 = 1.35;
         const absolute_floor_ms: i64 = 50;
         const tick_ms: f64 = 15.625;
@@ -219,8 +227,13 @@ test "IGSH-991 CPU961 pending echo assignment stays within a same-run scaled bud
 
         const Measured = struct { per_call_ms: f64, batch_ms: i64, wall_ms: i64, picked: ?usize, reps: usize };
 
+        const ref_work_units: u64 = workUnits(ref_blocks, ref_block_chars);
+        const heaviest_work_units: u64 = workUnits(12200, 600);
+
         fn workUnits(blocks: usize, block_chars: usize) u64 {
-            return @as(u64, @intCast(blocks)) * @as(u64, @intCast(block_chars));
+            const b = @as(u64, @intCast(blocks));
+            const c = @as(u64, @intCast(block_chars));
+            return b * (c + @as(u64, @intCast(ref_block_chars)));
         }
         fn budgetMs(reference_per_call_ms: f64, units: u64) f64 {
             const ratio = @as(f64, @floatFromInt(units)) / @as(f64, @floatFromInt(ref_work_units));

@@ -2033,7 +2033,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2283,7 +2283,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2745,7 +2745,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (remember_closed) {
         if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
-        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len], @import("tmux_closed.zig").now()) catch debugLog("Could not remember closed tmux session");
         for (app_state.g_tmux_closed.entries.items) |*entry| {
             if (@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
                 entry.face = closing.face;
@@ -2977,6 +2977,8 @@ pub fn paneGuardKeepUser(requested: u32) void {
 }
 
 pub fn switchToShellByUser(idx: u32) void {
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and idx != app_state.active_shell)
+        @import("sidebar.zig").freezeSidebarOrder();
     const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
     if (idx < app_state.shell_count) {
         @import("room_frontend.zig").cancelRestoreForUser();
@@ -2994,7 +2996,10 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
-    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) app_state.g_sidebar_view = null;
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) {
+        _ = @import("sidebar.zig").thawSidebarOrder();
+        app_state.g_sidebar_view = null;
+    }
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;

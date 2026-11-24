@@ -9,6 +9,7 @@ const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
 const MAX_LINE = 400;
 const SLOW_FEATURES = new Set(['browser-switch-speed', 'chat-switch-speed', 'pane-layout', 'live-chat-pane']);
+const CHAT_SEND_REPLY_JOURNEYS = new Set(['chat-delivery', 'server-chat']);
 const VERDICTS = ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED'];
 const MARKER = '<!-- pstack-verifier -->';
 const CODEX_MODEL = 'gpt-6.1-sol';
@@ -41,6 +42,22 @@ function oneLine(value, limit = MAX_LINE) {
 function isRepair(pr) {
   return /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
     (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
+}
+
+function isExemptUnmappedFile(file) {
+  if (file.startsWith('openwiki/') || file.startsWith('docs/')) return true;
+  if (file.startsWith('changelog.d/')) return true;
+  if (file.startsWith('tools/ticket-titles/')) return true;
+  if (file.startsWith('src/testdata/')) return true;
+  if (file.startsWith('.github/')) return true;
+  if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) return true;
+  return false;
+}
+
+function userFacingUnmapped(unmapped) {
+  return (Array.isArray(unmapped) ? unmapped : [])
+    .filter(file => !isExemptUnmappedFile(file) && (file.startsWith('src/') || file.startsWith('extension/')))
+    .sort();
 }
 
 function ciRepro(selection, summary) {
@@ -318,6 +335,7 @@ function modelFamily(model) {
   if (/anthropic|claude/i.test(name)) return 'anthropic';
   if (/composer|cursor/i.test(name)) return 'cursor';
   if (/google|gemini/i.test(name)) return 'google';
+  if (/zai|glm|zhipu/i.test(name)) return 'zai';
   if (/openai|gpt/i.test(name)) return 'openai';
   return '';
 }
@@ -390,6 +408,12 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     if (final === 'PASS') final = 'PASS+NOTES';
     for (const note of selection.journeyNotes) notes.push(oneLine(note));
   }
+  const chatFiles = Array.isArray(selection.chatFiles) ? selection.chatFiles : [];
+  const chatReplyShown = rows.some(row => CHAT_SEND_REPLY_JOURNEYS.has(row.feature) && row.head === 'passed');
+  if (chatFiles.length && !chatReplyShown && final !== 'BLOCKED') {
+    final = 'FAIL';
+    notes.unshift(`Chat source changed (${chatFiles.join(', ')}) and no selected journey that sends a message and reads the reply passed at this head; ${[...CHAT_SEND_REPLY_JOURNEYS].join(', ')} must pass.`);
+  }
   if (!ran.length && final === 'PASS') {
     final = 'PASS+NOTES';
     notes.push('No desktop journey ran for this change, so the app was not driven.');
@@ -397,6 +421,11 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   if (selection.uncovered && final === 'PASS') {
     final = 'PASS+NOTES';
     notes.push(`Not covered by any journey: ${selection.uncovered}`);
+  }
+  const uncoveredUserFacing = userFacingUnmapped(selection.unmapped);
+  if (uncoveredUserFacing.length && final !== 'BLOCKED') {
+    final = 'FAIL';
+    notes.unshift(`Changed user-facing files have no journey: ${uncoveredUserFacing.join(', ')}.`);
   }
   const ciProof = selection.bugFix ? ciRepro(selection, summary) : null;
   if (ciProof) {
@@ -461,14 +490,6 @@ function recoveryReport(run, headSha, comments) {
   return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
 }
 
-function cancelledRunWasSuperseded(run, pr, runs) {
-  if (run.conclusion !== 'cancelled') return false;
-  const title = run.display_title || `verify PR ${pr.number}`;
-  return runs.some(candidate => Number(candidate.id) > Number(run.id) &&
-    candidate.display_title === title &&
-  !['completed', 'cancelled'].includes(candidate.status));
-}
-
 function cancelledRunNeedsRetry(run, pr, checks, runs) {
   if (run.conclusion !== 'cancelled' || pr.state !== 'open' || pr.draft) return false;
   const head = pr.head.sha;
@@ -476,6 +497,14 @@ function cancelledRunNeedsRetry(run, pr, checks, runs) {
     (check.name === 'pstack-verifier recovery' || (check.name === 'pstack-verifier' && check.conclusion === 'success')))) return false;
   return !runs.some(candidate => Number(candidate.id) !== Number(run.id) && candidate.display_title === `verify PR ${pr.number}` &&
     (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
+}
+
+function supersededCancellation(run, pr, runs) {
+  if (run.head_sha && run.head_sha !== pr.head.sha) return true;
+  const title = run.display_title || `verify PR ${pr.number}`;
+  return runs.some(candidate => Number(candidate.id) > Number(run.id) && candidate.display_title === title &&
+    (candidate.head_sha === pr.head.sha || candidate.event === 'workflow_dispatch') &&
+    !['completed', 'cancelled'].includes(candidate.status));
 }
 
 function githubState(env, { number, headSha }) {
@@ -515,14 +544,13 @@ function recover(env) {
   const { pr, checks, comments, tests } = githubState(env, { number });
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
   const headSha = pr.head.sha;
-  const verifierRuns = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '[.workflow_runs[] | {id, display_title, head_sha, event, status}]']));
   if (run.conclusion === 'cancelled') {
-    if (cancelledRunNeedsRetry(run, pr, checks, verifierRuns)) {
+    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '[.workflow_runs[] | {id, display_title, head_sha, event, status}]']));
+    if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
       gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
-      return;
     }
-    if (cancelledRunWasSuperseded(run, pr, verifierRuns)) return;
+    if (supersededCancellation(run, pr, runs)) return;
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
@@ -992,6 +1020,7 @@ async function main(argv, env) {
     selection.unmapped = mapped.unmapped;
     selection.journeyNotes = mapped.notes || [];
     selection.ciWorkflows = mapped.ciWorkflows || [];
+    selection.chatFiles = mapped.chatFiles || [];
     if (mapped.unmapped.length) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
     }
@@ -1098,7 +1127,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, cancelledRunWasSuperseded, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, LADDER_LANE_FAMILIES, modelFamily, authorModelLines, pickVerifier, ladderFamily, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, LADDER_LANE_FAMILIES, modelFamily, authorModelLines, pickVerifier, ladderFamily, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

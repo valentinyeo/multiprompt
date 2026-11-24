@@ -1,0 +1,1 @@
+The slash menu lists skills from the server account and folder that run each chat.

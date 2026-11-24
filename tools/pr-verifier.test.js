@@ -305,6 +305,11 @@ test('the verifier family differs from every Author model line in the pull reque
   assert.match(verifier.pickVerifier('Author model: acme/some-model\n').problem, /unknown model family/);
 });
 
+test('the zai model family is known', () => {
+  assert.equal(verifier.modelFamily('zai/glm-5.3-flash'), 'zai');
+  assert.deepEqual(verifier.pickVerifier('Author model: zai/glm-5.3-flash\n'), { engine: 'claude' });
+});
+
 test('a pull request with no independent verifier FAILs and names the reason', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   const { final, body } = verifier.finalize({
@@ -721,4 +726,116 @@ test('inspecting known failed tests can never turn an independent PASS into a gr
   }
   assert.match(workflow, /inspect_failed_tests:[\s\S]*?default: false/);
   assert.match(workflow, /inputs\.inspect_failed_tests && needs\.tests\.outputs\.result == 'FAIL'/);
+});
+
+test('SOFT-3100 chat source changes without a passing send-and-read journey are FAIL, not PASS+NOTES', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-still': { status: 'passed', checks: [1] },
+    'verify-chat-delivery': { status: 'failed', error: 'message order never shown' },
+  }), ['chat-delivery', 'chat-still']);
+  summary.masterFailures = ['chat-delivery'];
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS+NOTES', evidence: ['chat-still kept the message rectangle'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-delivery', 'chat-still'], { chatFiles: ['src/chat_echo.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /sends a message and reads the reply/);
+  assert.match(body, /src\/chat_echo\.zig/);
+});
+
+test('SOFT-3100 chat source changes with no selected sender journey are FAIL', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-chat-still': { status: 'passed' } }), ['chat-still']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['chat-still kept the message rectangle'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-still'], { chatFiles: ['src/chat_session.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /server-chat/);
+});
+
+test('SOFT-3100 a passing send-and-read journey keeps a chat change reviewable', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-chat-still': { status: 'passed' },
+    'verify-server-chat': { status: 'passed' },
+  }), ['chat-still', 'server-chat']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['server-chat sent a message and copied its reply'] },
+    headSha: head,
+    summary,
+    selection: selection(['chat-still', 'server-chat'], { chatFiles: ['src/chat_history.zig'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+});
+
+test('SOFT-3100 non-chat changes keep their existing verdicts', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance']),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+});
+
+test('SOFT-3136 uncovered user-facing src files force FAIL, not PASS+NOTES', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['src/mp_sessions.py', 'src/mp_send.py'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /Changed user-facing files have no journey/);
+  assert.match(body, /src\/mp_sessions\.py/);
+  assert.match(body, /src\/mp_send\.py/);
+});
+
+test('SOFT-3136 unmapped exempt paths alone do not fail the verdict from this rule', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['tools/pr-verifier.cjs', 'changelog.d/foo.md', '.github/workflows/test.yml'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+  assert.doesNotMatch(body, /Changed user-facing files have no journey/);
+});
+
+test('SOFT-3136 uncovered extension files force FAIL', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final } = verifier.finalize({
+    verdict: { verdict: 'PASS+NOTES', evidence: [] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['extension/background.js'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'FAIL');
+});
+
+test('MUBO-247 an unmapped Zig test fixture under src/testdata is not a user-facing file', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['src/testdata/mubo-247-cases.json'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+  assert.doesNotMatch(body, /Changed user-facing files have no journey/);
+  assert.deepEqual(verifier.userFacingUnmapped(['src/testdata/mubo-247-cases.json', 'src/chat_mention.zig']), ['src/chat_mention.zig']);
 });

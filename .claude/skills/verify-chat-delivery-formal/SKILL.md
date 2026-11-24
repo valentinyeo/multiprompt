@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2681 reviewed source at `28135885b5b63344a2b71e2e278d502658fd6ea8`. The reader now publishes Claude's native session and selects its current transcript; its added tests cover that routing. `message_store_transaction`, `message_poll`, `message_poll_locked` and `IGSH_1266_SharedMessageHostTest` are unchanged from the prior sync. Every other covered file is unchanged. Only the reader and reader-test hashes move; the fixed-session model, bounds, decisions, probes and mutations remain unchanged. Hosted CI must rerun the full self-test and native replay.
+
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 
 SOFT-3097 reverts `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6` on top of `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, so pending rows reconcile by exact text again and id-less history rows key on their text. `pickBlock`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch and the restore guard are unchanged from the pre-identity source, and the native probes and replay supply only the text block. The recorded decision table still matches, because it models one exact-text echo. The reader's `client_id` metadata and alias persistence are gone; the covered reader functions are otherwise unchanged. Only the echo, send and reader hashes move, and the sync commit names the base it was reviewed on. Bounds, decisions, mutations and properties remain unchanged.
@@ -57,13 +59,31 @@ Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` 
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
+SOFT-3054 merges master into the fresh-start handover branch. The handover now picks one usable reply and falls back to recent history; that sits beside the outbox and echo path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader and its test file hashes moved, and the sync commit names the merged master tip.
+
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
-SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. That rule now lives in SOFT-3054's `host_fresh_handover_pick` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
 
+SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
+
+MUBO-246 turns the blocked row into a send failure. The reader records a `blocked` settlement fact from the text after `Original prompt:`, the host stream marks the matching send not sent, and the connector binds the attempt to a `not_sent` fact so the shared store says failed. The prompt is matched the same way echoes are, and `promptKept` true or a different prompt changes nothing. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, because the recorded decisions never include a hook block; only the reader and connector hashes move.
+
+MUBO-246 gates the blocked settlement behind `blocked_settlement` in the history query, because a shipped phone build maps each settlement operation through a fixed enum and drops the whole history read for an operation it does not know. The tail cache keys on the flag, so a client that does not ask reads the same rows as before. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged; only the reader and reader-test hashes move.
+
+MUBO-246 adds failing-first cases for a prompt a UserPromptSubmit hook blocked before the chat read it. The reader and shared-store cases read `tools/fixtures/MUBO-246/blocked-by-hook.jsonl`, and a `chat_history.zig` case asks the delivery evidence for that message. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, so only the reader-test hash and the sync commit move.
+
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
+
+MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified mention deliveries and format read-along copies for FYI/CC mentions. All nine covered send functions, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged, so only `src/chat_send.zig`'s whole-file hash and the sync commit move.
+
+MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns; a hosted hax chat still answers from the host history only. `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged, so only the reader and reader-test hashes move, on top of master 158ebc74.
 
 | Source | Covered behavior |
 | --- | --- |
