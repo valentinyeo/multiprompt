@@ -104,8 +104,9 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
-        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID"):
+        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID", "MULTIPROMPT_HOST"):
             base.pop(name, None)
+        base["MULTIPROMPT_HOST"] = "0"
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
 
@@ -376,7 +377,10 @@ class MpSessionsTest(unittest.TestCase):
         rows = self.parsed(self.run_sessions("list", "--json"))
         self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
-                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
+                                       workspace=None, group=None, busy=False, running=True, self=False,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
 
 if __name__ == "__main__":

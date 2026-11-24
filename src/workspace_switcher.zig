@@ -343,6 +343,23 @@ fn refreshEntries() void {
     if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
 }
 
+fn deleteSelected() void {
+    if (selected < views.len or selected >= entry_count + views.len) return;
+    const entry = &entries[selected - views.len];
+    const wi = workspaces.findWorkspace(entry.id[0..entry.id_len]) orelse return;
+    if (!workspaces.workspaceHasChatsByIndex(wi)) {
+        _ = workspaces.deleteWorkspaceByIndex(wi);
+        loadEntries();
+        selected = @min(selected, rowCount() - 1);
+        first = if (rowCount() > visible) @min(first, rowCount() - visible) else 0;
+        if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
+        return;
+    }
+    workspaces.requestWorkspaceDelete(entry.id[0..entry.id_len]);
+    close();
+    _ = w.PostMessageW(app_state.g_main_hwnd, w.WM_APP_SEARCH_OPEN, 0, 0);
+}
+
 pub fn key(vk: usize) bool {
     if (!opened) return false;
     switch (vk) {
@@ -352,6 +369,7 @@ pub fn key(vk: usize) bool {
         },
         0x26 => step(-1),
         0x28 => step(1),
+        0x2E => deleteSelected(),
         0x0D, 0x20 => activate(selected),
         0x10, 0x11, 0x12 => return false,
         else => {

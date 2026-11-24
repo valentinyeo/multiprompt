@@ -29,8 +29,8 @@ test("blue-dot attention survives save, restart, and reconnect", () => {
   const failedRestore = functionBody("preserveFailedRemoteSavedTab", "parseSessionTabs");
   assert.match(failedRestore, /shell\.needs_attention = tab\.needs_attention/);
 
-  const restore = functionBody("applySavedTabFields", "restoreCachedSavedTab");
-  assert.match(restore, /shells\[idx\]\.needs_attention = tab\.needs_attention/);
+  const restore = functionBody("spawnSavedTab", "restoreSession");
+  assert.match(restore, /shells\[idx\]\.needs_attention = tabs\[t\]\.needs_attention/);
   assert.match(functionBody("restoreSession", "enumWindowsCallback"), /spawnSavedTab\(&tabs\[t\], \.continue_latest\)/);
 
   const respawn = functionBody("respawnShellInPlace", "faviconHostForShell");
@@ -59,6 +59,13 @@ test("ACTIVE clears any prior dot and a resumed DONE respects filing content", (
   assert.match(apply, /archive_rules\.doneHasActivity\(/);
   assert.match(apply, /last_done_content_valid/);
   assert.match(apply, /completed_turn and dotTargetsTab\(i\) and \(!shells\[i\]\.inbox_archived or archiveHasNewContent\(i\)\)/);
+});
+
+test("SOFT-3113 hosted Waiting uses hook timestamps when console read is unavailable", () => {
+  const sidebar = fs.readFileSync(path.join(path.resolve(__dirname, ".."), "src", "sidebar.zig"), "utf8");
+  assert.match(sidebar, /fn hostedArchiveHasNewContent/);
+  assert.match(sidebar, /shellUsesHostedArchive/);
+  assert.match(sidebar, /test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE"/);
 });
 
 test("workspace exports retain blue dots too", () => {

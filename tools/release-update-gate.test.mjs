@@ -27,11 +27,19 @@ test('production publishes the build, startup proof and signature gates without 
   assert.deepEqual(needsOf('launch'), ['prepare', 'build']);
   assert.match(job('launch'), /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64\.exe -Evidence release-proof/);
   assert.match(job('launch'), /name: release-launch-proof\n          path: release-proof\/\n          if-no-files-found: error/);
+  assert.equal(jobs['resource-observation'], undefined, 'release.yml must not run resource-observation on the release path');
+  assert.match(job('build'), /uses: actions\/cache@0057852bfaa89a56745cba8c7296529d2fc39830[\s\S]*zig-toolchain-0\.16\.0/);
+  assert.match(job('build'), /uses: actions\/cache@0057852bfaa89a56745cba8c7296529d2fc39830[\s\S]*\.zig-cache[\s\S]*ZIG_GLOBAL_CACHE_DIR/);
+  assert.match(job('build'), /python3 tools\/trim-zig-cache\.py --cap-mib 1600/);
+  assert.doesNotMatch(job('launch'), /actions\/setup-node/);
   assert.match(job('gitleaks'), /release_scan: true/);
-  assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks', 'resource-observation']);
+  assert.deepEqual(needsOf('release'), ['prepare', 'build', 'launch', 'gitleaks']);
   assert.doesNotMatch(job('release'), /^    if:/m);
   assert.match(job('release'), /run: node tools\/sign-release\.mjs/);
   assert.deepEqual(needsOf('queue-newer'), ['prepare', 'release']);
+  const nightly = fs.readFileSync(new URL('../.github/workflows/resource-observation.yml', import.meta.url), 'utf8');
+  assert.match(nightly, /^  schedule:\n    - cron: '[^']+'/m);
+  assert.match(nightly, /node tools\/resource-warning-ticket\.mjs/);
 });
 
 test('symbol files build beside the release and attach after publication', () => {
@@ -39,6 +47,7 @@ test('symbol files build beside the release and attach after publication', () =>
   assert.deepEqual(needsOf('attach-symbols'), ['prepare', 'release', 'symbols']);
   assert.doesNotMatch(job('build'), /symbols/);
   assert.doesNotMatch(job('release'), /symbols/);
+  assert.match(job('symbols'), /uses: actions\/cache\/restore@0057852bfaa89a56745cba8c7296529d2fc39830[\s\S]*\.zig-cache/);
   assert.match(job('symbols'), /name: multiprompt-\$\{\{ matrix.arch \}\}-symbols/);
   assert.match(job('attach-symbols'), /gh release upload "\$TAG" "\$\{files\[@\]\}"/);
 });

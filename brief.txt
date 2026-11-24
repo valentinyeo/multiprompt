@@ -1,0 +1,12 @@
+Read /home/valentin/.claude/plugins/cache/cursor-plugins/pstack/0.15.46/skills/poteto-mode/worker.md before anything else. Also read CLAUDE.md and /home/valentin/.claude/skills/hypertask/SKILL.md.
+Rung: medium
+
+Goal: settle two stale red CI/verification PRs in valentinyeo/multiprompt. Each either lands (rebased, green) or closes with a reason. No new PRs. Never build or run tests on this server; GitHub CI only. Search only inside this repo checkout.
+
+PRs and tickets: 1276 (MUBO-215, chat code changes must run the chat tests), 1160 (MUBO-39).
+For each, oldest last:
+1. Read the PR, its ticket (hypertask task show), and check whether master already has the behaviour (git log origin/master, grep the workflow or tool). Superseded or already on master: close the PR with a one-line reason naming the master commit, comment on the ticket, move the ticket to Done if master has it, else Todo.
+2. Still needed: merge origin/master into the PR branch, resolve conflicts keeping master's newer behaviour, push, and read the failing checks (gh pr checks, gh run view --log-failed). Fix real failures in the same branch. Ensure the PR body has an "Author model: <provider/model>" line. Do not merge; leave it for the verifier and Multi Bot Verification.
+Commits: "<SOFT key from the PR title>: <plain words>", blank line, "Undo: git revert this commit."; identity 348741585+software-factory-runners[bot]@users.noreply.github.com, name software-factory-runners[bot]; no Co-authored-by. Hypertask CLI: always pass --token "$(cat ~/.config/hypertask-agents/credentials/sessions/multi-bot-verify-agent-token)"; --kind qa comments, sentences at most 12 words. At most one gh call per second.
+
+Last lines: one per PR "<PR>: closed|rebased-green|rebased-red - <reason>".
