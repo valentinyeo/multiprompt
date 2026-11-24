@@ -666,17 +666,118 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
             raise ValueError()
     except ValueError:
         fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
-endpoint = os.environ.get("ZSB_SOCKET")
-if not endpoint:
+def pane_port():
+    try:
+        return int(port)
+    except (TypeError, ValueError):
+        return 0
+
+
+def pane_holders():
+    target = pane_port()
+    if not target:
+        return []
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            rows = pathlib.Path(table).read_text(errors="replace").splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if len(fields) < 10 or fields[3] != "0A":
+                continue
+            try:
+                if int(fields[1].rsplit(":", 1)[1], 16) == target:
+                    inodes.add(fields[9])
+            except (IndexError, ValueError):
+                continue
+    if not inodes:
+        return []
+    holders = []
+    try:
+        entries = list(pathlib.Path("/proc").iterdir())
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            for handle in entry.joinpath("fd").iterdir():
+                try:
+                    if not handle.readlink().startswith("socket:["):
+                        continue
+                    if handle.readlink()[8:-1] not in inodes:
+                        continue
+                except OSError:
+                    continue
+                try:
+                    command = " ".join(entry.joinpath("cmdline").read_bytes().decode(errors="replace").split("\x00")).strip()
+                except OSError:
+                    command = ""
+                holders.append((int(entry.name), command))
+                break
+        except OSError:
+            continue
+    return holders
+
+
+def relay_holds_port(holders):
+    return all(any(word.endswith(("mp_notify_relay.py", "notify_link.py")) for word in command.split())
+               for _, command in holders)
+
+
+def fail_port_conflict(holders):
+    pid, command = holders[0]
+    label = command or "unknown process"
+    message = (f"multiprompt pane port {port} is held by pid {pid} ({label}), which is not the multiprompt relay, "
+               f"so the SSH tunnel cannot use that port. Stop that process, then reconnect this SSH session from multiprompt.")
+    fail("port_conflict", message,
+         {"ok": False, "error": "port_conflict", "message": message, "session": session, "port": pane_port(),
+          "holder": {"pid": pid, "command": command},
+          "hint": "Stop the stale process holding the pane port (kill " + str(pid) + "), then reconnect this SSH/tmux session from multiprompt."})
+
+
+def unix_endpoint(path):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(min(5, timeout))
+        sock.connect(path)
+        return sock
+    except OSError:
+        sock.close()
+        return None
+
+explicit = os.environ.get("ZSB_SOCKET")
+configured = ""
+if not explicit:
     config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "multiprompt/browser-socket"
     try:
-        endpoint = config.read_text().strip()
+        configured = config.read_text().strip()
     except FileNotFoundError:
         pass
     except OSError:
         fail("tunnel_down", "Cannot read this user's browser socket configuration")
+endpoint = explicit or configured
+sock = unix_endpoint(endpoint) if endpoint else None
+if sock is None and explicit:
+    holders = pane_holders()
+    message = (f"the owner browser relay socket {explicit} is not reachable. Install or restart the owner browser relay "
+               "(bash tools/install-owner-browser.sh <desktop-ssh-host>) on this server, then reconnect this SSH session from multiprompt.")
+    if holders:
+        message += f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'})."
+    fail("relay_unavailable", message, hint="Install or restart the owner browser relay, then reconnect this SSH/tmux session.")
+if sock is None:
+    endpoint = None
+    if configured:
+        holders = pane_holders()
+        message = (f"the browser relay socket {configured} is not reachable. Install or restart the owner browser relay "
+                   "(bash tools/install-owner-browser.sh <desktop-ssh-host>), then reconnect this SSH session from multiprompt.")
+        if holders:
+            message += f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'})."
+        fail("relay_unavailable", message, hint="Install or restart the browser relay, then reconnect this SSH/tmux session.")
 token = None
-if not endpoint:
+if sock is None:
     try:
         token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
         if not token:
@@ -684,6 +785,9 @@ if not endpoint:
         if not token:
             raise ValueError()
     except (OSError, subprocess.SubprocessError, ValueError):
+        holders = pane_holders()
+        if holders and not relay_holds_port(holders):
+            fail_port_conflict(holders)
         fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
 
 started = time.monotonic()
@@ -691,15 +795,14 @@ deadline = started + timeout
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
     fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
-try:
-    if endpoint:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(min(5, timeout))
-        sock.connect(endpoint)
-    else:
+if sock is None:
+    try:
         sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
-except OSError:
-    fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
+    except (OSError, ValueError):
+        holders = pane_holders()
+        if holders and not relay_holds_port(holders):
+            fail_port_conflict(holders)
+        fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
@@ -726,7 +829,11 @@ except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
-    fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed). " + fix)
+    holders = pane_holders() if not endpoint else []
+    detail = ""
+    if holders:
+        detail = f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'}); stop it if it is an old relay and reconnect."
+    fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed)." + detail + " " + fix)
 # The app's pane handoff and WebView2 actions use a literal acknowledgement.
 if raw.strip() == "ok" and args[0] in {"open", "sidebar", "navigate", "back", "forward", "reload"}:
     print(raw.rstrip())

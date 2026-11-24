@@ -203,14 +203,46 @@ test('owner broker socket controls a pane without reading a vault token', { skip
   }
 });
 
-test('missing owner broker never falls back to the shared relay', { skip: process.platform === 'win32' }, async () => {
+test('missing owner broker is reported with its socket path', { skip: process.platform === 'win32' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-owner-missing-'));
   try {
+    const endpoint = path.join(dir, 'missing');
     const result = await run(['status'], () => assert.fail('broker fell back to TCP'), wrapper,
-      { ZSB_SOCKET: path.join(dir, 'missing') });
+      { ZSB_SOCKET: endpoint });
     assert.equal(result.code, 1);
-    assert.equal(JSON.parse(result.stdout).error, 'tunnel_down');
+    assert.equal(JSON.parse(result.stdout).error, 'relay_unavailable');
+    assert.match(result.stderr, new RegExp(endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a stale process on the pane port is named, not called a tunnel', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-stale-port-'));
+  const server = net.createServer(socket => socket.on('error', () => {}));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const child = spawn('bash', [wrapper, 'status'], {
+      env: { ...process.env, HOME: dir, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port),
+        ZSB_SOCKET: '', MULTIPROMP_NOTIFY_RELAY_TOKEN: '' },
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => stdout += chunk);
+    child.stderr.on('data', chunk => stderr += chunk);
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    assert.equal(code, 1, stdout + stderr);
+    const reply = JSON.parse(stdout);
+    assert.equal(reply.error, 'port_conflict');
+    assert.equal(reply.holder.pid, process.pid);
+    assert.match(reply.message, new RegExp(String(port)));
+    assert.match(reply.message, /not the multiprompt relay/);
+    assert.doesNotMatch(stdout, /tunnel_down|notify_token_unavailable/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('owner browser proof keeps disposable credentials outside evidence', () => {

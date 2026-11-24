@@ -3546,6 +3546,7 @@ def host_stop(provider, sid, force=False):
             time.sleep(0.125)
     host_clear_stale(provider, sid)
     host_clear_pane(provider, sid)
+    host_owner_session_release(provider, sid)
     return dict(status="stopped")
 
 
@@ -3752,6 +3753,40 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_owner_browser_endpoint():
+    return '/tmp/mp-browser-' + str(os.getuid()) + '/control.sock'
+
+
+def host_owner_sessions_dir():
+    return HOME / '.local/state/multiprompt/owner-sessions'
+
+
+def host_owner_session_register(provider, sid, user):
+    name = host_chat_name(provider, sid)
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except (KeyError, AttributeError):
+        return None
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name) or type(uid) is not int or uid <= 0:
+        return None
+    path = host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')
+    try:
+        host_write(path, dict(session=name, uid=uid, at=time.time()))
+    except OSError:
+        return None
+    return path
+
+
+def host_owner_session_release(provider, sid):
+    name = host_chat_name(provider, sid)
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+        return
+    try:
+        (host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')).unlink()
+    except OSError:
+        pass
+
+
 def host_agent_env(provider, sid):
     config = host_config(provider, sid) or {}
     env = dict(os.environ)
@@ -3935,6 +3970,7 @@ def host_agent_start(provider, sid, mode=None):
         tmux = host_chat_name(provider, sid)
         if tmux:
             prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
+        prefix.append("ZSB_SOCKET=" + host_owner_browser_endpoint())
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
@@ -3962,6 +3998,7 @@ def host_agent_start(provider, sid, mode=None):
             else:
                 check_command = "--resume" if probe.returncode == 74 else "--session-id"
             command[-2:] = [check_command, native]
+        host_owner_session_register(provider, sid, user)
         command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
         try:
             return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -9034,6 +9071,8 @@ if __name__ == '__main__':
                     ('mp-sessions', 'mp-sessions', 'MP_SESSIONS_SOURCE'),
                     ('mp-fresh', 'mp-fresh', 'MP_FRESH_SOURCE'),
                     ('mp-zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('multiprompt-browser', 'mp-zsb', 'ZSB_SOURCE'),
                     ('mp-layout', 'mp-layout.mjs', 'MP_LAYOUT_SOURCE'),
                 )
 
