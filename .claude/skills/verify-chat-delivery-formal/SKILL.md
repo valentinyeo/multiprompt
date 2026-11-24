@@ -69,6 +69,8 @@ SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` ass
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-454 gives the mention wire note a new lead so the typing chat reads the line as its own message, and lets the picker list the chat being typed in. `message_store_transaction`, `message_poll`, `message_poll_locked`, `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged. `currentLive` no longer takes an exclude argument, so `deliverMentions`, `sendTextToShellVerifiedAt` and `chatFlowText` change only that call; delivery to a mentioned chat is unchanged. The send, render and reader hashes move, and the sync commit names the base it was reviewed on.
+
 MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
