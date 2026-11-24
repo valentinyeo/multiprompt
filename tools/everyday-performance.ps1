@@ -107,10 +107,12 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
             [void](Await 'Chat View closed' { [ChatDeliveryDesktop]::Composer($main) -eq [IntPtr]::Zero })
             [EverydayPerformance]::ObserveFor(400)
+            [void](Await 'owned main window foreground before opening' { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main); [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
+            $paintBefore = [EverydayPerformance]::PaintCount($log)
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
-            $ms = [EverydayPerformance]::AwaitLog($log, $offset, '[switch] chat content shown shell=', '', $start, 30000)
+            $ms = [EverydayPerformance]::AwaitLog($log, $offset, '[chat] position ', '', $start, 30000, $paintBefore)
             Foreground
             if ($i -ge 10) { Save-Sample 'opening' ($i - 10) $start $ms $offset 'closed console to nonempty Chat View' }
             [EverydayPerformance]::ObserveFor(400)
