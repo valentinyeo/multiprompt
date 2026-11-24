@@ -203,7 +203,7 @@ test('811 rejects both channel scenarios while master and 821 admit them before 
     assert.match(text, /\.op = "send"[\s\S]*chatHistoryPersistent\(job.key.host/);
     if (ref !== 'v0.28.811') assert.match(text, /"send_queued"/);
   }
-  assert.match(master, /if \(entry.steer_pending\)|if \(!entry.steer_pending\)/);
+  assert.match(master, /if \(!app_state\.g_chat_outbox\.items\[ei\]\.steer_pending\) return;/);
   assert.match(master, /chatSteerAfterDelivery\(idx, i\)/);
   const reader = execFileSync('git', ['show', `${masterRef}:src/chat_history_reader.py`], { cwd: root, encoding: 'utf8' });
   assert.match(reader, /keys = \["C-x", "C-s"\] if op == "send_queued"/);
