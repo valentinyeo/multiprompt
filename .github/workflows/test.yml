@@ -85,11 +85,12 @@ jobs:
         shell: pwsh
         env:
           BINARY_RUN: ${{ inputs.binary_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:BINARY_RUN -notmatch '^\d+$') { throw 'Expected numeric binary workflow run ID' }
-          $origin = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/actions/runs/$env:BINARY_RUN"
-          $builtRevision = $origin.head_sha
           if (Test-Path zig-out/bin/measurement-build.json) { exit 0 }
+          $origin = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/actions/runs/$env:BINARY_RUN" -Headers @{ Authorization="Bearer $env:GH_TOKEN" }
+          $builtRevision = $origin.head_sha
           @{ builtRevision=$builtRevision; originatingRun=$origin.html_url; sourceTree=(git rev-parse "${builtRevision}:src").Trim(); build=(git rev-parse "${builtRevision}:build.zig").Trim(); sha256=(Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content zig-out/bin/measurement-build.json
       - name: Build exact requested revision in production configuration
         if: inputs.binary_run == ''

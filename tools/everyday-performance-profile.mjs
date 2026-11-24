@@ -3,7 +3,10 @@ import path from 'node:path';
 const root = process.argv[2];
 if (!root) throw new Error('usage: everyday-performance-profile.mjs ROOT');
 const targets = {
-  'main.zig': ['wndProc'],
+  'main.zig': ['wndProc', 'sessionFrontChanged', 'updateSessionFront'],
+  'computer_pane.zig': ['sync'],
+  'room_frontend.zig': ['syncVisibility'],
+  'voice.zig': ['voiceManualFrontChanged'],
   'diagnostics.zig': ['debugLog'],
   'console.zig': ['switchToShell'],
   'chat_session.zig': ['chatFileOnReady', 'refreshChatBlockCache', 'refreshChatTranscript'],
@@ -19,7 +22,7 @@ for (const [file, functions] of Object.entries(targets)) {
   for (const name of functions) {
     const signature = new RegExp(`(fn ${name}\\([^\\n]+\\{)`);
     if (!signature.test(source)) throw new Error(`Unknown profile boundary ${file}:${name}`);
-    const ending = file === 'main.zig'
+    const ending = file === 'main.zig' && name === 'wndProc'
       ? `defer {\n        var everyday_label: [100]u8 = undefined;\n        @import("everyday_profile.zig").end(std.fmt.bufPrint(&everyday_label, "main.zig:wndProc:msg_{X}:wp_{X}", .{ msg, wp }) catch "main.zig:wndProc", everyday_span);\n    }`
       : `defer @import("everyday_profile.zig").end("${file}:${name}", everyday_span);`;
     source = source.replace(signature, `$1\n    const everyday_span = @import("everyday_profile.zig").start();\n    ${ending}`);
