@@ -21,7 +21,7 @@ function scan(t, source) {
 test('the shipped subtitle that claimed a few seconds is rejected', t => {
   const result = scan(t, 'const subtitle = std.fmt.bufPrint(&buf, "v{s} \\xc2\\xb7 takes a few seconds", .{ver}) catch "Takes a few seconds";\n');
   assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /no time estimate/i);
+  assert.match(result.stderr, /never show a time estimate/i);
   assert.match(result.stderr, /takes a few seconds/);
 });
 
@@ -49,6 +49,8 @@ test('the update card source in this repo shows no time estimate', () => {
 });
 
 test('this check runs in CI', () => {
-  assert.ok(discoverTests(root).includes('tools/check-update-card-time-wording.test.js'));
-  assert.match(fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8'), /node tools\/check-update-card-time-wording\.mjs/);
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  assert.match(workflow, /node --test tools\/check-update-card-time-wording\.test\.js/);
+  assert.match(workflow, /node tools\/check-update-card-time-wording\.mjs/);
+  assert.doesNotMatch(discoverTests(root).join('\n'), /check-update-card-time-wording\.test\.js/);
 });
