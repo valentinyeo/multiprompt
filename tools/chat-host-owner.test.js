@@ -17,6 +17,7 @@ outer = {}
 exec(compile(${JSON.stringify(source)}, 'reader', 'exec'), outer)
 r = {}
 exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
+r['HOST_START_RETRY_STEPS'] = ()
 with tempfile.TemporaryDirectory() as directory:
     r['HOME'] = Path(directory)
     home = '/home/synthetic_owner'

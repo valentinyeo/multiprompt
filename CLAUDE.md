@@ -58,6 +58,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
 | Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
+| A chat owned by another OS user starts with its own agent binary, retries a missing agent a few times, and never rotates the nightly restart inside an auto-update window. | `tools/chat-host-owner-binary.test.js` |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
 | Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every new commit on a pull request and on a master push in `test.yml`; the squash-merge helper strips trailers |
