@@ -1,0 +1,24 @@
+{
+  "provider": "claude",
+  "sid": "synthetic-owner",
+  "tmux": "synthetic-chat",
+  "mode": "bypassPermissions",
+  "nightly_day": "2026-11-23",
+  "startup_failure": {
+    "reason": "agent_not_found",
+    "retry_generation": 0,
+    "config": {
+      "enabled": true,
+      "provider": "claude",
+      "sid": "synthetic-owner",
+      "tmux": "synthetic-chat",
+      "cwd": "/home/synthetic_owner/workspace",
+      "permission_mode": "bypassPermissions",
+      "model": "sonnet",
+      "nightly": true,
+      "command": [
+        "/home/synthetic_runner/.local/bin/claude"
+      ]
+    }
+  }
+}
