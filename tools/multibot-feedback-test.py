@@ -6,6 +6,7 @@ import hashlib
 import struct
 import zlib
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'src'))
+import multibot_feedback as feedback
 
 FAKE_CLI = r'''#!/usr/bin/env python3
 import datetime, json, os, sys
@@ -244,11 +247,8 @@ class BoardFeedbackTest(unittest.TestCase):
         self.assertEqual({label['name'] for label in task['labels']}, {'Multiprompt', 'Agent Feedback'})
         self.assertIn(task['ticketNumber'], board['comments'])
         self.assertEqual(len(board['comments'][task['ticketNumber']]), 2)
-        for heading in ('Problem', 'Fix', 'Done when', 'Risk', 'Decision'):
-            self.assertIn('<strong>' + heading + '</strong>', task['description'])
         self.assertIn('Capture is slow', task['description'])
         self.assertIn('Browser  screenshots', task['description'])
-        self.assertIn('The requested capability works in Multibot.', task['description'])
         self.assertIn('1.2.3', task['description'])
         self.assertIn('codex', task['description'])
         for private in ('private-workspace', 'private-chat', 'credential-one', str(self.home)):
@@ -335,11 +335,16 @@ class BoardFeedbackTest(unittest.TestCase):
         queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
         self.assertTrue(queue.exists())
 
+    def saved_after_cutoff(self, path):
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        self.write_rows(path, [dict(row, at=feedback.QUEUE_CUTOFF + 60) for row in rows])
+
     def test_no_token_queue_and_drain_files(self):
         result = self.run_cli('drainable capability', token=None)
         self.assertIn('queued, will be filed', result.stdout)
         queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
         self.assertEqual(len(queue.read_text().splitlines()), 1)
+        self.saved_after_cutoff(queue)
         drain = self.run_cli('--drain')
         self.assertIn('filed ', drain.stdout)
         self.assertEqual(len(self.read_board()['tasks']), 1)
@@ -350,6 +355,7 @@ class BoardFeedbackTest(unittest.TestCase):
         self.assertIn('queued, will be filed', result.stdout)
         queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
         self.assertEqual(len(queue.read_text().splitlines()), 1)
+        self.saved_after_cutoff(queue)
         drain = self.run_cli('--drain', FAKE_FAIL='1')
         self.assertNotIn('filed https://', drain.stdout)
         self.assertEqual(len(queue.read_text().splitlines()), 1)
@@ -414,47 +420,47 @@ class BoardFeedbackTest(unittest.TestCase):
         result = self.run_cli('local bin wish', PATH=str(shim))
         self.assertIn('filed https://app.hypertask.ai/detail/project-13734/', result.stdout)
 
-    def backlog_row(self, want, row_id, why=''):
-        return dict(id=row_id, at=1, want=want, why=why, session='', provider='codex', app_version='1.2.3', cwd='work')
+    def queue_row(self, want, row_id, at=None, why=''):
+        return dict(id=row_id, at=int(datetime.datetime.now(datetime.timezone.utc).timestamp()) if at is None else at, want=want, why=why, session='', provider='codex', app_version='1.2.3', cwd='work')
 
     def write_rows(self, path, rows):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
 
-    def test_drain_backlog_files_once_across_both_files_and_skips_secrets(self):
-        existing = dict(ticketNumber='MUBO-5', title='Multibot wish: already on board', status='Normal', labels=[dict(name='Multiprompt'), dict(name='Agent Feedback')])
-        self.write_board(dict(tasks=[existing], comments={}))
+    def test_drain_drops_queue_rows_saved_before_the_cutoff_without_a_board_call(self):
+        self.assertEqual(feedback.QUEUE_CUTOFF, 1795550400)
         queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
-        log = self.home / 'state/multibot/feedback.jsonl'
-        self.write_rows(queue, [self.backlog_row('already  on BOARD', 'row-1'), self.backlog_row('first new wish', 'row-2')])
-        self.write_rows(log, [self.backlog_row('second new wish', 'row-3'), self.backlog_row('First new wish', 'row-4'), self.backlog_row('credential-one', 'row-5')])
-        drain = self.run_cli('--drain-backlog')
+        self.write_rows(queue, [self.queue_row('filed by hand earlier', 'row-old', at=feedback.QUEUE_CUTOFF - 1),
+                                self.queue_row('saved after the cutoff', 'row-new', at=feedback.QUEUE_CUTOFF)])
+        drain = self.run_cli('--drain')
         self.assertEqual(drain.returncode, 0, drain.stderr)
-        lines = drain.stdout.splitlines()
-        self.assertEqual(len(lines), 5)
-        self.assertEqual(lines[0], 'exists https://app.hypertask.ai/detail/project-13734/5')
-        self.assertTrue(lines[1].startswith('filed https://app.hypertask.ai/detail/project-13734/'))
-        self.assertTrue(lines[2].startswith('filed https://app.hypertask.ai/detail/project-13734/'))
-        self.assertEqual(lines[3], 'exists ' + lines[1].split(' ', 1)[1])
-        self.assertEqual(lines[4], 'skipped secret in wish')
-        self.assertNotIn('credential-one', drain.stdout + drain.stderr)
+        self.assertEqual(drain.stdout.count('filed '), 1)
         board = self.read_board()
-        self.assertEqual(sorted(task['title'] for task in board['tasks']),
-                         ['Multibot wish: already on board', 'Multibot wish: first new wish', 'Multibot wish: second new wish'])
-        self.assertFalse(queue.exists() and queue.read_text().strip())
-        again = self.run_cli('--drain-backlog')
+        self.assertEqual([task['title'] for task in board['tasks']], ['Multibot wish: saved after the cutoff'])
+        self.assertNotIn('filed by hand earlier', self.calls.read_text())
+        self.assertFalse(queue.read_text().strip())
+        again = self.run_cli('--drain')
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn('filed ', again.stdout)
-        self.assertEqual(len(self.read_board()['tasks']), 3)
+        self.assertEqual(len(self.read_board()['tasks']), 1)
 
-    def test_drain_backlog_without_token_files_nothing(self):
-        queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
-        self.write_rows(queue, [self.backlog_row('waiting wish', 'row-1')])
-        result = self.run_cli('--drain-backlog', token=None)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('agent token unavailable', result.stderr)
-        self.assertEqual(self.read_board()['tasks'], [])
-        self.assertEqual(len(queue.read_text().splitlines()), 1)
+    def test_description_shape_keeps_long_text_inside_quote_blocks(self):
+        want = 'browser screenshots arrive attached to the wish every time one is captured'
+        why = 'Capturing a screenshot then describing it costs more time than it saves here'
+        result = self.run_cli(want, '--why', why)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = self.read_board()['tasks'][0]
+        self.assertEqual(task['title'], 'Multibot wish: ' + ' '.join(want.split()[:10]))
+        description = task['description']
+        quoted = [line[2:] for line in description.splitlines() if line.startswith('> ')]
+        self.assertTrue(any(want in line for line in quoted))
+        self.assertTrue(any(why in line for line in quoted))
+        self.assertTrue(any('1.2.3' in line and 'codex' in line for line in quoted))
+        for line in description.splitlines():
+            if line and not line.startswith('> '):
+                self.assertLessEqual(len(line.split()), 12, line)
+                self.assertIsNone(re.search(r'[A-Z][A-Z0-9]*-\d+', line), line)
+        self.assertIsNone(re.search(r'[A-Z][A-Z0-9]*-\d+', description.split('Why:')[0]))
 
     def test_description_escapes_deliberate_input(self):
         result = self.run_cli('capture <screen>', '--why', 'Less <work> & time')

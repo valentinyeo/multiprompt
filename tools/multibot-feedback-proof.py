@@ -105,7 +105,7 @@ def main():
         agent = module.identity()
         stage = 'labels'
         module.board_labels()
-        title = module.normalized(module.PREFIX + module.normalized(WISH))
+        title = module.normalized(module.wish_title(dict(want=WISH)))
 
         def matching():
             return [(status, task) for status in ('Normal', 'Archive', 'Deleted') for task in module.tasks(status) if module.normalized(task['title']) == title]

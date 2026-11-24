@@ -28,6 +28,8 @@ SESSION_TOKENS = '.config/hypertask-agents/credentials/sessions'
 PREFIX = 'Multibot wish: '
 VOTE = 'multibot-feedback-vote:v1'
 LABELS = {'Multiprompt', 'Agent Feedback'}
+QUEUE_CUTOFF = 1795550400
+TITLE_WORDS = 10
 
 
 class BoardError(Exception):
@@ -202,6 +204,11 @@ def contains_secret(text):
     secrets.append(session_token())
     return (any(len(value) >= 6 and value in text for value in secrets if value) or
             bool(re.search(r'(?i)(?:\b(?:bearer\s+\S+|(?:token|password|api[_ -]?key)\s*[:=]\s*\S+)|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)', text)))
+
+
+def queue_row_is_stale(row):
+    at = row.get('at')
+    return not isinstance(at, int) or at < QUEUE_CUTOFF
 
 
 def safe_text(*parts):
@@ -408,19 +415,29 @@ def ticket_url(task):
     return 'https://app.hypertask.ai/detail/project-13734/' + task['ticketNumber'].split('-', 1)[1]
 
 
+def wish_title(row):
+    return PREFIX + ' '.join(normalized(row['want']).split()[:TITLE_WORDS])
+
+
+def wish_description(row):
+    details = 'App version %s. Session type %s.' % (row['app_version'], row['provider'])
+    return ('Wish from a Multibot chat.\n\nWhat you want:\n\n> %s\n\nWhy:\n\n> %s\n\nDetails:\n\n> %s\n'
+            % (html.escape(row['want']), html.escape(row['why'] or 'No reason given.'), html.escape(details)))
+
+
 def submit(row, snapshots):
     agent = identity()
     board_labels()
-    title = PREFIX + normalized(row['want'])
+    title = wish_title(row)
     version = row['app_version']
     provider = row['provider']
     if len(title) > 200 or not safe_text(row['want'], row['why']) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version) or provider not in ('claude', 'codex', 'pi'):
         raise BoardError('unsafe or missing feedback metadata')
     with wish_lock(normalized(title)):
-        return submit_locked(row, agent, title, version, provider, snapshots)
+        return submit_locked(row, agent, title, snapshots)
 
 
-def submit_locked(row, agent, title, version, provider, snapshots):
+def submit_locked(row, agent, title, snapshots):
     matching = []
     for status in ('Normal', 'Archive', 'Deleted'):
         matching += [(status, task) for task in tasks(status) if normalized(task['title']) == normalized(title)]
@@ -431,12 +448,7 @@ def submit_locked(row, agent, title, version, provider, snapshots):
         raise BoardError('duplicate wishes require review')
     created = not active
     if created:
-        description = ('<p><strong>Problem</strong></p><p>' + html.escape(row['why'] or 'No reason provided.') + '</p>'
-                       '<p><strong>Fix</strong></p><p>' + html.escape(row['want']) + '</p>'
-                       '<p><strong>Done when</strong></p><p>The requested capability works in Multibot.</p>'
-                       '<p><strong>Risk</strong></p><p>Review the wish before building. Undo changes if needed.</p>'
-                       '<p><strong>Decision</strong></p><p>None.</p>'
-                       '<p>App version: ' + html.escape(version) + '</p><p>Session type: ' + html.escape(provider) + '</p>')
+        description = wish_description(row)
         response = cli('task', 'create', '--project', PROJECT, '--title', title,
                        '--description', description, '--labels', 'Agent Feedback,Multiprompt')
         if response.get('success') is not True:
@@ -460,20 +472,24 @@ def drain_queue():
         raise BoardError('agent token unavailable')
     queue_path = board_queue_path()
     log_path = state_path()
+    queue_rows = read_jsonl(queue_path)
+    log_rows = read_jsonl(log_path)
     pending = []
+    stale = set()
     seen = set()
-    for source in (queue_path, log_path):
-        for row in read_jsonl(source):
+    for rows in (queue_rows, log_rows):
+        for row in rows:
             if row['id'] in seen:
                 continue
             if row.get('filed_url') or row.get('board_pending') is False:
                 continue
             seen.add(row['id'])
+            if queue_row_is_stale(row):
+                stale.add(row['id'])
+                continue
             pending.append(row)
-    if not pending:
+    if not pending and not stale:
         return 0, 0, []
-    queue_rows = read_jsonl(queue_path)
-    log_rows = read_jsonl(log_path)
     filed = []
     failures = 0
     confirmed = set()
@@ -490,69 +506,10 @@ def drain_queue():
             continue
         confirmed.add(row['id'])
         filed.append(url)
-    queue_rows = [row for row in queue_rows if row.get('id') not in confirmed]
-    log_rows = [row for row in log_rows if row.get('id') not in confirmed]
-    write_jsonl(queue_path, queue_rows)
-    write_jsonl(log_path, log_rows)
+    dropped = confirmed | stale
+    write_jsonl(queue_path, [row for row in queue_rows if row.get('id') not in dropped])
+    write_jsonl(log_path, [row for row in log_rows if row.get('id') not in confirmed])
     return len(filed), failures, filed
-
-
-def board_wishes():
-    found = {}
-    for status in ('Normal', 'Archive'):
-        for task in tasks(status):
-            found[normalized(task['title'])] = ticket_url(task)
-    return found
-
-
-def backlog_rows():
-    rows = []
-    for source in (board_queue_path(), state_path()):
-        try:
-            rows += [row for row in read_jsonl(source) if isinstance(row.get('want'), str)]
-        except (BoardError, OSError):
-            print('skipped corrupt feedback queue', file=sys.stderr)
-    return rows
-
-
-def mark_queue_done(ids):
-    if not ids:
-        return
-    try:
-        queue = read_jsonl(board_queue_path())
-        write_jsonl(board_queue_path(), [row for row in queue if row.get('id') not in ids])
-    except (BoardError, OSError):
-        pass
-
-
-def drain_backlog():
-    if not board_token():
-        raise BoardError('agent token unavailable')
-    known = board_wishes()
-    done = set()
-    for row in backlog_rows():
-        want = row['want']
-        if not want.strip():
-            print('skipped no wish text')
-            continue
-        if contains_secret(want + '\n' + str(row.get('why') or '')):
-            print('skipped secret in wish')
-            continue
-        key = normalized(PREFIX + normalized(want))
-        if key in known:
-            print(f'exists {known[key]}')
-            done.add(row['id'])
-            continue
-        try:
-            snapshots = load_snapshots(row)
-            _, url = submit(row, snapshots)
-        except BoardError as exc:
-            print(f'skipped {exc}')
-            continue
-        known[key] = url
-        done.add(row['id'])
-        print(f'filed {url}')
-    mark_queue_done(done)
 
 
 def rank():
@@ -582,18 +539,8 @@ def main(argv):
     parser.add_argument('--why', default='')
     parser.add_argument('--attach', action='append', default=[], metavar='PNG', help='attach a reviewed PNG (up to four)')
     parser.add_argument('--drain', action='store_true', help='file queued wishes with the current agent token')
-    parser.add_argument('--drain-backlog', action='store_true', help='file every saved wish once, skipping ones already on the board')
     parser.add_argument('--rank', '--weekly', action='store_true')
     args = parser.parse_args(argv)
-    if args.drain_backlog:
-        if args.want or args.why or args.attach or args.rank or args.drain:
-            parser.error('drain-backlog does not accept a wish')
-        try:
-            drain_backlog()
-        except BoardError as exc:
-            print(f'multibot-feedback: backlog drain unavailable: {exc}', file=sys.stderr)
-            return 1
-        return 0
     if args.drain:
         if args.want or args.why or args.attach or args.rank:
             parser.error('drain does not accept a wish')
