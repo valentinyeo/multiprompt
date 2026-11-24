@@ -27,6 +27,14 @@ class SessionRestartJourneyTest(unittest.TestCase):
         ):
             self.assertIn(needle, DRIVE)
 
+    def test_uses_published_tools_and_keeps_reopened_view_untouched(self):
+        self.assertIn("~/.multiprompt-runtime/mp-sessions", DRIVE)
+        self.assertNotIn("MULTIPROMPT_READER_SOURCE=", DRIVE)
+        reopened = DRIVE.split("$restartJson =", 1)[1]
+        self.assertNotIn("Alt+C", reopened)
+        self.assertIn(". Restart-DesktopApp", reopened)
+        self.assertIn("$Evidence/$Stage.layout.json", DRIVE)
+
 
 if __name__ == "__main__":
     unittest.main()
