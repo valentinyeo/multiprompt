@@ -29,6 +29,16 @@ SPEC.loader.exec_module(reader)
 FIXTURE_SPEC = importlib.util.spec_from_file_location('soft2779_fixture', ROOT / 'tools/fixtures/SOFT-2779/fixture.py')
 fixture = importlib.util.module_from_spec(FIXTURE_SPEC)
 FIXTURE_SPEC.loader.exec_module(fixture)
+MUBO_246_PROMPT = '/pstack:poteto-mode full autopilot on this queue'
+MUBO_246_FIXTURE = ROOT / 'tools/fixtures/MUBO-246/blocked-by-hook.jsonl'
+
+
+def mubo_246_events():
+    return [event for event in (json.loads(line) for line in MUBO_246_FIXTURE.read_text().splitlines() if line.strip())]
+
+
+def mubo_246_blocked_row():
+    return next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is False)
 
 
 class HistoryReaderTest(unittest.TestCase):
@@ -504,6 +514,36 @@ class HistoryReaderTest(unittest.TestCase):
             self.query.update(cached_sid='', inode=0, offset=0)
             _, again = self.read()
             self.assertEqual([row.get('read_id') or row.get('id') for row in again if row['role'] in ('user', 'assistant')][:2], identities)
+
+    def hax_runner_transcript(self):
+        sid = '11111111-1111-4111-8111-111111111111'
+        path = self.home / '.local/state/hax/sessions/shared-runners' / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type='session', version=1, id=sid, cwd='/work/shared-runners', timestamp='2026-01-01T00:00:00Z', provider='codex', model='neutral'),
+                  dict(kind='user', text='IGSH1043 runner 0 question'),
+                  dict(kind='assistant', text='IGSH1043 runner 0 saved reply')]
+        path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+        self.query.update(provider='hax', sid='', tmux='runner-alpha', cwd='/work/shared-runners', follow=True)
+        return sid, path
+
+    def test_mubo278_hax_runner_tab_reads_its_saved_transcript(self):
+        sid, path = self.hax_runner_transcript()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=(sid, path)):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], sid)
+        self.assertEqual(fields[9], 'hax')
+        self.assertEqual([row['text'] for row in rows if row['role'] in ('user', 'assistant')],
+                         ['IGSH1043 runner 0 question', 'IGSH1043 runner 0 saved reply'])
+
+    def test_mubo278_hosted_hax_chat_keeps_the_host_history_only(self):
+        sid, path = self.hax_runner_transcript()
+        reader.host_write(reader.host_paths('hax', sid)['config'], dict(enabled=True, tmux='runner-alpha', cwd='/work/shared-runners'))
+        self.query['sid'] = sid
+        with patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('hosted hax chat read a native transcript')):
+            fields, rows = self.read()
+        self.assertEqual(fields[9], 'hax')
+        self.assertTrue([row for row in rows if row.get('no_transcript') is True])
+        self.assertFalse([row for row in rows if row.get('role') in ('user', 'assistant')])
 
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
@@ -2147,6 +2187,46 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIsNone(reader.settlement_event(dict(refused, isSidechain=True), 'claude'))
         self.assertIsNone(reader.settlement_event(dict(refused, content='Compacted while idle'), 'claude'))
         self.assertIsNone(reader.settlement_event(refused, 'codex'))
+
+    def test_mubo_246_a_prompt_a_hook_blocked_is_a_send_failure(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        blocked = mubo_246_blocked_row()
+        self.assertIsNone(reader.settlement_event(blocked, 'claude'))
+        fact = reader.settlement_event(blocked, 'claude', True)
+        self.assertEqual(fact['settlement'], dict(operation='blocked', content=MUBO_246_PROMPT))
+        self.assertEqual(fact['timestamp'], blocked['timestamp'])
+        kept = next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is True)
+        self.assertIsNone(reader.settlement_event(kept, 'claude', True))
+        delivered = next(event for event in mubo_246_events() if event.get('type') == 'user')
+        self.assertIsNone(reader.settlement_event(delivered, 'claude', True))
+        self.assertIsNone(reader.settlement_event(dict(blocked, isSidechain=True), 'claude', True))
+        self.assertIsNone(reader.settlement_event(blocked, 'codex', True))
+        self.query.update(settlement=True, blocked_settlement=True, offset=0, cached_sid='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row.get('role') == 'user'], ['summarise the open pull requests'])
+
+    def test_mubo_246_a_client_without_the_opt_in_reads_master_output(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(settlement=True, offset=0, cached_sid='')
+        wire = reader.response(dict(self.query))
+        self.assertNotIn('blocked', wire)
+        without_opt_in = wire.splitlines()[1:-1]
+        self.assertEqual([json.loads(row)['text'] for row in without_opt_in], ['summarise the open pull requests', 'Two are open.'])
+        ignored = [event for event in mubo_246_events() if event.get('promptSubmitEnding')]
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in mubo_246_events() if event not in ignored))
+        self.query.update(cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        master = reader.response(dict(self.query))
+        self.assertEqual(without_opt_in, master.splitlines()[1:-1])
+        self.assertNotIn('blocked', master)
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(blocked_settlement=True, cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant' and row['text']], ['Two are open.'])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'user'], ['summarise the open pull requests'])
 
     def test_queue_removal_and_contentless_dequeue_popall_survive_delta_paging(self):
         self.query['settlement'] = True
@@ -4077,6 +4157,33 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
+
+    def test_mubo_246_a_prompt_blocked_by_a_hook_says_not_sent(self):
+        self.submit(text=MUBO_246_PROMPT)
+        self.request('dispatch')
+        self.assertEqual(self.status()['state'], 'sent')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('blocked_by_hook', message['receipt'])
+
+    def test_mubo_246_a_block_for_another_prompt_leaves_a_delivered_message_alone(self):
+        self.submit(text='synthetic prompt')
+        self.request('dispatch')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        self.assertEqual(self.status()['state'], 'sent')
+
+    def test_mubo_246_the_host_stream_marks_a_blocked_prompt_not_sent(self):
+        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', epoch=1, accepted=False,
+                                             text=MUBO_246_PROMPT)])
+        with patch.object(reader, 'host_apply', return_value=True) as apply:
+            reader.host_claude_event('claude', 'sid', 'fixture', session, mubo_246_blocked_row())
+        fact = apply.call_args.args[3][0]
+        self.assertEqual((fact['kind'], fact['id'], fact['reason']),
+                         ('not_sent', 'message_fixture_0001', 'blocked_by_hook'))
+        self.assertEqual(session['sends'], [])
 
     def test_soft_2989_connector_not_sent_keeps_the_reason_it_returned(self):
         connector = dict(

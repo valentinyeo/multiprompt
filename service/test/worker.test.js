@@ -343,6 +343,14 @@ test('better auth: dashboard session reads devices/layout, revokes only with sam
 });
 
 test('better auth: a fresh session can start passkey registration; passkey sign-in options are public', async () => {
+  const page = await request('/');
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('Content-Security-Policy'), /img-src https:\/\/deploy\.workers\.cloudflare\.com;/);
+  const text = await page.text();
+  assert.match(text, /Deploy your own hub/);
+  assert.match(text, /Sign in or sign up with a passkey/);
+  assert.match(text, /Download for Windows/);
+  assert.doesNotMatch(text, /<(?:input|textarea)[^>]*(?:ssh|private.?key|type="file")/i);
   const cookie = await emailSignIn();
   const reg = await request('/api/auth/passkey/generate-register-options', { headers: { Cookie: cookie, ...origin } });
   assert.equal(reg.status, 200); const options = await reg.json();

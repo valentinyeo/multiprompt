@@ -260,6 +260,7 @@ fn activate(index: usize) void {
     } else if (index < entry_count + views.len) {
         const entry = &entries[index - views.len];
         if (!app_state.g_single_window) {
+            _ = @import("sidebar.zig").thawSidebarOrder();
             app_state.g_sidebar_view = null;
             @import("rename.zig").showActiveShellAfterOverlay();
         }

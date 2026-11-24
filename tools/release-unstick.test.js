@@ -29,14 +29,22 @@ test('SOFT-3018 can release the repair commit without a ticket title lookup', as
   assert.equal(notes.releases[0].changes.at(-1), 'IGSH-3018 Multiprompt: releases land within 15 minutes of merge');
 });
 
-test('SOFT-3018 does not attribute the bundled ticket to an unreviewed commit', async () => {
+test('SOFT-3018 releases the bundled ticket of an unreviewed commit with a warning', async () => {
   const { buildChangelog } = await tool;
+  const { releaseNotes } = await import('./release-notes.mjs');
   const commits = fixture.commits.map((commit, i) => i === 0 ? { ...commit, sha: 'unreviewed' } : commit);
-  assert.throws(() => buildChangelog(fixture.files, fixture.tag, fixture.history, commits), /IGSH-3075 fragment has no matching commit ticket/);
+  const warnings = [];
+  const source = buildChangelog(fixture.files, fixture.tag, fixture.history, commits, undefined, line => warnings.push(line));
+  assert.ok(warnings.includes('v0.28.1853: IGSH-3075 fragment has no matching commit ticket; publishing it from its fragment text'), warnings.join('\n'));
+  assert.ok(releaseNotes(source, fixture.tag).releases[0].tickets.includes('https://app.hypertask.ai/detail/project-2060/3075'));
 });
 
-test('SOFT-3018 still rejects fragments without commit attribution', async () => {
+test('SOFT-3018 publishes a fragment without commit attribution and warns', async () => {
   const { buildChangelog } = await tool;
+  const { releaseNotes } = await import('./release-notes.mjs');
   const files = { ...fixture.files, 'changelog.d/SOFT-9999-unattributed.md': 'The folder picker opens faster.\n' };
-  assert.throws(() => buildChangelog(files, fixture.tag, fixture.history, fixture.commits), /IGSH-9999 fragment has no matching commit ticket/);
+  const warnings = [];
+  const source = buildChangelog(files, fixture.tag, fixture.history, fixture.commits, undefined, line => warnings.push(line));
+  assert.ok(warnings.includes('v0.28.1853: IGSH-9999 fragment has no matching commit ticket; publishing it from its fragment text'), warnings.join('\n'));
+  assert.ok(releaseNotes(source, fixture.tag).releases[0].changes.includes('The folder picker opens faster.'));
 });

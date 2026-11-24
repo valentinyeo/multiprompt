@@ -1,6 +1,6 @@
 # Chat delivery
 
-Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/ui_words.zon, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/ui_words.zon, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
 
 ## Sub-features
 
@@ -70,7 +70,7 @@ It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message 
 
 ### Instant saved chat (IGSH-1289)
 
-Dispatch `verify.yml` on the branch with `feature=chat-instant`.
+UNREACHABLE as a dispatch today: `gh workflow run verify.yml -f feature=chat-instant` is refused as an unsupported journey, because there is no `chat-instant` file in `features/` and `verify.yml` only turns on `CHAT_INSTANT_PROOF` from that matrix stem. The prerequisite is a `chat-instant` feature map, or a supported stem that sets that flag.
 This feature selects the existing chat-delivery driver.
 The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
 It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer.
