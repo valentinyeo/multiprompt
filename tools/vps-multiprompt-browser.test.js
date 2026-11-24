@@ -6,7 +6,6 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
-// A server's pane port is held by the SSH tunnel, so the fixture names itself like it.
 const TUNNEL_TITLE = 'sshd: multiprompt-tunnel-fixture@notty';
 process.title = TUNNEL_TITLE;
 
