@@ -47,6 +47,12 @@
             if ($workspaces.Count -ne 1) { throw 'workspace-list did not report the saved active workspace' }
             $listedGroups = @($workspaces[0].groups | Where-Object { $_.id -eq $group.id -and $_.name -ceq $group.name })
             if ($listedGroups.Count -ne 1) { throw 'workspace-list did not report the user-created group' }
+            if ($listed.active_workspace -cne $workspaceName -or $listed.sidebar_view -cne $workspaceName) { throw 'workspace-list did not report the workspace on screen' }
+            $sidebarTabs = @($listedGroups[0].tabs | Where-Object { $_.active -eq $true })
+            if ($sidebarTabs.Count -ne 1) { throw 'workspace-list did not identify the selected sidebar chat' }
+            $sidebarTab = $sidebarTabs[0]
+            if ($sidebarTab.visible -ne $true -or $null -ne $sidebarTab.hidden_reason -or $sidebarTab.waiting -ne $false -or $sidebarTab.pinned -ne $false -or $sidebarTab.archived -ne $false -or $sidebarTab.user_hidden -ne $false) { throw 'workspace-list visibility differs from the visible selected sidebar row' }
+            $result.checks += @{ name = 'SOFT-3140-desktop-sidebar-report'; activeWorkspace = $listed.active_workspace; view = $listed.sidebar_view; tab = $sidebarTab }
             if (@($listed.hosts).Count -lt 1 -or -not ($listed.hosts[0] -is [string]) -or -not $listed.hosts[0]) { throw 'workspace-list reported no usable host name' }
             $hostName = $listed.hosts[0]
             $openArgs = @('session-open', '--workspace', $workspaceName, '--group', $group.name, '--host', $hostName, '--tmux', 'verify-1', '--name', 'Verify 1')
