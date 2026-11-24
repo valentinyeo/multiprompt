@@ -1,6 +1,6 @@
 # Inbox
 
-Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox.ps1
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox.ps1, src/sidebar_attention.zig
 
 Open the session list across workspaces, change a session's read/unread state, and return to the workspace.
 
