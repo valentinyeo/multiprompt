@@ -7,7 +7,7 @@
     "src/chat_history_reader.py": "3ac8535071311e2e2a9aad34c251fadbb452377239bb2d3b7dc14f9f65194467",
     "src/app_state.zig": "54f96500e122ec4895c33edf631455690167f2b269df5c9219b6a446a6b317ca",
     "src/chat_connectors/claude.py": "7be13a50645bbcdb32f606e152ec75927a135db2f15c7310df50d899d093deca",
-    "tools/chat-history-reader-test.py": "aac68c95e834fa9b53cb1bd18d7a7c29294f17be5a6624314a359687b59c5541",
+    "tools/chat-history-reader-test.py": "a8a92ff01dd801bd3bcb127fe72e4952bb2e45c6d7a091be0cb1e79514f523a3",
     "tools/multibot-feedback-test.py": "1b7581c2ca4898aed9ec19a9903d83c8cc92ed8d40289ef99a5e18614f2a67d0"
   },
   "coverage": {
