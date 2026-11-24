@@ -5,5 +5,8 @@ Description=Automatic desktop freeze report triage
 Type=oneshot
 EnvironmentFile=%h/.config/multiprompt/crash-report-tickets.env
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 %h/.local/share/multiprompt-crash-tickets/crash-report-tickets.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=-/usr/bin/git -C %h/projects/multiprompt-crash-report-tickets fetch --depth 1 origin master
+ExecStartPre=-/usr/bin/git -C %h/projects/multiprompt-crash-report-tickets checkout -q --detach origin/master
+ExecStart=/usr/bin/python3 %h/projects/multiprompt-crash-report-tickets/service/crash-report-tickets.py
 UMask=0077

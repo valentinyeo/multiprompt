@@ -61,6 +61,14 @@ test("ACTIVE clears any prior dot and a resumed DONE respects filing content", (
   assert.match(apply, /completed_turn and dotTargetsTab\(i\) and \(!shells\[i\]\.inbox_archived or archiveHasNewContent\(i\)\)/);
 });
 
+test("SOFT-3113 hosted Waiting uses hook timestamps when console read is unavailable", () => {
+  const store = fs.readFileSync(path.join(path.resolve(__dirname, ".."), "src", "sidebar_attention.zig"), "utf8");
+  assert.match(store, /fn hostedArchiveHasNewContent/);
+  assert.match(store, /shellUsesHostedArchive/);
+  const sidebar = fs.readFileSync(path.join(path.resolve(__dirname, ".."), "src", "sidebar.zig"), "utf8");
+  assert.match(sidebar, /test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE"/);
+});
+
 test("workspace exports retain blue dots too", () => {
   const exported = functionBody("exportSlotSessionFile", "closeMyWorkspaceSlot");
   assert.match(exported, /shells\[i\]\.needs_attention/);

@@ -423,7 +423,10 @@ test('HYCI-158 attributes only the reviewed browser focus merge', () => {
   let generated;
   assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles); });
   assert.match(generated, /\.ticket = "HYCI-158"/);
-  assert.throws(() => buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83b' }], ticketTitles), /lacks a leading ticket ID/);
+  const warnings = [];
+  const unreviewed = buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83b' }], ticketTitles, line => warnings.push(line));
+  assert.match(unreviewed, /\.ticket = "no-ticket"/);
+  assert.deepEqual(warnings, ['v0.28.1600: commit a0a4f4e has no ticket key; publishing its line without a link']);
 });
 
 test('HYCI-168 attributes only the reviewed Windows resources merge', () => {
@@ -434,7 +437,10 @@ test('HYCI-168 attributes only the reviewed Windows resources merge', () => {
     generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles);
   });
   assert.match(generated, /\.ticket = "HYCI-168"/);
-  assert.throws(() => buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e2' }], ticketTitles), /lacks a leading ticket ID/);
+  const warnings = [];
+  const unreviewed = buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e2' }], ticketTitles, line => warnings.push(line));
+  assert.match(unreviewed, /\.ticket = "no-ticket"/);
+  assert.deepEqual(warnings, ['v0.28.1600: commit ed1a8bb has no ticket key; publishing its line without a link']);
 });
 
 test('IGSH-1732 attributes the reviewed repository picker merge before publishing', () => {
@@ -597,10 +603,9 @@ test('IGSH-1243 build reads ticketed commits between published tags', async t =>
       const ids = subject.split(':')[0].split(', ');
       assert.deepEqual(notes.releases[0], release('0.29.2', ...ids));
     } else {
-      assert.equal(result.status, 1);
-      assert.ok(result.stderr.includes(sha));
-      assert.match(result.stderr, /leading ticket ID/);
-      assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), changelog);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, new RegExp(`Release notes warning: v0\\.29\\.2: commit ${sha.slice(0, 7)} has no ticket key`));
+      assert.deepEqual(releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.29.2').releases[0], { version: '0.29.2', changes: ['Repair checks'], tickets: [null] });
     }
   }
 });
@@ -632,7 +637,9 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.equal(source.includes('Typing feels faster.'), false);
   assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], { version: '0.29.2', changes: [], tickets: [] });
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
-  assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
+  const warnings = [];
+  assert.deepEqual(releaseNotes(forged, 'v0.28.1100', line => warnings.push(line)).releases[0], { version: '0.28.1100', changes: ['Typing feels faster.'], tickets: [null] });
+  assert.deepEqual(warnings, ['Release 0.28.1100: HYCI-101 has no title after its key; publishing its line without a link']);
 });
 
 test('SOFT-2803 attributes the untagged master commits since v0.28.1762', () => {
