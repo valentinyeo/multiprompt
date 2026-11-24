@@ -826,7 +826,6 @@ const ReleaseMutex = @import("win32.zig").ReleaseMutex;
 const windowOwnerProcessStillActive = @import("workspaces.zig").windowOwnerProcessStillActive;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
 const findAndFocusWorkspaceWindow = @import("workspaces.zig").findAndFocusWorkspaceWindow;
-const deleteWorkspaceByIndex = @import("workspaces.zig").deleteWorkspaceByIndex;
 const saveWorkspaceRegistry = @import("workspaces.zig").saveWorkspaceRegistry;
 const gcDefaultNamedWindowOnClose = @import("workspaces.zig").gcDefaultNamedWindowOnClose;
 const setWorkspaceRestoreAndSave = @import("workspaces.zig").setWorkspaceRestoreAndSave;
@@ -2384,7 +2383,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
             const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
                 @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
-            if (!pointer_in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
+            if (!pointer_in_sidebar and app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {
@@ -2421,7 +2420,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const pointer_in_sidebar = !app_state.g_hide_sidebar and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W();
             if (pointer_in_sidebar) {
                 @import("sidebar.zig").freezeSidebarOrder();
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            } else if (app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
@@ -4364,6 +4363,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
             loadSnippetsIfChanged();
+            @import("workspace_delete_palette.zig").takeRequested();
             if (app_state.g_search_pick_repo_mode) requestAllRepoRefresh();
             updateSearchResults();
             if (!was_search_active and !app_state.g_search_from_inbox) {
@@ -7346,21 +7346,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target >= SEARCH_WORKSPACE_DELETE_OFFSET and target < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) {
-                    const workspace_idx: u32 = @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET);
-                    if (app_state.g_search_workspace_delete_confirm) |confirm_idx| {
-                        if (confirm_idx == workspace_idx) {
-                            _ = deleteWorkspaceByIndex(workspace_idx);
-                            app_state.g_search_workspace_delete_confirm = null;
-                            app_state.g_search_len = 0;
-                            app_state.g_search_sel = 0;
-                            app_state.g_search_scroll = 0;
-                            updateSearchResults();
-                            _ = InvalidateRect(hwnd, null, 0);
-                            return 0;
-                        }
-                    }
-                    app_state.g_search_workspace_delete_confirm = workspace_idx;
-                    _ = InvalidateRect(hwnd, null, 0);
+                    @import("workspace_delete_palette.zig").confirm(hwnd, @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET));
                     return 0;
                 }
                 if (target == app_state.SEARCH_TABCTX_PIN_PAGE or target == app_state.SEARCH_TABCTX_UNPIN_PAGE) {

@@ -20,7 +20,7 @@ async function layoutFixture(features = 'groups,favorite') {
   };
   const invoke = async args => {
     const out = [], err = [];
-    const code = await run(args, { env: { MULTIPROMPT_KEY: 'k', MULTIPROMPT_HOST: '1' }, fetch, out: line => out.push(line), err: line => err.push(line), tmux: () => { throw new Error('tmux'); } });
+    const code = await run(args, { env: { MULTIPROMPT_KEY: 'k' }, fetch, out: line => out.push(line), err: line => err.push(line), tmux: () => { throw new Error('tmux'); } });
     return { code, out: out.join('\n'), err: err.join('\n') };
   };
   return { invoke, requests, get layout() { return layout; }, get revision() { return revision; } };
@@ -43,7 +43,7 @@ test('open with a group sends the groups header and publishes one shell tab', as
 
 test('open refuses a group when the service does not advertise groups', async () => {
   const fixture = await layoutFixture('');
-  const refused = await fixture.invoke(['open', 'mp-runner-1', '--workspace', 'Multiprompt', '--group', 'MP Runners', '--no-tmux']);
+  const refused = await fixture.invoke(['open', 'mp-runner-1', '--workspace', 'Multiprompt', '--group', 'MP Runners', '--host', '1', '--no-tmux']);
   assert.equal(refused.code, 1);
   assert.match(refused.err, /does not support groups/);
   assert.equal(fixture.layout.tabs.length, 0);
@@ -152,7 +152,7 @@ test('chat kind routes to spawn and refuses an old service before setup', async 
   const { run } = await import('./mp-layout.mjs');
   const calls = [];
   const err = [];
-  const code = await run(['open', '--kind', 'chat', '--name', 'Runner', '--folder', 'work', '--workspace', 'Work', '--group', 'Runners'], {
+  const code = await run(['open', '--kind', 'chat', '--name', 'Runner', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--group', 'Runners'], {
     env: { HOME: os.tmpdir(), MULTIPROMPT_KEY: 'k' },
     out() {}, err: line => err.push(line),
     resolveFolder: () => '/work',
@@ -182,7 +182,7 @@ test('chat kind publishes one grouped live tab through spawn', async () => {
     return { status: 200, json: async () => ({ revision }) };
   };
   const out = [], err = [];
-  const code = await run(['open', '--kind', 'chat', '--name', 'Runner chat', '--folder', 'work', '--workspace', 'Work', '--group', 'MP Runners'], {
+  const code = await run(['open', '--kind', 'chat', '--name', 'Runner chat', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--group', 'MP Runners'], {
     env: { HOME: home, MULTIPROMPT_KEY: 'k' },
     out: line => out.push(line), err: line => err.push(line),
     resolveFolder: () => '/work',

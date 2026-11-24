@@ -14,7 +14,7 @@ Ctrl+T, Alt+T and the sidebar plus use the default workspace launch. Use Ctrl+K 
 
 Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
-1. Use Part B (`w-2567b`, SOFT-2567) runner-owned real SSH/tmux host and Part A real-size profile. Do not create another server fixture.
+1. Use the merged Part B runner-owned real SSH/tmux host that `feature=server-chat` installs on the Windows runner (see [server chat](server-chat.md)). Do not create another server fixture; Part A's real-size profile never landed.
 2. Open each available provider chat on that server. Send a prompt requesting one unique marker, require one matching logical reply turn, leave and reopen the chat.
 3. Require the same server, session ID and history, exactly one sent user turn and one logical reply turn, and an editable draft after returning.
 4. Pair native keyboard/screenshot proof with the receiving host's transcript. A painted synthetic reply alone is insufficient.
@@ -29,7 +29,7 @@ Follow the priority server-chat recipe above, using the selected server and fold
 
 Observable proof: One receiving session and one reply per unique input; stable session identity on reopen.
 
-UNREACHABLE for real SSH/providers until Part B and the installed authenticated provider CLI are ready. Existing chat-delivery is a stand-in.
+REACHABLE for real SSH and tmux through `feature=server-chat`, which owns both ends of a loopback OpenSSH/tmux connection and a deterministic stream-json provider. UNREACHABLE for a paid provider reply: that needs an installed authenticated provider CLI on the runner. `chat-delivery` remains a stand-in.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
@@ -40,6 +40,9 @@ UNREACHABLE for real SSH/providers until Part B and the installed authenticated 
 | `SEARCH_NEW_PI_CHAT_OFFSET` | Ctrl+K, type **new pi chat**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_NEW_TERMINAL_OFFSET` | Ctrl+K, type **new terminal**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_OPENALL_HOST_BACK_OFFSET` | Open the named submenu, then choose **back**. Follow `server` above. |
+| `SEARCH_OPENALL_HOST_DE_OFFSET` | Ctrl+K, search for **open all vps tmux sessions**, then choose the German host row. Follow `server` above. |
+| `SEARCH_OPENALL_HOST_INNE_OFFSET` | Ctrl+K, search for **open all vps tmux sessions**, then choose the inner host row. Follow `server` above. |
+| `SEARCH_OPENALL_HOST_UK_OFFSET` | Ctrl+K, search for **open all vps tmux sessions**, then choose the UK host row. Follow `server` above. |
 | `SEARCH_OPENALL_OFFSET` | Ctrl+K, search for **open all vps tmux sessions**. Follow `server` above. |
 | `SEARCH_OPENFOLDER_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_OPEN_SESSION_MENU_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
@@ -48,6 +51,6 @@ UNREACHABLE for real SSH/providers until Part B and the installed authenticated 
 
 ## Gotchas
 
-UNREACHABLE for real-server proof until Part B supplies its ready SSH endpoint, restricted Windows key, tmux session and healthy host. Real provider replies additionally need an installed authenticated provider CLI; list each missing provider separately.
+Real-server transport is reachable through the merged `server-chat` journey: runner-owned WSL OpenSSH, a restricted runner-SID key and a real tmux session. Still UNREACHABLE is a paid provider reply, which needs an installed authenticated provider CLI; list each missing provider separately.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A ([PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070), `seed-profile.py`, `seed-profile.ps1`, the `chat-real-size` journey) was closed unmerged, so master still has no real-size seeded profile. Part B ([PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072)) merged on 2026-11-18 as the runner-owned SSH/tmux [server chat](server-chat.md) journey, which runs as `feature=server-chat`; use it rather than adding another server fixture. Do not add replacement real-size fixtures here until a Part A equivalent lands.

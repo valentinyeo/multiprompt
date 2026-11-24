@@ -1,6 +1,6 @@
 # Bot photos
 
-Source files: src/bot_picture.zig, src/bot_photo*.zig, tools/verify-bot-photo/*, src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
+Source files: src/bot_picture.zig, src/bot_photo*.zig, src/bot_avatar.zig, src/bot_look.zig, tools/verify-bot-photo/*, src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
 
 ## Sub-features
 
