@@ -43,7 +43,7 @@ $plans = @(
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
 if ($Feature -in @('chat-full-history', 'chat-newest')) { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
-if ($env:CHAT_PIN_PROOF -eq '1') { $plans = @(@{name='pin-skill'; mode='idle'; text='pinned skill message'}) }
+if ($env:CHAT_PIN_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}, @{name='pin-skill'; mode='idle'; text='pinned skill message'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $plans = @(@{name='live-delivery'; mode='busy'; text='continuous busy-session delivery'}) }
@@ -709,7 +709,7 @@ foreach ($plan in $plans) {
             if ($isRecovery) { . "$PSScriptRoot/resync-recovery.ps1" } else { . "$PSScriptRoot/resync.ps1" }
         } elseif ($isHax) {
             . "$PSScriptRoot/hax-sessions.ps1"
-        } elseif ($env:CHAT_PIN_PROOF -eq '1') {
+        } elseif ($plan.name -eq 'pin-skill') {
             $pinFile = "$settings/chat-pins.txt"
             $pinLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x11, 0x4B) 'Ctrl+K: find the pin row'
@@ -1706,6 +1706,8 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
 }
 if ($env:CHAT_PIN_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-pin-proof.mjs" $Evidence
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($env:CHAT_RETENTION_PROOF -eq '1') {
