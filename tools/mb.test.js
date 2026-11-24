@@ -73,7 +73,7 @@ function harness(options = {}) {
     assert.equal(typeof run, 'function');
     const lines = [], errors = [];
     const code = await run(args, {
-      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir, MULTIPROMPT_HOST: '0' },
+      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir },
       out: line => lines.push(line), err: line => errors.push(line), fetch, tmux: tmuxFn,
       runtime: argv => { runtime.push(argv); return { status: 0, stdout: '{"status":"disabled"}' }; },
       ownerPath

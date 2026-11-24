@@ -1024,7 +1024,7 @@ test('ISSUE-511 lifecycle and confirmation timeout execute pure production state
 });
 
 test('ISSUE-511 lifecycle oracles reject 9542152 state behavior', async () => {
-  const prior = fs.readFileSync(path.join(__dirname, 'fixtures/ISSUE-511/ssh_reconnect.zig'), 'utf8');
+  const prior = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-254/ssh_reconnect.zig'), 'utf8');
   const current = fs.readFileSync(path.join(root, 'src/ssh_reconnect.zig'), 'utf8');
   const tests = current.slice(current.indexOf('\nfn testGoneLifecycle('));
   let baseline = prior.slice(0, prior.indexOf('\ntest "'));

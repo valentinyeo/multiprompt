@@ -53,7 +53,9 @@ def display_name(name):
 
 
 def host_slot(text=None):
-    text = (text if text is not None else os.environ.get("MULTIPROMPT_HOST") or "0").strip()
+    text = (text if text is not None else os.environ.get("MULTIPROMPT_HOST") or "").strip()
+    if not text:
+        raise ValueError("set MULTIPROMPT_HOST to this server's account slot: 0, 1 or 2")
     try:
         slot = int(text)
     except ValueError:
@@ -184,7 +186,10 @@ def session_catalog(send, listing):
         candidates = [row for row in rows.values() if row["tmux"] == tmux]
         matched = [row for row in candidates if row.get("sid") == sid]
         row = matched[0] if len(matched) == 1 else candidates[0] if len(candidates) == 1 else dict(desktop_state(listing, tmux=tmux), tmux=tmux, tab_open=False)
-        row.update(provider=provider, folder=config.get("cwd"), cwd=config.get("cwd"), spawn_name=config.get("spawn_name"))
+        row.update(provider=provider, folder=config.get("cwd"), cwd=config.get("cwd"), spawn_name=config.get("spawn_name"),
+                   host=row.get("host"), workspace=row.get("workspace") or config.get("spawn_workspace"),
+                   group=row.get("group") if "group" in row else config.get("spawn_group"),
+                   recorded_host=config.get("spawn_host"), recorded_host_name=config.get("spawn_host_name"))
         if not row.get("sid"):
             row["sid"] = sid
         row["running"] = config.get("enabled") is True and alive
