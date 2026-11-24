@@ -2132,9 +2132,11 @@ fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.
     while (i < list.items.len) {
         const e = &list.items[i];
         const row_known = chatEchoRowKnown(e.*, force);
-        if (!e.message_v1 or e.reset_pending or (key.len > 0 and !std.mem.eql(u8, e.key[0..e.key_len], key)) or
+        const landed_row = row_known and !force and e.message_v1 and !e.reset_pending and e.state != .not_sent and
+            e.state != .cancelled and (key.len == 0 or std.mem.eql(u8, e.key[0..e.key_len], key));
+        if (!landed_row and (!e.message_v1 or e.reset_pending or (key.len > 0 and !std.mem.eql(u8, e.key[0..e.key_len], key)) or
             !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0), row_known,
-                force or (e.anchor.sent_ms > 0 and reply_ms > e.anchor.sent_ms), now_ms, e.sent_tick_ms))
+                force or (e.anchor.sent_ms > 0 and reply_ms > e.anchor.sent_ms), now_ms, e.sent_tick_ms)))
         {
             i += 1;
             continue;

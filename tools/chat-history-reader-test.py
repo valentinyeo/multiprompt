@@ -8008,7 +8008,17 @@ class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
         started = self.antigravity_events('turn.started')
         self.assertEqual(len(started), 1, 'the Antigravity turn must name the send it took')
         self.assertEqual(started[0]['payload']['message_id'], 'mp-antigravity-1')
-        self.assertEqual(started[0]['payload']['uuids'], ['um-antigravity-1'])
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-1', 'um-antigravity-1'])
+
+    def test_an_antigravity_turn_without_a_reported_uuid_still_names_its_row(self):
+        self.session['sends'] = [dict(id='mp-antigravity-2', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):

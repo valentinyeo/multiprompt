@@ -1679,7 +1679,7 @@ def install_antigravity_host(namespace):
         namespace["host_state_write"](provider, candidate, kept)
         session = dict(turn=token, state=kept, pending={}, messages={},
                        sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
-        previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token))
+        previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token, uuids=[token]))
         previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
         block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
         reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."

@@ -5672,6 +5672,20 @@ def host_antigravity_set_mode(provider, sid, session, mode):
     return host_refuse("antigravity_mode_fixed")
 
 
+def host_antigravity_names(session, entity, update):
+    entry = next((item for item in reversed(session.get("sends") or []) if not item.get("uuid")), None)
+    if entry is None:
+        return None
+    names = [entry["id"]]
+    for source in (update, entity):
+        for key in ("user_message_uuid", "user_message_uuids"):
+            value = source.get(key)
+            listed = value if isinstance(value, list) else [value]
+            names.extend(item for item in listed if isinstance(item, str) and item)
+    entry["uuid"] = list(dict.fromkeys(names))
+    return entry
+
+
 def host_antigravity_event(provider, sid, tmux, session, event):
     kind = event.get("event")
     if kind == "init":
@@ -5693,6 +5707,9 @@ def host_antigravity_event(provider, sid, tmux, session, event):
         if isinstance(native, str) and native and not session["state"].get("native_session"):
             session["state"]["native_session"] = native
         if step_type == "user_input":
+            named = host_antigravity_names(session, event, update)
+            if named is not None:
+                host_turn_started(provider, sid, tmux, session, named)
             host_accept(provider, sid, tmux, session, event)
             return
         if step_type == "agent_response":
