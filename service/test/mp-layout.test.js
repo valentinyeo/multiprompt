@@ -98,20 +98,20 @@ test('workspace key gets a clear refusal for another workspace', async () => {
 
 test('open starts tmux when missing and registers the session in the default workspace', async () => {
   await reset();
-  const result = await cli(['open', 'fresh-one', '--title', 'Fresh one'], innerKey);
+  const result = await cli(['open', 'fresh-one', '--title', 'Fresh one', '--host', '0'], innerKey);
   assert.equal(result.code, 0, result.errors.join('\n'));
   assert.deepEqual(result.tmuxCalls.map(c => c[0]), ['has-session', 'new-session']);
   assert.match(result.lines[0], /opened fresh-one \(tmux session started\) \(revision 4\)/);
   const added = (await stored()).layout.tabs.find(t => t.tmux_session === 'fresh-one');
   assert.deepEqual(added, { kind: 'tmux', name: 'Fresh one', tmux_session: 'fresh-one', tmux_host: 0, workspace: 'inne' });
-  const again = await cli(['open', 'fresh-one', '--no-tmux'], innerKey);
+  const again = await cli(['open', 'fresh-one', '--host', '0', '--no-tmux'], innerKey);
   assert.match(again.lines[0], /already open/);
   assert.equal((await stored()).revision, 4);
 });
 
 test('admin open needs a workspace when there are several', async () => {
   await reset();
-  const result = await cli(['open', 'fresh-two', '--no-tmux'], adminKey);
+  const result = await cli(['open', 'fresh-two', '--host', '0', '--no-tmux'], adminKey);
   assert.equal(result.code, 1);
   assert.match(result.errors[0], /--workspace/);
   const named = await cli(['open', 'fresh-two', '--workspace', 'Work', '--host', '2', '--no-tmux'], adminKey);
@@ -158,7 +158,7 @@ test('spawn publishes once through the real service and refuses a workspace esca
     },
     runtime: args => { runtimeCalls++; return { status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) }; }
   };
-  const args = ['spawn', '--name', 'New live chat', '--folder', 'work', '--workspace', 'Work', '--group', 'Runners'];
+  const args = ['spawn', '--name', 'New live chat', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--group', 'Runners'];
   assert.equal(await run(args, { ...opts, env: { ...opts.env, MULTIPROMPT_KEY: innerKey } }), 1);
   assert.equal(runtimeCalls, 0);
   assert.equal(parked, false);
@@ -240,7 +240,7 @@ test('roster apply sets group, face, color, photo, and workspace color once', as
   const sessions = new Set();
   const lines = [], errors = [];
   const invoke = args => mbRun(args, {
-    env: { MULTIPROMPT_KEY: adminKey, MULTIPROMPT_URL: base, HOME: dir, MULTIPROMPT_HOST: '1' },
+    env: { MULTIPROMPT_KEY: adminKey, MULTIPROMPT_URL: base, HOME: dir },
     out: line => lines.push(line), err: line => errors.push(line),
     fetch: (url, init) => mf.dispatchFetch(url, init),
     ownerPath: join(dir, 'owners.json'),

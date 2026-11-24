@@ -35,6 +35,21 @@ function isRepair(pr) {
     (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
 }
 
+function isExemptUnmappedFile(file) {
+  if (file.startsWith('openwiki/') || file.startsWith('docs/')) return true;
+  if (file.startsWith('changelog.d/')) return true;
+  if (file.startsWith('tools/ticket-titles/')) return true;
+  if (file.startsWith('.github/')) return true;
+  if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) return true;
+  return false;
+}
+
+function userFacingUnmapped(unmapped) {
+  return (Array.isArray(unmapped) ? unmapped : [])
+    .filter(file => !isExemptUnmappedFile(file) && (file.startsWith('src/') || file.startsWith('extension/')))
+    .sort();
+}
+
 function ciRepro(selection, summary) {
   const workflows = selection.ciWorkflows || [];
   const receipts = summary?.ciRepro || [];
@@ -310,6 +325,7 @@ function modelFamily(model) {
   if (/anthropic|claude/i.test(name)) return 'anthropic';
   if (/composer|cursor/i.test(name)) return 'cursor';
   if (/google|gemini/i.test(name)) return 'google';
+  if (/zai|glm|zhipu/i.test(name)) return 'zai';
   if (/openai|gpt/i.test(name)) return 'openai';
   return '';
 }
@@ -375,6 +391,11 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   if (selection.uncovered && final === 'PASS') {
     final = 'PASS+NOTES';
     notes.push(`Not covered by any journey: ${selection.uncovered}`);
+  }
+  const uncoveredUserFacing = userFacingUnmapped(selection.unmapped);
+  if (uncoveredUserFacing.length && final !== 'BLOCKED') {
+    final = 'FAIL';
+    notes.unshift(`Changed user-facing files have no journey: ${uncoveredUserFacing.join(', ')}.`);
   }
   const ciProof = selection.bugFix ? ciRepro(selection, summary) : null;
   if (ciProof) {
@@ -1031,7 +1052,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, userFacingUnmapped };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

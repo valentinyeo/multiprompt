@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+SOFT-2681 reviewed source at `28135885b5b63344a2b71e2e278d502658fd6ea8`. The reader now publishes Claude's native session and selects its current transcript; its added tests cover that routing. `message_store_transaction`, `message_poll`, `message_poll_locked` and `IGSH_1266_SharedMessageHostTest` are unchanged from the prior sync. Every other covered file is unchanged. Only the reader and reader-test hashes move; the fixed-session model, bounds, decisions, probes and mutations remain unchanged. Hosted CI must rerun the full self-test and native replay.
+
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.
 
 SOFT-3097 reverts `a7335b3cb606f89f2ecf3cadc09bb514aa59aaf6` on top of `ddd9c677f60b14f29df5c3e2728bef2ec9d51fec`, so pending rows reconcile by exact text again and id-less history rows key on their text. `pickBlock`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch and the restore guard are unchanged from the pre-identity source, and the native probes and replay supply only the text block. The recorded decision table still matches, because it models one exact-text echo. The reader's `client_id` metadata and alias persistence are gone; the covered reader functions are otherwise unchanged. Only the echo, send and reader hashes move, and the sync commit names the base it was reviewed on. Bounds, decisions, mutations and properties remain unchanged.
@@ -62,6 +64,8 @@ SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. 
 SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
+
+SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
