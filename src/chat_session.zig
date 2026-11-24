@@ -2358,6 +2358,7 @@ test "MUBO-249 a refresh that appends rows keeps the saved layout while live cha
         .from_file = app_state.g_chat_blocks_from_file,
         .file_valid = app_state.g_chat_file_valid,
         .drawn = g_chat_live_drawn_revision,
+        .working = app_state.g_chat_screen_working,
     };
     app_state.g_chat_histories = .empty;
     defer {
@@ -2375,6 +2376,7 @@ test "MUBO-249 a refresh that appends rows keeps the saved layout while live cha
         app_state.g_chat_blocks_from_file = saved.from_file;
         app_state.g_chat_file_valid = saved.file_valid;
         g_chat_live_drawn_revision = saved.drawn;
+        app_state.g_chat_screen_working = saved.working;
         app_state.g_chat_block_count = 0;
         app_state.g_chat_last_len = 0;
         app_state.g_chat_last_hash = 0;
@@ -2399,7 +2401,7 @@ test "MUBO-249 a refresh that appends rows keeps the saved layout while live cha
     try entry.history.apply(a, wire.items, 1, key);
     const base = entry.history.blocks.items.len;
     try std.testing.expect(base > 100);
-    _ = live.begin(shell_id, 0, "sid");
+    try std.testing.expect(live.starting(shell_id, 0, "sid"));
     try std.testing.expect(live.revision(shell_id) != 0);
     app_state.g_chat_cache_shell_id = 0;
     app_state.g_chat_block_count = 0;
