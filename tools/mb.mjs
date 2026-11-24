@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { run as layoutRun } from './mp-layout.mjs';
+import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -14,6 +16,8 @@ commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
+  pin <name> [--host N] [--json]
+  unpin <name> [--host N] [--json]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -25,18 +29,24 @@ commands:
   workspace list
   workspace create <name> [--color N]
   workspace rename <old> <new>
-  workspace delete <name>
+  workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
   group list
   group create <name>
   group rename <old> <new>
   group delete <name>
   roster apply <file> [--dry-run]
+  health [--json] [--ping]
+
+every write names its server: --host wins, then the host recorded when the chat was created,
+then this machine's slot, which is MULTIPROMPT_HOST or "multiprompt_slot" on this machine's
+entry in the installed servers file. A tab that is already open keeps its own host, so a
+verb aimed at an open tab never needs a slot.
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
   MULTIPROMPT_URL   account service address (default ${DEFAULT_URL})
-  MULTIPROMPT_HOST  default host slot (default 0)
+  MULTIPROMPT_SERVERS_FILE  path to the installed servers file
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
@@ -55,7 +65,7 @@ const REFUSALS = {
 
 function parse(argv) {
   const flags = { _: [] };
-  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo']);
+  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
@@ -63,7 +73,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux'].includes(name)) flags[name] = true;
+    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -184,7 +194,6 @@ function choose(layout, name, host) {
   if (tabs.length > 1) throw new Failure('give --host');
   return tabs[0] || null;
 }
-const defaultHost = (ctx, flags) => hostSlot(flags?.host ?? ctx.env.MULTIPROMPT_HOST ?? '0');
 
 function ensureSession(ctx, session, command) {
   if (ctx.tmux(['has-session', '-t', '=' + session]).status === 0) return false;
@@ -236,7 +245,15 @@ async function list(ctx, flags) {
 
 async function placeShell(ctx, flags) {
   const session = sessionName(flags.tmux);
-  const host = defaultHost(ctx, flags);
+  let layoutHosts;
+  let existingHost;
+  if (needsLayoutHosts(ctx.env, session, flags.host)) {
+    const layout = (await readLayout(ctx)).data.layout || {};
+    layoutHosts = layout.hosts;
+    const present = (layout.tabs || []).filter(tab => String(tab.tmux_session || '').toLowerCase() === session.toLowerCase() && Number.isInteger(tab.tmux_host));
+    if (present.length === 1) existingHost = present[0].tmux_host;
+  }
+  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts, existingHost);
   const workspace = workspaceName(flags.workspace);
   const group = flags.group === undefined ? null : groupName(flags.group);
   const title = flags.title === undefined ? null : titleName(flags.title);
@@ -304,6 +321,57 @@ async function close(ctx, flags) {
   const owned = Object.values(owners.sessions).find(item => item.owner === 'mb' && (item.session.toLowerCase() === clean(session).toLowerCase() || clean(item.name || '').toLowerCase() === clean(session).toLowerCase()) && (host === null || item.host === host));
   if (owned) await releaseOwned(ctx, owners, owned);
   ctx.out(`${result.changed ? 'closed' : 'already closed'} ${clean(name)}${result.changed ? ` (revision ${result.revision})` : ''}`);
+}
+
+function zsbBinary(env) {
+  const home = env.HOME || '';
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mp_zsb.sh');
+  for (const candidate of [env.MULTIPROMPT_ZSB, join(home, '.multiprompt-runtime/mp-zsb'), join(home, '.local/bin/zsb'), checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  throw new Failure('zsb is not installed');
+}
+
+function zsbCall(ctx, args) {
+  const done = spawnSync(zsbBinary(ctx.env), args, { encoding: 'utf8', env: ctx.env, timeout: 60000 });
+  const lines = String(done.stdout || '').trim().split('\n');
+  let reply = null;
+  try { reply = JSON.parse(lines[lines.length - 1] || ''); } catch { reply = null; }
+  if (!reply || typeof reply.ok !== 'boolean') {
+    const message = String(done.stderr || '').trim().split('\n').pop();
+    throw new Failure(message || 'zsb did not answer');
+  }
+  if (!reply.ok) throw new Failure(String(reply.message || reply.error || 'zsb refused the command'));
+  return reply;
+}
+
+function listingTabs(listing) {
+  const tabs = [];
+  for (const workspace of listing.workspaces || []) {
+    tabs.push(...(workspace.tabs || []));
+    for (const group of workspace.groups || []) tabs.push(...(group.tabs || []));
+  }
+  return tabs;
+}
+
+async function pinSession(ctx, flags, pinned) {
+  const verb = pinned ? 'pin' : 'unpin';
+  if (flags._.length !== 1) throw new Failure(`${verb} needs one tab name`);
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const listing = zsbCall(ctx, ['workspace-list']);
+  const hostName = host === null ? null : (listing.hosts || [])[host];
+  if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
+  const wanted = clean(flags._[0]).toLowerCase();
+  const matches = listingTabs(listing).filter(tab => (host === null || tab.host === hostName) &&
+    (String(tab.title || '').toLowerCase() === wanted || String(tab.tmux || '').toLowerCase() === wanted));
+  if (matches.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
+  if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
+  const tab = matches[0];
+  const changed = (tab.pinned === true) !== pinned;
+  if (changed) zsbCall(ctx, [pinned ? 'session-pin' : 'session-unpin', '--tab', String(tab.id)]);
+  const word = pinned ? 'pinned' : 'unpinned';
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed, tab: tab.id, pinned }));
+  else ctx.out(`${changed ? word : 'already ' + word} ${tab.title}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -428,17 +496,25 @@ async function workspaceCommand(ctx, sub, flags) {
     const owners = readOwners(ctx);
     const seen = await readLayout(ctx);
     if (!seen.data.layout.workspaces.some(item => item.name === name)) { ctx.out(`already deleted workspace ${name}`); return; }
-    if (owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
+    const chats = seen.data.layout.tabs.filter(tab => tab.workspace === name);
+    const moveTo = flags['move-to'] === undefined ? null : workspaceName(flags['move-to']);
+    if (chats.length > 0 && moveTo === null) throw new Failure(`workspace ${name} has ${chats.length} chat${chats.length === 1 ? '' : 's'}; give --move-to <workspace>`);
+    if (moveTo !== null) {
+      if (moveTo === name) throw new Failure('move-to must be a different workspace');
+      if (!seen.data.layout.workspaces.some(item => item.name === moveTo)) throw new Failure(`workspace ${moveTo} not found`);
+    }
+    if (chats.some(tab => owners.sessions[tabId(tab)]?.owner !== 'mb')) throw new Failure('not owned');
+    if (moveTo === null && owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
     const result = await edit(ctx, layout => {
-      const foreign = layout.tabs.some(tab => tab.workspace === name && owners.sessions[tabId(tab)]?.owner !== 'mb');
-      if (foreign) throw new Failure('not owned');
-      const next = layout.tabs.filter(tab => tab.workspace !== name);
-      if (next.length === layout.tabs.length && layout.workspaces.every(item => item.name !== name)) return null;
-      layout.tabs = next;
+      if (moveTo !== null) for (const tab of layout.tabs) if (tab.workspace === name) tab.workspace = moveTo;
+      layout.tabs = layout.tabs.filter(tab => tab.workspace !== name);
       layout.workspaces = layout.workspaces.filter(item => item.name !== name);
       return layout;
     });
-    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) await releaseOwned(ctx, owners, owned);
+    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) {
+      if (moveTo === null) await releaseOwned(ctx, owners, owned);
+      else owned.workspace = moveTo;
+    }
     delete owners.workspaces[name];
     writeOwners(ctx, owners);
     ctx.out(`deleted workspace ${name} (revision ${result.revision})`);
@@ -559,7 +635,7 @@ function loadRoster(text, file) {
   return { workspaces, groups: [...new Set([...groups, ...runners.map(runner => runner.group).filter(Boolean)])], runners };
 }
 
-function rosterDiff(layout, owners, roster, hostDefault) {
+function rosterDiff(layout, owners, roster) {
   const next = structuredClone(layout);
   let changed = false;
   const actions = [];
@@ -604,7 +680,8 @@ function rosterDiff(layout, owners, roster, hostDefault) {
       } else actions.push(`unchanged ${runner.name}`);
       continue;
     }
-    const host = runner.host ?? hostDefault;
+    if (runner.host === null) throw new Failure(`give host for runner ${runner.name}`);
+    const host = runner.host;
     const id = `${host}:${runner.name.toLowerCase()}`;
     wanted.add(id);
     const tab = next.tabs.find(item => item.tmux_host === host && item.tmux_session.toLowerCase() === runner.name.toLowerCase());
@@ -645,12 +722,13 @@ function rosterDiff(layout, owners, roster, hostDefault) {
   return { actions, layout: changed ? next : null, createdWorkspaces, opened, updates, closed };
 }
 
-function runnerTab(layout, runner, hostDefault) {
+function runnerTab(layout, runner) {
   if (runner.kind === 'chat') {
     const matches = layout.tabs.filter(tab => clean(tab.name || '').toLowerCase() === runner.name.toLowerCase() && (runner.host === null || tab.tmux_host === runner.host));
     return matches.length === 1 ? matches[0] : null;
   }
-  const host = runner.host ?? hostDefault;
+  const host = runner.host;
+  if (host === null) throw new Failure(`give host for runner ${runner.name}`);
   return layout.tabs.find(tab => tab.tmux_host === host && tab.tmux_session.toLowerCase() === runner.name.toLowerCase()) || null;
 }
 
@@ -663,23 +741,22 @@ async function applyRoster(ctx, file, dry) {
   if (roster.workspaces.some(item => item.color !== null)) requireFeature(read, 'workspace_color');
   if (roster.runners.some(item => item.face !== null || item.color !== null)) requireFeature(read, 'bot_appearance');
   if (roster.workspaces.some(item => item.color === 7) || roster.runners.some(item => item.color === 7)) requireFeature(read, 'bot_palette8');
-  const hostDefault = defaultHost(ctx, {});
-  const plan = rosterDiff(read.data.layout, owners, roster, hostDefault);
+  const plan = rosterDiff(read.data.layout, owners, roster);
   if (dry) ctx.out('dry-run');
   for (const line of plan.actions) ctx.out(line);
   const photos = [];
   for (const runner of roster.runners) {
     if (!runner.photo) continue;
-    const host = runner.host ?? hostDefault;
+    const host = runner.host;
     const png = pngFromFile(runner.photo);
-    const tab = runnerTab(read.data.layout, runner, hostDefault);
+    const tab = runnerTab(read.data.layout, runner);
     if (!tab) { photos.push({ runner, host, png, changed: true }); ctx.out(`photo ${runner.name}`); continue; }
     const changed = await syncPhoto(ctx, tab.tmux_host, tab.tmux_session, png, true);
     photos.push({ runner, host: tab.tmux_host, session: tab.tmux_session, png, changed });
     if (changed) ctx.out(`photo ${runner.name}`);
   }
   for (const runner of roster.runners.filter(item => item.kind === 'shell')) {
-    const host = runner.host ?? hostDefault;
+    const host = runner.host;
     const owned = owners.sessions[`${host}:${runner.name.toLowerCase()}`];
     if (!owned || (owned.command || null) === runner.command) continue;
     if (ctx.tmux(['has-session', '-t', '=' + runner.name]).status !== 0) continue;
@@ -691,7 +768,7 @@ async function applyRoster(ctx, file, dry) {
   if (dry) { ctx.out(`revision ${read.data.revision}`); return; }
   for (const runner of [...plan.opened, ...plan.updates]) {
     if (runner.kind !== 'shell') continue;
-    const owned = owners.sessions[`${runner.host ?? hostDefault}:${runner.name.toLowerCase()}`];
+    const owned = owners.sessions[`${runner.host}:${runner.name.toLowerCase()}`];
     if (!plan.opened.includes(runner) && !owned) continue;
     if (owned && (owned.command || null) !== runner.command && ctx.tmux(['has-session', '-t', '=' + runner.name]).status === 0) {
       const lines = paneLines(ctx, runner.name) || [];
@@ -700,19 +777,20 @@ async function applyRoster(ctx, file, dry) {
     }
     ensureSession(ctx, runner.name, runner.command);
   }
-  const result = await edit(ctx, layout => rosterDiff(layout, owners, roster, hostDefault).layout);
+  const result = await edit(ctx, layout => rosterDiff(layout, owners, roster).layout);
   for (const line of plan.actions) if (line.startsWith('create group ')) owners.groups[line.slice('create group '.length)] = { owner: 'mb' };
   if (result.changed) for (const name of plan.createdWorkspaces) owners.workspaces[name] = { owner: 'mb' };
   if (result.changed) for (const runner of plan.opened) {
-    const host = runner.host ?? hostDefault;
+    if (runner.kind !== 'shell') continue;
+    const host = runner.host;
     owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: runner.model === 'claude' || runner.model === 'hax' ? runner.model : null, sid: null };
   }
   for (const runner of plan.updates) {
-    const host = runner.host ?? hostDefault;
+    const host = runner.host;
     const id = `${host}:${runner.name.toLowerCase()}`;
     if (owners.sessions[id]) Object.assign(owners.sessions[id], { command: runner.command, model: runner.model, workspace: runner.workspace });
   }
-  for (const runner of roster.runners.filter(item => item.kind === 'chat' && !runnerTab(read.data.layout, item, hostDefault))) {
+  for (const runner of roster.runners.filter(item => item.kind === 'chat' && !runnerTab(read.data.layout, item))) {
     if (!runner.folder) throw new Failure('chat open needs a title, folder and workspace');
     const previous = ctx.out;
     let last = '';
@@ -731,7 +809,7 @@ async function applyRoster(ctx, file, dry) {
     let host = photo.host;
     let session = photo.session || photo.runner.name;
     if (photo.runner.kind === 'chat' && !photo.session) {
-      const current = runnerTab((await readLayout(ctx)).data.layout, photo.runner, hostDefault);
+      const current = runnerTab((await readLayout(ctx)).data.layout, photo.runner);
       if (!current) throw new Failure('no such session');
       host = current.tmux_host;
       session = current.tmux_session;
@@ -797,6 +875,35 @@ async function pull(ctx, flags) {
   await list(ctx, flags);
 }
 
+function mpSessionsScript(env) {
+  const runtime = join(env.HOME || '', '.multiprompt-runtime/mp-sessions');
+  const talk = join(env.HOME || '', '.local/share/multiprompt-talk/mp_sessions.py');
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'mp-sessions');
+  for (const candidate of [env.MULTIPROMPT_MP_SESSIONS, runtime, talk, checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
+}
+
+async function health(ctx, flags) {
+  if (flags._.length) throw new Failure('health takes no arguments');
+  const args = ['health'];
+  if (flags.json) args.push('--json');
+  if (flags.ping) args.push('--ping');
+  const script = mpSessionsScript(ctx.env);
+  const home = ctx.env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  const result = spawnSync('python3', [script, ...args], {
+    encoding: 'utf8',
+    env: { ...ctx.env, HOME: home, PATH: ctx.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }
+  });
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const err = (result.stderr || '').trimEnd();
+  if (err) ctx.err(err);
+  return result.status ?? 1;
+}
+
 export async function run(argv, overrides = {}) {
   const env = overrides.env || process.env;
   const out = overrides.out || (line => process.stdout.write(line + '\n'));
@@ -804,6 +911,17 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (command === 'pin' || command === 'unpin') {
+      const flags = parse(rest);
+      await pinSession({ env, out, err }, flags, command === 'pin');
+      return 0;
+    }
+    if (command === 'health') {
+      const flags = parse(rest);
+      const home = env.HOME;
+      if (!home) throw new Failure('HOME is required');
+      return await health({ env, out, err }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;

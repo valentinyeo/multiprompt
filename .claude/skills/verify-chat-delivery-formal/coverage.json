@@ -1,13 +1,13 @@
 {
-  "sync_commit": "9e1f24d457b173f350f94b38881d3ef57a1e516f",
+  "sync_commit": "7995f22bbc0732fd5be0baf3f39ce9283de28e58",
   "files": {
-    "src/chat_echo.zig": "5f7c542aa3569aee9e2897f1c9ce0b4c26132e1148c1b6f99288e6d57ffa3328",
-    "src/chat_send.zig": "ee4d2c92b948df5aabb51c92f70b6594ca1c0cfb2dd183ce42d3157a8d40071b",
+    "src/chat_echo.zig": "c07e886e122ed8c3c3e412f55e09990732c72f499f0789624fe829b4715588e6",
+    "src/chat_send.zig": "63c39c43fd492a080c440a9433be71eb2f18565a7e16367ed04b6d8436e76acb",
     "src/chat_render.zig": "1492e46382856c4b949e8f4a4c1b94ba40ad348b9e8c8c0a17dfa7068c18bd24",
-    "src/chat_history_reader.py": "f3c193c5139b6c9783d47e2534eaea895cef4018351ebc67ef213f87e13d20e1",
-    "src/app_state.zig": "91c494e26bdbb25085752449c18d3a5ff9d8767b97a5443695f6e23fd7924e70",
-    "src/chat_connectors/claude.py": "7b181305096a39c3ac4276607a3177177f23ca0a88535c96604c2b3f393d1729",
-    "tools/chat-history-reader-test.py": "a91eb196b8bc4642ed7e74e317be59278c8420cabbbd9e0d9700c0136d5502ea",
+    "src/chat_history_reader.py": "3ac8535071311e2e2a9aad34c251fadbb452377239bb2d3b7dc14f9f65194467",
+    "src/app_state.zig": "54f96500e122ec4895c33edf631455690167f2b269df5c9219b6a446a6b317ca",
+    "src/chat_connectors/claude.py": "7be13a50645bbcdb32f606e152ec75927a135db2f15c7310df50d899d093deca",
+    "tools/chat-history-reader-test.py": "aac68c95e834fa9b53cb1bd18d7a7c29294f17be5a6624314a359687b59c5541",
     "tools/multibot-feedback-test.py": "1b7581c2ca4898aed9ec19a9903d83c8cc92ed8d40289ef99a5e18614f2a67d0"
   },
   "coverage": {
@@ -20,7 +20,6 @@
     "src/chat_send.zig": [
       "chatEchoEnqueueForShell",
       "chatOutboxTrySendEntry",
-      "chatOutboxFirstSendableIndexIn",
       "chatEchoWaitsOnTranscript",
       "chatMessageReduce",
       "chatEchoSendAgain",
