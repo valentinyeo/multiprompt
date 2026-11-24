@@ -23,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `328a76079cf0ddb343f82e328a9e32729bf9a790`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `8e971237d93f9227136667c1d4189d05ce171f2d`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
 
 SOFT-3140 restores the original single-file helper bundle in `src/chat_session.zig`, keeping health inside `mp_sessions.py`. All six covered functions and both types retain their canonical hashes after regeneration; no scroll expressions, callers, replay boundaries or model assumptions change.
 
@@ -48,6 +48,8 @@ Master's SOFT-2557 fix in `5ce536b4` preserves the existing anchor when a divide
 MUBO-280 gives the opening hold a follow path. `refreshChatTranscript` now reads `follows_newest`, so the checker carries a reader-at-the-bottom input: while the reader is held, the first visible row must not move as before, and while the reader follows, the view must land on the newest message instead. Sources without that expression keep the held-only obligation, so this adds no finding to the previous model and the older counterexamples still replay. `328a76079` adds the same follow path to `chatRelayoutPreservingScroll`. The existing `follows_newest` translation now checks both callers, retaining all ten held-reader obligations and adding five bottom-reader obligations for relayout. Native replay already extracts `openingScroll` and carries the reader state. Bounds, properties, mutation expectations and inherited findings remain unchanged.
 
 A counterexample lists old/new row tops, content height, viewport, divider, padding and the newest message's before/after Y. Tell it as opening the chat, receiving that update, and painting the changed Y. For a model error, show the mismatching production operation or impossible geometry and repair the mapping; keep the invariant. For a real bug, link the failing coordinates and native replay to the product ticket. Do not confuse replaying a synthetic measurement boundary with proving a production UI path.
+
+MUBO-280 removes the previous-height requirement from `followsNewest` at `8e971237d`. Both callers now follow whenever the reader is not scrolled up, including the first layout after restart. The SMT follow predicate matches that decision; its tall-content bounds and held-reader obligations are unchanged. `tools/chat-switch-anchor.test.js` separately exercises cold and fitting-cache opens with unread history and requires the former height predicate to fail both cases. Cold-open geometry remains outside the SMT bounds.
 
 ## Prove and maintain it
 

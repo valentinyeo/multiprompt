@@ -1,13 +1,13 @@
 {
-  "sync_commit": "328a76079cf0ddb343f82e328a9e32729bf9a790",
+  "sync_commit": "8e971237d93f9227136667c1d4189d05ce171f2d",
   "functions": {
     "refreshChatTranscript": {
       "file": "src/chat_session.zig",
-      "sha256": "61cbd8dbf3859481aa447769c9a5b75179fe673f62eff27296edc3ba77ba70c5"
+      "sha256": "70930b97c357390adac4cb5ec6ca0e19387712b334eea8f0644567a24bcbc231"
     },
     "chatRelayoutPreservingScroll": {
       "file": "src/chat_session.zig",
-      "sha256": "85f390a8d058fd4c9a02e1da83bb67d1f6ded7d6beec68c93ad921b8cf10c05d"
+      "sha256": "2aa7438fb5b671c7363adb496fb59f927a6a95b469b69c7faf7071d3e70546b7"
     },
     "openScroll": {
       "file": "src/chat_history.zig",
