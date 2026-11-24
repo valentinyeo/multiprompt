@@ -1620,6 +1620,26 @@ def transport_reader():
             close(cid)
 
 
+ANTIGRAVITY_RELEASE_EVENT = "Local\\multiprompt-verify-antigravity-release"
+
+
+def wait_for_antigravity_release(seconds):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.OpenEventW.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenEventW(0x00100000, False, ANTIGRAVITY_RELEASE_EVENT)
+    if not handle:
+        raise RuntimeError("The journey never created the Antigravity release event")
+    try:
+        return kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def install_antigravity_host(namespace):
     sid = state()["sid"]
     namespace["host_write"](namespace["host_paths"]("claude", sid)["config"],
@@ -1661,20 +1681,20 @@ def install_antigravity_host(namespace):
                        sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
         previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token))
         previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
+        block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
+        reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
         if provider == "antigravity" and (ROOT / "hold-reply").exists():
             held = dict(namespace["host_read"](paths["state"]) or {})
             held["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, accepted=True, at=time.time())
             namespace["host_state_write"](provider, candidate, held)
-            record("antigravity-hold.jsonl", stage="replying", provider=provider, sid=candidate, text=text)
-            deadline = time.time() + 120
-            while not (ROOT / "release-reply").exists() and time.time() < deadline:
-                time.sleep(0.1)
+            record("antigravity-hold.jsonl", stage="replying", provider=provider, sid=candidate, text=text, reply=reply)
+            if not wait_for_antigravity_release(180):
+                record("antigravity-hold.jsonl", stage="timeout", provider=provider, sid=candidate, text=text, reply=reply)
+                raise RuntimeError("The journey never released the held Antigravity reply")
             released = dict(namespace["host_read"](paths["state"]) or {})
             released.pop("inflight", None)
             namespace["host_state_write"](provider, candidate, released)
-            record("antigravity-hold.jsonl", stage="released", provider=provider, sid=candidate, released=(ROOT / "release-reply").exists())
-        block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
-        reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
+            record("antigravity-hold.jsonl", stage="released", provider=provider, sid=candidate, text=text, reply=reply, released=True)
         namespace["host_delta"](session, block, reply)
         namespace["host_complete"](provider, candidate, "verify-agent", session, block)
         previous_event(provider, candidate, "verify-agent", session, "turn.ended", dict(status="completed"))

@@ -72,11 +72,19 @@ $antigravityHistory = @(Get-ChildItem "$antigravityRoot/*.history.jsonl" | Where
 if ($antigravityHistory.Count -ne 1) { throw 'The switch did not write one handed-over antigravity history' }
 if (-not (Read-Shared $antigravityHistory[0].FullName).Contains($earlierText)) { throw 'The switched chat lost the earlier message' }
 Tab-Menu-Show 'switch ai to claude' 7176 'antigravity-tab-menu-switch'
+$releaseEvent = [System.Threading.EventWaitHandle]::new($false, [System.Threading.EventResetMode]::ManualReset, 'Local\multiprompt-verify-antigravity-release')
+$releaseEvent.Reset()
 [IO.File]::WriteAllText("$state/hold-reply", '')
 Bind-Transcript
 Send-Composer $afterText
 [void](Wait-For 'antigravity stand-in is still writing the reply' { (Test-Path "$state/antigravity-hold.jsonl") -and (Read-Shared "$state/antigravity-hold.jsonl").Contains('"stage": "replying"') } 30)
-if ((Read-Shared $antigravityHistory[0].FullName).Contains('Antigravity stand-in reply')) { throw 'The reply finished before the switch could be tried' }
+$holdRows = @((Read-Shared "$state/antigravity-hold.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$held = @($holdRows | Where-Object { $_.stage -ceq 'replying' -and $_.text -ceq $afterText })[-1]
+if (-not $held) { throw 'The stand-in never held the reply to the new message' }
+if (@($holdRows | Where-Object { $_.stage -ceq 'released' -or $_.stage -ceq 'timeout' }).Count -ne 0) { throw 'The reply finished before the switch could be tried' }
+$heldReply = $held.reply
+$historyRows = @((Read-Shared $antigravityHistory[0].FullName) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+if (@($historyRows | Where-Object { $_.row.role -eq 'assistant' -and $_.row.text -ceq $heldReply }).Count -ne 0) { throw 'The reply finished before the switch could be tried' }
 Palette-Choose 'switch ai to claude' 7050 'antigravity-busy-switch-palette'
 [void](Wait-For 'the host refused the switch while the chat was replying' { (Test-Path "$state/antigravity-switch.jsonl") -and (Read-Shared "$state/antigravity-switch.jsonl").Contains('"status": "busy"') } 30)
 Start-Sleep -Milliseconds 800
@@ -86,14 +94,16 @@ $busy = @($switchRows | Where-Object { $_.status -eq 'busy' })[-1]
 $busyConfig = Get-Content $antigravityConfig -Raw | ConvertFrom-Json
 if ($busyConfig.provider -cne 'antigravity' -or $busyConfig.enabled -ne $true) { throw 'The refused switch disabled the Antigravity chat' }
 if (@(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -ne 0) { throw 'The refused switch still moved the chat to Claude' }
-Save @{notice='Switch AI: wait for this reply to finish'; screenshot='antigravity-switch-while-replying.png'; request=@{provider=$busy.provider; sid=$busy.sid; target=$busy.target}; reply=@{status=$busy.status; reason=$busy.reason}; providerAfter=$busyConfig.provider; sidAfter=$busyConfig.sid; stillReplying=$true} "$caseDir/switch-while-replying.json"
-[IO.File]::WriteAllText("$state/release-reply", '')
+Save @{notice='Switch AI: wait for this reply to finish'; screenshot='antigravity-switch-while-replying.png'; request=@{provider=$busy.provider; sid=$busy.sid; target=$busy.target}; reply=@{status=$busy.status; reason=$busy.reason}; providerAfter=$busyConfig.provider; sidAfter=$busyConfig.sid; stillReplying=$true; heldReply=$heldReply} "$caseDir/switch-while-replying.json"
 Remove-Item -LiteralPath "$state/hold-reply" -Force -ErrorAction SilentlyContinue
+[void]$releaseEvent.Set()
+[void](Wait-For 'antigravity stand-in released the held reply' { (Read-Shared "$state/antigravity-hold.jsonl").Contains('"stage": "released"') } 30)
+$releaseEvent.Dispose()
 [void](Wait-For 'antigravity stand-in received the new message' {
     (Test-Path "$state/antigravity-deliver.jsonl") -and (Read-Shared "$state/antigravity-deliver.jsonl").Contains($afterText)
 } 60)
 [void](Wait-For 'antigravity reply reached the switched chat' {
-    (Read-Shared $antigravityHistory[0].FullName).Contains('Antigravity stand-in reply')
+    (Read-Shared $antigravityHistory[0].FullName).Contains($heldReply)
 } 60)
 Copy-Item $antigravityHistory[0].FullName "$caseDir/antigravity-history.jsonl"
 Shot 'antigravity-switched-chat'
@@ -107,7 +117,7 @@ $claudeBackConfig = @(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (R
 $claudeBackRoot = Split-Path $claudeBackConfig
 $claudeBackHistory = @(Get-ChildItem "$claudeBackRoot/*.history.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('Switched AI: Antigravity to Claude') })
 if ($claudeBackHistory.Count -ne 1) { throw 'The switch back did not write one Claude history' }
-foreach ($kept in @($earlierText, $afterText, 'Antigravity stand-in reply', 'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude')) {
+foreach ($kept in @($earlierText, $afterText, $heldReply, 'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude')) {
     if (-not (Read-Shared $claudeBackHistory[0].FullName).Contains($kept)) { throw ('The switch back lost ' + $kept) }
 }
 $backSid = (Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).sid
