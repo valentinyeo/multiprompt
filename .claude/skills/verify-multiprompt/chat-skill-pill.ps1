@@ -59,10 +59,10 @@ foreach ($theme in @('dark', 'light')) {
         @{ name = 'end-skill'; text = 'why is this not done via /pill-proof' }
     )) {
         Assert-ChatTyping $case.text ($theme + '-' + $case.name)
-        $captures += Save-SkillPill ($theme + '-' + $case.name + '-draft') $theme $edit $false
+        $captures += Save-SkillPill ($theme + '-' + $case.name + '-draft') $theme $edit $true
         Press @(0x11, 0x0D) 'Ctrl+Enter: send literal slash skill mention'
         Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'literal slash mention left composer'
-        $captures += Save-SkillPill ($theme + '-' + $case.name + '-sent') $theme $thread $false $edit
+        $captures += Save-SkillPill ($theme + '-' + $case.name + '-sent') $theme $thread $true $edit
     }
     Assert-ChatTyping '/pill-proof arguments stay normal' ($theme + '-skill')
     $captures += Save-SkillPill ($theme + '-skill-draft') $theme $edit $true
