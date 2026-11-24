@@ -37,7 +37,7 @@ function harness() {
     fn(read('window_frame'), 'frameScaled'),
     fn(read('window_frame'), 'controlsRect').replaceAll('w.RECT', 'RECT'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
-    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(chat, 'chatDictationMicWidth'), fn(chat, 'chatDictationMicFit'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks').replace('    refreshBrowserControlMaskColor(layout);\n', ''), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'),
+    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(chat, 'chatDictationMicWidth'), fn(chat, 'chatDictationMicFit'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks').replace('    refreshBrowserControlMaskColor(layout);\n', ''), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(layout, 'repositionActive'), fn(layout, 'shellPaneAtTarget'), fn(browser, 'paintBrowserSplitter'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', '').replace('finalizeReconnectedConsoleLayout(idx, rc.left, con_top, w, h);', 'verifyShellWindowSize(shell.hwnd, rc.left, con_top, w, h);'),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
@@ -198,6 +198,7 @@ fn GetWindowLongPtrW(_: HANDLE, _: i32) isize { return 0; }
 fn SetWindowLongPtrW(_: HANDLE, _: i32, _: isize) isize { return 0; }
 fn SetWindowRgn(_: HANDLE, _: HANDLE, _: i32) i32 { return 1; }
 fn SetWindowPos(_: HANDLE, _: HANDLE, x: i32, y: i32, w: i32, h: i32, _: i32) i32 { shell_rect = .{ .left = x, .top = y, .right = x + w, .bottom = y + h }; return 1; }
+fn GetWindowRect(_: HANDLE, rc: *RECT) i32 { rc.* = .{ .left = shell_rect.left + 37, .top = shell_rect.top + 53, .right = shell_rect.right + 37, .bottom = shell_rect.bottom + 53 }; return 1; }
 fn verifyShellWindowSize(_: HANDLE, _: i32, _: i32, _: i32, _: i32) void {}
 fn MoveWindow(_: HANDLE, _: i32, _: i32, _: i32, _: i32, _: i32) i32 { return 1; }
 fn CreateRoundRectRgn(_: i32, _: i32, _: i32, _: i32, _: i32, _: i32) HANDLE { return null; }
