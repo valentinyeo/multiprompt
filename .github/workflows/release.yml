@@ -402,9 +402,14 @@ jobs:
           const release = document.releases[0];
           if (document.version !== process.env.TAG.slice(1) || !release?.changes?.length || release.changes.length !== release.tickets?.length) throw new Error('Invalid release notes');
           for (const [index, line] of release.changes.entries()) {
+            const escape = text => text.replaceAll('&', '&amp;').replace(/[\\`*_{}\[\]()<>#+.!|~-]/g, '\\$&');
+            const link = release.tickets[index];
+            if (!link) {
+              console.log(`- ${escape(line)}`);
+              continue;
+            }
             const space = line.indexOf(' ');
-            const title = line.slice(space + 1).replaceAll('&', '&amp;').replace(/[\\`*_{}\[\]()<>#+.!|~-]/g, '\\$&');
-            console.log(`- [${line.slice(0, space)}](${release.tickets[index]}) ${title}`);
+            console.log(`- [${line.slice(0, space)}](${link}) ${escape(line.slice(space + 1))}`);
           }
           NODE
           remote=$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}")

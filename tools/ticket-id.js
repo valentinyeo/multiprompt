@@ -1,5 +1,6 @@
 const prefixes = { IGSH: ['IGSH', 2060], SOFT: ['IGSH', 2060], HYCI: ['HYCI', 11514], MUBO: ['MUBO', 13734] };
 const multipromptMovedBoardId = 13734;
+const unlinkedTicketId = 'no-ticket';
 
 function parseTicketId(value) {
   const match = typeof value === 'string' && /^([A-Z][A-Z0-9]*)-([1-9]\d*)$/.exec(value);
@@ -23,4 +24,4 @@ function ticketIds(text) {
   return [...new Set([...text.matchAll(/(?:^|[^A-Za-z0-9-])([A-Z][A-Z0-9]*-\d+)(?![A-Za-z0-9-])/g)].map(match => parseTicketId(match[1])?.id).filter(Boolean))];
 }
 
-module.exports = { parseTicketId, canonicalTicketId, fragmentTicketId, ticketIds, multipromptMovedBoardId };
+module.exports = { parseTicketId, canonicalTicketId, fragmentTicketId, ticketIds, multipromptMovedBoardId, unlinkedTicketId };
