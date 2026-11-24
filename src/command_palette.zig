@@ -4886,7 +4886,6 @@ pub fn updateSearchResults() void {
         }
     }
 
-
     if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_groupmove = (app_state.g_search_len == 0);
         if (!show_groupmove) {
@@ -5219,8 +5218,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
 
-        appendChatActions(app_state.active_shell);
-        @import("chat_pin.zig").appendTabContextRows(app_state.active_shell);
+        appendChatActions(app_state.active_shell); @import("chat_pin.zig").appendTabContextRows(app_state.active_shell);
     }
 
     if (app_state.g_single_window) {
@@ -5270,7 +5268,6 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMIND_ME_OFFSET;
             app_state.g_search_result_count += 1;
         }
-
     }
 
     {
