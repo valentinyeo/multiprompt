@@ -44,9 +44,11 @@ if (args[0] === 'api' && args[1] === 'graphql') {
   if (query.startsWith('mutation')) {
     if (!process.env.MERGE_RESPONSE) process.exit(2);
     console.log(process.env.MERGE_RESPONSE);
-  } else if (query.includes('after: $cursor')) console.log(process.env.PAGE_RESPONSE || '{}');
+  } else if (query.includes('pullRequest(number: $number) { headRefOid') && process.env.REFRESH_BASE) console.log(JSON.stringify({ data: { repository: { pullRequest: { headRefOid: process.env.REFRESH_HEAD || '${sha}', baseRef: { target: { oid: process.env.REFRESH_BASE } } } } } }));
+  else if (query.includes('after: $cursor')) console.log(process.env.PAGE_RESPONSE || '{}');
   else process.stdout.write(fs.readFileSync(process.env.RESPONSE_PATH));
-} else if (args[0] === 'workflow' && args[1] === 'run' && process.env.MERGE_RESPONSE) process.exit(0);
+} else if (args[0] === 'workflow' && args[2] === 'merge-preflight.yml' && process.env.PREFLIGHT_DISPATCH_FAILURE) process.exit(1);
+else if (args[0] === 'workflow' && args[1] === 'run' && process.env.MERGE_RESPONSE) process.exit(0);
 else if (args[0] === 'api' && args[1] === '--method' && args[2] === 'DELETE' && process.env.MERGE_RESPONSE) process.exit(0);
 else if (args[0] === 'api' && args[1].includes('/files') && process.env.REST_RESPONSE) console.log(process.env.REST_RESPONSE);
 else if (args[0] === 'api' && args[1].includes('/pulls/42/commits')) console.log(process.env.COMMITS_RESPONSE);
@@ -58,10 +60,10 @@ else if (args[0] === 'api' && args[1].includes('/commits/')) console.log('${mast
 else if (args[0] === 'run' && args[1] === 'list') {
   const dispatch = fs.readFileSync(process.env.CALL_LOG, 'utf8').trim().split('\\n').map(JSON.parse).find(call => call[0] === 'workflow' && call[2] === 'merge-preflight.yml');
   const request = dispatch?.find(arg => arg.startsWith('request='))?.slice(8);
-  console.log(JSON.stringify([{ databaseId: 123, displayTitle: 'merge-preflight PR 42 ' + request }]));
-} else if (args[0] === 'run' && args[1] === 'watch') process.exit(process.env.PREFLIGHT_CONCLUSION === 'failure' ? 1 : 0);
+  console.log(JSON.stringify([{ databaseId: 999, displayTitle: 'merge-preflight PR 42 stale-request' }, { databaseId: 123, displayTitle: 'merge-preflight PR 42 ' + request }]));
+} else if (args[0] === 'run' && args[1] === 'watch') process.exit(process.env.PREFLIGHT_CONCLUSION === 'failure' || process.env.PREFLIGHT_WATCH_FAILURE ? 1 : 0);
 else if (args[0] === 'run' && args[1] === 'view') console.log(JSON.stringify({
-  status: 'completed', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success', url: 'https://github.com/owner/repo/actions/runs/123',
+  status: process.env.PREFLIGHT_STATUS || 'completed', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success', url: 'https://github.com/owner/repo/actions/runs/123',
   jobs: [{ name: 'fast-checks', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success', steps: [{ name: 'Cap Zig source file size', conclusion: process.env.PREFLIGHT_CONCLUSION || 'success' }] }],
 }));
 else { console.error('Unexpected gh command: ' + JSON.stringify(args)); process.exit(2); }
@@ -232,23 +234,45 @@ test('MUBO-446 refuses a red combined-code preflight without merging or starting
   assert.ok(!f.calls().some(args => args[0] === 'workflow' && ['test.yml', 'no-comments.yml', 'gitleaks.yml'].includes(args[2])));
 });
 
+for (const [name, env] of [
+  ['dispatch failure', { PREFLIGHT_DISPATCH_FAILURE: '1' }],
+  ['cancelled run', { PREFLIGHT_CONCLUSION: 'cancelled' }],
+  ['skipped run', { PREFLIGHT_CONCLUSION: 'skipped' }],
+  ['unfinished run', { PREFLIGHT_STATUS: 'in_progress' }],
+  ['watch failure', { PREFLIGHT_WATCH_FAILURE: '1' }],
+  ['master advanced', { REFRESH_BASE: 'c'.repeat(40) }],
+  ['PR head changed', { REFRESH_BASE: master, REFRESH_HEAD: 'c'.repeat(40) }],
+]) test(`merge preflight ${name} fails closed`, t => {
+  const merged = { data: { mergePullRequest: { pullRequest: { number: 42, merged: true, mergeCommit: { oid: master } } } } };
+  const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged), ...env });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /failed closed/);
+  assert.ok(!f.calls().some(args => args.some(arg => arg.includes('mergePullRequest(input:'))));
+  assert.ok(!f.calls().some(args => args[0] === 'workflow' && args[2] !== 'merge-preflight.yml'));
+});
+
 test('an atomic head-bound merge alone starts three master checks', t => {
   const merged = { data: { mergePullRequest: { pullRequest: { number: 42, merged: true, mergeCommit: { oid: master } } } } };
   const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged) });
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const calls = f.calls();
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 11);
+  assert.deepEqual(calls[2].slice(0, 7), ['workflow', 'run', 'merge-preflight.yml', '-R', 'owner/repo', '--ref', 'master']);
+  for (const input of ['pr=42', `base=${master}`, `head=${sha}`]) assert.ok(calls[2].includes(input));
+  assert.ok(calls[4].includes('123'));
+  assert.ok(calls[5].includes('123'));
   assert.ok(calls[1].some(arg => arg.includes('/pulls/42/commits')));
-  assert.ok(calls[2].some(arg => arg.includes('expectedHeadOid: $head')));
-  assert.ok(calls[2].includes(`head=${sha}`));
-  const body = calls[2].find(arg => arg.startsWith('body='));
-  const headline = calls[2].find(arg => arg.startsWith('headline='));
+  assert.ok(calls[7].some(arg => arg.includes('expectedHeadOid: $head')));
+  assert.ok(calls[7].includes(`head=${sha}`));
+  const body = calls[7].find(arg => arg.startsWith('body='));
+  const headline = calls[7].find(arg => arg.startsWith('headline='));
   assert.equal(headline, 'headline=SOFT-2713: Tidy the automerge helper (#42)');
   assert.match(result.stdout, /#42: squash title SOFT-2713: Tidy the automerge helper/);
   assert.ok(body.includes('Undo: revert this commit.'), body);
   assert.doesNotMatch(body, /co-authored-by/i);
-  assert.deepEqual(calls.slice(3).map(args => args.slice(0, 3)), [
+  assert.deepEqual(calls.slice(8).map(args => args.slice(0, 3)), [
     ['workflow', 'run', 'test.yml'], ['workflow', 'run', 'no-comments.yml'], ['workflow', 'run', 'gitleaks.yml'],
   ]);
 });
@@ -264,7 +288,7 @@ test('the squash title comes from the changelog fragments, not the typed title',
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const calls = f.calls();
-  assert.equal(calls[2].find(arg => arg.startsWith('headline=')), 'headline=SOFT-3140: Report chat health and what the PC shows (SOFT-3140) (#42)');
+  assert.equal(calls[7].find(arg => arg.startsWith('headline=')), 'headline=SOFT-3140: Report chat health and what the PC shows (SOFT-3140) (#42)');
   assert.match(result.stdout, /#42: squash title SOFT-3140:/);
 });
 
@@ -272,7 +296,7 @@ test('a rejected merge race never dispatches master checks', t => {
   const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify({ errors: [{ message: 'Pull Request is not mergeable' }] }) });
   const result = f.run();
   assert.equal(result.status, 1);
-  assert.equal(f.calls().length, 3);
+  assert.equal(f.calls().length, 8);
   assert.match(result.stderr, /failed closed/);
 });
 
@@ -328,8 +352,8 @@ test('successful merge retains branch cleanup when repository auto-deletion is o
   const f = fixture(t, response, event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged) });
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(f.calls().length, 7);
-  assert.deepEqual(f.calls()[6], ['api', '--method', 'DELETE', 'repos/owner/repo/git/refs/heads/ceo%2FIGSH-42']);
+  assert.equal(f.calls().length, 12);
+  assert.deepEqual(f.calls()[11], ['api', '--method', 'DELETE', 'repos/owner/repo/git/refs/heads/ceo%2FIGSH-42']);
 });
 
 for (const [login, verdict] of [['software-factory-runners', 'merge'], ['other-app', 'not a same-repo PR']]) {

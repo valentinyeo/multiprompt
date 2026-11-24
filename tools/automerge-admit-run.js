@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
+const { setTimeout } = require('node:timers/promises');
 const { mergeHeadline } = require('./merge-title.js');
 
 const pageInfo = 'pageInfo { hasNextPage endCursor }';
@@ -68,7 +70,39 @@ function squashBody(commits) {
     .join('\n\n');
 }
 
-function main() {
+async function mergePreflight(repo, number, base, head) {
+  const request = randomUUID();
+  const title = `merge-preflight PR ${number} ${request}`;
+  gh('workflow', 'run', 'merge-preflight.yml', '-R', repo, '--ref', 'master',
+    '-f', `pr=${number}`, '-f', `base=${base}`, '-f', `head=${head}`, '-f', `request=${request}`);
+  let run;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const runs = JSON.parse(gh('run', 'list', '-R', repo, '--workflow', 'merge-preflight.yml', '--event', 'workflow_dispatch',
+      '--branch', 'master', '--limit', '100', '--json', 'databaseId,displayTitle'));
+    run = runs.find(candidate => candidate.displayTitle === title);
+    if (run) break;
+    await setTimeout(5000);
+  }
+  if (!Number.isSafeInteger(run?.databaseId) || run.databaseId <= 0) throw new Error('merge preflight run was not found');
+  let watchError;
+  try {
+    execFileSync('gh', ['run', 'watch', String(run.databaseId), '-R', repo, '--exit-status', '--interval', '10'],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 240000 });
+  } catch (error) {
+    watchError = error;
+  }
+  const result = JSON.parse(gh('run', 'view', String(run.databaseId), '-R', repo, '--json', 'status,conclusion,jobs,url'));
+  console.log(`#${number}: merge preflight ${result.url}`);
+  if (watchError || result.status !== 'completed' || result.conclusion !== 'success') {
+    const failures = (result.jobs || []).filter(job => job.conclusion !== 'success').flatMap(job => {
+      const steps = (job.steps || []).filter(step => ['failure', 'cancelled', 'timed_out'].includes(step.conclusion));
+      return steps.length ? steps.map(step => step.name) : [job.name];
+    });
+    throw new Error(`merge preflight refused: ${failures.join(', ') || result.conclusion || result.status || 'unknown result'} (${result.url})`);
+  }
+}
+
+async function main() {
   const repo = process.env.GITHUB_REPOSITORY || gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner').trim();
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('invalid repository');
   const [owner, name] = repo.split('/');
@@ -166,6 +200,11 @@ function main() {
   if (!body) throw new Error('no commit message to build the squash commit from');
   const headline = mergeHeadline(pr.title, paths, number);
   console.log(`#${number}: squash title ${headline}`);
+  await mergePreflight(repo, number, baseOid, pr.headRefOid);
+  const current = graphql(`query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid baseRef { target { oid } } } }
+  }`, { owner, name, number }).repository?.pullRequest;
+  if (current?.headRefOid !== pr.headRefOid || current?.baseRef?.target?.oid !== baseOid) throw new Error('PR or master changed during merge preflight; run admission again');
   const merged = graphql(`mutation($id: ID!, $head: GitObjectID!, $headline: String!, $body: String!) {
     mergePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH, commitHeadline: $headline, commitBody: $body }) {
       pullRequest { number merged mergeCommit { oid } }
@@ -183,9 +222,7 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
+main().catch(error => {
   console.error(`automerge failed closed: ${error.message}`);
   process.exitCode = 1;
-}
+});

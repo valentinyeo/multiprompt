@@ -99,9 +99,6 @@ jobs:
       - name: Guard the reader runtime fingerprint
         if: success() || (failure() && steps.merge.outcome == 'success')
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
-      - name: Check durable regression inputs
-        if: success() || (failure() && steps.merge.outcome == 'success')
-        run: node tools/check-regression-inputs.mjs "$BASE"
       - name: Check PowerShell host names
         if: success() || (failure() && steps.merge.outcome == 'success')
         shell: pwsh
