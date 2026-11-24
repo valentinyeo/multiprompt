@@ -1,0 +1,2 @@
+{"type":"permission-mode","permissionMode":"auto","sessionId":"example-session"}
+{"parentUuid":"example-user-1","isSidechain":false,"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will remove the stale table now."},{"type":"tool_use","id":"toolu_EXAMPLE_AUTO_OPEN","name":"Bash","input":{"command":"psql -c 'drop table old_events'","description":"Drop a stale table"}}]},"uuid":"example-assistant-1","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"example-session","cwd":"/home/example/app","version":"2.1.330"}
