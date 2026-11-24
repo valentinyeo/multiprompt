@@ -83,6 +83,10 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the FFmpeg install guard
+        run: node --test tools/check-ffmpeg-install.test.js
+      - name: Require a cached, retried FFmpeg install
+        run: node tools/check-ffmpeg-install.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
       - name: Test the source file-size ratchet
@@ -265,7 +269,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js tools/release-notes-tolerance.test.mjs tools/version-stamp.test.mjs tools/ticket-title-contract.test.js tools/release-unstick.test.js
       - name: Verify responsive startup ordering and original regression controls
         run: |
           node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
@@ -589,7 +593,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -642,31 +646,6 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Read the pre-change chat row source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .chat-row-base
-          sparse-checkout: src
-          persist-credentials: false
-      - name: Prove hosted row regressions fail on the identity-only source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        env:
-          CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
-        run: |
-          if ! grep -q 'client_id' .chat-row-base/src/chat_echo.zig; then
-            echo 'Base no longer uses identity-only matching'
-            exit 0
-          fi
-          set +e
-          timeout 180 node --test tools/chat-row-identity.test.js > "$RUNNER_TEMP/chat-row-before.log" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/chat-row-before.log"
-          test "$status" = 1
-          grep -q '^# fail 2$' "$RUNNER_TEMP/chat-row-before.log"
-          grep -q 'TestExpectedEqual' "$RUNNER_TEMP/chat-row-before.log"
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js

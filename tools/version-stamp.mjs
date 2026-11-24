@@ -3,8 +3,8 @@ import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
-import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
-import { canonicalTicketId, fragmentTicketId } from './ticket-id.js';
+import { ticketRecord, ticketLine, resolveReleaseTitles, loadTicketTitles } from './ticket-titles.mjs';
+import { canonicalTicketId, fragmentTicketId, parseTicketId, ticketKeyKind, unlinkedTicketId } from './ticket-id.js';
 const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
@@ -90,6 +90,10 @@ export function userFacingReleaseLine(line) {
 
 export function fragmentLines(file, text) {
   fragmentTicketId(file);
+  return fragmentText(file, text);
+}
+
+function fragmentText(file, text) {
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
   if (lines.some(line => !plainChange(line))) throw new Error(`${file}: write plain product lines without ticket ids, file names, paths or PR numbers`);
@@ -184,9 +188,21 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
   const version = tag.slice(1);
   if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) {
     if (compareTags(tag, 'v0.28.1027') >= 0) throw new Error(`Release ${tag} already exists in source; generate from the previous release`);
-    return files[changelogPath];
+    return { changelog: files[changelogPath], fallbacks: {}, skipped: new Map() };
   }
   let result = { ...files };
+  const fallbacks = {};
+  const skipped = new Map();
+  const releaseNote = (value, fallback, unlinked) => {
+    const id = parseTicketId(value)?.id;
+    if (!id) {
+      if (value) skipped.set(value, ticketKeyKind(value));
+      if (fallback) unlinked.add(fallback);
+      return null;
+    }
+    if (fallback) fallbacks[id] = fallback;
+    return id;
+  };
   const stamp = (stepTag, fragments, stepCommits, sha, current) => {
     if (compareTags(stepTag, 'v0.28.1027') < 0) {
       const tickets = new Set();
@@ -204,26 +220,33 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     const reviewed = reviewedReleases[stepTag];
     if (reviewed && sha !== reviewed[0]) throw new Error(`${stepTag}: reviewed release commit does not match ${sha || 'missing commit'}`);
     const notes = new Map(Object.entries(reviewed?.[1] || {}));
+    const unlinked = new Set();
     if (!reviewed) {
       for (const commit of stepCommits || []) {
         const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
         const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
         if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
-        for (const ticket of tickets.map(canonicalTicketId)) {
-          if (!notes.has(ticket)) notes.set(ticket, null);
+        const text = (lead ? commit.subject.slice(lead.length).replace(/^\s*[,:]\s*/, '') : commit.subject).trim();
+        for (const ticket of tickets) {
+          const id = releaseNote(ticket, text, unlinked);
+          if (id && !notes.has(id)) notes.set(id, text);
         }
       }
     }
     for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
-      fragmentLines(file, text);
-      const ticket = fragmentTicketId(file);
-      if (!reviewed && !notes.has(ticket)) throw new Error(`${stepTag}: ${ticket} fragment has no matching commit ticket`);
-      if (!notes.has(ticket)) notes.set(ticket, null);
+      const lines = fragmentText(file, text);
+      const id = releaseNote(/^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-[^/]+\.md$/.exec(file)?.[1], lines[0], unlinked);
+      if (!id) continue;
+      if (!reviewed && !notes.has(id)) throw new Error(`${stepTag}: ${id} fragment has no matching commit ticket`);
+      if (!notes.has(id)) notes.set(id, lines[0]);
     }
-    if (!notes.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
+    if (!notes.size && !unlinked.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
     if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
     const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
-    const bullets = [...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`);
+    const bullets = [
+      ...[...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`),
+      ...[...unlinked].map(text => `        .{ .text = "${escape(text)}", .ticket = "${unlinkedTicketId}" },`),
+    ];
     result[changelogPath] = result[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${stepTag.slice(1)}", .items = &.{\n${bullets.join('\n')}\n    } },`);
   };
   let previous = history.length ? fragmentFiles(history[0].files) : {};
@@ -233,26 +256,32 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     previous = fragmentFiles(step.files);
   }
   stamp(tag, addedSince(fragmentFiles(files), previous), commits, undefined, true);
-  return result[changelogPath];
+  return { changelog: result[changelogPath], fallbacks, skipped };
 }
 
 
 export function changelogTicketIds(source) {
-  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => match[1]).filter(Boolean).map(canonicalTicketId))];
+  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => parseTicketId(match[1])?.id).filter(Boolean))];
 }
 
-export function applyTicketTitles(source, titles) {
+export function applyTicketTitles(source, titles, fallbacks = {}) {
+  const literal = line => JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
   return source.replace(/^[ \t]*\.\{ \.text = "(?:\\.|[^"\\])*", \.ticket = "([^"\\]*)" \},\r?\n/gm, (row, id) => {
-    if (!id) throw new Error('Unidentified changelog row; remove pre-ticket legacy rows before release');
-    id = canonicalTicketId(id);
-    const line = ticketLine(ticketRecord(id, titles[id]));
-    const literal = JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
-    return `        .{ .text = ${literal}, .ticket = "${id}" },\n`;
+    if (!id || id === unlinkedTicketId) return row;
+    const canonical = parseTicketId(id)?.id;
+    if (canonical && titles[canonical] !== undefined) {
+      const line = ticketLine(ticketRecord(canonical, titles[canonical]));
+      return `        .{ .text = ${literal(line)}, .ticket = "${canonical}" },\n`;
+    }
+    const fallback = fallbacks[canonical ?? id];
+    if (!fallback) throw new Error(`Missing title for ${id}`);
+    return `        .{ .text = ${literal(fallback)}, .ticket = "${unlinkedTicketId}" },\n`;
   });
 }
 
 export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog) {
-  return applyTicketTitles(buildUnresolvedChangelog(files, tag, history, commits), titles);
+  const built = buildUnresolvedChangelog(files, tag, history, commits);
+  return applyTicketTitles(built.changelog, titles, built.fallbacks);
 }
 
 function git(args, cwd, timeout) {
@@ -417,9 +446,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const history = await releaseHistory(base, files[changelogPath], publishedTags);
       if (!history.length && compareTags(base, 'v0.28.1027') >= 0) throw new Error('No published baseline; fetch published release tags before building');
       const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
-      const unresolved = buildUnresolvedChangelog(files, base, history, commits);
-      const titles = await resolveTicketTitles(changelogTicketIds(unresolved), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
-      fs.writeFileSync(changelogPath, applyTicketTitles(unresolved, titles));
+      const built = buildUnresolvedChangelog(files, base, history, commits);
+      const resolved = await resolveReleaseTitles(changelogTicketIds(built.changelog), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
+      for (const [key, kind] of new Map([...built.skipped, ...resolved.unresolved])) console.error(`Release notes skip ${key}: ${kind}`);
+      fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks));
     } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
     console.error(error.message);

@@ -27,7 +27,7 @@ test('mp-fresh exit codes and hosted env wiring', () => {
   const body = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
   assert.match(body, /env\['MULTIBOT_SID'\] = sid/);
   assert.doesNotMatch(body, /DISABLE_AUTO_COMPACT/);
-  assert.match(body, /publish_named_tool\('mp-fresh'/);
+  assert.match(body, /\('mp-fresh', 'mp-fresh', 'MP_FRESH_SOURCE'\),/);
 });
 
 test('hosted Claude agent env leaves auto-compact enabled', () => {
