@@ -187,16 +187,16 @@ class OwnerChatBrowserTest(unittest.TestCase):
             path.write_text(body)
             path.chmod(0o644)
         cls.temp.chmod(0o755)
-        sudo('chown', '-R', BRIDGE + ':' + BRIDGE, str(cls.temp))
         cls.log = cls.temp / 'fake-app.log'
         cls.log.write_text('')
         cls.log.chmod(0o666)
+        cls.stale_source = cls.temp / 'stale-copy'
+        cls.stale_source.write_text(STALE_COPY)
+        cls.stale_source.chmod(0o755)
+        sudo('chown', '-R', BRIDGE + ':' + BRIDGE, str(cls.temp))
         cls.stale_copy = Path(cls.owner.pw_dir) / '.local/bin/zsb'
-        source = cls.temp / 'stale-copy'
-        source.write_text(STALE_COPY)
-        source.chmod(0o755)
         sudo('install', '-d', '-m', '755', '-o', OWNER, '-g', OWNER, str(cls.stale_copy.parent))
-        sudo('install', '-m', '755', '-o', OWNER, '-g', OWNER, str(source), str(cls.stale_copy))
+        sudo('install', '-m', '755', '-o', OWNER, '-g', OWNER, str(cls.stale_source), str(cls.stale_copy))
         cls.app_socket = Path('/tmp/mp-notify-' + str(cls.bridge.pw_uid) + '/mp-fake-app.sock')
         cls.broker_socket = Path('/tmp/mp-browser-' + str(cls.bridge.pw_uid) + '/control.sock')
         try:

@@ -705,9 +705,10 @@ def pane_holders():
         try:
             for handle in entry.joinpath("fd").iterdir():
                 try:
-                    if not handle.readlink().startswith("socket:["):
+                    link = os.readlink(handle)
+                    if not link.startswith("socket:["):
                         continue
-                    if handle.readlink()[8:-1] not in inodes:
+                    if link[8:-1] not in inodes:
                         continue
                 except OSError:
                     continue
