@@ -38,6 +38,18 @@ For self-hosted desktop sync, change the public service origin in `src/account_c
 
 Read Android crashes newest first with `python3 service/crash-reports.py --limit 20` using `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; use `--database NAME` to override `multiprompt-account` or `--json` for raw rows.
 
+## Scheduled freeze triage
+
+`tools/install-crash-report-tickets.sh` runs the automatic freeze triage from a checkout of this repo, never from a copy outside it. It keeps a shallow clone in `~/projects/multiprompt-crash-report-tickets` (override with `CRASH_REPORT_TICKETS_REPO`), writes the timer and service from `service/`, and points both at `service/crash-report-tickets.py` in that clone. Before each run the service fetches `origin/master` into the clone, so a merged fix reaches the live timer without reinstalling. A failed fetch is ignored and the run uses the copy it has. Credentials stay in `~/.config/multiprompt/crash-report-tickets.env`, mode 600.
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=... SHIP_SESSION_NAME=... CRASH_BOARD_COMMAND=... CRASH_GH_COMMAND=... tools/install-crash-report-tickets.sh
+systemctl --user start crash-report-tickets.service
+journalctl --user -u crash-report-tickets.service -n 40
+```
+
+Stop it with `systemctl --user disable --now crash-report-tickets.timer`.
+
 ## Tests and API
 
 `npm test` bundles the Worker first, then runs it against local D1 through Miniflare. Device flows sign in through Better Auth with email codes captured from mocked outbound mail; no test-auth bypass is deployed. Passkey re-confirm uses `/signin?fresh=1&next=%2F%3Fpasskey%3Dadd` on either host, preserving the 15-minute fresh-session requirement.
