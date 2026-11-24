@@ -384,6 +384,20 @@ test('the judge order is ladder-call then Codex then Claude with one ladder-call
   assert.doesNotMatch(workflow, /ladder_backup/);
 });
 
+test('every hosted judge excludes all author families before using a plan', () => {
+  const authors = verifier.authorModels('Author model: opencode-go/deepseek-v4.1-flash\nauthor model: openai/gpt-6.1-sol\n');
+  assert.deepEqual(authors.map(verifier.modelFamily), ['deepseek', 'openai']);
+  assert.deepEqual(verifier.authorModels('No author declared'), []);
+  assert.match(fs.readFileSync(modulePath, 'utf8'), /author_families: authorModels\(pr\.body\)\.map\(modelFamily\)\.join\(','\)/);
+  assert.match(workflow, /author_families: \$\{\{ steps\.pr\.outputs\.author_families \}\}/);
+  assert.match(workflow, /exclude-families: \$\{\{ needs\.resolve\.outputs\.author_families \}\}/);
+  assert.match(workflow, /name: Install pinned Codex client\n        if: [^\n]+!contains\(needs\.resolve\.outputs\.author_families, 'openai'\)/);
+  for (const [id, family] of [['openai', 'openai'], ['claude', 'anthropic']]) {
+    const condition = workflow.match(new RegExp(`id: ${id}\\n        if: ([^\\n]+)`))[1];
+    assert.ok(condition.includes(`!contains(needs.resolve.outputs.author_families, '${family}')`));
+  }
+});
+
 test('a ladder answer is turned into the same verdict shape', () => {
   const answer = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-answer-')), 'answer.json');
   fs.writeFileSync(answer, JSON.stringify({
