@@ -120,6 +120,16 @@ class MpSessionsTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(MP_SESSIONS), *args], capture_output=True, text=True,
                               env=self.env(**extra), cwd=str(self.work), timeout=60)
 
+    def servers_file(self, slot=None, hostname=None):
+        facts = json.loads((ROOT / "tools/fixtures/MUBO-294/servers.json").read_text(encoding="utf-8"))
+        if hostname is not None:
+            facts["servers"][0]["hostname"] = hostname
+        if slot is not None:
+            facts["servers"][0]["multiprompt_slot"] = slot
+        path = self.home / "servers.json"
+        path.write_text(json.dumps(facts), encoding="utf-8")
+        return path
+
     def parsed(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
@@ -367,6 +377,64 @@ class MpSessionsTest(unittest.TestCase):
         missing = self.run_sessions("send", "No such chat", "hello")
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
+
+    def test_MUBO_294_send_without_a_host_slot_still_reaches_the_chat(self):
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(peer)
+        servers = self.servers_file()
+        done = self.run_sessions("send", "Peer", "hello there", MULTIPROMPT_HOST=None,
+                                 MULTIPROMPT_SERVERS_FILE=str(servers), MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertEqual(sent["sid"], peer["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
+
+    def test_MUBO_294_start_takes_the_servers_file_slot_for_this_machine(self):
+        servers = self.servers_file(slot=0, hostname=socket.gethostname())
+        started = self.parsed(self.run_sessions("start", "--name", "Slot chat", MULTIPROMPT_HOST=None,
+                                                MULTIPROMPT_SERVERS_FILE=str(servers)))
+        self.assertEqual(started["host"], "remote-1")
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config["spawn_host"], 0)
+
+    def test_MUBO_294_start_falls_back_to_the_callers_recorded_slot(self):
+        caller = self.parsed(self.run_sessions("start", "--name", "Caller", "--workspace", "Home"))
+        servers = self.servers_file()
+        started = self.parsed(self.run_sessions("start", "--name", "Neighbour", MULTIPROMPT_HOST=None,
+                                                MULTIPROMPT_SERVERS_FILE=str(servers),
+                                                MULTIPROMPT_TAB=caller["tmux"]))
+        self.assertEqual(started["host"], "remote-1")
+
+    def test_MUBO_294_start_without_any_slot_names_the_file_and_the_field(self):
+        servers = self.servers_file()
+        refused = self.run_sessions("start", "--name", "Homeless", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(refused.stdout, "")
+        self.assertIn("multiprompt_slot", refused.stderr)
+        self.assertIn(str(servers), refused.stderr)
+        self.assertIn("MULTIPROMPT_HOST", refused.stderr)
+
+    def test_MUBO_294_the_env_slot_wins_over_the_servers_file(self):
+        servers = self.servers_file(slot=2, hostname=socket.gethostname())
+        started = self.parsed(self.run_sessions("start", "--name", "Env chat", MULTIPROMPT_HOST="0",
+                                                MULTIPROMPT_SERVERS_FILE=str(servers)))
+        self.assertEqual(started["host"], "remote-1")
+        refused = self.run_sessions("start", "--name", "Slot two", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("desktop host list is unavailable", refused.stderr)
+
+    def test_MUBO_294_a_machine_named_twice_in_the_servers_file_is_refused(self):
+        servers = self.servers_file(slot=0, hostname=socket.gethostname())
+        facts = json.loads(servers.read_text(encoding="utf-8"))
+        facts["servers"][1]["hostname"] = socket.gethostname()
+        servers.write_text(json.dumps(facts), encoding="utf-8")
+        refused = self.run_sessions("start", "--name", "Ambiguous", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("more than one server", refused.stderr)
 
     def test_SOFT_3093_list_json_shows_a_hosted_chat_with_no_terminal(self):
         key = "a" * 32
