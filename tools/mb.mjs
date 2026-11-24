@@ -786,7 +786,9 @@ async function pinSkill(ctx, flags) {
   const session = sessionName(flags._[0]);
   const skill = String(flags._[1]);
   if (skill !== 'off' && !/^[A-Za-z0-9_.:-]{1,80}$/.test(skill)) throw new Failure('invalid skill');
-  const host = defaultHost(ctx, flags);
+  const layout = (await readLayout(ctx)).data.layout;
+  const host = resolveTabHost(ctx.env, session, flags.host, layout?.hosts);
+  if (skill !== 'off' && !choose(layout, session, host)) throw new Failure(`pin needs a chat tab: ${session} has no chat key`);
   const key = `${host}:${session.toLowerCase()}`;
   const file = pinsPath(ctx);
   let existing = '';

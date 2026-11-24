@@ -160,6 +160,11 @@ fn shellChatKey(idx: u32, out: *[MAX_CHAT]u8) ?[]const u8 {
     return chatKey(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], out);
 }
 
+pub fn hasChatKey(idx: u32) bool {
+    var key_buf: [MAX_CHAT]u8 = undefined;
+    return shellChatKey(idx, &key_buf) != null;
+}
+
 pub fn pinned(idx: u32) ?[]const u8 {
     var key_buf: [MAX_CHAT]u8 = undefined;
     const key = shellChatKey(idx, &key_buf) orelse return null;
@@ -252,18 +257,28 @@ fn refreshPinsOnce() void {
     _ = reloadPins();
 }
 
+pub fn tabContextRows(has_chat_key: bool, is_pinned: bool, query: []const u16, out: []usize) usize {
+    if (!has_chat_key) return 0;
+    var count: usize = 0;
+    for (rows, 0..) |row, i| {
+        if (i == 1 and !is_pinned) continue;
+        if (count >= out.len) return count;
+        if (!labelContains(row.label, query)) continue;
+        out[count] = row.target;
+        count += 1;
+    }
+    return count;
+}
+
 pub fn appendTabContextRows(tc_idx: ?u32) void {
     const ti = tc_idx orelse return;
+    if (!hasChatKey(ti)) return;
     refreshPinsOnce();
     const query = app_state.g_search_buf[0..app_state.g_search_len];
     const is_pinned = pinned(ti) != null;
-    for (rows, 0..) |row, i| {
-        if (i == 1 and !is_pinned) continue;
-        if (app_state.g_search_result_count >= app_state.g_search_results.len) return;
-        if (!labelContains(row.label, query)) continue;
-        app_state.g_search_results[app_state.g_search_result_count] = row.target;
-        app_state.g_search_result_count += 1;
-    }
+    const room = app_state.g_search_results.len - app_state.g_search_result_count;
+    const written = tabContextRows(true, is_pinned, query, app_state.g_search_results[app_state.g_search_result_count..][0..room]);
+    app_state.g_search_result_count += written;
 }
 
 fn closePaletteForPin() void {
@@ -347,6 +362,34 @@ test "MUBO-245 chat keys are host scoped and lowercase" {
     try std.testing.expectEqualStrings("1:live-a", chatKey(1, "Live-A", &buf).?);
     try std.testing.expect(chatKey(0, "", &buf) == null);
     try std.testing.expect(chatKey(0, "bad:name", &buf) == null);
+}
+
+test "MUBO-245 a tab without a chat key offers no pin rows" {
+    var out: [8]usize = undefined;
+    try std.testing.expectEqual(@as(usize, 0), tabContextRows(false, false, &.{}, &out));
+    try std.testing.expectEqual(@as(usize, 0), tabContextRows(false, true, &.{}, &out));
+    try std.testing.expectEqual(@as(usize, 1), tabContextRows(true, false, &.{}, &out));
+    try std.testing.expectEqual(app_state.SEARCH_TABCTX_PIN_SKILL, out[0]);
+    try std.testing.expectEqual(@as(usize, 2), tabContextRows(true, true, &.{}, &out));
+    try std.testing.expectEqual(app_state.SEARCH_TABCTX_UNPIN_SKILL, out[1]);
+}
+
+test "MUBO-245 a local command tab has no chat key to pin" {
+    const saved_count = app_state.shell_count;
+    const saved_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.shells[0] = saved_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = app_state.empty_shell;
+    try std.testing.expect(!hasChatKey(0));
+    @memcpy(app_state.shells[0].tmux_session[0..4], "live");
+    app_state.shells[0].tmux_session_len = 4;
+    try std.testing.expect(hasChatKey(0));
+    app_state.shells[0].tmux_session_len = 0;
+    try std.testing.expect(!hasChatKey(0));
+    try std.testing.expect(!setForShell(0, "pospeak"));
 }
 
 test "MUBO-245 pin palette rows follow the pinned state" {

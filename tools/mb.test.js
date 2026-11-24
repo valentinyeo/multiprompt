@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 let run;
@@ -391,6 +391,26 @@ test('star is refused when the service has no favorite feature', async () => {
   const refused = await box.call(['star', 'mp-runner-1', 'on']);
   assert.equal(refused.code, 1);
   assert.match(refused.errors[0], /does not support favorite/);
+  assert.equal(box.puts.length, 0);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('pin needs a chat tab and writes the same line once', async () => {
+  const box = harness({ layout: { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [{ kind: 'tmux', name: 'Runner', tmux_session: 'mp-runner-1', tmux_host: 1, workspace: 'Work' }] } });
+  const file = join(box.dir, 'ZigShell', 'chat-pins.txt');
+  const local = await box.call(['pin', 'mp-local-1', 'pospeak', '--host', '0']);
+  assert.equal(local.code, 1);
+  assert.match(local.errors[0], /pin needs a chat tab/);
+  assert.equal(existsSync(file), false);
+  const pinned = await box.call(['pin', 'mp-runner-1', 'pospeak', '--host', '1']);
+  assert.equal(pinned.code, 0, text(pinned));
+  assert.equal(readFileSync(file, 'utf8'), '# multiprompt pinned skills v1\n1:mp-runner-1\tpospeak\n');
+  const again = await box.call(['pin', 'Runner', 'pospeak', '--host', '1']);
+  assert.match(again.lines.at(-1), /already pinned mp-runner-1/);
+  assert.equal(readFileSync(file, 'utf8'), '# multiprompt pinned skills v1\n1:mp-runner-1\tpospeak\n');
+  const cleared = await box.call(['pin', 'mp-runner-1', 'off', '--host', '1']);
+  assert.equal(cleared.code, 0, text(cleared));
+  assert.equal(readFileSync(file, 'utf8'), '# multiprompt pinned skills v1\n');
   assert.equal(box.puts.length, 0);
   rmSync(box.dir, { recursive: true, force: true });
 });
