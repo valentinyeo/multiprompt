@@ -304,6 +304,11 @@ test('the verifier family differs from every Author model line in the pull reque
   assert.match(verifier.pickVerifier('Author model: acme/some-model\n').problem, /unknown model family/);
 });
 
+test('the zai model family is known', () => {
+  assert.equal(verifier.modelFamily('zai/glm-5.3-flash'), 'zai');
+  assert.deepEqual(verifier.pickVerifier('Author model: zai/glm-5.3-flash\n'), { engine: 'claude' });
+});
+
 test('a pull request with no independent verifier FAILs and names the reason', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   for (const [problem, reason] of [['no verifier from another model family', /no verifier from another model family/], ['missing Author model line', /missing Author model line/]]) {
