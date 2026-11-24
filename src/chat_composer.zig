@@ -468,7 +468,7 @@ test "IGSH-909 send and stop share one slot so the composer never shows more tha
     }
 }
 
-test "IGSH-965 send while dictating stops the recording and queues one send" {
+test "IGSH-965 send while dictating stops the recording at once and queues one send" {
     const Engine = struct {
         var toggles: u32 = 0;
         fn toggle() void {
@@ -511,22 +511,19 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     app_state.g_dictation_running.store(true, .release);
     app_state.g_dictation_recording.store(true, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
     try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
     app_state.g_chat_draft_owner[0] = 'a';
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_running.store(false, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
 }
 
 pub fn chatComposerHasText() bool {

@@ -136,7 +136,8 @@ test("IGSH-846 cancellation preserves an existing draft and restores the idle mi
   const ready = functionBody("handleDictationReady", "toggleDictation");
   assert.ok(ready.indexOf('if (g_dictation_cancelled.load(.acquire))') < ready.indexOf('chatDraftAppend('));
   const composer = fs.readFileSync(path.join(__dirname, '../src/chat_composer.zig'), 'utf8');
-  assert.match(composer, /const next: DictationState = if \(app_state\.g_dictation_draft_owner_len == 0[^\n]*\)\s*\.idle/);
+  assert.match(composer, /const listening = app_state\.g_dictation_draft_owner_len > 0 and\s*app_state\.g_dictation_running\.load\(\.acquire\) and app_state\.g_dictation_recording\.load\(\.acquire\);/);
+  assert.match(composer, /const next: DictationState = if \(listening\) \.listening else \.idle;/);
 });
 
 test("IGSH-846 idle Escape falls through unchanged, held cancellation Escape is consumed", () => {
