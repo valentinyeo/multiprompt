@@ -2880,7 +2880,9 @@ test "SOFT-3163 unchanged history refresh keeps its measured layout" {
     var wire = try perfWire(a, "term-3163", 8 * 1024, 1, 0);
     defer wire.deinit(a);
     try entry.history.apply(a, wire.items, 1, key);
-    try std.testing.expect(live.starting(316301, 0, "sid"));
+    _ = live.begin(316301, 0, "sid");
+    try std.testing.expect(live.applyPage(316301, "sid", "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"ready\"}}}]}}"));
+    try std.testing.expect(live.revision(316301) != 0 and !live.running(316301));
     chatDeferTranscriptLoad();
     chatRelayout(800);
     const layouts = app_state.g_chat_layout_count;
