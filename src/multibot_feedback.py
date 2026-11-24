@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import struct
 import zlib
@@ -20,7 +21,10 @@ from pathlib import Path
 EMPTY_WANT = 'multibot-feedback: say what you want from Multibot'
 BOARD_QUEUE_NAME = 'feedback-board-queue.jsonl'
 ATTACHMENT_DIR_NAME = 'feedback-attachments'
-PROJECT = '2060'
+PROJECT = '13734'
+TICKET_NUMBER = r'[A-Z][A-Z0-9]*-\d+'
+CHAT_NAMES = '.local/state/multiprompt/chat-names.json'
+SESSION_TOKENS = '.config/hypertask-agents/credentials/sessions'
 PREFIX = 'Multibot wish: '
 VOTE = 'multibot-feedback-vote:v1'
 LABELS = {'Multiprompt', 'Agent Feedback'}
@@ -63,6 +67,49 @@ def session_name():
             return name
     parts = os.environ.get('TMUX', '').split(',')
     return parts[1] if len(parts) > 1 else ''
+
+
+def chat_name():
+    session = session_name().strip()
+    if not session:
+        return ''
+    try:
+        known = json.loads((Path.home() / CHAT_NAMES).read_text(encoding='utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        known = None
+    entry = known.get(session) if isinstance(known, dict) else None
+    shown = entry.get('name') if isinstance(entry, dict) else None
+    if isinstance(shown, str) and shown.strip():
+        return shown.strip()
+    return session
+
+
+def agent_slug():
+    return re.sub(r'[^a-z0-9]+', '-', chat_name().lower()).strip('-')
+
+
+def session_token():
+    slug = agent_slug()
+    if not slug:
+        return ''
+    path = Path.home() / SESSION_TOKENS / (slug + '-agent-token')
+    try:
+        token = path.read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return ''
+    return token if token and not re.search(r'\s', token) else ''
+
+
+def board_token():
+    return os.environ.get('HT_TOKEN', '').strip() or session_token()
+
+
+def hypertask_command():
+    found = shutil.which('hypertask')
+    if found:
+        return found
+    fallback = Path.home() / '.local/bin/hypertask'
+    return str(fallback) if fallback.is_file() else 'hypertask'
 
 
 def feedback_row(want, why):
@@ -152,6 +199,7 @@ def normalized(text):
 def contains_secret(text):
     secrets = [value for name, value in os.environ.items()
                if re.search(r'TOKEN|SECRET|PASSWORD|API_KEY', name, re.I)]
+    secrets.append(session_token())
     return (any(len(value) >= 6 and value in text for value in secrets if value) or
             bool(re.search(r'(?i)(?:\b(?:bearer\s+\S+|(?:token|password|api[_ -]?key)\s*[:=]\s*\S+)|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)', text)))
 
@@ -239,10 +287,11 @@ def confirm_attachments(ticket, snapshots):
 
 
 def cli(*args):
-    if not os.environ.get('HT_TOKEN', '').strip():
+    token = board_token()
+    if not token:
         raise BoardError('agent token unavailable')
     try:
-        result = subprocess.run(['hypertask', '--json', *args], env=dict(os.environ),
+        result = subprocess.run([hypertask_command(), '--json', *args], env=dict(os.environ, HT_TOKEN=token),
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 text=True, timeout=30, check=False)
         data = json.loads(result.stdout)
@@ -296,7 +345,7 @@ def tasks(status):
             raise BoardError('invalid task response')
         names = {label.get('name') for label in task['labels'] if isinstance(label, dict)}
         if LABELS <= names and task['title'].startswith(PREFIX):
-            if not isinstance(task.get('ticketNumber'), str) or not re.fullmatch(r'IGSH-\d+', task['ticketNumber']):
+            if not isinstance(task.get('ticketNumber'), str) or not re.fullmatch(TICKET_NUMBER, task['ticketNumber']):
                 raise BoardError('invalid task reference')
             yield task
 
@@ -356,7 +405,7 @@ def votes(task):
 
 
 def ticket_url(task):
-    return 'https://app.hypertask.ai/detail/project-2060/' + task['ticketNumber'].split('-', 1)[1]
+    return 'https://app.hypertask.ai/detail/project-13734/' + task['ticketNumber'].split('-', 1)[1]
 
 
 def submit(row, snapshots):
@@ -407,7 +456,7 @@ def submit_locked(row, agent, title, version, provider, snapshots):
 
 
 def drain_queue():
-    if not os.environ.get('HT_TOKEN', '').strip():
+    if not board_token():
         raise BoardError('agent token unavailable')
     queue_path = board_queue_path()
     log_path = state_path()
@@ -448,6 +497,64 @@ def drain_queue():
     return len(filed), failures, filed
 
 
+def board_wishes():
+    found = {}
+    for status in ('Normal', 'Archive'):
+        for task in tasks(status):
+            found[normalized(task['title'])] = ticket_url(task)
+    return found
+
+
+def backlog_rows():
+    rows = []
+    for source in (board_queue_path(), state_path()):
+        try:
+            rows += [row for row in read_jsonl(source) if isinstance(row.get('want'), str)]
+        except (BoardError, OSError):
+            print('skipped corrupt feedback queue', file=sys.stderr)
+    return rows
+
+
+def mark_queue_done(ids):
+    if not ids:
+        return
+    try:
+        queue = read_jsonl(board_queue_path())
+        write_jsonl(board_queue_path(), [row for row in queue if row.get('id') not in ids])
+    except (BoardError, OSError):
+        pass
+
+
+def drain_backlog():
+    if not board_token():
+        raise BoardError('agent token unavailable')
+    known = board_wishes()
+    done = set()
+    for row in backlog_rows():
+        want = row['want']
+        if not want.strip():
+            print('skipped no wish text')
+            continue
+        if contains_secret(want + '\n' + str(row.get('why') or '')):
+            print('skipped secret in wish')
+            continue
+        key = normalized(PREFIX + normalized(want))
+        if key in known:
+            print(f'exists {known[key]}')
+            done.add(row['id'])
+            continue
+        try:
+            snapshots = load_snapshots(row)
+            _, url = submit(row, snapshots)
+        except BoardError as exc:
+            print(f'skipped {exc}')
+            continue
+        known[key] = url
+        done.add(row['id'])
+        print(f'filed {url}')
+    mark_queue_done(done)
+
+
 def rank():
     identity()
     board_labels()
@@ -475,8 +582,18 @@ def main(argv):
     parser.add_argument('--why', default='')
     parser.add_argument('--attach', action='append', default=[], metavar='PNG', help='attach a reviewed PNG (up to four)')
     parser.add_argument('--drain', action='store_true', help='file queued wishes with the current agent token')
+    parser.add_argument('--drain-backlog', action='store_true', help='file every saved wish once, skipping ones already on the board')
     parser.add_argument('--rank', '--weekly', action='store_true')
     args = parser.parse_args(argv)
+    if args.drain_backlog:
+        if args.want or args.why or args.attach or args.rank or args.drain:
+            parser.error('drain-backlog does not accept a wish')
+        try:
+            drain_backlog()
+        except BoardError as exc:
+            print(f'multibot-feedback: backlog drain unavailable: {exc}', file=sys.stderr)
+            return 1
+        return 0
     if args.drain:
         if args.want or args.why or args.attach or args.rank:
             parser.error('drain does not accept a wish')

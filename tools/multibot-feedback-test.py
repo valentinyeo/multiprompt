@@ -49,7 +49,7 @@ elif args[:2] == ['task', 'list']:
     page('tasks', [task for task in state['tasks'] if task['status'] == option('--status')])
 elif args[:2] == ['task', 'create']:
     number = 1000 + len(state['tasks'])
-    task = dict(title=option('--title'), ticketNumber='IGSH-' + str(number), status='Normal', labels=[dict(name=name) for name in option('--labels').split(',')], description=option('--description'))
+    task = dict(title=option('--title'), ticketNumber='MUBO-' + str(number), status='Normal', labels=[dict(name=name) for name in option('--labels').split(',')], description=option('--description'))
     state['tasks'].append(task)
     state_path.write_text(json.dumps(state))
     print(json.dumps(dict(success=True, task=task)))
@@ -116,7 +116,7 @@ class BoardFeedbackTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(ROOT / 'src/multibot_feedback.py'), *args], cwd=self.work, env=env, capture_output=True, text=True, timeout=60)
 
     def task(self, number, title, labels=('Multiprompt', 'Agent Feedback'), status='Normal'):
-        return dict(ticketNumber='IGSH-' + str(number), title=title, status=status, labels=[dict(name=name) for name in labels])
+        return dict(ticketNumber='MUBO-' + str(number), title=title, status=status, labels=[dict(name=name) for name in labels])
 
     def vote(self, agent, date):
         return dict(id='activity-id', runId='run-id', type='thought', text='multibot-feedback-vote:v1', agentId=agent, agentName='Agent', createdAt=date.isoformat())
@@ -239,6 +239,8 @@ class BoardFeedbackTest(unittest.TestCase):
         self.assertEqual(len(board['tasks']), 1)
         task = board['tasks'][0]
         self.assertEqual(task['title'], 'Multibot wish: browser screenshots')
+        self.assertTrue(task['ticketNumber'].startswith('MUBO-'))
+        self.assertIn('filed https://app.hypertask.ai/detail/project-13734/', second.stdout)
         self.assertEqual({label['name'] for label in task['labels']}, {'Multiprompt', 'Agent Feedback'})
         self.assertIn(task['ticketNumber'], board['comments'])
         self.assertEqual(len(board['comments'][task['ticketNumber']]), 2)
@@ -259,7 +261,7 @@ class BoardFeedbackTest(unittest.TestCase):
         state = dict(tasks=[self.task(1, 'Multibot wish: capture', ('Other', 'Agent Feedback')), self.task(2, 'Multibot wish: capture more'), self.task(3, 'Multibot wish: capture', status='Archive')], comments={})
         self.write_board(state)
         result = self.run_cli('capture')
-        self.assertEqual(result.stdout.strip(), 'filed https://app.hypertask.ai/detail/project-2060/3')
+        self.assertEqual(result.stdout.strip(), 'filed https://app.hypertask.ai/detail/project-13734/3')
         self.assertEqual(len(self.read_board()['tasks']), 3)
         state['tasks'].append(self.task(4, 'Multibot wish: deleted', status='Deleted'))
         self.write_board(state)
@@ -270,7 +272,7 @@ class BoardFeedbackTest(unittest.TestCase):
     def test_weekly_rank_counts_distinct_agents_and_sorts_ties(self):
         now = datetime.datetime.now(datetime.timezone.utc)
         start = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        state = dict(tasks=[self.task(1, 'Multibot wish: beta'), self.task(2, 'Multibot wish: alpha'), self.task(3, 'Multibot wish: old'), self.task(4, 'Multibot wish: leading')], comments={'IGSH-1': [self.vote('a', start), self.vote('a', start)], 'IGSH-2': [self.vote('b', start)], 'IGSH-3': [self.vote('c', start - datetime.timedelta(seconds=1))], 'IGSH-4': [self.vote('d', start), self.vote('e', start)]})
+        state = dict(tasks=[self.task(1, 'Multibot wish: beta'), self.task(2, 'Multibot wish: alpha'), self.task(3, 'Multibot wish: old'), self.task(4, 'Multibot wish: leading')], comments={'MUBO-1': [self.vote('a', start), self.vote('a', start)], 'MUBO-2': [self.vote('b', start)], 'MUBO-3': [self.vote('c', start - datetime.timedelta(seconds=1))], 'MUBO-4': [self.vote('d', start), self.vote('e', start)]})
         self.write_board(state)
         result = self.run_cli('--weekly')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -305,10 +307,10 @@ class BoardFeedbackTest(unittest.TestCase):
 
     def test_full_activity_window_refuses_unverifiable_vote(self):
         task = self.task(1, 'Multibot wish: crowded')
-        self.write_board(dict(tasks=[task], comments={'IGSH-1': [self.vote('a', datetime.datetime.now(datetime.timezone.utc))] * 100}))
+        self.write_board(dict(tasks=[task], comments={'MUBO-1': [self.vote('a', datetime.datetime.now(datetime.timezone.utc))] * 100}))
         result = self.run_cli('crowded')
         self.assertIn('activity limit reached', result.stdout)
-        self.assertEqual(len(self.read_board()['comments']['IGSH-1']), 100)
+        self.assertEqual(len(self.read_board()['comments']['MUBO-1']), 100)
 
     def test_malformed_activity_fails_closed(self):
         task = self.task(1, 'Multibot wish: bad activity')
@@ -327,6 +329,7 @@ class BoardFeedbackTest(unittest.TestCase):
     def test_missing_token_does_not_invoke_default_login(self):
         result = self.run_cli('a capability', token=None)
         self.assertIn('queued, will be filed', result.stdout)
+        self.assertIn('agent token unavailable', result.stdout)
         self.assertFalse(self.calls.exists())
         self.assertTrue(self.log.exists())
         queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
@@ -377,6 +380,81 @@ class BoardFeedbackTest(unittest.TestCase):
             self.assertNotIn(private, json.dumps(board))
         self.assertNotIn('Session type: browser', json.dumps(board))
         self.assertNotIn('Session type: k', json.dumps(board))
+
+    def test_existing_wish_with_any_ticket_prefix_is_reused(self):
+        self.write_board(dict(tasks=[dict(ticketNumber='IGSH-9', title='Multibot wish: capture', status='Normal', labels=[dict(name='Multiprompt'), dict(name='Agent Feedback')])], comments={}))
+        result = self.run_cli('capture')
+        self.assertEqual(result.stdout.strip(), 'filed https://app.hypertask.ai/detail/project-13734/9')
+        self.assertEqual(len(self.read_board()['tasks']), 1)
+
+    def test_session_token_file_is_used_when_ht_token_is_unset(self):
+        names = self.home / '.local/state/multiprompt/chat-names.json'
+        names.parent.mkdir(parents=True)
+        names.write_text(json.dumps({'mbf-mubo-57': dict(name='Multi Bot Features', at=1)}))
+        tokens = self.home / '.config/hypertask-agents/credentials/sessions'
+        tokens.mkdir(parents=True)
+        (tokens / 'multi-bot-features-agent-token').write_text('credential-from-file\n')
+        result = self.run_cli('token fallback wish', token=None, MULTIBOT_SESSION='mbf-mubo-57')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('filed https://app.hypertask.ai/detail/project-13734/', result.stdout)
+        self.assertNotIn('credential-from-file', result.stdout + result.stderr)
+        self.assertNotIn('credential-from-file', self.log.read_text())
+        self.assertNotIn('credential-from-file', self.board.read_text())
+        self.assertEqual(len(self.read_board()['tasks']), 1)
+
+    def test_local_bin_cli_is_found_when_path_has_none(self):
+        local = self.home / '.local/bin'
+        local.mkdir(parents=True)
+        shim = self.home / 'shim'
+        shim.mkdir()
+        (shim / 'python3').symlink_to(sys.executable)
+        (local / 'hypertask').write_bytes((self.bin / 'hypertask').read_bytes())
+        (local / 'hypertask').chmod(0o700)
+        (self.bin / 'hypertask').unlink()
+        result = self.run_cli('local bin wish', PATH=str(shim))
+        self.assertIn('filed https://app.hypertask.ai/detail/project-13734/', result.stdout)
+
+    def backlog_row(self, want, row_id, why=''):
+        return dict(id=row_id, at=1, want=want, why=why, session='', provider='codex', app_version='1.2.3', cwd='work')
+
+    def write_rows(self, path, rows):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+    def test_drain_backlog_files_once_across_both_files_and_skips_secrets(self):
+        existing = dict(ticketNumber='MUBO-5', title='Multibot wish: already on board', status='Normal', labels=[dict(name='Multiprompt'), dict(name='Agent Feedback')])
+        self.write_board(dict(tasks=[existing], comments={}))
+        queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
+        log = self.home / 'state/multibot/feedback.jsonl'
+        self.write_rows(queue, [self.backlog_row('already  on BOARD', 'row-1'), self.backlog_row('first new wish', 'row-2')])
+        self.write_rows(log, [self.backlog_row('second new wish', 'row-3'), self.backlog_row('First new wish', 'row-4'), self.backlog_row('credential-one', 'row-5')])
+        drain = self.run_cli('--drain-backlog')
+        self.assertEqual(drain.returncode, 0, drain.stderr)
+        lines = drain.stdout.splitlines()
+        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[0], 'exists https://app.hypertask.ai/detail/project-13734/5')
+        self.assertTrue(lines[1].startswith('filed https://app.hypertask.ai/detail/project-13734/'))
+        self.assertTrue(lines[2].startswith('filed https://app.hypertask.ai/detail/project-13734/'))
+        self.assertEqual(lines[3], 'exists ' + lines[1].split(' ', 1)[1])
+        self.assertEqual(lines[4], 'skipped secret in wish')
+        self.assertNotIn('credential-one', drain.stdout + drain.stderr)
+        board = self.read_board()
+        self.assertEqual(sorted(task['title'] for task in board['tasks']),
+                         ['Multibot wish: already on board', 'Multibot wish: first new wish', 'Multibot wish: second new wish'])
+        self.assertFalse(queue.exists() and queue.read_text().strip())
+        again = self.run_cli('--drain-backlog')
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('filed ', again.stdout)
+        self.assertEqual(len(self.read_board()['tasks']), 3)
+
+    def test_drain_backlog_without_token_files_nothing(self):
+        queue = self.home / 'state/multibot/feedback-board-queue.jsonl'
+        self.write_rows(queue, [self.backlog_row('waiting wish', 'row-1')])
+        result = self.run_cli('--drain-backlog', token=None)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('agent token unavailable', result.stderr)
+        self.assertEqual(self.read_board()['tasks'], [])
+        self.assertEqual(len(queue.read_text().splitlines()), 1)
 
     def test_description_escapes_deliberate_input(self):
         result = self.run_cli('capture <screen>', '--why', 'Less <work> & time')

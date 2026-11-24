@@ -10,7 +10,9 @@ multibot-feedback "a browser screenshot shortcut" --why "capturing a screenshot 
 
 Each wish is saved in the local user's private feedback log first. The local record keeps session and working-folder context. Never put credentials in feedback. The command rejects known credentials and paths. Session names and folder names are not attached automatically. Review the deliberate want and why before submitting; automatic checks cannot recognize every secret.
 
-When the chat has an agent `HT_TOKEN`, the command files or votes immediately. When it does not, the wish is still saved locally and appended to a shared server queue under the host account's state directory. The agent host and `multibot-feedback --drain` submit that queue with whichever agent token the host already holds. No token is bundled or saved by this command. It never falls back to the CLI's saved login for a write.
+Wishes go to the Multi Bot board, 13734. Review them at https://app.hypertask.ai/project?id=13734&view=agent-feedback.
+
+When the chat has an agent `HT_TOKEN`, the command files or votes immediately. When it does not, the command uses the chat's own agent login: it reads `~/.config/hypertask-agents/credentials/sessions/<chat-slug>-agent-token`, where `<chat-slug>` is the live chat name lowercased, with each run of non-alphanumeric characters turned into one `-` (`Multi Bot Features` becomes `multi-bot-features`). The chat name comes from the published chat names under `~/.local/state/multiprompt/chat-names.json`, the same list `zsb` reads. The token is passed to the hypertask CLI for that one call. It is never printed, logged or bundled. The command also finds the CLI on `PATH` first, then `~/.local/bin/hypertask`. If no token file exists, the wish is still saved locally and appended to a shared server queue under the host account's state directory, and the output says `agent token unavailable`. `multibot-feedback --drain` submits that queue with the chat's agent login. It never falls back to the CLI's saved login for a write.
 
 New board tickets have the existing Multiprompt and Agent Feedback labels. They contain the wish, reason, running app version and provider. Session names, paths and local context are not attached. The two labels must already exist. The app version comes from the desktop build, not a manual field. Older clients without a version keep feedback local.
 
@@ -19,6 +21,14 @@ Wish titles are Unicode-normalized, case-folded and whitespace-normalized. Exact
 The activity API returns at most 100 entries without an activity cursor. If that window fills, submission and ranking fail closed rather than miss older votes.
 
 The output says `filed` with the ticket link only after reading the ticket and vote back. If the chat has no token or a board call fails, local feedback and the shared queue keep the row and the output says `queued, will be filed` with the reason. Run `multibot-feedback --drain` on the host (or wait for the agent host idle drain) to file queued rows once a token is available. A ticket or vote may nevertheless have reached the board before a failed response. Retry the same wish to reconcile it.
+
+To file every wish already saved in the local log and the shared queue, run:
+
+```sh
+multibot-feedback --drain-backlog
+```
+
+The command builds the same title `submit` would, checks board 13734 first, and reuses the existing ticket when the title is already there, open or done. It prints one line per saved row: `filed <link>`, `exists <link>` or `skipped <reason>`. Rows that trip the secret check are skipped, never filed. Rows it files are removed from the shared queue. Running it a second time files nothing.
 
 To rank actual votes in the current UTC week, run:
 
