@@ -971,6 +971,8 @@ jobs:
       - name: Require pre-fix master to miss the new skill
         if: env.CHAT_SKILLS_PROOF == '1'
         shell: powershell
+        env:
+          CHAT_PIN_PROOF: ''
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force evidence/negative | Out-Null
