@@ -515,6 +515,36 @@ class HistoryReaderTest(unittest.TestCase):
             _, again = self.read()
             self.assertEqual([row.get('read_id') or row.get('id') for row in again if row['role'] in ('user', 'assistant')][:2], identities)
 
+    def hax_runner_transcript(self):
+        sid = '11111111-1111-4111-8111-111111111111'
+        path = self.home / '.local/state/hax/sessions/shared-runners' / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type='session', version=1, id=sid, cwd='/work/shared-runners', timestamp='2026-01-01T00:00:00Z', provider='codex', model='neutral'),
+                  dict(kind='user', text='IGSH1043 runner 0 question'),
+                  dict(kind='assistant', text='IGSH1043 runner 0 saved reply')]
+        path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+        self.query.update(provider='hax', sid='', tmux='runner-alpha', cwd='/work/shared-runners', follow=True)
+        return sid, path
+
+    def test_mubo278_hax_runner_tab_reads_its_saved_transcript(self):
+        sid, path = self.hax_runner_transcript()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=(sid, path)):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], sid)
+        self.assertEqual(fields[9], 'hax')
+        self.assertEqual([row['text'] for row in rows if row['role'] in ('user', 'assistant')],
+                         ['IGSH1043 runner 0 question', 'IGSH1043 runner 0 saved reply'])
+
+    def test_mubo278_hosted_hax_chat_keeps_the_host_history_only(self):
+        sid, path = self.hax_runner_transcript()
+        reader.host_write(reader.host_paths('hax', sid)['config'], dict(enabled=True, tmux='runner-alpha', cwd='/work/shared-runners'))
+        self.query['sid'] = sid
+        with patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('hosted hax chat read a native transcript')):
+            fields, rows = self.read()
+        self.assertEqual(fields[9], 'hax')
+        self.assertTrue([row for row in rows if row.get('no_transcript') is True])
+        self.assertFalse([row for row in rows if row.get('role') in ('user', 'assistant')])
+
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
         old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))
