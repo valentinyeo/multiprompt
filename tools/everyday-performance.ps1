@@ -9,7 +9,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/desktop.cs", "$PSScriptRoot/everyday-performance.cs" -ReferencedAssemblies System, System.Core, System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/job.cs"
-$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-CimInstance Win32_Process | Select-Object Name, ProcessId, KernelModeTime, UserModeTime); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; sampleCounts=@{ typing=$Count; switching=$Count; opening=[Math]::Min($Count,20); scrolling=$Count; streaming=$Count }; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to increased nonempty transcript paint count plus DwmFlush; existing 1500ms toggle guard honored outside timed region'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append cumulative assistant update to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
+$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-CimInstance Win32_Process | Select-Object Name, ProcessId, KernelModeTime, UserModeTime); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; sampleCounts=@{ typing=$Count; switching=$Count; opening=[Math]::Min($Count,20); scrolling=$Count; streaming=$Count }; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to increased nonempty transcript paint count plus DwmFlush; existing 1500ms toggle guard honored outside timed region'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append incremental assistant part to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
 $machine | ConvertTo-Json -Depth 8 | Set-Content "$Evidence/machine.json"
 for ($trial = 1; $trial -le $Trials; $trial++) {
     $directory = "$Evidence/trial-$trial"
@@ -140,27 +140,33 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         [EverydayPerformance]::ObserveFor(500)
         $streamPath = "$root/home/.claude/projects/C--verify-work1/a1b2c3d4-1068-4000-8000-000000000001.jsonl"
         if (-not (Test-Path $streamPath)) { throw 'Long chat transcript missing' }
-        @{ shell=$longShell; transcriptBytes=(Get-Item $streamPath).Length; rounds=40; source='synthetic Claude cumulative assistant records; real native reader and layout' } | ConvertTo-Json | Set-Content "$directory/long-chat-workload.json"
+        @{ shell=$longShell; transcriptBytes=(Get-Item $streamPath).Length; rounds=40; source='synthetic Claude incremental assistant parts; real native reader and layout' } | ConvertTo-Json | Set-Content "$directory/long-chat-workload.json"
         $streamText = ''
         $encoding = [Text.UTF8Encoding]::new($false)
         for ($i = 0; $i -lt ($Count + 10); $i++) {
-            $streamText += " chunk-$i is the next piece of a live reply."
-            $row = @{ type='assistant'; timestamp=[DateTime]::UtcNow.ToString('o'); sessionId='a1b2c3d4-1068-4000-8000-000000000001'; uuid=[guid]::NewGuid().ToString(); isSidechain=$false; message=@{ role='assistant'; id="everyday-stream-$trial"; model='claude-opus-5-5'; content=@(@{ type='text'; text=$streamText }) } }
+            $streamPiece = "chunk-$i is the next piece of a live reply."
+            $streamText += $streamPiece + "`n"
+            $row = @{ type='assistant'; timestamp=[DateTime]::UtcNow.ToString('o'); sessionId='a1b2c3d4-1068-4000-8000-000000000001'; uuid=[guid]::NewGuid().ToString(); isSidechain=$false; message=@{ role='assistant'; id="everyday-stream-$trial"; model='claude-opus-5-5'; content=@(@{ type='text'; text=$streamPiece }) } }
             $json = ($row | ConvertTo-Json -Depth 6 -Compress) + "`n"
             $paintBefore = [EverydayPerformance]::PaintCount($log)
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [IO.File]::AppendAllText($streamPath, $json, $encoding)
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] push shell=$longShell ", '[chat] position ', $start, 30000, $paintBefore)
-            if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "cumulative update=$i bytes=$($encoding.GetByteCount($json))" }
+            if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "incremental part=$i bytes=$($encoding.GetByteCount($json))" }
             [EverydayPerformance]::ObserveFor(37 + (($i * 53) % 113))
         }
         [EverydayPerformance]::Screenshot("$directory/streaming.png")
         Foreground
         [Windows.Forms.Clipboard]::Clear()
         [EverydayPerformance]::CopyTranscript($main, $app.Id)
-        [void](Await 'latest streamed text in real rendered transcript copy' { [Windows.Forms.Clipboard]::ContainsText() -and [Windows.Forms.Clipboard]::GetText().Contains($streamText) } 30)
-        @{ expectedLatest=$streamText; copiedCharacters=[Windows.Forms.Clipboard]::GetText().Length; exactLatestFound=$true } | ConvertTo-Json | Set-Content "$directory/stream-receipt.json"
+        [void](Await 'latest streamed part in real rendered transcript copy' { [Windows.Forms.Clipboard]::ContainsText() -and [Windows.Forms.Clipboard]::GetText().Contains($streamPiece) } 30)
+        $copied = [Windows.Forms.Clipboard]::GetText()
+        $parts = [regex]::Matches($copied, 'chunk-(\d+) is the next piece of a live reply\.')
+        $correct = $parts.Count -eq ($Count + 10)
+        for ($part = 0; $part -lt $parts.Count; $part++) { if ([int]$parts[$part].Groups[1].Value -ne $part) { $correct = $false } }
+        @{ expectedLatest=$streamText; expectedParts=$Count + 10; actualParts=$parts.Count; copiedCharacters=$copied.Length; exactLatestFound=$correct } | ConvertTo-Json | Set-Content "$directory/stream-receipt.json"
+        if (-not $correct) { [IO.File]::WriteAllText("$directory/incorrect-transcript.txt", $copied, $encoding); throw 'Stream output has missing, repeated or reordered parts' }
         $observer.Refresh(); $app.Refresh()
         @{ observerCpuMs=$observer.TotalProcessorTime.TotalMilliseconds - $observerBefore; appCpuMs=$app.TotalProcessorTime.TotalMilliseconds - $appBefore; wallMs=$trialClock.Elapsed.TotalMilliseconds; appPid=$app.Id } | ConvertTo-Json | Set-Content "$directory/accounting.json"
     } catch {
