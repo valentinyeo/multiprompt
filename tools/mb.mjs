@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
+import { run as layoutRun } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -36,13 +36,10 @@ commands:
   roster apply <file> [--dry-run]
   health [--json] [--ping]
 
-every write names its server: --host is required to create a tab, and a reopen takes the
-host recorded when the chat was created. There is no default host.
-
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
   MULTIPROMPT_URL   account service address (default ${DEFAULT_URL})
-  MULTIPROMPT_SERVERS_FILE  path to the installed servers file
+  MULTIPROMPT_HOST  default host slot (default 0)
   MULTIPROMPT_READER  path to the installed host reader
 `;
 
@@ -190,6 +187,7 @@ function choose(layout, name, host) {
   if (tabs.length > 1) throw new Failure('give --host');
   return tabs[0] || null;
 }
+const defaultHost = (ctx, flags) => hostSlot(flags?.host ?? ctx.env.MULTIPROMPT_HOST ?? '0');
 
 function ensureSession(ctx, session, command) {
   if (ctx.tmux(['has-session', '-t', '=' + session]).status === 0) return false;
@@ -241,9 +239,7 @@ async function list(ctx, flags) {
 
 async function placeShell(ctx, flags) {
   const session = sessionName(flags.tmux);
-  let layoutHosts;
-  if (needsLayoutHosts(ctx.env, session, flags.host)) layoutHosts = (await readLayout(ctx)).data.layout?.hosts;
-  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts);
+  const host = defaultHost(ctx, flags);
   const workspace = workspaceName(flags.workspace);
   const group = flags.group === undefined ? null : groupName(flags.group);
   const title = flags.title === undefined ? null : titleName(flags.title);
@@ -574,7 +570,7 @@ function loadRoster(text, file) {
   return { workspaces, groups: [...new Set([...groups, ...runners.map(runner => runner.group).filter(Boolean)])], runners };
 }
 
-function rosterDiff(layout, owners, roster) {
+function rosterDiff(layout, owners, roster, hostDefault) {
   const next = structuredClone(layout);
   let changed = false;
   const actions = [];
@@ -619,8 +615,7 @@ function rosterDiff(layout, owners, roster) {
       } else actions.push(`unchanged ${runner.name}`);
       continue;
     }
-    if (runner.host === null) throw new Failure(`give host for runner ${runner.name}`);
-    const host = runner.host;
+    const host = runner.host ?? hostDefault;
     const id = `${host}:${runner.name.toLowerCase()}`;
     wanted.add(id);
     const tab = next.tabs.find(item => item.tmux_host === host && item.tmux_session.toLowerCase() === runner.name.toLowerCase());
@@ -661,13 +656,12 @@ function rosterDiff(layout, owners, roster) {
   return { actions, layout: changed ? next : null, createdWorkspaces, opened, updates, closed };
 }
 
-function runnerTab(layout, runner) {
+function runnerTab(layout, runner, hostDefault) {
   if (runner.kind === 'chat') {
     const matches = layout.tabs.filter(tab => clean(tab.name || '').toLowerCase() === runner.name.toLowerCase() && (runner.host === null || tab.tmux_host === runner.host));
     return matches.length === 1 ? matches[0] : null;
   }
-  const host = runner.host;
-  if (host === null) throw new Failure(`give host for runner ${runner.name}`);
+  const host = runner.host ?? hostDefault;
   return layout.tabs.find(tab => tab.tmux_host === host && tab.tmux_session.toLowerCase() === runner.name.toLowerCase()) || null;
 }
 
@@ -680,22 +674,23 @@ async function applyRoster(ctx, file, dry) {
   if (roster.workspaces.some(item => item.color !== null)) requireFeature(read, 'workspace_color');
   if (roster.runners.some(item => item.face !== null || item.color !== null)) requireFeature(read, 'bot_appearance');
   if (roster.workspaces.some(item => item.color === 7) || roster.runners.some(item => item.color === 7)) requireFeature(read, 'bot_palette8');
-  const plan = rosterDiff(read.data.layout, owners, roster);
+  const hostDefault = defaultHost(ctx, {});
+  const plan = rosterDiff(read.data.layout, owners, roster, hostDefault);
   if (dry) ctx.out('dry-run');
   for (const line of plan.actions) ctx.out(line);
   const photos = [];
   for (const runner of roster.runners) {
     if (!runner.photo) continue;
-    const host = runner.host;
+    const host = runner.host ?? hostDefault;
     const png = pngFromFile(runner.photo);
-    const tab = runnerTab(read.data.layout, runner);
+    const tab = runnerTab(read.data.layout, runner, hostDefault);
     if (!tab) { photos.push({ runner, host, png, changed: true }); ctx.out(`photo ${runner.name}`); continue; }
     const changed = await syncPhoto(ctx, tab.tmux_host, tab.tmux_session, png, true);
     photos.push({ runner, host: tab.tmux_host, session: tab.tmux_session, png, changed });
     if (changed) ctx.out(`photo ${runner.name}`);
   }
   for (const runner of roster.runners.filter(item => item.kind === 'shell')) {
-    const host = runner.host;
+    const host = runner.host ?? hostDefault;
     const owned = owners.sessions[`${host}:${runner.name.toLowerCase()}`];
     if (!owned || (owned.command || null) === runner.command) continue;
     if (ctx.tmux(['has-session', '-t', '=' + runner.name]).status !== 0) continue;
@@ -707,7 +702,7 @@ async function applyRoster(ctx, file, dry) {
   if (dry) { ctx.out(`revision ${read.data.revision}`); return; }
   for (const runner of [...plan.opened, ...plan.updates]) {
     if (runner.kind !== 'shell') continue;
-    const owned = owners.sessions[`${runner.host}:${runner.name.toLowerCase()}`];
+    const owned = owners.sessions[`${runner.host ?? hostDefault}:${runner.name.toLowerCase()}`];
     if (!plan.opened.includes(runner) && !owned) continue;
     if (owned && (owned.command || null) !== runner.command && ctx.tmux(['has-session', '-t', '=' + runner.name]).status === 0) {
       const lines = paneLines(ctx, runner.name) || [];
@@ -716,20 +711,19 @@ async function applyRoster(ctx, file, dry) {
     }
     ensureSession(ctx, runner.name, runner.command);
   }
-  const result = await edit(ctx, layout => rosterDiff(layout, owners, roster).layout);
+  const result = await edit(ctx, layout => rosterDiff(layout, owners, roster, hostDefault).layout);
   for (const line of plan.actions) if (line.startsWith('create group ')) owners.groups[line.slice('create group '.length)] = { owner: 'mb' };
   if (result.changed) for (const name of plan.createdWorkspaces) owners.workspaces[name] = { owner: 'mb' };
   if (result.changed) for (const runner of plan.opened) {
-    if (runner.kind !== 'shell') continue;
-    const host = runner.host;
+    const host = runner.host ?? hostDefault;
     owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: runner.model === 'claude' || runner.model === 'hax' ? runner.model : null, sid: null };
   }
   for (const runner of plan.updates) {
-    const host = runner.host;
+    const host = runner.host ?? hostDefault;
     const id = `${host}:${runner.name.toLowerCase()}`;
     if (owners.sessions[id]) Object.assign(owners.sessions[id], { command: runner.command, model: runner.model, workspace: runner.workspace });
   }
-  for (const runner of roster.runners.filter(item => item.kind === 'chat' && !runnerTab(read.data.layout, item))) {
+  for (const runner of roster.runners.filter(item => item.kind === 'chat' && !runnerTab(read.data.layout, item, hostDefault))) {
     if (!runner.folder) throw new Failure('chat open needs a title, folder and workspace');
     const previous = ctx.out;
     let last = '';
@@ -748,7 +742,7 @@ async function applyRoster(ctx, file, dry) {
     let host = photo.host;
     let session = photo.session || photo.runner.name;
     if (photo.runner.kind === 'chat' && !photo.session) {
-      const current = runnerTab((await readLayout(ctx)).data.layout, photo.runner);
+      const current = runnerTab((await readLayout(ctx)).data.layout, photo.runner, hostDefault);
       if (!current) throw new Failure('no such session');
       host = current.tmux_host;
       session = current.tmux_session;
