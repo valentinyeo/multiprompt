@@ -91,13 +91,15 @@ while True:
 
 STALE_LISTENER = r'''
 import socket
-import sys
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("127.0.0.1", 0))
 server.listen(4)
 print(server.getsockname()[1], flush=True)
-sys.stdin.read()
+while True:
+    client, _ = server.accept()
+    client.recv(4096)
+    client.close()
 '''
 
 DRIVER = r'''
@@ -186,7 +188,8 @@ class OwnerChatBrowserTest(unittest.TestCase):
         for name, body in (('user_browser.py', (ROOT / 'tools/agent-notifications/user_browser.py').read_text()),
                            ('mp_notify_relay.py', (ROOT / 'tools/agent-notifications/mp_notify_relay.py').read_text()),
                            ('fake_app.py', FAKE_APP), ('stale_listener.py', STALE_LISTENER),
-                           ('driver.py', DRIVER), ('probe.py', RUNTIME_PROBE)):
+                           ('driver.py', DRIVER), ('probe.py', RUNTIME_PROBE),
+                           ('chat_history_reader.py', (ROOT / 'src/chat_history_reader.py').read_text())):
             path = cls.temp / name
             path.write_text(body)
             path.chmod(0o644)
@@ -212,7 +215,7 @@ class OwnerChatBrowserTest(unittest.TestCase):
             if not (socket_ready(cls.app_socket) and socket_ready(cls.broker_socket)):
                 raise AssertionError('the owner browser broker or its app socket never came up')
             cls.driver = subprocess.run(['sudo', '-n', '-H', '-u', BRIDGE, 'python3', str(cls.temp / 'driver.py'),
-                                         str(ROOT / 'src/chat_history_reader.py'), cls.bridge.pw_dir,
+                                         str(cls.temp / 'chat_history_reader.py'), cls.bridge.pw_dir,
                                          cls.owner.pw_dir, SESSION, OWNER],
                                         capture_output=True, text=True, timeout=120)
             if cls.driver.returncode == 0:
@@ -270,7 +273,7 @@ class OwnerChatBrowserTest(unittest.TestCase):
         values = {'HOME': self.owner.pw_dir, 'USER': OWNER,
                   'PATH': self.owner.pw_dir + '/.multiprompt-runtime:/usr/bin:/bin',
                   'MULTIBOT_PROVIDER': 'claude', 'MULTIBOT_SESSION': session, 'ZSB_SESSION': session,
-                  'MULTIPROMPT_TAB': session, 'ZSB_TIMEOUT': '30'}
+                  'MULTIPROMPT_TAB': session, 'ZSB_SOCKET': str(self.broker_socket), 'ZSB_TIMEOUT': '30'}
         values.update(env or {})
         command = ['sudo', '-n', '-H', '-u', OWNER, '/usr/bin/env', '-i',
                    *[key + '=' + value for key, value in values.items()], 'zsb', *args]
@@ -326,6 +329,7 @@ class OwnerChatBrowserTest(unittest.TestCase):
             port = listener.stdout.readline().strip()
             self.assertTrue(port.isdigit(), 'the stale listener never reported its port')
             result = self.zsb('status', env={'ZSB_PORT': port, 'ZSB_SOCKET': '',
+                                             'MULTIPROMP_NOTIFY_RELAY_TOKEN': 'stale-holder-test',
                                              'MULTIBOT_SESSION': '', 'MULTIPROMPT_TAB': ''})
         finally:
             listener.kill()

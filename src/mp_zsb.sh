@@ -731,8 +731,8 @@ def relay_holds_port(holders):
 def fail_port_conflict(holders):
     pid, command = holders[0]
     label = command or "unknown process"
-    message = (f"multiprompt pane port {port} is held by pid {pid} ({label}), which is not the multiprompt relay, "
-               f"so the SSH tunnel cannot use that port. Stop that process, then reconnect this SSH session from multiprompt.")
+    message = (f"multiprompt app not reachable: pane port {port} is held by pid {pid} ({label}), which is not the "
+               f"multiprompt relay, so this request went nowhere. Stop that process, then reconnect this SSH session from multiprompt.")
     fail("port_conflict", message,
          {"ok": False, "error": "port_conflict", "message": message, "session": session, "port": pane_port(),
           "holder": {"pid": pid, "command": command},
@@ -787,9 +787,11 @@ if sock is None:
             raise ValueError()
     except (OSError, subprocess.SubprocessError, ValueError):
         holders = pane_holders()
+        detail = ""
         if holders and not relay_holds_port(holders):
-            fail_port_conflict(holders)
-        fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
+            detail = (f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'}), "
+                      "which is not the multiprompt relay.")
+        fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents." + detail)
 
 started = time.monotonic()
 deadline = started + timeout
@@ -831,6 +833,8 @@ except OSError:
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
     holders = pane_holders() if not endpoint else []
+    if holders and not relay_holds_port(holders):
+        fail_port_conflict(holders)
     detail = ""
     if holders:
         detail = f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'}); stop it if it is an old relay and reconnect."
