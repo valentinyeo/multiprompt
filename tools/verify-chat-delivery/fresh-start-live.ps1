@@ -47,10 +47,24 @@ for ($i = 0; $i -lt 20 -and -not $observation.dots; $i++) {
     Start-Sleep -Milliseconds 100
 }
 if (-not $observation.dots) { throw 'Fresh start never showed the reloading dots' }
+[void](Wait-For 'the reloading reply reaches the live subscription' {
+    foreach ($line in ((Read-Shared "$state/working-host.jsonl") -split "`n")) {
+        if (-not $line.Trim()) { continue }
+        $row = $line | ConvertFrom-Json
+        if ($row.stage -ne 'pushed') { continue }
+        foreach ($entry in $row.events) {
+            if ($entry.event.PSObject.Properties['kind'] -and $entry.event.kind -eq 'text.delta') { return $true }
+        }
+    }
+} 30)
 [void](Scroll-Transcript -12000)
-$liveCopy = Copy-Rendered 'fresh-live'
-if (-not $liveCopy.Contains('The handover is reloaded')) { throw 'The reloading reply was not painted live' }
-if (@(Working-Stage 'fresh-start-finished').Count -gt 0) { throw 'The reloading reply only appeared after the reload finished' }
+$liveCopy = $null
+for ($liveTry = 0; $liveTry -lt 6 -and -not $liveCopy; $liveTry++) {
+    if (@(Working-Stage 'fresh-start-finished').Count -gt 0) { throw 'The reloading reply only appeared after the reload finished' }
+    $copy = Copy-Rendered 'fresh-live'
+    if ($copy -and $copy.Contains('The handover is reloaded')) { $liveCopy = $copy }
+}
+if (-not $liveCopy) { throw 'The reloading reply was not painted live' }
 $observation.liveReply = $true
 Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer text mismatch during the reload' }
