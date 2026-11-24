@@ -107,10 +107,7 @@ try {
         ctrl = [VerifyNative]::IsDown(0x11)
         shift = [VerifyNative]::IsDown(0x10)
         win = [VerifyNative]::IsDown(0x5B) -or [VerifyNative]::IsDown(0x5C)
-        browserEnabled = $setupSession.tabs[0].br
-        browserState = $setupSession.tabs[0].browser_state
-        browserWindowId = $setupSession.tabs[0].browser_window_id
-        browserConnectionId = $setupSession.tabs[0].browser_connection_id
+        sessionTab = $setupSession.tabs[0]
     }) 'browser-typing-setup.json'
 }
 [VerifyNative]::Chord(@(0x0D))
