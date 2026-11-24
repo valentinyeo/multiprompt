@@ -4737,6 +4737,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_skills_mode) {
                 app_state.g_search_skills_mode = false;
+                app_state.g_search_pin_skill_mode = false;
                 app_state.g_search_sel = 0;
                 app_state.g_search_scroll = 0;
                 updateSearchResults();

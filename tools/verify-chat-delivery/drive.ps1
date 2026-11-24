@@ -722,8 +722,9 @@ foreach ($plan in $plans) {
             [void](Wait-For 'skill list offered for the pin' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match '\[palette\] ready chars=0 count=\d+ target=41\d\d(?:\s|$)' })
             $skillQuery = 'verify-zebra'
             foreach ($letter in $skillQuery.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
-            [void](Wait-For 'the fixture skill is the pin match' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match ('\[palette\] ready chars=' + $skillQuery.Length + ' count=\d+ target=41\d\d(?:\s|$)') })
+            [void](Wait-For 'the fixture skill is the only pin match' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match ('\[palette\] rows chars=' + $skillQuery.Length + ' count=2 ids=6309 41\d\d(?:\s|$)') })
             Press @(0x0D) 'Enter: pin the fixture skill'
+            [void](Wait-For 'the pin is written for the fixture skill' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match '\[chat-pin\] saved shell=\d+ key=0:verify-agent skill=verify-zebra' } 10)
             [void](Wait-For 'pin saved for this chat' { (Test-Path $pinFile) -and ((Read-Shared $pinFile) -match '^0:verify-agent\tverify-zebra') } 10)
             Copy-Item $pinFile "$caseDir/chat-pins.txt" -Force
             $pinnedLogStart = (Read-Shared "$settings/debug.log").Length

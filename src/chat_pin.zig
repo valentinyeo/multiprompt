@@ -171,13 +171,27 @@ pub fn pinned(idx: u32) ?[]const u8 {
     return find(loadPins(), key);
 }
 
+fn pinTrace(idx: u32, key: []const u8, skill: []const u8, stage: []const u8) void {
+    var buf: [192]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&buf, "[chat-pin] {s} shell={d} key={s} skill={s}", .{ stage, idx, key, skill }) catch "[chat-pin] trace overflow");
+}
+
 pub fn setForShell(idx: u32, skill: ?[]const u8) bool {
+    const wanted = skill orelse "-";
     var key_buf: [MAX_CHAT]u8 = undefined;
-    const key = shellChatKey(idx, &key_buf) orelse return false;
+    const key = shellChatKey(idx, &key_buf) orelse {
+        pinTrace(idx, "-", wanted, "no-chat-key");
+        return false;
+    };
     _ = loadPins();
     const changed = if (skill) |name| setPin(&g_pins, key, name) else clearPin(&g_pins, key);
-    if (!changed) return true;
-    return savePins();
+    if (!changed) {
+        pinTrace(idx, key, wanted, "unchanged");
+        return true;
+    }
+    const saved = savePins();
+    pinTrace(idx, key, wanted, if (saved) "saved" else "save-failed");
+    return saved;
 }
 
 fn skillNote(name: []const u8, out: []u8) []const u8 {
@@ -295,13 +309,19 @@ fn closePaletteForPin() void {
 }
 
 fn actionShell() ?u32 {
-    if (app_state.g_search_tabctx_mode) return @import("inbox.zig").findShellById(app_state.g_tabctx_sid);
+    if (app_state.g_search_tabctx_mode) {
+        if (@import("inbox.zig").findShellById(app_state.g_tabctx_sid)) |idx| return idx;
+    }
     return if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
 }
 
 pub fn handleAction(target: usize) bool {
     if (target == app_state.SEARCH_TABCTX_UNPIN_SKILL) {
-        if (actionShell()) |ti| _ = setForShell(ti, null);
+        if (actionShell()) |ti| {
+            _ = setForShell(ti, null);
+        } else {
+            pinTrace(0xFFFF_FFFF, "-", "-", "no-shell");
+        }
         closePaletteForPin();
         return true;
     }
@@ -321,7 +341,11 @@ pub fn handleAction(target: usize) bool {
 
 pub fn consumePick(name: []const u8) bool {
     if (!app_state.g_search_pin_skill_mode) return false;
-    if (actionShell()) |idx| _ = setForShell(idx, name);
+    if (actionShell()) |idx| {
+        _ = setForShell(idx, name);
+    } else {
+        pinTrace(0xFFFF_FFFF, "-", name, "no-shell");
+    }
     closePaletteForPin();
     return true;
 }
