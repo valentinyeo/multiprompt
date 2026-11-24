@@ -221,6 +221,9 @@ jobs:
           fi
           ok=0
           if [ "$write_code" = 200 ] && [ -n "$written_revision" ] && [ "$written_revision" != "$read_revision" ]; then ok=1; fi
+          if [ "$ok" = 0 ]; then
+            echo "sync write answered ${write_code:-none} with body: $(head -c 400 "$RUNNER_TEMP/layout-write.json" 2>/dev/null || echo unreadable)"
+          fi
           check "sync write $URL/v1/layout answered ${write_code:-none} at revision ${written_revision:-none}${write_error:+ ($write_error)}" "$ok"
           again_code="$(layout_call "$RUNNER_TEMP/layout-again.json" "$URL/v1/layout")"
           again_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
