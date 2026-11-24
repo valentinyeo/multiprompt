@@ -1,2 +1,5 @@
 tools/chat-history-reader-test.py:igsh402-fixture-ids:2027-12-31
 tools/verify-skill-eval.mjs:verify-skill-eval-harness:2027-12-31
+# The Claude judge opens journey screenshots as images; ladder-call reads text only.
+# Remove this line when VSTA-200 lands: https://app.hypertask.ai/detail/project-13556/200
+.github/workflows/pr-verifier.yml:needs images:2026-12-31

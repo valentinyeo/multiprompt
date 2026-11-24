@@ -1,0 +1,26 @@
+name: No direct model calls
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: no-direct-model-calls
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: No direct model calls
+        uses: valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@106c5d3c7c6968b4e368aa58dd3b9bcc9f33e6f9

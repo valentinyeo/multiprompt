@@ -243,17 +243,29 @@ test('the workflow starts on same-repository pull requests and on a dispatched p
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);
 });
 
-test('no plan login reaches the independent judge', () => {
-  for (const secret of ['CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_AUTH_JSON']) assert.doesNotMatch(workflow, new RegExp(`secrets\\.${secret}`));
-  assert.doesNotMatch(workflow, /uses: anthropics\/claude-code-action@/);
+test('the plan login reaches only the screenshot judge and never a script', () => {
+  const lines = workflow.split('\n');
+  const uses = lines.map((line, index) => [line, index]).filter(([line]) => line.includes('secrets.CLAUDE_CODE_OAUTH_TOKEN'));
+  assert.equal(uses.length, 1);
+  for (const [line, index] of uses) {
+    assert.match(line, /^          claude_code_oauth_token: /);
+    const action = lines.slice(index - 5, index).join('\n');
+    assert.match(action, /uses: anthropics\/claude-code-action@[0-9a-f]{40}/);
+    assert.match(action, /allowed_bots: software-factory-runners,hypertask-runners,cursor/);
+  }
+  assert.doesNotMatch(workflow, /secrets\.CODEX_AUTH_JSON/);
   assert.doesNotMatch(workflow, /@openai\/codex|pr-verifier\.cjs judge-openai/);
   assert.doesNotMatch(workflow, /secrets: inherit/);
   assert.doesNotMatch(workflow, /^\s+secrets:/m);
 });
 
-test('the judge offers no CLI client and no tool permission list', () => {
-  assert.doesNotMatch(workflow, /--allowedTools/);
-  assert.doesNotMatch(workflow, /dangerously|--permission-mode|--max-turns/);
+test('Claude gets read tools and read-only git and gh only', () => {
+  const allowed = [...workflow.matchAll(/--allowedTools "([^"]+)"/g)].map(match => match[1]);
+  assert.equal(allowed.length, 1);
+  for (const tools of allowed) {
+    assert.equal(tools, 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)');
+  }
+  assert.doesNotMatch(workflow, /dangerously|--permission-mode|Bash\(\*\)|Bash\(node|Bash\(python/);
 });
 
 test('Claude output reaches scripts through environment variables, never inline', () => {
@@ -361,18 +373,29 @@ test('the ladder judge reads result and doctor files as data and says it cannot 
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the judge order is ladder-call then one ladder-call retry', () => {
-  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 2);
-  assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          GEMINI_API_KEY: /);
+test('a desktop review is judged with its screenshots and every text-only judge walks the ladder', () => {
+  assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@106c5d3c7c6968b4e368aa58dd3b9bcc9f33e6f9/g)].length, 2);
+  assert.doesNotMatch(workflow, /ladder-call@main/);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.select\.outputs\.features != '\[\]'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /Read the screenshots as images/);
+  assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && \(needs\.select\.outputs\.features == '\[\]' \|\| steps\.claude\.outcome != 'success'\)\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@106c5d3c7c6968b4e368aa58dd3b9bcc9f33e6f9\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /id: ladder_call_retry\n        if: [^\n]*steps\.ladder_call\.outcome != 'success'/);
   assert.match(workflow, /request-file: verifier-out\/ladder-request\.json/);
   assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && \(steps\.ladder_call\.outcome == 'success' \|\| steps\.ladder_call_retry\.outcome == 'success'\)/);
   assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
-  assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \}\}/);
-  assert.match(workflow, /ENGINE: \$\{\{ steps\.ladder\.outcome == 'success' && 'ladder' \|\| '' \}\}/);
+  assert.match(workflow, /VERDICT: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.ladder\.outputs\.structured_output \}\}/);
+  assert.match(workflow, /ENGINE: \$\{\{ steps\.claude\.outcome == 'success' && 'claude' \|\| steps\.ladder\.outcome == 'success' && 'ladder' \|\| '' \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
   assert.doesNotMatch(workflow, /ladder_backup/);
-  assert.doesNotMatch(workflow, /steps\.(?:openai|claude)\./);
+  assert.ok(workflow.indexOf('id: claude') < workflow.indexOf('id: ladder_call'), 'the screenshot judge runs before the text-only ladder');
+});
+
+test('the direct-model-call scan runs as its own check and allows only the screenshot judge', () => {
+  const scan = fs.readFileSync(path.join(root, '.github/workflows/no-direct-model-calls.yml'), 'utf8');
+  const allow = fs.readFileSync(path.join(root, '.github/ladder-call-allow'), 'utf8');
+  assert.match(scan, /- uses: actions\/checkout@[0-9a-f]{40}[\s\S]*- name: No direct model calls\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/lint-direct-model-calls@[0-9a-f]{40}/);
+  assert.match(allow, /^\.github\/workflows\/pr-verifier\.yml:needs images:\d{4}-\d{2}-\d{2}$/m);
+  assert.match(allow, /VSTA-200/);
 });
 
 test('a ladder answer is turned into the same verdict shape', () => {

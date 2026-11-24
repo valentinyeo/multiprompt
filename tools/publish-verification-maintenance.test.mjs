@@ -40,7 +40,8 @@ test('weekly maintenance uses the verifier Claude action, OAuth secret and Sonne
   const weekly = fs.readFileSync(path.join(root, '.github/workflows/maintain-verification.yml'), 'utf8');
   assert.match(weekly, /uses: anthropics\/claude-code-action@[0-9a-f]{40}/);
   const verifier = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier.yml'), 'utf8');
-  assert.ok(!verifier.includes('claude_code_oauth_token'));
+  const action = verifier.match(/uses: (anthropics\/claude-code-action@\w+)/)[1];
+  assert.ok(weekly.includes(`uses: ${action}`));
   assert.ok(weekly.includes('claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}'));
   assert.ok(weekly.includes('--model sonnet'));
   assert.match(weekly, /cron: '17 5 \* \* 2'/);
