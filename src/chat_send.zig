@@ -5,6 +5,8 @@ const json_reader = @import("json_reader.zig");
 const skill_model = @import("skills.zig");
 const chat_complete = @import("chat_complete.zig");
 const chat_echo = @import("chat_echo.zig");
+const chat_markdown = @import("chat_markdown.zig");
+const chat_reaction = @import("chat_reaction.zig");
 const shell_exit = @import("shell_exit.zig");
 const DWORD = @import("win32.zig").DWORD;
 const UINT = @import("win32.zig").UINT;
@@ -1787,6 +1789,13 @@ fn chatEchoWaitsOnTranscript(e: ChatOutboxEntry) bool {
     return e.write_started or e.retryable;
 }
 
+fn chatEchoSendCode(e: app_state.ChatOutboxEntry) u64 {
+    if (chat_reaction.parse(e.text) == null and chat_reaction.parseSpoken(e.text) == null) return 0;
+    const wire = std.mem.sliceTo(&e.message_wire_id, 0);
+    if (wire.len == 0) return 0;
+    return chat_markdown.rowKey(wire);
+}
+
 fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const u16, window_full: bool, result: *ChatEchoAssignment) void {
     result.* = .{};
     var prefixes: [CHAT_OUTBOX_MAX_PER_KEY][CHAT_ECHO_PREFIX_CAP]u16 = undefined;
@@ -1801,6 +1810,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
+            .client_id = chatEchoSendCode(e),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };
@@ -1817,7 +1827,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     for (blocks, 0..) |b, bi| {
         if (b.role != .user or user_count >= users.len) continue;
         const disp = chatBlockDisplayRange(buf, b);
-        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id };
+        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id, .client_id = b.client_id };
         user_at[user_count] = bi;
         user_count += 1;
     }

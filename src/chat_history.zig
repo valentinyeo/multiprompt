@@ -5,7 +5,7 @@ const style = @import("chat_style.zig");
 const echo = @import("chat_echo.zig");
 const diff = @import("chat_diff.zig");
 
-const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, client_id: []const u8 = "", settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
@@ -49,7 +49,7 @@ pub const History = struct {
         return result;
     }
 
-    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8) !void {
+    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8, client_id: []const u8) !void {
         const start = self.text.items.len;
         const first_block = self.blocks.items.len;
         const max_blocks = 1 + std.mem.count(u8, bytes, "\n");
@@ -63,9 +63,11 @@ pub const History = struct {
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
         const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
         const row_key = if (id.len == 0) 0 else md.rowKey(id);
+        const send_key = if (client_id.len == 0) 0 else md.rowKey(client_id);
         for (self.blocks.items[first_block..]) |*block| {
             block.message_id = message_id;
             block.row_key = row_key;
+            block.client_id = send_key;
             block.reaction_reference = @import("chat_reaction.zig").reference(id);
             block.source_offset = source_offset;
             block.source_end = source_end;
@@ -87,6 +89,8 @@ pub const History = struct {
         defer last_id.deinit(a);
         var last_read_id: std.ArrayList(u8) = .empty;
         defer last_read_id.deinit(a);
+        var last_client_id: std.ArrayList(u8) = .empty;
+        defer last_client_id.deinit(a);
         var last_stamp: std.ArrayList(u8) = .empty;
         defer last_stamp.deinit(a);
         var last_role: md.Role = .prose;
@@ -152,12 +156,12 @@ pub const History = struct {
                 continue;
             }
             if (std.mem.eql(u8, m.role, "tool")) {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id.items);
                 message.clearRetainingCapacity();
                 last_id.clearRetainingCapacity();
                 if (m.text.len == 0) continue;
                 const tool_text_start = self.text.items.len;
-                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id);
+                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id, "");
                 const index = self.blocks.items.len - 1;
                 var block = &self.blocks.items[index];
                 block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "running") orelse .running;
@@ -183,7 +187,7 @@ pub const History = struct {
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id.items);
                 message.clearRetainingCapacity();
                 source_offset = m.offset;
                 segment = m.segment;
@@ -199,9 +203,11 @@ pub const History = struct {
             try last_id.appendSlice(a, m.id);
             last_read_id.clearRetainingCapacity();
             try last_read_id.appendSlice(a, m.read_id orelse m.id);
+            last_client_id.clearRetainingCapacity();
+            try last_client_id.appendSlice(a, m.client_id);
             last_role = role;
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_client_id.items);
         var pending = tools.valueIterator();
         while (pending.next()) |tool| {
             if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {

@@ -205,6 +205,7 @@ pub const UserBlock = struct {
     text: []const u16,
     stamp_ms: i64 = 0,
     message_id: u64 = 0,
+    client_id: u64 = 0,
 };
 
 pub const Claim = struct { message_id: u64 = 0, stamp_ms: i64 = 0, text_hash: u64 = 0 };
@@ -214,6 +215,7 @@ pub const Pending = struct {
     text: []const u16 = &.{},
     anchor: Anchor,
     unanchored_delivery: bool = false,
+    client_id: u64 = 0,
 };
 
 const Normalized = struct {
@@ -836,11 +838,27 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
     return false;
 }
 
+fn claimedBlock(b: UserBlock, claimed: []const Claim, pending_hash: u64) bool {
+    for (claimed) |claim| {
+        if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
+        if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) return true;
+    }
+    return false;
+}
+
 fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const Claim, taken: []const ?usize, earlier: []const Pending) ?usize {
     if (p.prefix.len == 0) return null;
     var full: [16384]u16 = undefined;
     const norm = normalize(p.text, &full);
     const pending_hash = if (claimed.len > 0) textHash(p.text) else 0;
+    if (p.client_id != 0) {
+        for (blocks, 0..) |b, bi| {
+            if (b.client_id != p.client_id) continue;
+            if (claimedBlock(b, claimed, pending_hash)) continue;
+            if (isTaken(taken, bi, earlier, p)) continue;
+            return bi;
+        }
+    }
     for (blocks, 0..) |b, bi| {
         const after_anchor = b.message_id != 0 and p.anchor.after_id != 0 and b.stamp_ms == p.anchor.after_ms and (for (blocks[0..bi]) |before| {
             if (before.message_id == p.anchor.after_id) break true;
@@ -848,11 +866,7 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
         const sent_after = p.anchor.sent_ms > 0 and isNewBlock(p.anchor, b.stamp_ms, bi, window_full);
         if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !skillMatchesBlock(b.text, norm)))) continue;
-        const already_claimed = for (claimed) |claim| {
-            if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
-            if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
-        } else false;
-        if (already_claimed) continue;
+        if (claimedBlock(b, claimed, pending_hash)) continue;
         if (isTaken(taken, bi, earlier, p)) continue;
         if (messageMatches(b.text, p, norm)) return bi;
     }
@@ -865,6 +879,7 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
     for (0..n) |i| {
         out[i] = pickBlock(pending[i], blocks, window_full, claimed, out[0..i], pending[0..i]);
         const bi = out[i] orelse continue;
+        if (pending[i].client_id != 0 and blocks[bi].client_id == pending[i].client_id) continue;
         for (pending, 0..) |*other, j| {
             if (j <= i) continue;
             if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text)) {

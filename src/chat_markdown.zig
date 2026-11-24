@@ -24,6 +24,7 @@ pub const Block = struct {
     tool_id: u64 = 0,
     message_id: u64 = 0,
     row_key: u64 = 0,
+    client_id: u64 = 0,
     reaction_reference: u64 = 0,
     detail_start: usize = 0,
     detail_len: usize = 0,

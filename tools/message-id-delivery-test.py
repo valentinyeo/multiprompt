@@ -79,6 +79,26 @@ class MessageIdDeliveryTest(unittest.TestCase):
         accepted = [fact['id'] for fact in result['facts'] if fact.get('kind') == 'accepted' and not fact.get('ambiguous')]
         self.assertEqual(accepted, ['message_fixture_0001'])
 
+    def test_history_names_each_thumbs_up_send_without_changing_its_text(self):
+        import uuid
+        tokens = ['desktop-' + 'a' * 32, 'desktop-' + 'b' * 32]
+        text = '\U0001f44d to: Same first words for this example'
+        for token in tokens:
+            self.request('submit', message_id=token, text=text)
+        events = [dict(type='user', uuid=str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + token)),
+                       timestamp='2026-11-07T00:00:00Z',
+                       message=dict(role='user', content=text)) for token in reversed(tokens)]
+        ordinary = dict(type='user', uuid='plain-reply', timestamp='2026-11-07T00:00:01Z',
+                        message=dict(role='user', content='same prompt'))
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in [*events, ordinary]))
+        wire = reader.response(dict(id=1, sid='sid', tmux='fixture', source_offsets=True, offset=0, inode=0, cached_sid=''),
+                               resolved=('claude', 'sid', self.path, None))
+        rows = [json.loads(line) for line in wire.splitlines() if line.startswith('{')]
+        users = [row for row in rows if row.get('role') == 'user']
+        self.assertEqual([row.get('client_id') for row in users[:-1]], list(reversed(tokens)))
+        self.assertNotIn('client_id', users[-1])
+        self.assertEqual([row['text'] for row in users], [text, text, 'same prompt'])
+
     def test_queued_message_past_its_deadline_resolves(self):
         token = 'message_fixture_0001'
         self.request('submit', message_id=token, text='please review the offer')
