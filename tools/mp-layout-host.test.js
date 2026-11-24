@@ -6,6 +6,9 @@ const path = require('node:path');
 
 const HOSTS = path.join('.local/state/multiprompt/agent-host');
 const FIXTURE = path.join(__dirname, 'fixtures/SOFT-3139/servers.json');
+const INSTALLED_FIXTURE = path.join(__dirname, 'fixtures/MUBO-294/servers.json');
+
+const noSlot = (session, file) => `give --host: ${session} has no recorded host and this machine has no multiprompt_slot; set MULTIPROMPT_HOST or add "multiprompt_slot": 0, 1 or 2 to its entry in ${file}`;
 
 const layoutHosts = () => ([
   { slot: 0, name: 'Desk', hostname: 'desk.fake.internal', port: 22, user: 'red-cust' },
@@ -76,10 +79,11 @@ test('SOFT-3139 a --host that matches the record opens the tab once', async () =
 
 test('SOFT-3139 a tab with no record and no --host is refused instead of landing on host 0', async () => {
   const box = await fixture();
-  box.env.MULTIPROMPT_SERVERS_FILE = path.join(box.home, 'missing-servers.json');
+  const missing = path.join(box.home, 'missing-servers.json');
+  box.env.MULTIPROMPT_SERVERS_FILE = missing;
   const refused = await box.call(['open', 'live-new', '--workspace', 'Multiprompt', '--no-tmux']);
   assert.equal(refused.code, 1);
-  assert.equal(refused.err, 'mp-layout: give --host: live-new has no recorded host');
+  assert.equal(refused.err, 'mp-layout: ' + noSlot('live-new', missing));
   assert.equal(box.puts.length, 0);
 });
 
@@ -126,7 +130,7 @@ test('SOFT-3139 a shared server refuses when the os user is not allowed', async 
   box.env.MULTIPROMPT_SERVERS_FILE = serversFile;
   const refused = await box.call(['open', 'live-shared', '--workspace', 'Multiprompt', '--no-tmux']);
   assert.equal(refused.code, 1);
-  assert.equal(refused.err, 'mp-layout: give --host: live-shared has no matching server');
+  assert.equal(refused.err, 'mp-layout: ' + noSlot('live-shared', serversFile));
   assert.equal(box.puts.length, 0);
 });
 
@@ -140,7 +144,7 @@ test('SOFT-3139 a shared server refuses the other customer user on this machine'
   box.layout.hosts = [{ slot: 2, name: 'Rack beta blue', hostname: os.hostname(), port: 22, user: 'blue-cust' }];
   const refused = await box.call(['open', 'live-red-on-shared', '--workspace', 'Multiprompt', '--no-tmux']);
   assert.equal(refused.code, 1);
-  assert.equal(refused.err, 'mp-layout: give --host: live-red-on-shared is not on any listed server');
+  assert.equal(refused.err, 'mp-layout: ' + noSlot('live-red-on-shared', serversFile));
   assert.equal(box.puts.length, 0);
 });
 
@@ -148,7 +152,7 @@ test('SOFT-3139 an unknown machine refuses when the servers file does not match'
   const box = await fixture({ env: { USER: 'red-cust' } });
   const refused = await box.call(['open', 'live-nowhere', '--workspace', 'Multiprompt', '--no-tmux']);
   assert.equal(refused.code, 1);
-  assert.equal(refused.err, 'mp-layout: give --host: live-nowhere has no matching server');
+  assert.equal(refused.err, 'mp-layout: ' + noSlot('live-nowhere', FIXTURE));
   assert.equal(box.puts.length, 0);
 });
 
@@ -156,7 +160,7 @@ test('SOFT-3139 spawn refuses without --host and records the host it is given', 
   const box = await fixture();
   const refused = await box.call(['spawn', '--name', 'New chat', '--folder', 'work', '--workspace', 'Multiprompt']);
   assert.equal(refused.code, 1);
-  assert.deepEqual(JSON.parse(refused.err), { ok: false, error: 'give --host: a new chat must name the server it runs on' });
+  assert.deepEqual(JSON.parse(refused.err), { ok: false, error: noSlot('New chat', FIXTURE) });
   const { run } = await import('./mp-layout.mjs');
   const lines = [];
   const code = await run(['spawn', '--name', 'New chat', '--folder', 'work', '--workspace', 'Multiprompt', '--host', '1'], {
@@ -182,4 +186,76 @@ test('SOFT-3139 spawn refuses without --host and records the host it is given', 
   const reopened = await box.call(['open', spawned.session, '--workspace', 'Multiprompt', '--no-tmux']);
   assert.equal(reopened.code, 0, reopened.err);
   assert.deepEqual(box.layout.tabs.map(tab => [tab.tmux_session, tab.tmux_host]), [[spawned.session, 1]]);
+});
+
+test('MUBO-294 a tab that is already open reopens with the installed servers file and no slot', async () => {
+  const box = await fixture({ env: { MULTIPROMPT_SERVERS_FILE: INSTALLED_FIXTURE } });
+  box.layout.tabs = [{ kind: 'tmux', name: 'Live chat', tmux_session: 'live-open', tmux_host: 1, workspace: 'Multiprompt' }];
+  const reopened = await box.call(['open', 'live-open', '--workspace', 'Multiprompt', '--no-tmux']);
+  assert.equal(reopened.code, 0, reopened.err);
+  assert.deepEqual(box.layout.tabs.map(tab => [tab.tmux_session, tab.tmux_host]), [['live-open', 1]]);
+});
+
+test('MUBO-294 the servers file slot names the host for a new tab', async () => {
+  const box = await fixture();
+  const facts = JSON.parse(fs.readFileSync(INSTALLED_FIXTURE, 'utf8'));
+  facts.servers = facts.servers.map(server => server.id === 'site-two'
+    ? { ...server, hostname: os.hostname(), multiprompt_slot: 1 }
+    : server);
+  const serversFile = path.join(box.home, 'servers.json');
+  fs.writeFileSync(serversFile, JSON.stringify(facts));
+  box.env.MULTIPROMPT_SERVERS_FILE = serversFile;
+  const opened = await box.call(['open', 'live-from-slot', '--workspace', 'Multiprompt', '--no-tmux']);
+  assert.equal(opened.code, 0, opened.err);
+  assert.equal(box.layout.tabs[0].tmux_host, 1);
+});
+
+test('MUBO-294 MULTIPROMPT_HOST wins over a servers file slot', async () => {
+  const box = await fixture({ env: { MULTIPROMPT_HOST: '0' } });
+  const facts = JSON.parse(fs.readFileSync(INSTALLED_FIXTURE, 'utf8'));
+  facts.servers = facts.servers.map(server => server.id === 'site-two'
+    ? { ...server, hostname: os.hostname(), multiprompt_slot: 2 }
+    : server);
+  const serversFile = path.join(box.home, 'servers.json');
+  fs.writeFileSync(serversFile, JSON.stringify(facts));
+  box.env.MULTIPROMPT_SERVERS_FILE = serversFile;
+  const opened = await box.call(['open', 'live-from-env', '--workspace', 'Multiprompt', '--no-tmux']);
+  assert.equal(opened.code, 0, opened.err);
+  assert.equal(box.layout.tabs[0].tmux_host, 0);
+});
+
+test('MUBO-294 a new tab with the installed servers file names the file and the field to add', async () => {
+  const box = await fixture({ env: { MULTIPROMPT_SERVERS_FILE: INSTALLED_FIXTURE } });
+  const refused = await box.call(['spawn', '--name', 'New chat', '--folder', 'work', '--workspace', 'Multiprompt']);
+  assert.equal(refused.code, 1);
+  const error = JSON.parse(refused.err).error;
+  assert.match(error, /multiprompt_slot/);
+  assert.ok(error.includes(INSTALLED_FIXTURE), error);
+  assert.equal(box.puts.length, 0);
+});
+
+test('MUBO-294 spawn takes the servers file slot when no --host is given', async () => {
+  const box = await fixture();
+  const facts = JSON.parse(fs.readFileSync(INSTALLED_FIXTURE, 'utf8'));
+  facts.servers = facts.servers.map(server => server.id === 'site-two'
+    ? { ...server, hostname: os.hostname(), multiprompt_slot: 1 }
+    : server);
+  const serversFile = path.join(box.home, 'servers.json');
+  fs.writeFileSync(serversFile, JSON.stringify(facts));
+  const lines = [];
+  const { run } = await import('./mp-layout.mjs');
+  const code = await run(['spawn', '--name', 'New chat', '--folder', 'work', '--workspace', 'Multiprompt'], {
+    env: { MULTIPROMPT_KEY: 'k', HOME: box.home, MULTIPROMPT_SERVERS_FILE: serversFile },
+    resolveFolder: () => '/work',
+    fetch: async (url, request) => (request.method === 'GET'
+      ? { status: 200, headers: { get: () => 'groups' }, json: async () => ({ layout: { workspaces: [{ name: 'Multiprompt' }], tabs: [] }, revision: 1 }) }
+      : { status: 200, headers: { get: () => 'groups' }, json: async () => ({ revision: 2 }) }),
+    out: line => lines.push(line),
+    err: line => lines.push(line),
+    lock: async () => () => {},
+    tmux: args => ({ status: args[0] === 'has-session' ? 1 : 0 }),
+    runtime: args => ({ status: 0, stdout: JSON.stringify({ status: args[0] === 'host' && args[1] === 'enable' ? 'enabled' : 'started' }) })
+  });
+  assert.equal(code, 0, lines.join('\n'));
+  assert.equal(JSON.parse(lines[0]).host, 1);
 });

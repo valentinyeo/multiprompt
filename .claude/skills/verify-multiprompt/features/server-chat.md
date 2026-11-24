@@ -1,6 +1,6 @@
 # Runner-owned server chat
 
-Source files: tools/verify-server-chat/*, src/ssh*, src/tmux*, src/chat*, src/console.zig, src/session.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control.ps1
+Source files: tools/verify-server-chat/*, src/ssh*, src/tmux*, src/chat*, src/console.zig, src/session.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/control-library.ps1
 
 Verify on: push, pull_request
 
