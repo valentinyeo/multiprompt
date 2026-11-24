@@ -1,0 +1,1 @@
+Chats that wait for your permission now say so on the tab and in Ctrl+K
