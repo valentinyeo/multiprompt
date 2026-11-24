@@ -1080,13 +1080,33 @@ def pair_tool_rows(rows):
     return paired
 
 
-def settlement_event(event, agent):
+ORIGINAL_PROMPT = "Original prompt:"
+
+
+def blocked_prompt(event):
+    ending = event.get("promptSubmitEnding") if isinstance(event, dict) else None
+    if not isinstance(ending, dict) or ending.get("promptKept") is not False:
+        return None
+    content = event.get("content")
+    if not isinstance(content, str):
+        return None
+    index = content.rfind(ORIGINAL_PROMPT)
+    if index < 0:
+        return None
+    text = visible_prompt(content[index + len(ORIGINAL_PROMPT):].strip()).strip()
+    return text or None
+
+
+def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
     kind = event.get("type")
     operation = event.get("operation")
     content = event.get("content", "")
-    if kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
+    blocked = blocked_prompt(event) if blocked_settlement else None
+    if blocked is not None:
+        fact = dict(operation="blocked", content=blocked)
+    elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
         fact = dict(operation=operation, content=content if isinstance(content, str) else "")
     elif (kind == "system" and event.get("subtype") == "informational" and
           event.get("level") in ("warning", "error") and isinstance(content, str) and
@@ -2002,6 +2022,7 @@ def search_response(q, path, agent, sid):
 
 def tail_view(q, agent, fill):
     return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(q.get("blocked_settlement")),
             bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
             bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
 
@@ -2171,7 +2192,7 @@ def response(q, source=None, as_owner=False, resolved=None):
                     elif operation in ("enqueue", "remove") and stamp >= previous[0]:
                         queue_stamps[content] = (stamp, timestamp)
             if message is None and q.get("settlement"):
-                fact = settlement_event(event, agent)
+                fact = settlement_event(event, agent, bool(q.get("blocked_settlement")))
                 if fact:
                     messages.insert(0, fact)
             if q.get("source_offsets"):
@@ -5640,6 +5661,9 @@ def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
     if kind == "system":
+        if event.get("subtype") == "informational":
+            host_blocked_prompt(provider, sid, tmux, session, event)
+            return
         if event.get("subtype") == "init":
             session["ready"] = True
             capabilities = event.get("capabilities")
@@ -5711,6 +5735,18 @@ def host_claude_open(provider, sid, tmux, session):
 
 def host_cursor_open(provider, sid, tmux, session):
     pass
+
+
+def host_blocked_prompt(provider, sid, tmux, session, event):
+    prompt = blocked_prompt(event)
+    if prompt is None:
+        return
+    wanted = squashed(prompt)
+    entry = next((item for item in session.get("sends") or []
+                  if not item.get("accepted") and item.get("text") and squashed(item["text"]) == wanted), None)
+    if entry is None:
+        return
+    host_unsent(provider, sid, tmux, session, entry["id"], "blocked_by_hook")
 
 
 def host_claude_write(provider, sid, session, token, text):

@@ -71,6 +71,12 @@ SOFT-3145 publishes the bundled tools from one table, sets their mode before the
 
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
 
+MUBO-246 turns the blocked row into a send failure. The reader records a `blocked` settlement fact from the text after `Original prompt:`, the host stream marks the matching send not sent, and the connector binds the attempt to a `not_sent` fact so the shared store says failed. The prompt is matched the same way echoes are, and `promptKept` true or a different prompt changes nothing. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, because the recorded decisions never include a hook block; only the reader and connector hashes move.
+
+MUBO-246 gates the blocked settlement behind `blocked_settlement` in the history query, because a shipped phone build maps each settlement operation through a fixed enum and drops the whole history read for an operation it does not know. The tail cache keys on the flag, so a client that does not ask reads the same rows as before. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged; only the reader and reader-test hashes move.
+
+MUBO-246 adds failing-first cases for a prompt a UserPromptSubmit hook blocked before the chat read it. The reader and shared-store cases read `tools/fixtures/MUBO-246/blocked-by-hook.jsonl`, and a `chat_history.zig` case asks the delivery evidence for that message. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, so only the reader-test hash and the sync commit move.
+
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |

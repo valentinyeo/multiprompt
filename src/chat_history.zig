@@ -39,7 +39,7 @@ pub const History = struct {
 
     const cache_allocator = std.heap.page_allocator;
 
-    const SettleKind = enum { rejected, enqueue, pop_all, remove, other };
+    const SettleKind = enum { rejected, blocked, enqueue, pop_all, remove, other };
     const SettleFact = struct { stamp: i64, kind: SettleKind, start: usize, len: usize, hash: u64 };
 
     const SettleCache = struct {
@@ -86,7 +86,7 @@ pub const History = struct {
                 var normalized: [32768]u16 = undefined;
                 const norm = echo.normalize(wide, &normalized);
                 const op = fact.operation;
-                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
+                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "blocked")) .blocked else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
                 const start = self.pool.items.len;
                 try self.pool.appendSlice(cache_allocator, wide);
                 try self.facts.append(cache_allocator, .{ .stamp = echo.stampMs(m.timestamp), .kind = kind, .start = start, .len = wide.len, .hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm)) });
@@ -408,6 +408,10 @@ pub const History = struct {
                 const fresh = echo.isNewBlock(pending.anchor, stamp, 0, true);
                 if (fact.kind == .rejected) {
                     if (fresh and echo.refusesCommand(content, pending.text)) result.refused = true;
+                    continue;
+                }
+                if (fact.kind == .blocked) {
+                    if (fresh and echo.sameText(content, pending.text)) result.refused = true;
                     continue;
                 }
                 const matches = fresh and echo.sameText(content, pending.text);
@@ -1417,6 +1421,21 @@ test "settlement: remove dequeue and popAll track the matching queue entry, not 
     later.anchor.after_ms = echo.stampMs("2026-10-13T11:06:59.442Z");
     try std.testing.expect(!(try h.deliveryEvidence(a, later)).refused);
     try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, later)).removed_ms);
+}
+
+test "MUBO-246 a prompt a hook blocked is a send failure for that message only" {
+    const a = std.testing.allocator;
+    const prompt = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on this queue");
+    var h = History{};
+    defer h.deinit(a);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-11-22T23:47:01.315Z\",\"settlement\":{\"operation\":\"blocked\",\"content\":\"/pstack:poteto-mode full autopilot on this queue\"}}\n");
+    const pending = echo.Pending{ .prefix = prompt, .text = prompt, .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect((try h.deliveryEvidence(a, pending)).refused);
+    const elsewhere = echo.Pending{ .prefix = prompt, .text = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on another queue"), .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect(!(try h.deliveryEvidence(a, elsewhere)).refused);
+    var older = pending;
+    older.anchor.after_ms = echo.stampMs("2026-11-22T23:47:01.315Z");
+    try std.testing.expect(!(try h.deliveryEvidence(a, older)).refused);
 }
 
 test "ISSUE-349 incomplete queue cannot blame A for C before A is delivered" {
