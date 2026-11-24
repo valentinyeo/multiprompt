@@ -1737,7 +1737,7 @@ def resolve_response_path(q, source=None, as_owner=False):
         history = host_paths(agent, sid)["history"]
         if history.is_file():
             return agent, sid, history, None
-    if agent == "hax":
+    if agent == "hax" and hosted:
         return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if agent == "pi":
         try:
