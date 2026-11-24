@@ -469,6 +469,14 @@ function cancelledRunNeedsRetry(run, pr, checks, runs) {
     (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
 }
 
+function supersededCancellation(run, pr, runs) {
+  if (run.head_sha && run.head_sha !== pr.head.sha) return true;
+  const title = run.display_title || `verify PR ${pr.number}`;
+  return runs.some(candidate => Number(candidate.id) > Number(run.id) && candidate.display_title === title &&
+    (candidate.head_sha === pr.head.sha || candidate.event === 'workflow_dispatch') &&
+    !['completed', 'cancelled'].includes(candidate.status));
+}
+
 function githubState(env, { number, headSha }) {
   const [owner, name] = env.REPO.split('/');
   const suites = `checkSuites(last:100) { nodes { status conclusion workflowRun { databaseId workflow { name } }
@@ -512,6 +520,7 @@ function recover(env) {
       gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
     }
+    if (supersededCancellation(run, pr, runs)) return;
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
@@ -1053,7 +1062,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, userFacingUnmapped };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, userFacingUnmapped };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
