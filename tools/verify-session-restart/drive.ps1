@@ -240,7 +240,9 @@ try {
     Assert-ChatTab 'before-restart'
     Shot 'before-restart'
     $result.cases += @{ name = 'before-restart'; passed = $true; detail = 'Hosted chat with reply in named workspace and group' }
-    Press @(0x11, 0x31) 'Ctrl+1: leave the chat tab in the background'
+    Press @(0x11, 0x4B) 'Ctrl+K: leave the chat tab in the background'
+    Type-Text 'Group anchor'
+    Press @(0x0D) 'Enter: focus the group anchor tab'
     [void](Wait-For 'chat tab in the background' {
         $state = Read-SavedSession
         $tab = Find-ChatTab $state
