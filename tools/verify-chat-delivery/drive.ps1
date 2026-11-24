@@ -563,7 +563,9 @@ foreach ($plan in $plans) {
     $isModel = $plan.name -eq 'model-settings'
     $isRecall = $plan.name -eq 'recall-handed'
     $socketTemp = $null
-    $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $isPin = $plan.name -eq 'pin-skill'
+    $pinSid = 'a1b2c3d4-0923-4000-8000-000000000923'
+    $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax -or $isPin
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -633,6 +635,7 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isPin -and $env:CHAT_SKILLS_PROOF -eq '1') { Shell-Run @('resume', $pinSid) }
         if ($isRecovery) { Shell-Run @('recovery-init') } elseif ($isResync) { Shell-Run @('resync-init') }
         if ($isRecovery) {
             & $env:MP_VERIFY_PYTHON "$PSScriptRoot/recovery-provenance.py" "$caseDir/canonical-corpus-sha256.txt" "$caseDir/provenance.json"
@@ -645,7 +648,7 @@ foreach ($plan in $plans) {
         if ($isSwitch) { Shell-Run @('switch-history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
-        if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = $pinSid }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
