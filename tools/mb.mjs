@@ -16,6 +16,8 @@ commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
+  archive <name> [--host N] [--json]
+  unarchive <name> [--host N] [--json]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -307,6 +309,81 @@ async function close(ctx, flags) {
   const owned = Object.values(owners.sessions).find(item => item.owner === 'mb' && (item.session.toLowerCase() === clean(session).toLowerCase() || clean(item.name || '').toLowerCase() === clean(session).toLowerCase()) && (host === null || item.host === host));
   if (owned) await releaseOwned(ctx, owners, owned);
   ctx.out(`${result.changed ? 'closed' : 'already closed'} ${clean(name)}${result.changed ? ` (revision ${result.revision})` : ''}`);
+}
+
+function zsbBinary(env) {
+  const home = env.HOME || '';
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mp_zsb.sh');
+  for (const candidate of [env.MULTIPROMPT_ZSB, join(home, '.multiprompt-runtime/mp-zsb'), join(home, '.local/bin/zsb'), checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  throw new Failure('zsb is not installed');
+}
+
+function zsbCall(ctx, args) {
+  const done = spawnSync(zsbBinary(ctx.env), args, { encoding: 'utf8', env: ctx.env, timeout: 60000 });
+  const lines = String(done.stdout || '').trim().split('\n');
+  let reply = null;
+  try { reply = JSON.parse(lines[lines.length - 1] || ''); } catch { reply = null; }
+  if (!reply || typeof reply.ok !== 'boolean') {
+    const message = String(done.stderr || '').trim().split('\n').pop();
+    throw new Failure(message || 'zsb did not answer');
+  }
+  if (!reply.ok) throw new Failure(String(reply.message || reply.error || 'zsb refused the command'));
+  return reply;
+}
+
+function listingTabs(listing) {
+  const tabs = [];
+  for (const workspace of listing.workspaces || []) {
+    tabs.push(...(workspace.tabs || []));
+    for (const group of workspace.groups || []) tabs.push(...(group.tabs || []));
+  }
+  return tabs;
+}
+
+function named(items, wanted, hostName) {
+  return items.filter(item => (hostName === null || item.host === hostName) &&
+    (String(item.title || '').toLowerCase() === wanted || String(item.tmux || '').toLowerCase() === wanted));
+}
+
+function oneNamed(items, wanted, hostName, name, label) {
+  const matches = named(items, wanted, hostName);
+  if (matches.length > 1) throw new Failure(`more than one ${label}tab matches; pass --host and the terminal session name`);
+  if (!matches.length) throw new Failure(`no ${label}tab named '${name}'`);
+  return matches[0];
+}
+
+async function archiveSession(ctx, flags, archived) {
+  const verb = archived ? 'archive' : 'unarchive';
+  const word = archived ? 'archived' : 'unarchived';
+  if (flags._.length !== 1) throw new Failure(`${verb} needs one tab name`);
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const listing = zsbCall(ctx, ['workspace-list']);
+  const hostName = host === null ? null : (listing.hosts || [])[host];
+  if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
+  const name = clean(flags._[0]);
+  const wanted = name.toLowerCase();
+  const own = archived ? listingTabs(listing) : (listing.archived_sessions || []);
+  const other = archived ? (listing.archived_sessions || []) : listingTabs(listing);
+  if (!named(own, wanted, hostName).length) {
+    const done = other.length ? oneNamed(other, wanted, hostName, name, archived ? 'archived ' : '') : null;
+    if (!done) throw new Failure(`no tab named '${name}'`);
+    if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: false, title: done.title }));
+    else ctx.out(`already ${word} ${done.title}`);
+    return;
+  }
+  const target = oneNamed(own, wanted, hostName, name, archived ? '' : 'archived ');
+  if (archived && !target.tmux) throw new Failure(`tab '${target.title}' has no terminal session to archive`);
+  if (archived) {
+    zsbCall(ctx, ['session-archive', '--tab', String(target.id)]);
+    if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: true, tab: target.id, title: target.title }));
+    else ctx.out(`${word} ${target.title}`);
+    return;
+  }
+  zsbCall(ctx, ['session-unarchive', '--tmux', String(target.tmux), '--host', String(target.host)]);
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: true, tmux: target.tmux, title: target.title }));
+  else ctx.out(`${word} ${target.title}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -844,6 +921,11 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (command === 'archive' || command === 'unarchive') {
+      const flags = parse(rest);
+      await archiveSession({ env, out, err }, flags, command === 'archive');
+      return 0;
+    }
     if (command === 'health') {
       const flags = parse(rest);
       const home = env.HOME;

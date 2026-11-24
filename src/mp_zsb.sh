@@ -81,6 +81,12 @@ print_help() {
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
         echo '  The active tab is refused with active_tab; a snoozed workspace is refused with workspace_snoozed.'
         ;;
+      session-archive) echo 'usage: zsb session-archive --tab <id>'
+        echo '  Archives a remote tab: remembers it, ends its tmux session and removes the tab. An unknown tab returns unknown_tab.'
+        ;;
+      session-unarchive) echo 'usage: zsb session-unarchive --tmux <session> [--host <host name>]'
+        echo '  Reopens one archived session as a tab and drops it from the archive. An unknown session returns unknown_archived_session.'
+        ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
       reset) echo 'usage: zsb reset (reconnect bridge and clear stuck CDP sessions; keeps the pane open)' ;;
@@ -163,6 +169,9 @@ Commands and flags:
                                     Set a tab's manual title
   session-move --tab ID [--workspace NAME] [--group NAME | --ungrouped]
                                     Move a background tab to another workspace or group
+  session-archive --tab ID          Archive one remote tab and end its tmux session
+  session-unarchive --tmux SESSION [--host HOST]
+                                    Reopen one archived session as a tab
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -228,7 +237,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -586,12 +595,13 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-elif args[0] in {"session-close", "session-rebind", "session-rename", "session-move"}:
+elif args[0] in {"session-close", "session-rebind", "session-rename", "session-move", "session-archive"}:
     edit_specs = {
         "session-close": ({"--tab"}, {"--tab"}),
         "session-rename": ({"--tab", "--name"}, {"--tab", "--name"}),
         "session-rebind": ({"--tab", "--host", "--tmux"}, {"--tab", "--tmux"}),
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
+        "session-archive": ({"--tab"}, {"--tab"}),
     }
     allowed, required = edit_specs[args[0]]
     values = {}
@@ -639,6 +649,31 @@ elif args[0] in {"session-close", "session-rebind", "session-rename", "session-m
         fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", f"{args[0]} argument too long")
+
+elif args[0] == "session-unarchive":
+    allowed, required = {"--tmux", "--host"}, {"--tmux"}
+    values = {}
+    rest = args[1:]
+    i = 0
+    while i < len(rest):
+        if i + 1 >= len(rest):
+            fail("bad_args", f"session-unarchive flag {rest[i]} needs a value")
+        flag, value = rest[i], rest[i + 1]
+        if flag not in allowed or flag in values or not value:
+            fail("bad_args", "session-unarchive takes only its named flags once, with nonempty values")
+        if any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+            if flag == "--tmux":
+                fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+            fail("bad_args", "session-unarchive values must not contain control characters")
+        values[flag] = value
+        i += 2
+    if not required <= values.keys():
+        fail("bad_args", "session-unarchive requires --tmux")
+    tmux = values["--tmux"]
+    if len(tmux) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in tmux):
+        fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+    if any(len(value.encode()) > 256 for value in values.values()):
+        fail("bad_args", "session-unarchive argument too long")
 
 output_path = None
 if script_mode:
@@ -758,7 +793,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:
