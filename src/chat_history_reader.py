@@ -2837,6 +2837,8 @@ HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', '
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
 HOST_NIGHTLY_HOUR = 4
+HOST_ROTATE_RECHECK = 60
+HOST_START_RETRY_STEPS = (0, 30, 90, 180, 240)
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
@@ -3048,6 +3050,16 @@ def host_command(provider, sid):
         if resolved is None:
             return None
         parts = [resolved]
+    extra = config.get("args")
+    return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+
+
+def host_named_command(provider, sid):
+    config = host_config(provider, sid) or {}
+    command = config.get("command")
+    parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
+    if parts and os.path.isabs(parts[0]) and Path(parts[0]).is_relative_to(HOME):
+        parts = [host_binary_name(provider)] + parts[1:]
     extra = config.get("args")
     return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
 
@@ -3546,6 +3558,7 @@ def host_stop(provider, sid, force=False):
             time.sleep(0.125)
     host_clear_stale(provider, sid)
     host_clear_pane(provider, sid)
+    host_owner_session_release(provider, sid)
     return dict(status="stopped")
 
 
@@ -3752,6 +3765,40 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_owner_browser_endpoint():
+    return '/tmp/mp-browser-' + str(os.getuid()) + '/control.sock'
+
+
+def host_owner_sessions_dir():
+    return HOME / '.local/state/multiprompt/owner-sessions'
+
+
+def host_owner_session_register(provider, sid, user):
+    name = host_chat_name(provider, sid)
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except (KeyError, AttributeError):
+        return None
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name) or type(uid) is not int or uid <= 0:
+        return None
+    path = host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')
+    try:
+        host_write(path, dict(session=name, uid=uid, at=time.time()))
+    except OSError:
+        return None
+    return path
+
+
+def host_owner_session_release(provider, sid):
+    name = host_chat_name(provider, sid)
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+        return
+    try:
+        (host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')).unlink()
+    except OSError:
+        pass
+
+
 def host_agent_env(provider, sid):
     config = host_config(provider, sid) or {}
     env = dict(os.environ)
@@ -3890,18 +3937,40 @@ def host_settings_event(provider, sid, tmux, session):
     host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied, mode=host_permission_mode(provider, sid, session.get("state"))))
 
 
+def host_owner_launch(provider, sid, owner):
+    user, home = owner
+    env = {"PATH": "/usr/bin:/bin"}
+    prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
+              "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider,
+              "MULTIBOT_APP_VERSION=" + globals().get('MULTIBOT_APP_VERSION', '')]
+    tmux = host_chat_name(provider, sid)
+    if tmux:
+        prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
+    prefix.append("ZSB_SOCKET=" + host_owner_browser_endpoint())
+    shell = ["/bin/sh", "-l", "-c"]
+    folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
+    setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+    return prefix, shell, setup, env
+
+
+def host_agent_ready(provider, sid):
+    owner = conversation_owner(host_cwd(provider, sid), include_home=True)
+    if owner is None or owner[1] == HOME:
+        return host_command(provider, sid) is not None
+    prefix, shell, setup, env = host_owner_launch(provider, sid, owner)
+    try:
+        probe = subprocess.run(prefix + shell + [setup + 'command -v "$1" >/dev/null', "agent-ready", host_named_command(provider, sid)[0]],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
 def host_agent_start(provider, sid, mode=None):
     cwd = host_cwd(provider, sid)
     owner = conversation_owner(cwd, include_home=True)
     cross_owner = owner is not None and owner[1] != HOME
-    if cross_owner:
-        config = host_config(provider, sid) or {}
-        command = config.get("command")
-        base = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
-        extra = config.get("args")
-        base = base + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
-    else:
-        base = host_command(provider, sid)
+    base = host_named_command(provider, sid) if cross_owner else host_command(provider, sid)
     if base is None:
         return None
     if provider == "claude":
@@ -3927,17 +3996,8 @@ def host_agent_start(provider, sid, mode=None):
     else:
         command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
     if cross_owner:
-        user, home = owner
-        env = {"PATH": "/usr/bin:/bin"}
-        prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
-                  "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider,
-                  "MULTIBOT_APP_VERSION=" + globals().get('MULTIBOT_APP_VERSION', '')]
-        tmux = host_chat_name(provider, sid)
-        if tmux:
-            prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
-        shell = ["/bin/sh", "-l", "-c"]
-        folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
-        setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+        config = host_config(provider, sid) or {}
+        prefix, shell, setup, env = host_owner_launch(provider, sid, owner)
         if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku", "fable"):
             setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; '
         source = host_reader_source()
@@ -3962,6 +4022,7 @@ def host_agent_start(provider, sid, mode=None):
             else:
                 check_command = "--resume" if probe.returncode == 74 else "--session-id"
             command[-2:] = [check_command, native]
+        host_owner_session_register(provider, sid, owner[0])
         command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
         try:
             return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -6530,6 +6591,57 @@ def host_accept_client(provider, sid, tmux, session, server):
             pass
 
 
+def host_start_agent(provider, sid, mode=None):
+    try:
+        agent = host_agent_start(provider, sid, mode)
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
+        return None, ("cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else
+                      "agent_not_found" if isinstance(error, FileNotFoundError) else "agent_unavailable")
+    except RuntimeError as error:
+        return None, str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
+    return agent, None if agent is not None else "agent_not_found"
+
+
+def host_start_wait(server, seconds):
+    import select
+    deadline = time.time() + seconds
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        try:
+            ready = select.select([server], [], [], remaining)[0]
+        except (OSError, ValueError):
+            return
+        if not ready:
+            return
+        try:
+            server.accept()[0].close()
+        except OSError:
+            return
+
+
+def host_agent_retryable(provider, sid):
+    return host_named_command(provider, sid)[0] == host_binary_name(provider)
+
+
+def host_start_agent_retry(provider, sid, server, mode=None):
+    reason = None
+    steps = HOST_START_RETRY_STEPS if host_agent_retryable(provider, sid) else (0,)
+    for attempt, wait in enumerate(steps or (0,)):
+        if wait and attempt:
+            host_log(provider, sid, "start_retry_wait", dict(attempt=attempt, wait=wait, reason=reason))
+            host_start_wait(server, wait)
+        agent, reason = host_start_agent(provider, sid, mode)
+        if agent is not None:
+            if attempt:
+                host_log(provider, sid, "start_retry_ok", dict(attempt=attempt))
+            return agent, None
+        if reason != "agent_not_found":
+            return None, reason
+    return None, reason
+
+
 def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0):
     state["startup_failure"] = dict(reason=reason, config=host_config(provider, sid), retry_generation=retry_generation)
     host_state_write(provider, sid, state)
@@ -6615,7 +6727,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 continue
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
-            if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
+            if idle and not session["sends"] and (host_restart_requested(provider, sid) or
+                                                  (host_nightly_due(provider, sid) and host_rotate_ready(provider, sid, session))):
                 if host_rotate(provider, sid, session, agent):
                     return
             for key, _ in selector.select(host_flush_timeout(session)):
@@ -6681,14 +6794,7 @@ def host_main(provider, sid):
         mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
         if mode in HOST_SAVED_PERMISSION_MODES:
             host_save_permission_mode(provider, sid, mode)
-        try:
-            agent = host_agent_start(provider, sid, mode)
-            reason = "agent_not_found" if agent is None else None
-        except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
-            reason = "cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else (
-                "agent_not_found" if isinstance(error, FileNotFoundError) else "agent_unavailable")
-        except RuntimeError as error:
-            reason = str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
+        agent, reason = host_start_agent_retry(provider, sid, server, mode)
         if reason:
             host_startup_failure(provider, sid, tmux, state, reason, retry_generation)
             return 5 if reason == "agent_not_found" else 4
@@ -6801,6 +6907,19 @@ def host_published_runtime():
     except OSError:
         pass
     return host_runtime_file()
+
+
+def host_rotate_ready(provider, sid, session, now=None):
+    now = time.time() if now is None else now
+    checked = session.get("rotate_checked")
+    if type(checked) in (int, float) and now - checked < HOST_ROTATE_RECHECK:
+        return session.get("rotate_ready") is True
+    ready = host_agent_ready(provider, sid)
+    session["rotate_checked"] = now
+    session["rotate_ready"] = ready
+    if not ready:
+        host_log(provider, sid, "rotate_deferred", dict(reason="agent_not_found"))
+    return ready
 
 
 def host_rotate(provider, sid, session, agent):
@@ -9034,6 +9153,8 @@ if __name__ == '__main__':
                     ('mp-sessions', 'mp-sessions', 'MP_SESSIONS_SOURCE'),
                     ('mp-fresh', 'mp-fresh', 'MP_FRESH_SOURCE'),
                     ('mp-zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('multiprompt-browser', 'mp-zsb', 'ZSB_SOURCE'),
                     ('mp-layout', 'mp-layout.mjs', 'MP_LAYOUT_SOURCE'),
                 )
 

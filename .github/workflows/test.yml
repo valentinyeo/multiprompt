@@ -96,6 +96,10 @@ jobs:
         run: node --test tools/check-ffmpeg-install.test.js
       - name: Require a cached, retried FFmpeg install
         run: node tools/check-ffmpeg-install.mjs
+      - name: Test the servers slot guard
+        run: node --test tools/check-servers-slots.test.js
+      - name: Require a slot per server in every servers file
+        run: node tools/check-servers-slots.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
       - name: Test the source file-size ratchet
@@ -110,6 +114,8 @@ jobs:
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup
         run: python3 tools/chat-shared-runtime.test.py -v
+      - name: Prove a second user's hosted chat reaches its own browser pane
+        run: python3 tools/owner-chat-browser.test.py -v
       - name: Track each message by its id
         run: python3 -W error::DeprecationWarning tools/message-id-delivery-test.py -v
       - name: Restart a stopped chat AI from the reader
@@ -602,7 +608,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})

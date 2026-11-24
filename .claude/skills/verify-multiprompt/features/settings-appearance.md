@@ -46,6 +46,8 @@ Journey: appearance, settings-panel, command-palette, pane-layout, window-contro
 | `SEARCH_THEME_DEV_BLUE_OFFSET` | Ctrl+K, search for **dev blue**. Follow `look` above. |
 | `SEARCH_THEME_EDGE_GRAY_OFFSET` | Ctrl+K, search for **edge grey**. Follow `look` above. |
 | `SEARCH_THEME_LIGHT_OFFSET` | Ctrl+K, search for **light**. Follow `look` above. |
+| `SEARCH_THEME_DEV_EDIT_OFFSET` | Ctrl+K, search for **edit dev theme json** to open the developer theme file. Follow `look` above. |
+| `SEARCH_THEME_DEV_RELOAD_OFFSET` | Ctrl+K, search for **reload dev theme** after editing that file. Follow `look` above. |
 | `SEARCH_THEME_MENU_OFFSET` | Ctrl+K, search for **themes**. Follow `look` above. |
 | `SEARCH_THEME_MID_OFFSET` | Ctrl+K, search for **mid**. Follow `look` above. |
 | `SEARCH_THEME_MULTIPROMPT_OFFSET` | Ctrl+K, search for **multi bot**. Follow `look` above. |
