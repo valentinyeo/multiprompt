@@ -5,7 +5,7 @@ const { discoverFeatures } = require('./verify-features.cjs');
 const SHARED_CORE_MAPS = 5;
 const MAX_JOURNEYS = 8;
 const SMOKE_JOURNEY = 'appearance';
-const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml']);
+const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml', 'emergency-lane.yml']);
 const CHAT_SOURCE_FILES = new Set([
   'src/chat_echo.zig',
   'src/chat_history.zig',
