@@ -152,6 +152,10 @@ def sudo(*args, **kwargs):
     return subprocess.run(['sudo', '-n', *args], capture_output=True, text=True, **kwargs)
 
 
+def socket_ready(path):
+    return sudo('test', '-S', str(path)).returncode == 0
+
+
 def account(name):
     try:
         return pwd.getpwnam(name)
@@ -203,9 +207,9 @@ class OwnerChatBrowserTest(unittest.TestCase):
             cls.run_as(BRIDGE, 'fake_app.py', FAKE_HOST=HOST, FAKE_SESSION=SESSION, FAKE_LOG=str(cls.log))
             cls.run_as(BRIDGE, 'user_browser.py', MP_BROWSER_HOST=HOST)
             deadline = time.time() + 30
-            while time.time() < deadline and not (cls.app_socket.exists() and cls.broker_socket.exists()):
+            while time.time() < deadline and not (socket_ready(cls.app_socket) and socket_ready(cls.broker_socket)):
                 time.sleep(0.1)
-            if not cls.app_socket.exists() or not cls.broker_socket.exists():
+            if not (socket_ready(cls.app_socket) and socket_ready(cls.broker_socket)):
                 raise AssertionError('the owner browser broker or its app socket never came up')
             cls.driver = subprocess.run(['sudo', '-n', '-H', '-u', BRIDGE, 'python3', str(cls.temp / 'driver.py'),
                                          str(ROOT / 'src/chat_history_reader.py'), cls.bridge.pw_dir,
@@ -254,7 +258,7 @@ class OwnerChatBrowserTest(unittest.TestCase):
             process.stdout.close()
         temp = getattr(cls, 'temp', None)
         if temp is not None:
-            shutil.rmtree(temp, ignore_errors=True)
+            sudo('rm', '-rf', str(temp))
         bridge = account(BRIDGE)
         if bridge is not None:
             sudo('rm', '-rf', '/tmp/mp-browser-' + str(bridge.pw_uid), '/tmp/mp-notify-' + str(bridge.pw_uid))
