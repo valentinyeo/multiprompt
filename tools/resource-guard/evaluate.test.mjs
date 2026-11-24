@@ -15,7 +15,8 @@ test('resource workflows pass versions safely to PowerShell', () => {
   const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
   assert.match(pr, /\$tag = node tools\/release-version\.mjs\s+if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}\s+"CANDIDATE_VERSION=\$\(\$tag\.Substring\(1\)\)" \| Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
   assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=\$env:CANDIDATE_VERSION"/);
-  assert.match(release, /node tools\/resource-warning-ticket\.mjs/);
+  assert.match(pr, /node tools\/resource-warning-ticket\.mjs/);
+  assert.doesNotMatch(release, /^\s+resource-observation:/m);
 });
 test('comparison fails closed and blocks regressions', () => {
   assert.deepEqual(evaluateResources(limits, normal, normal), []);

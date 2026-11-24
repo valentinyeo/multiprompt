@@ -1,0 +1,1 @@
+Hosted chats stay dead after a failed nightly start
