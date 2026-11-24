@@ -71,6 +71,10 @@ SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` ass
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-454 gives the mention wire note a new lead so the typing chat reads the line as its own message, and lets the picker list the chat being typed in. `message_store_transaction`, `message_poll`, `message_poll_locked`, `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged. `currentLive` no longer takes an exclude argument, so `deliverMentions`, `sendTextToShellVerifiedAt` and `chatFlowText` change only that call; delivery to a mentioned chat is unchanged. The echo, send, render and reader hashes move, and the sync commit names the base it was reviewed on.
+
+MUBO-454 merges master `63388c2bf`, which splits `src/sidebar.zig` and drops the leading-position gate from `chat_skill.zig`'s pill. The typing chat keeps the line as its own message while a mentioned chat receives exactly one unchanged copy, so `message_store_transaction`, `message_poll`, `message_poll_locked`, `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged. Only `src/chat_render.zig`'s whole-file hash moves (`chatFlowText` and `chatMeasureProjectedBlockRect` call the argument-less `currentLive`), and the sync commit names that master tip.
+
 MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
@@ -103,6 +107,8 @@ Whole-file drift stops before checking, even for an unrelated function change. T
 MUBO-280 reviewed `328a76079` after the relayout bottom-follow fix. The only render-file change since the recorded hash is the `chatSetTopPad` call from `openScroll` to `openingScroll`. `chatRelayout`, `chatEchoNotSent`, the pending-bubble count, native decisions, replay and mutations are unchanged. Only the render-file hash and sync commit move; the delivery properties and bounds do not change.
 
 MUBO-280 merges master `845f8044` after the verified bottom-follow source. Its render change removes the leading-word restriction from skill-pill painting in `chatFlowText`. The two delivery-covered render functions and every decision, bound, probe and mutation remain unchanged. The merged render hash combines that skill-paint change with the reviewed bottom-follow change; the sync commit names the merged master tip.
+
+MUBO-280 merges master `0bba0b4fd`, retaining MUBO-454's mention changes and their reviewed coverage. Relative to that master, the render diff contains only the previously reviewed `chatSetTopPad` bottom-follow call and the unchanged-state logging in `chatScrollStateChanged`. `chatRelayout`, `chatEchoNotSent`, the pending-bubble count, native decisions, bounds, replay and mutations are unchanged. The render hash combines both changes; the remaining covered files match master.
 
 ## Prove the checker can fail
 

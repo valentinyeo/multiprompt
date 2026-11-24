@@ -486,7 +486,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var x: i32 = 0;
     var y: i32 = 0;
     var pos: usize = 0;
-    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive(null) else &.{};
+    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive() else &.{};
     var search: usize = 0;
     var link: ?link_detect.Range = null;
     var syntax = chat_code.Iterator{ .text = text };
@@ -1180,7 +1180,7 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
             _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             var natural_w = calc.right;
             if (std.mem.indexOfScalar(u16, body, '@') != null) {
-                const live = @import("chat_mention.zig").currentLive(null);
+                const live = @import("chat_mention.zig").currentLive();
                 var scan: usize = 0;
                 while (scan < body.len) {
                     const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse {
