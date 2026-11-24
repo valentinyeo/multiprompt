@@ -1,1 +1,0 @@
-Recorded Windows journeys now exercise tab commands through the mb command line with video proof.
