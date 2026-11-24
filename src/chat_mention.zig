@@ -60,6 +60,10 @@ fn markerAt(text: []const u16, pos: usize) ?Span {
     return .{ .start = pos, .visible_end = i, .end = j + 1 };
 }
 
+fn mentionTailDelim(c: u16) bool {
+    return space(c) or c == '{' or c == ',' or c == ':' or c == ';' or c == '.' or c == '!' or c == '?' or c == ')' or c == ']';
+}
+
 fn namedAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
     if (pos >= text.len or text[pos] != '@' or !boundary(text, pos)) return null;
     var best: ?Span = null;
@@ -70,7 +74,7 @@ fn namedAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
         if (n == 0 or n <= best_len or pos + 1 + n > text.len) continue;
         if (!std.mem.eql(u16, text[pos + 1 ..][0..n], wide[0..n])) continue;
         const next = pos + 1 + n;
-        if (next < text.len and !space(text[next]) and text[next] != '{') continue;
+        if (next < text.len and !mentionTailDelim(text[next])) continue;
         best_len = n;
         best = .{ .start = pos, .visible_end = next, .end = next };
     }
@@ -410,30 +414,241 @@ fn liveChat(live: []const Chat, session: []const u8) ?Chat {
     return null;
 }
 
-pub fn mentionTargets(text: []const u16, source_session: []const u8, live: []const Chat, out: []Chat) []Chat {
+pub const DeliveryKind = enum { address, fyi };
+pub const Delivery = struct { chat: Chat, kind: DeliveryKind };
+
+fn hSpace(c: u16) bool {
+    return c == ' ' or c == '\t';
+}
+
+fn asciiLower(c: u16) u16 {
+    return if (c >= 'A' and c <= 'Z') c + 32 else c;
+}
+
+fn asciiWordChar(c: u16) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '\'';
+}
+
+fn eqlAsciiIgnoreCase(wide: []const u16, ascii: []const u8) bool {
+    if (wide.len != ascii.len) return false;
+    for (wide, ascii) |c, a| {
+        if (asciiLower(c) != a) return false;
+    }
+    return true;
+}
+
+fn skipHSpace(text: []const u16, start: usize) usize {
+    var i = start;
+    while (i < text.len and hSpace(text[i])) : (i += 1) {}
+    return i;
+}
+
+fn trimHSpaceRight(text: []const u16) []const u16 {
+    var end = text.len;
+    while (end > 0 and hSpace(text[end - 1])) : (end -= 1) {}
+    return text[0..end];
+}
+
+fn trimHSpace(text: []const u16) []const u16 {
+    const start = skipHSpace(text, 0);
+    return trimHSpaceRight(text[start..]);
+}
+
+fn listSeparator(gap: []const u16) bool {
+    var t = trimHSpace(gap);
+    if (t.len == 0) return true;
+    if (t[0] == ',') {
+        t = trimHSpace(t[1..]);
+        if (t.len == 0) return true;
+    }
+    return (t.len == 1 and t[0] == '&') or eqlAsciiIgnoreCase(t, "and");
+}
+
+fn fyiPunct(c: u16) bool {
+    return c == ':' or c == ',' or c == '-' or c == 0x2013 or c == 0x2014;
+}
+
+fn matchFyiLead(line: []const u16, start: usize) ?usize {
+    var p = skipHSpace(line, start);
+    if (p < line.len and (line[p] == '(' or line[p] == '[')) p = skipHSpace(line, p + 1);
+    const kw_len: usize = if (p + 3 <= line.len and eqlAsciiIgnoreCase(line[p .. p + 3], "fyi"))
+        3
+    else if (p + 2 <= line.len and eqlAsciiIgnoreCase(line[p .. p + 2], "cc"))
+        2
+    else
+        return null;
+    p += kw_len;
+    if (p >= line.len) return null;
+    if (hSpace(line[p])) {
+        p = skipHSpace(line, p);
+        if (p < line.len and fyiPunct(line[p])) p = skipHSpace(line, p + 1);
+        return p;
+    }
+    if (fyiPunct(line[p])) return skipHSpace(line, p + 1);
+    return null;
+}
+
+fn inMentionChain(line: []const u16, start: usize, target_pos: usize) bool {
+    var p = start;
+    while (p < line.len) {
+        const span = markerAt(line, p) orelse return false;
+        if (span.start == target_pos) return true;
+        if (span.start > target_pos) return false;
+        var next_at = span.end;
+        while (next_at < line.len and line[next_at] != '@') : (next_at += 1) {}
+        if (next_at >= line.len) return false;
+        if (!listSeparator(line[span.end..next_at])) return false;
+        p = next_at;
+    }
+    return false;
+}
+
+fn fyiTrailingOk(tail: []const u16) bool {
+    for (tail) |c| {
+        if (!hSpace(c) and c != '.' and c != '!' and c != ')' and c != ']') return false;
+    }
+    return true;
+}
+
+fn chainReachesLineEnd(line: []const u16, start_span: Span) bool {
+    var cur = start_span;
+    while (true) {
+        var next_at = cur.end;
+        while (next_at < line.len and line[next_at] != '@') : (next_at += 1) {}
+        if (next_at >= line.len) return fyiTrailingOk(line[cur.end..]);
+        if (!listSeparator(line[cur.end..next_at])) return false;
+        cur = markerAt(line, next_at) orelse return false;
+    }
+}
+
+fn chainStartBefore(line: []const u16, target_start: usize) usize {
+    var chain_start: ?usize = null;
+    var last_end: usize = 0;
+    var i: usize = 0;
+    while (i < target_start) {
+        if (markerAt(line, i)) |m| {
+            if (chain_start == null or !listSeparator(line[last_end..m.start])) {
+                chain_start = m.start;
+            }
+            last_end = m.end;
+            i = m.end;
+        } else {
+            i += 1;
+        }
+    }
+    if (chain_start) |cs| {
+        if (listSeparator(line[last_end..target_start])) return cs;
+    }
+    return target_start;
+}
+
+fn blockedBeforeFyi(word: []const u16) bool {
+    const blocked = [_][]const u8{
+        "to",     "not",   "no",    "dont",  "don't", "never",
+        "please", "pls",   "did",   "didnt", "didn't",
+        "should", "could", "would", "will",  "can",
+        "might",  "must",  "may",   "a",     "an",    "the",
+    };
+    for (blocked) |b| {
+        if (eqlAsciiIgnoreCase(word, b)) return true;
+    }
+    return false;
+}
+
+fn endsWithFyiKeyword(before: []const u16) bool {
+    var end = trimHSpaceRight(before).len;
+    if (end > 0 and fyiPunct(before[end - 1])) {
+        end = trimHSpaceRight(before[0 .. end - 1]).len;
+    }
+    const kw_len: usize = if (end >= 3 and eqlAsciiIgnoreCase(before[end - 3 .. end], "fyi"))
+        3
+    else if (end >= 2 and eqlAsciiIgnoreCase(before[end - 2 .. end], "cc"))
+        2
+    else
+        return false;
+    const kw_start = end - kw_len;
+    if (kw_start > 0) {
+        const prev = before[kw_start - 1];
+        if (asciiWordChar(prev) or prev == '@') return false;
+        const prev_trimmed = trimHSpaceRight(before[0..kw_start]);
+        if (prev_trimmed.len > 0 and asciiWordChar(prev_trimmed[prev_trimmed.len - 1])) {
+            var w_start = prev_trimmed.len;
+            while (w_start > 0 and asciiWordChar(prev_trimmed[w_start - 1])) : (w_start -= 1) {}
+            if (blockedBeforeFyi(prev_trimmed[w_start..])) return false;
+        }
+    }
+    return true;
+}
+
+fn classifyLineMention(line: []const u16, span: Span) ?DeliveryKind {
+    const lead = skipHSpace(line, 0);
+    if (lead >= line.len or line[lead] == '>') return null;
+    if (matchFyiLead(line, lead)) |after_kw| {
+        if (inMentionChain(line, after_kw, span.start)) return .fyi;
+    }
+    if (inMentionChain(line, lead, span.start)) return .address;
+    if (chainReachesLineEnd(line, span)) {
+        const group_start = chainStartBefore(line, span.start);
+        if (endsWithFyiKeyword(line[0..group_start])) return .fyi;
+    }
+    return null;
+}
+
+fn lineBounds(text: []const u16, pos: usize) struct { start: usize, end: usize } {
+    var start = pos;
+    while (start > 0 and text[start - 1] != '\n' and text[start - 1] != '\r') : (start -= 1) {}
+    var end = pos;
+    while (end < text.len and text[end] != '\n' and text[end] != '\r') : (end += 1) {}
+    return .{ .start = start, .end = end };
+}
+
+pub fn mentionDeliveries(text: []const u16, source_session: []const u8, live: []const Chat, out: []Delivery) []Delivery {
     if (isMentionNote(text)) return out[0..0];
     var n: usize = 0;
     var i: usize = 0;
-    while (i < text.len and n < out.len) {
+    while (i < text.len) {
         if (markerAt(text, i)) |span| {
-            var session_buf: [64]u8 = undefined;
-            const raw = text[span.visible_end + 1 .. span.end - 1];
-            if (markerSession(raw, &session_buf)) |session| {
-                if (std.mem.startsWith(u8, session, "live-") and !std.mem.eql(u8, session, source_session)) {
-                    if (liveChat(live, session)) |chat| {
-                        var seen = false;
-                        for (out[0..n]) |prior| if (std.mem.eql(u8, prior.session, chat.session)) {
-                            seen = true;
-                        };
-                        if (!seen) {
-                            out[n] = chat;
-                            n += 1;
+            const bounds = lineBounds(text, span.start);
+            const rel = Span{
+                .start = span.start - bounds.start,
+                .visible_end = span.visible_end - bounds.start,
+                .end = span.end - bounds.start,
+            };
+            if (classifyLineMention(text[bounds.start..bounds.end], rel)) |kind| {
+                var session_buf: [64]u8 = undefined;
+                const raw = text[span.visible_end + 1 .. span.end - 1];
+                if (markerSession(raw, &session_buf)) |session| {
+                    if (std.mem.startsWith(u8, session, "live-") and !std.mem.eql(u8, session, source_session)) {
+                        if (liveChat(live, session)) |chat| {
+                            var existing: ?usize = null;
+                            for (out[0..n], 0..) |prior, k| if (std.mem.eql(u8, prior.chat.session, chat.session)) {
+                                existing = k;
+                                break;
+                            };
+                            if (existing) |idx| {
+                                if (kind == .address) out[idx].kind = .address;
+                            } else if (n < out.len) {
+                                out[n] = .{ .chat = chat, .kind = kind };
+                                n += 1;
+                            }
                         }
                     }
                 }
             }
             i = span.end;
         } else i += 1;
+    }
+    return out[0..n];
+}
+
+pub fn mentionTargets(text: []const u16, source_session: []const u8, live: []const Chat, out: []Chat) []Chat {
+    var all_buf: [32]Delivery = undefined;
+    const all = mentionDeliveries(text, source_session, live, &all_buf);
+    var n: usize = 0;
+    for (all) |item| {
+        if (item.kind != .address or n >= out.len) continue;
+        out[n] = item.chat;
+        n += 1;
     }
     return out[0..n];
 }
@@ -463,6 +678,7 @@ pub fn providerName(agent: u8) []const u8 {
 }
 
 const mention_for_you = std.unicode.utf8ToUtf16LeStringLiteral(". This message is for you. Context:\n\n");
+const mention_fyi_only = std.unicode.utf8ToUtf16LeStringLiteral(" (FYI only; read along, do not act unless asked). Context:\n\n");
 const mention_source_mark = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
 
 pub fn trimWireNote(text: []const u16) []const u16 {
@@ -545,11 +761,10 @@ pub fn composeWireText(source_session: []const u8, live: []const Chat, text: []c
     return out[0 .. text.len + suffix.len];
 }
 
-pub fn mentionNote(source_name: []const u8, visible: []const u16, context: []const u8, out: []u16) ?[]const u16 {
+fn formatMentionNote(source_name: []const u8, mid: []const u16, visible: []const u16, context: []const u8, out: []u16) ?[]const u16 {
     const lead = "Valentin mentioned you in ";
     var w: usize = appendAscii(out, 0, lead) orelse return null;
     w = appendUtf8(out, w, source_name) orelse return null;
-    const mid = mention_for_you[0..mention_for_you.len];
     if (w + mid.len > out.len) return null;
     @memcpy(out[w..][0..mid.len], mid);
     w += mid.len;
@@ -565,6 +780,14 @@ pub fn mentionNote(source_name: []const u8, visible: []const u16, context: []con
         w = appendUtf8(out, w, context) orelse return null;
     }
     return out[0..w];
+}
+
+pub fn mentionNote(source_name: []const u8, visible: []const u16, context: []const u8, out: []u16) ?[]const u16 {
+    return formatMentionNote(source_name, mention_for_you[0..mention_for_you.len], visible, context, out);
+}
+
+pub fn mentionFyiNote(source_name: []const u8, visible: []const u16, context: []const u8, out: []u16) ?[]const u16 {
+    return formatMentionNote(source_name, mention_fyi_only[0..mention_fyi_only.len], visible, context, out);
 }
 
 const MentionSent = struct {
@@ -711,20 +934,20 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
             return utf16(text, buf);
         }
     }.next;
-    const typed = w(&storage, &slot, "ask @Design Lead{live-design} and @Design Lead{live-design} and @Notes{live-notes} and @Factory{live-factory} and @Missing{live-missing} and @Term{term-main}");
+    const typed = w(&storage, &slot, "@Design Lead{live-design} and @Design Lead{live-design} and @Notes{live-notes} and @Factory{live-factory} and @Missing{live-missing} and @Term{term-main} check this");
     var targets: [8]Chat = undefined;
     const found = mentionTargets(typed, "live-factory", &chats, &targets);
     try std.testing.expectEqual(@as(usize, 2), found.len);
     try std.testing.expectEqualStrings("live-design", found[0].session);
     try std.testing.expectEqual(@as(u32, 1), found[0].index);
     try std.testing.expectEqualStrings("live-notes", found[1].session);
-    try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "ask @Design Lead"), "live-factory", &chats, &targets).len);
+    try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "@Design Lead check this"), "live-factory", &chats, &targets).len);
     try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "mail user@example.com"), "live-factory", &chats, &targets).len);
     var visible_buf: [640]u16 = undefined;
     const visible = copyVisible(typed, &.{}, &visible_buf);
     var note_buf: [640]u16 = undefined;
     const note = mentionNote("Factory", visible, "user: prior\n\n---\n\nassistant: reply", &note_buf).?;
-    const expected = w(&storage, &slot, "Valentin mentioned you in Factory. This message is for you. Context:\n\nask @Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term\n\nuser: prior\n\n---\n\nassistant: reply");
+    const expected = w(&storage, &slot, "Valentin mentioned you in Factory. This message is for you. Context:\n\n@Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term check this\n\nuser: prior\n\n---\n\nassistant: reply");
     try std.testing.expectEqualSlices(u16, expected, note);
     try std.testing.expect(std.mem.indexOf(u16, note, mention_for_you[0..mention_for_you.len]) != null);
     try std.testing.expect(isMentionNote(note));
@@ -885,7 +1108,7 @@ test "SOFT-3084 mention framing separates typing chat from recipients" {
             return utf16(text, buf);
         }
     }.next;
-    const typed = w(&storage, &slot, "ping @Beta{live-beta} now");
+    const typed = w(&storage, &slot, "@Beta{live-beta} ping now");
     var targets: [4]Chat = undefined;
     const found = mentionTargets(typed, "live-alpha", &chats, &targets);
     try std.testing.expectEqual(@as(usize, 1), found.len);
@@ -904,11 +1127,98 @@ test "SOFT-3084 mention framing separates typing chat from recipients" {
     var suffix_buf: [512]u16 = undefined;
     const suffix = mentionSourceNote(found[0..1], &suffix_buf).?;
     try std.testing.expect(std.mem.indexOf(u16, wire, suffix) != null);
-    const multi = w(&storage, &slot, "hi @Beta{live-beta} and @Beta{live-beta}");
+    const multi = w(&storage, &slot, "@Beta{live-beta} and @Beta{live-beta} check");
     const multi_targets = mentionTargets(multi, "live-alpha", &chats, &targets);
     try std.testing.expectEqual(@as(usize, 1), multi_targets.len);
     const multi_suffix = mentionSourceNote(multi_targets, &suffix_buf).?;
     try std.testing.expect(std.mem.indexOf(u16, multi_suffix, w(&storage, &slot, "Beta")) != null);
-    try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "note @Alpha{live-alpha}"), "live-alpha", &chats, &targets).len);
-    try std.testing.expect(std.mem.eql(u16, composeWireText("live-alpha", &chats, w(&storage, &slot, "note @Alpha{live-alpha}"), &wire_buf), w(&storage, &slot, "note @Alpha{live-alpha}")));
+    try std.testing.expectEqual(@as(usize, 0), mentionTargets(w(&storage, &slot, "@Alpha{live-alpha} self note"), "live-alpha", &chats, &targets).len);
+    try std.testing.expect(std.mem.eql(u16, composeWireText("live-alpha", &chats, w(&storage, &slot, "@Alpha{live-alpha} self note"), &wire_buf), w(&storage, &slot, "@Alpha{live-alpha} self note")));
+}
+
+test "MUBO-247 real mention shapes separate addressing, reference, fyi and unsure" {
+    const FixtureCase = struct {
+        id: []const u8,
+        kind: []const u8,
+        text: []const u8,
+        address: []const []const u8,
+        fyi: []const []const u8,
+        has_wire_note: bool,
+    };
+    const chats = [_]Chat{
+        .{ .name = "Current", .session = "live-current", .index = 0 },
+        .{ .name = "Builder", .session = "live-builder", .index = 1 },
+        .{ .name = "Reviewer", .session = "live-reviewer", .index = 2 },
+        .{ .name = "Maintainer", .session = "live-maintainer", .index = 3 },
+        .{ .name = "Cleaner", .session = "live-cleaner", .index = 4 },
+        .{ .name = "Reconciler", .session = "live-reconciler", .index = 5 },
+        .{ .name = "Router", .session = "live-router", .index = 6 },
+        .{ .name = "Ops", .session = "live-ops", .index = 7 },
+        .{ .name = "Verifier", .session = "live-verifier", .index = 8 },
+        .{ .name = "Mobile", .session = "live-mobile", .index = 9 },
+    };
+    const parsed = try std.json.parseFromSlice([]const FixtureCase, std.testing.allocator, @embedFile("testdata/mubo-247-cases.json"), .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.len >= 20);
+    var wide_buf: [1024]u16 = undefined;
+    var wire_buf: [2048]u16 = undefined;
+    var targets_buf: [16]Chat = undefined;
+    var deliveries_buf: [16]Delivery = undefined;
+    for (parsed.value) |case| {
+        try std.testing.expect(case.id.len > 0 and case.kind.len > 0);
+        const wide = utf16(case.text, &wide_buf);
+        const addr = mentionTargets(wide, "live-current", &chats, &targets_buf);
+        try std.testing.expectEqual(case.address.len, addr.len);
+        for (case.address, 0..) |want, i| {
+            try std.testing.expectEqualStrings(want, addr[i].session);
+        }
+        const deliveries = mentionDeliveries(wide, "live-current", &chats, &deliveries_buf);
+        try std.testing.expectEqual(case.address.len + case.fyi.len, deliveries.len);
+        var addr_i: usize = 0;
+        var fyi_i: usize = 0;
+        for (deliveries) |item| {
+            if (item.kind == .address) {
+                try std.testing.expect(addr_i < case.address.len);
+                try std.testing.expectEqualStrings(case.address[addr_i], item.chat.session);
+                addr_i += 1;
+            } else {
+                try std.testing.expect(fyi_i < case.fyi.len);
+                try std.testing.expectEqualStrings(case.fyi[fyi_i], item.chat.session);
+                fyi_i += 1;
+            }
+        }
+        try std.testing.expectEqual(case.address.len, addr_i);
+        try std.testing.expectEqual(case.fyi.len, fyi_i);
+        const wire = composeWireText("live-current", &chats, wide, &wire_buf);
+        try std.testing.expectEqual(case.has_wire_note, wire.len > wide.len);
+        if (case.has_wire_note) {
+            try std.testing.expectEqualSlices(u16, wide, trimWireNote(wire));
+        } else {
+            try std.testing.expectEqualSlices(u16, wide, wire);
+        }
+    }
+    var visible_buf: [256]u16 = undefined;
+    var note_buf: [640]u16 = undefined;
+    const fyi_line = utf16("FYI @Reviewer we switched branches", &visible_buf);
+    const fyi_note = mentionFyiNote("Current", fyi_line, "prior context", &note_buf).?;
+    try std.testing.expect(isMentionNote(fyi_note));
+    try std.testing.expect(std.mem.indexOf(u16, fyi_note, mention_fyi_only[0..mention_fyi_only.len]) != null);
+    var echoed_buf: [900]u16 = undefined;
+    const echoed_tail = utf16("\n@Builder{live-builder} ping", &wide_buf);
+    @memcpy(echoed_buf[0..fyi_note.len], fyi_note);
+    @memcpy(echoed_buf[fyi_note.len..][0..echoed_tail.len], echoed_tail);
+    try std.testing.expectEqual(@as(usize, 0), mentionDeliveries(echoed_buf[0 .. fyi_note.len + echoed_tail.len], "live-current", &chats, &deliveries_buf).len);
+    var ann_in: [128]u16 = undefined;
+    var ann_out: [256]u16 = undefined;
+    const comma_in = utf16("@Builder, please check (cc @Ops)", &ann_in);
+    const comma_wired = annotate(comma_in, &.{}, &chats, &ann_out);
+    var comma_want_buf: [256]u16 = undefined;
+    const comma_want = utf16("@Builder{live-builder}, please check (cc @Ops{live-ops})", &comma_want_buf);
+    try std.testing.expectEqualSlices(u16, comma_want, comma_wired);
+    const comma_deliveries = mentionDeliveries(comma_wired, "live-current", &chats, &deliveries_buf);
+    try std.testing.expectEqual(@as(usize, 2), comma_deliveries.len);
+    try std.testing.expectEqual(DeliveryKind.address, comma_deliveries[0].kind);
+    try std.testing.expectEqualStrings("live-builder", comma_deliveries[0].chat.session);
+    try std.testing.expectEqual(DeliveryKind.fyi, comma_deliveries[1].kind);
+    try std.testing.expectEqualStrings("live-ops", comma_deliveries[1].chat.session);
 }
