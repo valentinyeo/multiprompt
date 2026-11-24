@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { mergeHeadline } = require('./merge-title.js');
 
 const pageInfo = 'pageInfo { hasNextPage endCursor }';
 const checkFields = '__typename ... on CheckRun { name status conclusion } ... on StatusContext { context state }';
@@ -68,14 +69,19 @@ function squashBody(commits) {
 }
 
 function main() {
-  const repo = process.env.GITHUB_REPOSITORY;
+  const repo = process.env.GITHUB_REPOSITORY || gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner').trim();
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('invalid repository');
   const [owner, name] = repo.split('/');
-  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+  const requested = process.argv[2];
+  const event = requested === undefined ? JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
   let number;
   let expectedHead;
   let dryRun;
-  if (process.env.GITHUB_EVENT_NAME === 'workflow_run') {
+  if (requested !== undefined) {
+    number = Number(requested);
+    dryRun = process.argv.includes('--dry-run');
+    console.log(`manual start PR=${requested} repo=${repo}`);
+  } else if (process.env.GITHUB_EVENT_NAME === 'workflow_run') {
     const run = event.workflow_run;
     if (run?.event !== 'pull_request' || run.conclusion !== 'success' || run.head_branch === 'master'
       || run.head_repository?.full_name !== repo || run.pull_requests?.length !== 1) {
@@ -119,16 +125,19 @@ function main() {
   if (!Array.isArray(pr.files?.nodes) || typeof pr.files.pageInfo?.hasNextPage !== 'boolean') throw new Error('incomplete PR files');
   const fileFallback = pr.files.pageInfo.hasNextPage || pr.files.nodes.some(file => ['RENAMED', 'COPIED'].includes(file.changeType));
   let files;
+  let paths;
   if (fileFallback) {
     console.log('additional read: complete REST files with rename origins');
     const pages = JSON.parse(gh('api', `repos/${repo}/pulls/${number}/files?per_page=100`, '--paginate', '--slurp'));
     if (!Array.isArray(pages) || !pages.every(Array.isArray)) throw new Error('invalid REST files');
     const entries = pages.flat();
     if (entries.length !== pr.changedFiles || entries.some(file => file.status === 'renamed' && !file.previous_filename)) throw new Error('incomplete REST files');
+    paths = entries.map(file => file.filename);
     files = entries.flatMap(file => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]);
   } else {
     if (pr.files.nodes.length !== pr.changedFiles || pr.files.totalCount !== pr.changedFiles) throw new Error('incomplete PR file list');
-    files = pr.files.nodes.map(file => file.path);
+    paths = pr.files.nodes.map(file => file.path);
+    files = paths;
   }
   if (paginated || fileFallback) {
     const current = graphql(`query($owner: String!, $name: String!, $number: Int!) {
@@ -155,11 +164,13 @@ function main() {
   if (!pr.title?.trim()) throw new Error('missing PR title for the squash commit');
   const body = squashBody(pullRequestCommits(repo, number));
   if (!body) throw new Error('no commit message to build the squash commit from');
+  const headline = mergeHeadline(pr.title, paths, number);
+  console.log(`#${number}: squash title ${headline}`);
   const merged = graphql(`mutation($id: ID!, $head: GitObjectID!, $headline: String!, $body: String!) {
     mergePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH, commitHeadline: $headline, commitBody: $body }) {
       pullRequest { number merged mergeCommit { oid } }
     }
-  }`, { id: pr.id, head: pr.headRefOid, headline: pr.title.trim(), body }).mergePullRequest?.pullRequest;
+  }`, { id: pr.id, head: pr.headRefOid, headline, body }).mergePullRequest?.pullRequest;
   if (merged?.number !== number || merged.merged !== true || !/^[0-9a-f]{40}$/.test(merged.mergeCommit?.oid || '')) throw new Error('merge was not confirmed');
   console.log(`#${number}: merged ${merged.mergeCommit.oid}`);
   for (const workflow of ['test.yml', 'no-comments.yml', 'gitleaks.yml']) gh('workflow', 'run', workflow, '-R', repo, '--ref', 'master');

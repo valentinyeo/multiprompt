@@ -1,0 +1,1 @@
+Chats moved between servers disappear from the sidebar
