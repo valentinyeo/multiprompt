@@ -2164,7 +2164,7 @@ pub fn refreshChatTranscript(force: bool) void {
         else
             app_state.g_chat_content_h - viewport_h;
     }
-    const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor_offset else old_scroll_y;
+    const held_y: ?i32 = if (old_content_h <= viewport_h or !chat_history.holdsReadPosition(app_state.g_chat_scrolled_up, app_state.g_chat_read_boundary.index != null)) null else if (anchor_top) |top| top + anchor_offset else old_scroll_y;
     if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     chatScrollStateChanged(viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);

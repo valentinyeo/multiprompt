@@ -1033,10 +1033,23 @@ pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
     return force or pending or !scrolled_up;
 }
 
+pub fn holdsReadPosition(scrolled_up: bool, unread: bool) bool {
+    return scrolled_up or unread;
+}
+
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
     const bottom = content_h - viewport_h;
     if (follow_bottom) return bottom;
     return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom), @max(0, bottom));
+}
+
+test "MUBO-280 growth at the bottom follows the newest message instead of holding the read position" {
+    try std.testing.expect(!holdsReadPosition(false, false));
+    try std.testing.expect(holdsReadPosition(true, false));
+    try std.testing.expect(holdsReadPosition(false, true));
+    try std.testing.expect(holdsReadPosition(true, true));
+    try std.testing.expectEqual(@as(i32, 10280), openScroll(10906, 626, 80, .{}, 0, null));
+    try std.testing.expectEqual(@as(i32, 400), openScroll(10906, 626, 80, .{}, 0, 400));
 }
 
 pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32, anchor: ?i32) i32 {
