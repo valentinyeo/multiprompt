@@ -82,6 +82,10 @@ jobs:
               process.exit(1);
             }
             process.stdout.write(String(value));
+          } else if (mode === 'error') {
+            const value = data.error;
+            if (typeof value !== 'string') process.exit(1);
+            process.stdout.write(value);
           } else {
             console.error(`unknown mode ${mode}`);
             process.exit(1);
@@ -184,26 +188,30 @@ jobs:
           seeded=0
           if npx wrangler d1 execute DB --remote --config wrangler.proof.jsonc --command "INSERT INTO service_keys (hash,account,kind,label,created) VALUES ('$key_hash','proof@example.com','admin','deploy-proof',$(date +%s))" > "$RUNNER_TEMP/key-seed.log" 2>&1; then seeded=1; fi
           check "sync key seeded in the proof database" "$seeded"
-          read_code="$(curl -sS -o "$RUNNER_TEMP/layout.json" -w '%{http_code}' -H "Authorization: Bearer $key" "$URL/v1/layout" || true)"
+          features='favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,workspace_color,bot_appearance'
+          read_code="$(curl -sS -o "$RUNNER_TEMP/layout.json" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$URL/v1/layout" || true)"
           read_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout.json" 2>/dev/null || true)"
           ok=0
           if [ "$read_code" = 200 ] && [ -n "$read_revision" ]; then ok=1; fi
           check "sync read $URL/v1/layout answered ${read_code} at revision ${read_revision:-none}" "$ok"
           write_code=""
           written_revision=""
+          write_error=""
           if [ -n "$read_revision" ]; then
             node -e 'const fs=require("node:fs");const snap=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));fs.writeFileSync(process.argv[2],JSON.stringify({base_revision:snap.revision,layout:snap.layout}))' "$RUNNER_TEMP/layout.json" "$RUNNER_TEMP/layout-put.json"
-            write_code="$(curl -sS -o "$RUNNER_TEMP/layout-write.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $key" -H 'Content-Type: application/json' --data-binary "@$RUNNER_TEMP/layout-put.json" "$URL/v1/layout" || true)"
+            write_code="$(curl -sS -o "$RUNNER_TEMP/layout-write.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $key" -H 'Accept: application/json' -H 'Content-Type: application/json' -H "X-Layout-Features: $features" --data-binary "@$RUNNER_TEMP/layout-put.json" "$URL/v1/layout" || true)"
             written_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-write.json" 2>/dev/null || true)"
+            write_error="$(node "$RUNNER_TEMP/wrangler-json.mjs" error < "$RUNNER_TEMP/layout-write.json" 2>/dev/null || true)"
           fi
           ok=0
           if [ "$write_code" = 200 ] && [ -n "$written_revision" ] && [ "$written_revision" != "$read_revision" ]; then ok=1; fi
-          check "sync write $URL/v1/layout answered ${write_code:-none} at revision ${written_revision:-none}" "$ok"
-          again_code="$(curl -sS -o "$RUNNER_TEMP/layout-again.json" -w '%{http_code}' -H "Authorization: Bearer $key" "$URL/v1/layout" || true)"
+          check "sync write $URL/v1/layout answered ${write_code:-none} at revision ${written_revision:-none}${write_error:+ ($write_error)}" "$ok"
+          again_code="$(curl -sS -o "$RUNNER_TEMP/layout-again.json" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$URL/v1/layout" || true)"
           again_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
+          again_error="$(node "$RUNNER_TEMP/wrangler-json.mjs" error < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
           ok=0
           if [ "$again_code" = 200 ] && [ -n "$written_revision" ] && [ "$again_revision" = "$written_revision" ]; then ok=1; fi
-          check "sync read back $URL/v1/layout answered ${again_code} at revision ${again_revision:-none}" "$ok"
+          check "sync read back $URL/v1/layout answered ${again_code} at revision ${again_revision:-none}${again_error:+ ($again_error)}" "$ok"
           exit "$failed"
       - name: Confirm the schema landed in the proof database
         working-directory: service
