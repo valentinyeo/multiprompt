@@ -92,6 +92,8 @@ MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified men
 
 Whole-file drift stops before checking, even for an unrelated function change. This favors an explicit source review over silently trusting a stale model. Re-read the covered functions and callers; change the mapping, native probes or bounds when needed. Update `decisions.json` only from native output after understanding the semantic change. Update hashes and move the sync commit forward **only after confirming the verification still describes the code**. A hash refresh alone is not verification.
 
+MUBO-297 forwards `provider_name` alongside `model` when the reader passes a Pi model switch to the running host; `host_reply`'s request allow-list dropped it, so the host refused with `invalid_model`. The outbox, echo and reconcile path is untouched: `message_store_transaction`, `message_poll`, `message_poll_locked`, `IGSH_1266_SharedMessageHostTest`, the native probes and `decisions.json` are unchanged. Only the reader and reader-test hashes move, and the sync commit names the fix.
+
 ## Prove the checker can fail
 
 `--self-test` first checks a reliable control with no timeout or restart. It then copies real source into temporary directories and plants two breaks. Both run in that same reliable control, so existing restart/timeout findings cannot satisfy a mutation test:
