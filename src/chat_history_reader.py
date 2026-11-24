@@ -1097,13 +1097,13 @@ def blocked_prompt(event):
     return text or None
 
 
-def settlement_event(event, agent):
+def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
     kind = event.get("type")
     operation = event.get("operation")
     content = event.get("content", "")
-    blocked = blocked_prompt(event)
+    blocked = blocked_prompt(event) if blocked_settlement else None
     if blocked is not None:
         fact = dict(operation="blocked", content=blocked)
     elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
@@ -2022,6 +2022,7 @@ def search_response(q, path, agent, sid):
 
 def tail_view(q, agent, fill):
     return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(q.get("blocked_settlement")),
             bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
             bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
 
@@ -2191,7 +2192,7 @@ def response(q, source=None, as_owner=False, resolved=None):
                     elif operation in ("enqueue", "remove") and stamp >= previous[0]:
                         queue_stamps[content] = (stamp, timestamp)
             if message is None and q.get("settlement"):
-                fact = settlement_event(event, agent)
+                fact = settlement_event(event, agent, bool(q.get("blocked_settlement")))
                 if fact:
                     messages.insert(0, fact)
             if q.get("source_offsets"):
