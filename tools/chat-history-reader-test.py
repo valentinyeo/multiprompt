@@ -9079,6 +9079,133 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class MUBO_293_Probe(unittest.TestCase):
+    """Throwaway probe: which realistic slash-command turn shapes the reader keeps intact."""
+    command = '/teach'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.path = self.home / '.claude/projects/-work-demo/sid.jsonl'
+        self.path.parent.mkdir(parents=True)
+        self.path.touch()
+        self.query = dict(id=7, codex=False, sid='sid', tmux='term-1', cwd='/work/demo',
+                          cached_sid='', inode=0, offset=0)
+        reader.TAIL_CACHE.clear()
+        reader.STATUS_CACHE.clear()
+        reader.QUEUE_CACHE.clear()
+
+    def markup(self, parts):
+        tags = dict(message='<command-message>teach</command-message>',
+                    name='<command-name>' + self.command + '</command-name>',
+                    args='<command-args></command-args>')
+        return '\n'.join(tags[part] for part in parts)
+
+    def turn(self, content, extra_command=None, reply='the explanation', tail=None):
+        stamp = '2026-11-24T17:00:00.000Z'
+        events = [dict(type='user', uuid='u-1', timestamp=stamp, message=dict(role='user', content=content), **(extra_command or {})),
+                  dict(type='user', isMeta=True, timestamp=stamp, message=dict(role='user', content=[dict(type='text', text='Base directory for this skill: /home/x/.claude/skills/teach')])),
+                  dict(type='assistant', uuid='a-1', timestamp='2026-11-24T17:00:30.000Z',
+                       message=dict(id='msg_reply', role='assistant', content=[dict(type='text', text=reply)]))]
+        if tail:
+            events.extend(tail)
+        return events
+
+    def read(self, *events):
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+        wire = reader.response(dict(self.query))
+        lines = wire.splitlines()
+        fields = lines[0].split('\t')
+        self.assertEqual(fields[:4], ['@mp', '7', 'history', 'ok'], wire)
+        return [json.loads(line) for line in lines[1:-1]]
+
+    def shown(self, rows):
+        return [(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')]
+
+    def test_probe_shapes(self):
+        cases = {
+            'message-name-args': ('message-name-args', None),
+            'message-only': ('message', None),
+            'name-only': ('name', None),
+            'args-only': ('args', None),
+            'message-args': ('message-args', None),
+            'name-args': ('name-args', None),
+            'meta-command': ('message-name-args', dict(isMeta=True)),
+            'transcript-only-command': ('message-name-args', dict(isVisibleInTranscriptOnly=True)),
+            'sidechain-command': ('message-name-args', dict(isSidechain=True)),
+        }
+        for label, (parts, extra) in cases.items():
+            with self.subTest(shape=label):
+                reader.TAIL_CACHE.clear()
+                self.query.update(cached_sid='', inode=0, offset=0)
+                rows = self.read(*self.turn(self.markup(parts.split('-')), extra))
+                self.assertEqual(self.shown(rows), [('user', self.command), ('assistant', 'the explanation')], label)
+
+    def test_probe_plain_and_commented_shapes(self):
+        cases = {
+            'plain-slash': self.command,
+            'local-stdout-second-row': None,
+            'blocked-info-event': None,
+        }
+        with self.subTest(shape='plain-slash'):
+            rows = self.read(*self.turn(self.command))
+            self.assertEqual(self.shown(rows), [('user', self.command), ('assistant', 'the explanation')])
+        with self.subTest(shape='local-stdout-second-row'):
+            reader.TAIL_CACHE.clear()
+            self.query.update(cached_sid='', inode=0, offset=0)
+            events = self.turn(self.markup(['message-name-args']))
+            events.insert(1, dict(type='user', uuid='u-2', timestamp='2026-11-24T17:00:01.000Z',
+                                  message=dict(role='user', content='<local-command-stdout>Unknown command: /teach</local-command-stdout>')))
+            rows = self.read(*events)
+            self.assertEqual(self.shown(rows), [('user', self.command), ('assistant', 'the explanation')])
+        with self.subTest(shape='blocked-info-event'):
+            reader.TAIL_CACHE.clear()
+            self.query.update(cached_sid='', inode=0, offset=0, settlement=True, blocked_settlement=True)
+            events = self.turn(self.markup(['message-name-args']))
+            events.insert(1, dict(type='system', subtype='informational', level='warning', timestamp='2026-11-24T17:00:01.000Z',
+                                  content='UserPromptSubmit hook finished. Original prompt: /teach',
+                                  promptSubmitEnding=dict(ending=dict(kind='hook'), promptKept=False)))
+            rows = self.read(*events)
+            self.assertEqual(self.shown(rows), [('user', self.command), ('assistant', 'the explanation')])
+
+    def test_probe_delta_after_a_previous_turn(self):
+        self.read(self.turn('first question', reply='first answer'))
+        self.query.update(cached_sid='sid', inode=self.path.stat().st_ino, offset=self.path.stat().st_size)
+        with self.path.open('a') as output:
+            for event in self.turn(self.markup(['message-name-args'])):
+                output.write(json.dumps(event) + '\n')
+        wire = reader.response(dict(self.query))
+        rows = [json.loads(line) for line in wire.splitlines()[1:-1]]
+        self.assertEqual(self.shown(rows), [('user', self.command), ('assistant', 'the explanation')])
+
+    def test_probe_settle_matches_the_typed_command(self):
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in self.turn(self.markup(['message-name-args']))))
+        for typed in (self.command, self.command + ' '):
+            wire = reader.settle_response(dict(self.query, op='settle', texts=[typed], after_ms=0)).splitlines()
+            self.assertEqual(json.loads(wire[1])['line'], 1, typed)
+
+    def test_probe_hosted_display_history(self):
+        sid, tmux = 'mubo-293-probe', 'mubo-293-chat'
+        session = dict(state=dict(display_history=True))
+        agent = types.SimpleNamespace(stdin=io.BytesIO())
+        reader.host_session_reset(session, agent)
+        with patch.object(reader, 'host_apply', return_value=False), \
+                patch.object(reader, 'host_state_write'), \
+                patch.object(reader, 'host_log'):
+            reply = reader.host_handle_request('claude', sid, tmux, session, dict(
+                op='deliver', id='mp-0123456789abcdef', attempt='one', epoch=1, text=self.command + ' '))
+            self.assertEqual(reply['status'], 'sent', reply)
+            reader.host_claude_event('claude', sid, tmux, session, dict(
+                type='assistant', message=dict(id='msg_reply', role='assistant', content=[dict(type='text', text='the explanation')])))
+        history = reader.host_paths('claude', sid)['history']
+        rows = [json.loads(line)['row'] for line in history.read_text().splitlines() if line.strip()]
+        self.assertEqual([(row['role'], row.get('text')) for row in rows],
+                         [('user', self.command + ' '), ('assistant', 'the explanation')])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
