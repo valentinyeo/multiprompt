@@ -8868,7 +8868,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else {
                         cancelShellRefocus(hwnd);
                     }
-                } else if ((app_state.g_shell_focused or inbox_force) and ours_now and app_state.shell_count > 0 and !mouse_down and app_state.g_edit_hwnd == null and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
+                } else if ((app_state.g_shell_focused or inbox_force) and ours_now and !activeBrowserHasForegroundFocus() and app_state.shell_count > 0 and !mouse_down and app_state.g_edit_hwnd == null and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
                     if (app_state.g_chat_active) altqLog("refocus_chat steal pending={} handoff_left={} rem={} fg={X} chat_owns={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), app_state.g_refocus_remaining, altqPtr(GetForegroundWindow()), chatViewOwnsInput() });
                     focusActiveShell();
                     const landed = activeShellHasForegroundFocus() or

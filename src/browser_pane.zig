@@ -858,14 +858,14 @@ pub fn syncPaneFocusModeFromForeground(fg: HANDLE, mouse_click: bool) void {
                 return;
             }
             if (mouse_click) {
-                cancelShellRefocus(app_state.g_main_hwnd);
-                app_state.g_shell_focused = false;
                 if (!app_state.g_browser_focus_mode) {
                     app_state.g_browser_focus_mode = true;
                     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
                 }
                 armBrowserEdgeMaskRaise();
             }
+            cancelShellRefocus(app_state.g_main_hwnd);
+            app_state.g_shell_focused = false;
             return;
         }
     }

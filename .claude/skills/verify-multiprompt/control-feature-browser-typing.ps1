@@ -76,7 +76,9 @@ $browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browse
 $omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
 Wait-Until {
     $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
-    $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus
+    $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus -and
+        [System.Windows.Automation.Automation]::Compare($omnibox, [System.Windows.Automation.AutomationElement]::FocusedElement) -and
+        [VerifyNative]::GetForegroundWindow() -eq $browser
 } 'owned browser omnibox focused for local page setup' 5
 [VerifyNative]::Text($url)
 $setupTyped = $false
