@@ -1,1 +1,0 @@
-{"ok":true,"hosts":["remote-1"],"workspaces":[{"id":0,"name":"Home","active":true,"groups":[],"tabs":[{"id":42,"title":"Broken chat","host":"remote-1","tmux":"live-broken","cv":false,"state":"connected"}]}]}

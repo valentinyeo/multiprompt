@@ -26,17 +26,7 @@ The desktop publishes `mp-send`, `mp-sessions`, `mp-helper`, `mp-shell`, `multib
 mp-send list
 mp-send list --json
 mp-sessions
-mp-sessions health
-mp-sessions health --json
 ```
-
-`mp-sessions list` and `mp-sessions health` read the desktop's current sidebar report. Both show visibility and its reason, Waiting, pinning, the chat's workspace, the workspace on screen, and the selected sidebar view. Visibility means membership in the sidebar's rendered row list, not whether the row is scrolled into the viewport. Waiting uses the same flag as All Sessions; it is not inferred from a missing sidebar row. Archived sessions come from the desktop's archive inventory. Tab and archive matches use this server's host slot (`MULTIPROMPT_HOST`, default zero), so another server's namesake cannot supply the visibility state.
-
-Both JSON outputs add `in_layout`, `visible`, `hidden_reason`, `waiting`, `pinned`, `archived`, `user_hidden`, `active_workspace` and `sidebar_view`. Unknown desktop state is `null`, not `false`. Older desktops report `desktop visibility unavailable`; an offline desktop reports `desktop offline`. Older helper bundles can still list chats without the desktop API. These additive diagnostic fields do not change saved layouts, chat delivery, or Android sync.
-
-`mp-sessions health` reports `BROKEN hidden: <reason>` for a chat in the layout but absent from the sidebar. Deliberate Waiting, archive and user-hide states do not make visibility broken, though host or history failures still do. Filters, other workspaces, collapsed groups or sections, and unexplained missing rows retain their reported reason. These are read-only agent diagnostics, so they have no desktop shortcut or palette action.
-
-`mp-sessions health` prints one `OK` or `BROKEN reason` line per chat in its catalog. It checks the host process, the registered conversation, the desktop tab view, and whether history can be read. `--ping` sends a visible health ping through chat delivery. When the desktop app is offline, tab and history checks report `UNKNOWN desktop offline` instead of `OK`. Any broken chat makes the command exit non-zero.
 
 Each row has the session link, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. The link looks like `Poteto{live-8bc7bac}`. A name with a space looks like `@Alpha Lead{live-alpha}`. `--json` also has a `link` field with that token. In Chat View the token shows the name, and a click opens that session. A click works when that session is open. An unknown session stays plain text. A chat counts as live when its host process runs or its terminal session exists, so a hosted chat needs no terminal and a terminal chat with a stopped host still appears, as `stopped`. A chat whose name has not been published yet uses its terminal session as the name inside the link, and can still be reached by that session.
 
