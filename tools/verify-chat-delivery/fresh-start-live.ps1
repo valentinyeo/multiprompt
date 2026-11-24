@@ -23,8 +23,8 @@ function Copy-Rendered([string]$Name) {
 }
 [void](Wait-For 'production live subscription' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "subscribed"' } 30)
 [void](Wait-For 'saved history served as the chat display' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "fresh-history-ready"' } 30)
-[void](Scroll-Transcript -12000)
 Bind-Transcript
+[void](Scroll-Transcript -12000)
 $bounds = $views[0].Current.BoundingRectangle
 Save @{left=0; top=0; right=[int]$bounds.Width; bottom=[int]$bounds.Height} "$caseDir/area.json"
 $freshQuery = 'fresh start'
