@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$Evidence,
     [Parameter(Mandatory=$true)][string]$Tag,
-    [ValidateSet('bare', 'chat')][string]$Scenario = 'bare',
+    [ValidateSet('bare', 'chat', 'live')][string]$Scenario = 'bare',
+    [string]$SshPath = '',
     [int]$IdleSeconds = 660,
     [int]$SettleSeconds = 40
 )
@@ -21,6 +22,13 @@ $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '1'
 New-Item -ItemType Directory -Force $root, $env:APPDATA, $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
+if ($Scenario -eq 'live') {
+    if (-not $SshPath) { throw 'The live scenario needs -SshPath pointing at the boundary launcher' }
+    $env:MP_VERIFY_STATE = Join-Path $root 'state'
+    $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+    $env:MP_VERIFY_BOUNDARY = (Resolve-Path 'tools/verify-chat-delivery/boundary.py').Path
+    $env:PYTHONUTF8 = '1'
+}
 Add-Type -Path tools/verify-chat-delivery/job.cs
 Add-Type -Path tools/verify-chat-delivery/desktop.cs
 Add-Type -AssemblyName System.Drawing
@@ -88,6 +96,12 @@ $result = [ordered]@{
     series = @()
     topLogTags = @()
     chatView = $null
+    chatTabs = $null
+    transcriptReads = $null
+    statusSnapshots = $null
+    chatPaintLines = $null
+    windowStatusSnapshots = $null
+    windowChatPaintLines = $null
     sha256 = $null
     exeVersion = $null
     error = $null
@@ -99,6 +113,10 @@ try {
     $bytes = $null
     if (-not $result.exeVersion) { throw 'Executable version marker missing' }
     New-Item -ItemType Directory -Force $settings | Out-Null
+    if ($Scenario -eq 'live') {
+        & python "$PSScriptRoot/live-chat-fixture.py" $root (Resolve-Path $SshPath).Path
+        if ($LASTEXITCODE -ne 0) { throw 'Live chat fixture failed' }
+    }
     $process = $job.Start($exePath, $root, "$evidencePath/stdout.log", "$evidencePath/stderr.log", "--single-window --no-window-restore --update-ready $eventName")
     if (-not $ready.WaitOne(45000)) { throw 'Released app did not become ready' }
     $main = [IntPtr]::Zero
@@ -116,6 +134,21 @@ try {
         $null = [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
         [void](Wait-For 'chat view composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero } 60 250)
         $result.chatView = 'composer present after a real Alt+C'
+    }
+    if ($Scenario -eq 'live') {
+        $sessionFile = Join-Path $settings 'session.json'
+        $restored = Wait-For 'three restored live chats' {
+            try {
+                $saved = Get-Content $sessionFile -Raw | ConvertFrom-Json
+                if (@($saved.tabs).Count -ne 3) { return $false }
+                if (@($saved.tabs | Where-Object { -not $_.cv }).Count -ne 0) { return $false }
+                $saved
+            } catch { return $false }
+        } 120 500
+        $result.chatTabs = @($restored.tabs).Count
+        [void](Wait-For 'live chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero } 60 250)
+        [void](Wait-For 'transcript read for a live chat' { (Read-LogText) -match '\[chat\] transcript (load|push) shell=' } 90 250)
+        $result.chatView = 'three live chats restored into the chat view'
     }
     Write-Host "Settling for $SettleSeconds s before the idle window"
     Start-Sleep -Seconds $SettleSeconds
@@ -140,6 +173,11 @@ try {
     $afterText = Read-LogText
     $afterCpu = $process.TotalProcessorTime.TotalMilliseconds
     $window = if ($afterText.Length -ge $beforeText.Length) { $afterText.Substring($beforeText.Length) } else { '' }
+    $result.transcriptReads = [regex]::Matches($afterText, '\[chat\] transcript (load|push) shell=').Count
+    $result.statusSnapshots = [regex]::Matches($afterText, 'chat-status-snapshot: sid=').Count
+    $result.chatPaintLines = [regex]::Matches($afterText, '\[chat-live\] (page|draw)|PERF\[chat\]: ').Count
+    $result.windowStatusSnapshots = [regex]::Matches($window, 'chat-status-snapshot: sid=').Count
+    $result.windowChatPaintLines = [regex]::Matches($window, '\[chat-live\] (page|draw)|PERF\[chat\]: ').Count
     $bytesDelta = $afterLog - $beforeLog
     $cpuDelta = $afterCpu - $beforeCpu
     $minutes = $wallMs / 60000
@@ -156,6 +194,10 @@ try {
     $result.rotatedLogs = @(Get-ChildItem $settings -Filter 'debug.log*' | Where-Object { $_.Name -ne 'debug.log' } | ForEach-Object { $_.Name })
     $result.topLogTags = Get-TagHistogram $window
     $result.status = if (-not $process.HasExited -and $result.logMbPerHour -ne $null) { 'measured' } else { 'invalid' }
+    if ($Scenario -eq 'live' -and ($result.chatTabs -ne 3 -or $result.transcriptReads -lt 1)) {
+        $result.status = 'invalid'
+        if (-not $result.error) { $result.error = "live chats never read a transcript (tabs=$($result.chatTabs), reads=$($result.transcriptReads), snapshots=$($result.statusSnapshots))" }
+    }
 } catch {
     $result.error = $_.Exception.Message
     Write-Host $_.ScriptStackTrace
