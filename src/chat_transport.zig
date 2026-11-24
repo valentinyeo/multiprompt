@@ -35,6 +35,7 @@ const Host = struct {
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
     wake: w.HANDLE = null,
+    ready: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -139,6 +140,7 @@ fn abortBoot(b: Boot) void {
     lock(b.host);
     b.host.starting = false;
     b.host.retry_at = w.GetTickCount64() + 250;
+    _ = w.SetEvent(b.host.ready);
     b.host.mutex.unlock();
 }
 
@@ -168,6 +170,7 @@ fn handshakeWorker(b: Boot) void {
     if (b.host.stopping or !b.host.starting) {
         const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process };
         b.host.starting = false;
+        _ = w.SetEvent(b.host.ready);
         b.host.mutex.unlock();
         closeBoot(abort);
         return;
@@ -187,15 +190,20 @@ fn handshakeWorker(b: Boot) void {
         b.host.input = null;
         b.host.output = null;
         b.host.retry_at = w.GetTickCount64() + 250;
+        _ = w.SetEvent(b.host.ready);
         b.host.mutex.unlock();
         return;
     };
     thread.detach();
+    _ = w.SetEvent(b.host.ready);
 }
 
 fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
     if (host.wake == null) return false;
+    if (host.ready == null) host.ready = w.CreateEventW(null, 1, 0, null);
+    if (host.ready == null) return false;
+    _ = w.ResetEvent(host.ready);
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
@@ -322,6 +330,20 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     return channel;
 }
 
+pub fn openReady(index: u8, watch: bool) ?*Channel {
+    if (open(index, watch)) |channel| return channel;
+    if (index >= hosts.len) return null;
+    const host = &hosts[index];
+    lock(host);
+    const ready = if (host.starting) host.ready else null;
+    const running = host.running;
+    host.mutex.unlock();
+    if (!running) {
+        if (ready == null or w.WaitForSingleObject(ready, 15_000) != 0) return null;
+    }
+    return open(index, watch);
+}
+
 pub fn openCommand(index: u8, command: []const u8) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
@@ -417,6 +439,7 @@ pub fn shutdown() void {
         lock(host);
         if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
         host.starting = false;
+        if (host.ready != null) _ = w.SetEvent(host.ready);
         for (host.channels.items) |channel| {
             channel.ended = true;
             notify(channel);
@@ -432,6 +455,7 @@ pub fn respawn(index: u8) void {
     defer host.mutex.unlock();
     if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
     host.starting = false;
+    if (host.ready != null) _ = w.SetEvent(host.ready);
 }
 
 fn rejectTerminal(channel: *Channel) bool {

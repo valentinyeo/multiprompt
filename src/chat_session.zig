@@ -1091,7 +1091,7 @@ pub fn closeAllChatHistoryChannels() void {
 }
 
 fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
-    ch.shared = transport.open(host, ch.watch) orelse return false;
+    ch.shared = transport.openReady(host, ch.watch) orelse return false;
     return true;
 }
 

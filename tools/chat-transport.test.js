@@ -115,7 +115,7 @@ test('history and live streams use logical channels, never per-stream SSH proces
   const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
   const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
   assert.doesNotMatch(session, /CreateProcessW\(/);
-  assert.match(session, /transport\.open\(host, ch\.watch\)/);
+  assert.match(session, /transport\.openReady\(host, ch\.watch\)/);
   assert.match(session, /transport\.respawn\(host\)/);
   assert.match(send, /chat_transport\.zig"\)\.respawn\(job\.key\.host\)/);
   assert.match(transport, /var hosts: \[3\]Host/);
