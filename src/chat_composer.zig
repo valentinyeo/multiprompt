@@ -370,7 +370,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = left + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH();
+    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH();
     return .{
         .pane = slot,
         .transcript = .{
@@ -401,10 +401,6 @@ pub fn chatViewLayout() ChatViewLayout {
     };
 }
 
-pub fn chatNewMessagesHeight() i32 {
-    return uiScaled(30);
-}
-
 pub fn chatNewMessagesRect() ?RECT {
     if (!app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)) return null;
     const layout = chatViewLayout();
@@ -413,7 +409,8 @@ pub fn chatNewMessagesRect() ?RECT {
     while (remaining >= 10) : (remaining /= 10) digits += 1;
     const width = @min(layout.transcript.right - layout.transcript.left, uiScaled(220 + digits * 8));
     const left = layout.transcript.left + @divTrunc(layout.transcript.right - layout.transcript.left - width, 2);
-    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + uiScaled(2), .bottom = layout.transcript.bottom + uiScaled(28) };
+    const bottom = layout.composer_card.top - uiScaled(2);
+    return .{ .left = left, .right = left + width, .top = bottom - uiScaled(26), .bottom = bottom };
 }
 
 pub fn chatNewMessagesChanged(had_messages: bool) void {
@@ -2982,7 +2979,7 @@ test "IGSH-760 typing presents completed smooth frames without native inline pai
     try std.testing.expect(IsWindowVisible(edit) == 0);
 }
 
-test "IGSH-813 pill is centered outside transcript and close keeps its count and layout space" {
+test "IGSH-813 pill floats above the composer and close keeps its count and layout space" {
     const w = @import("win32.zig");
     const hwnd = CreateWindowExW(0, L("STATIC"), L("new message layout"), 0, 0, 0, 1200, 900, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(hwnd);
@@ -3008,7 +3005,7 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     const layout = chatViewLayout();
     try std.testing.expectEqualDeep(initial.transcript, layout.transcript);
     const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
-    try std.testing.expect(pill.top >= layout.transcript.bottom);
+    try std.testing.expect(pill.top >= layout.transcript.top);
     try std.testing.expect(pill.bottom <= layout.composer_card.top - chatWorkingIndicatorH());
     try std.testing.expect(@abs((pill.left + pill.right) - (layout.transcript.left + layout.transcript.right)) <= 1);
     try std.testing.expectEqual(@as(u8, 10), chatButtonAt(pill.left + 1, pill.top + 1));
@@ -3019,6 +3016,40 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     try std.testing.expectEqualDeep(layout.transcript, chatViewLayout().transcript);
     app_state.g_chat_scrolled_up = false;
     try std.testing.expect(chatNewMessagesRect() == null);
+}
+
+test "MUBO-267 the composer gap is the gap alone, with and without a new-message pill" {
+    const w = @import("win32.zig");
+    const hwnd = CreateWindowExW(0, L("STATIC"), L("composer gap"), 0, 0, 0, 1200, 900, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_main = app_state.g_main_hwnd;
+    const old_active = app_state.g_chat_active;
+    const old_count = app_state.shell_count;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_counter = app_state.g_chat_new_messages;
+    defer {
+        app_state.g_main_hwnd = old_main;
+        app_state.g_chat_active = old_active;
+        app_state.shell_count = old_count;
+        app_state.g_chat_scrolled_up = old_up;
+        app_state.g_chat_new_messages = old_counter;
+    }
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    const clear = chatViewLayout();
+    try std.testing.expectEqual(clear.composer_card.top - uiScaled(14), clear.transcript.bottom);
+    try std.testing.expectEqual(uiScaled(14), clear.composer_card.top - clear.transcript.bottom - chatWorkingIndicatorH());
+    app_state.g_chat_new_messages.arrive(1, true);
+    const waiting = chatViewLayout();
+    try std.testing.expectEqualDeep(clear.transcript, waiting.transcript);
+    try std.testing.expectEqual(uiScaled(14), waiting.composer_card.top - waiting.transcript.bottom - chatWorkingIndicatorH());
+    const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, uiScaled(26)), pill.bottom - pill.top);
+    try std.testing.expectEqual(waiting.composer_card.top - uiScaled(2), pill.bottom);
+    try std.testing.expect(pill.top < waiting.transcript.bottom);
 }
 
 fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply, queued_ctrl_stop, queued_select }) !void {

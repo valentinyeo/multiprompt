@@ -124,7 +124,6 @@ fn chatComposerBaseCardH() i32 { return uiScaled(44); }
 var test_permission_visible = false;
 fn chatPermissionVisible() bool { return test_permission_visible; }
 ${fn(layout, 'chatWorkingIndicatorH')}
-fn chatNewMessagesHeight() i32 { return 0; }
 var test_stop_visible = false;
 var test_composer_text = false;
 var chat_dictation_state: enum { idle, listening, finishing } = .idle;
