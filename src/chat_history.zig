@@ -39,7 +39,7 @@ pub const History = struct {
 
     const cache_allocator = std.heap.page_allocator;
 
-    const SettleKind = enum { rejected, enqueue, pop_all, remove, other };
+    const SettleKind = enum { rejected, blocked, enqueue, pop_all, remove, other };
     const SettleFact = struct { stamp: i64, kind: SettleKind, start: usize, len: usize, hash: u64 };
 
     const SettleCache = struct {
@@ -86,7 +86,7 @@ pub const History = struct {
                 var normalized: [32768]u16 = undefined;
                 const norm = echo.normalize(wide, &normalized);
                 const op = fact.operation;
-                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
+                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "blocked")) .blocked else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
                 const start = self.pool.items.len;
                 try self.pool.appendSlice(cache_allocator, wide);
                 try self.facts.append(cache_allocator, .{ .stamp = echo.stampMs(m.timestamp), .kind = kind, .start = start, .len = wide.len, .hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm)) });
@@ -408,6 +408,10 @@ pub const History = struct {
                 const fresh = echo.isNewBlock(pending.anchor, stamp, 0, true);
                 if (fact.kind == .rejected) {
                     if (fresh and echo.refusesCommand(content, pending.text)) result.refused = true;
+                    continue;
+                }
+                if (fact.kind == .blocked) {
+                    if (fresh and echo.sameText(content, pending.text)) result.refused = true;
                     continue;
                 }
                 const matches = fresh and echo.sameText(content, pending.text);
