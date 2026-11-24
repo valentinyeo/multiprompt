@@ -706,6 +706,19 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
     }
 }
 
+fn selectMidSentenceSkill(text: []const u16) void {
+    if (app_state.g_palette_skills.len == 0) return;
+    const a = std.heap.page_allocator;
+    const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return;
+    defer a.free(utf8);
+    const found = skill_model.textSkill(utf8, app_state.g_palette_skills) orelse return;
+    if (found.name.len >= app_state.g_chat_skill_name.len or found.body.len >= app_state.g_chat_skill_body.len) return;
+    @memcpy(app_state.g_chat_skill_name[0..found.name.len], found.name);
+    app_state.g_chat_skill_name_len = found.name.len;
+    @memcpy(app_state.g_chat_skill_body[0..found.body.len], found.body);
+    app_state.g_chat_skill_body_len = found.body.len;
+}
+
 pub fn sendChatPrompt() void {
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
         showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
@@ -816,6 +829,7 @@ pub fn sendChatPrompt() void {
         };
         send_text = app_state.g_chat_message_wide[0..n];
     }
+    if (app_state.g_chat_skill_name_len == 0) selectMidSentenceSkill(send_text);
     if (app_state.g_chat_skill_name_len > 0) {
         const prompt_utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, send_text) catch {
             showHeaderNoticeAscii("The skill prompt contains invalid text", 3500, true);
