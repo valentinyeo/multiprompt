@@ -36,8 +36,10 @@ commands:
   roster apply <file> [--dry-run]
   health [--json] [--ping]
 
-every write names its server: --host is required to create a tab, and a reopen takes the
-host recorded when the chat was created. There is no default host.
+every write names its server: --host wins, then the host recorded when the chat was created,
+then this machine's slot, which is MULTIPROMPT_HOST or "multiprompt_slot" on this machine's
+entry in the installed servers file. A tab that is already open keeps its own host, so a
+verb aimed at an open tab never needs a slot.
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
@@ -242,8 +244,14 @@ async function list(ctx, flags) {
 async function placeShell(ctx, flags) {
   const session = sessionName(flags.tmux);
   let layoutHosts;
-  if (needsLayoutHosts(ctx.env, session, flags.host)) layoutHosts = (await readLayout(ctx)).data.layout?.hosts;
-  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts);
+  let existingHost;
+  if (needsLayoutHosts(ctx.env, session, flags.host)) {
+    const layout = (await readLayout(ctx)).data.layout || {};
+    layoutHosts = layout.hosts;
+    const present = (layout.tabs || []).filter(tab => String(tab.tmux_session || '').toLowerCase() === session.toLowerCase() && Number.isInteger(tab.tmux_host));
+    if (present.length === 1) existingHost = present[0].tmux_host;
+  }
+  const host = resolveTabHost(ctx.env, session, flags.host, layoutHosts, existingHost);
   const workspace = workspaceName(flags.workspace);
   const group = flags.group === undefined ? null : groupName(flags.group);
   const title = flags.title === undefined ? null : titleName(flags.title);
