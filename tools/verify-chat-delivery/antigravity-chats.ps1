@@ -85,7 +85,13 @@ Palette-Choose 'switch ai to antigravity' 7053 'antigravity-switch-palette'
     }).Count -eq 1
 } 90)
 $antigravityConfig = @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' })[0].path
-$savedAfterSwitch = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+$antigravitySid = (Get-Content $antigravityConfig -Raw | ConvertFrom-Json).sid
+$savedAfterSwitch = Wait-For 'the desktop adopted the Antigravity provider and session' {
+    if (-not (Test-Path "$settings/session.json")) { return $null }
+    $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $row = $saved.tabs[0]
+    if ($row.PSObject.Properties['ai_agent'] -and [int]$row.ai_agent -eq 8 -and $row.PSObject.Properties['csid'] -and $row.csid -ceq $antigravitySid) { $saved }
+} 90
 if (@($savedAfterSwitch.tabs).Count -ne $tabsBefore.Count) { throw 'The switch changed the number of chat rows' }
 if ($savedAfterSwitch.tabs[0].name -cne $tabsBefore[0].name) { throw 'The switch renamed the chat' }
 Copy-Item "$settings/session.json" "$caseDir/session-after-switch.json"
