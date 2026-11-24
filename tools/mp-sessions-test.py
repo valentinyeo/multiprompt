@@ -109,8 +109,10 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
         for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER",
-                     "MULTIBOT_SID", "MULTIBOT_SESSION", "ZSB_SESSION", "MULTIPROMPT_LAYOUT_PATH"):
+                     "MULTIBOT_SID", "MULTIBOT_SESSION", "ZSB_SESSION", "MULTIPROMPT_LAYOUT_PATH",
+                     "MULTIPROMPT_HOST"):
             base.pop(name, None)
+        base["MULTIPROMPT_HOST"] = "0"
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
 

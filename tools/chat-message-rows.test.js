@@ -80,7 +80,7 @@ test('IGSH-1415 the live tail drops a row the transcript already carries', () =>
   assert.match(live, /if \(!chat_markdown\.drawnOnce\(item\.key, seen\)\) continue;/);
   assert.match(live, /added\.key = if \(id\.len == 0\) 0 else chat_markdown\.rowKey\(id\);/);
   assert.match(live, /\.row_key = item\.key,/);
-  assert.match(read('chat_session.zig'), /tailFor\(shell_id, app_state\.g_chat_capture\[len\.\.\], len, &live_blocks, seen\);/);
+  assert.match(read('chat_session.zig'), /tailFor\(shell_id, app_state\.g_chat_capture\[len\.\.\], len, &live_blocks, seen, source\);/);
   assert.match(read('chat_session.zig'), /const seen: \[\]const @import\("chat_markdown\.zig"\)\.Block = if \(from_file\) entry\.\?\.history\.blocks\.items else &\.\{\};/);
 });
 
