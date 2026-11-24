@@ -135,6 +135,7 @@ function describeRun(directory, name) {
       .filter(item => item.passed === false)
       .map(item => JSON.stringify([item.name, item.detail])))].sort() : [],
     screenshots: files.filter(file => /\.png$/i.test(file)),
+    videos: files.filter(file => /(?:^|\/)journey\.mp4$/i.test(file) && fs.statSync(path.join(directory, file)).size > 0),
     files: files.slice(0, 60),
   };
 }
@@ -221,7 +222,7 @@ function infrastructureError(value) {
 
 function runOutcome(run) {
   if (run.status === 'failed' && run.error && run.failureKind !== 'infrastructure' && !infrastructureError(run.error)) return 'failed';
-  if (run.failureKind === 'infrastructure' || infrastructureError(run.error) || infrastructureError(run.cleanup) || run.screenshots?.length === 0) return 'blocked';
+  if (run.failureKind === 'infrastructure' || infrastructureError(run.error) || infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0) return 'blocked';
   if (run.status === 'passed') return 'passed';
   return run.status === 'failed' ? 'failed' : 'blocked';
 }
@@ -240,8 +241,8 @@ function journeyRows(summary, features = Object.keys(summary.head)) {
     const head = worst(headRuns);
     const inherited = masterFailures.has(feature) && head !== 'passed';
     const blocked = inherited
-      ? headRuns.some(run => infrastructureError(run.cleanup) || run.screenshots?.length === 0)
-      : headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
+      ? headRuns.some(run => infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0)
+      : headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0);
     return { feature, head, inherited, blocked };
   });
 }
@@ -322,6 +323,7 @@ function evidenceMarkdown(summary, selection) {
     lines.push(`## ${row.feature}: head ${row.head}${row.inherited ? ', inherited from master nightly' : ''}`, '');
     for (const run of summary.head[row.feature]) {
       lines.push(`- head artifact ${run.artifact}: status ${run.status}, checks ${run.checks}, cleanup ${run.cleanup || 'none recorded'}${run.error ? `, error ${run.error}` : ''}`);
+      for (const video of (run.videos || []).slice(0, 4)) lines.push(`  - evidence/${run.artifact}/${video}`);
       for (const shot of run.screenshots.slice(0, 12)) lines.push(`  - evidence/${run.artifact}/${shot}`);
     }
     lines.push('');
@@ -371,10 +373,12 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     (name === 'head' && job.result === 'failure' && !rows.some(row => row.head === 'failed') &&
       (rows.every(row => row.head === 'passed') || rows.some(row => row.head !== 'passed' && !row.inherited))));
   const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
+  const missingVideos = selection.features.flatMap(feature => (summary.head?.[feature] || []).filter(run => run.videos?.length === 0).map(run => run.artifact || feature));
   if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
     for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
+    if (missingVideos.length) notes.push(`Missing journey.mp4 in evidence: ${missingVideos.join(', ')}.`);
     if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head})`).join(', ')}.`);
     for (const [name, job] of prerequisites) notes.push(`${name} job ${job.result}; full verification could not complete.`);
   }

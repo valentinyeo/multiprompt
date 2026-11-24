@@ -530,8 +530,7 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
-      - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
+      - name: Install journey video recorder
         uses: ./.github/actions/install-ffmpeg
         with:
           version: '7.1.1'
@@ -1026,12 +1025,10 @@ jobs:
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
-          if ($env:VERIFY_CANDIDATE_ARTIFACT) {
-            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
-          } elseif ($mapped.ContainsKey($env:FEATURE)) {
+          if ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
@@ -1151,8 +1148,7 @@ jobs:
         timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
-          $driver = if ($env:VERIFY_CANDIDATE_ARTIFACT) { '.claude/skills/verify-multiprompt/drive.ps1' } else { '.claude/skills/verify-multiprompt/control.ps1' }
-          & $driver -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |

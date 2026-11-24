@@ -36,6 +36,7 @@ function evidenceDir(entries) {
   for (const [name, result] of Object.entries(entries)) {
     fs.mkdirSync(path.join(dir, name), { recursive: true });
     fs.writeFileSync(path.join(dir, name, 'after.png'), 'png');
+    fs.writeFileSync(path.join(dir, name, 'journey.mp4'), 'mp4');
     if (result) fs.writeFileSync(path.join(dir, name, 'result.json'), JSON.stringify(result));
   }
   return dir;
@@ -560,6 +561,20 @@ test('losing every screenshot blocks a supposedly passing result', () => {
   fs.unlinkSync(path.join(dir, 'verify-appearance', 'after.png'));
   const summary = verifier.summarize(dir, ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('missing or empty journey.mp4 blocks a journey run and names the artifact', () => {
+  for (const mode of ['missing', 'empty']) {
+    const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
+    const video = path.join(dir, 'verify-appearance', 'journey.mp4');
+    if (mode === 'missing') fs.unlinkSync(video);
+    else fs.writeFileSync(video, '');
+    const summary = verifier.summarize(dir, ['appearance']);
+    assert.deepEqual(summary.head.appearance[0].videos, []);
+    const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
+    assert.equal(result.final, 'BLOCKED');
+    assert.match(result.body, /Missing journey\.mp4 in evidence: verify-appearance/);
+  }
 });
 
 test('selected journeys absent from a partial summary cannot pass', () => {

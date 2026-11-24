@@ -44,7 +44,11 @@ Journey detail: [Chat delivery](features/chat-delivery.md), [chat focus](feature
 
 ## Evidence
 
-Artifact `verify-<feature>` holds screenshots, `.uia.json`, `actions.json`, `result.json`, optional `process-tree.json`, `build.json`, `doctor.json`, logs, and `data/` before scratch removal. Prove the real user path, the action and resulting state, and independently read side effects. Cite only files you opened; if you cannot view PNGs, read JSON and saved state and say screenshots were unreviewed. More: [verification-reference.md](verification-reference.md#evidence).
+Artifact `verify-<feature>` holds `journey.mp4`, `video.json`, screenshots, `.uia.json`, `actions.json`, `result.json`, optional `process-tree.json`, `build.json`, `doctor.json`, logs, and `data/` before scratch removal. Prove the real user path, the action and resulting state, and independently read side effects. Cite only files you opened; if you cannot view PNGs, read JSON and saved state and say screenshots were unreviewed. More: [verification-reference.md](verification-reference.md#evidence).
+
+## Done video
+
+Every journey run records `journey.mp4` in its evidence artifact. For every screen change or urgent fix, fetch the PR's video with `node tools/done-video.mjs <pr-number> [journey]` and post the ticket's Done comment with the board CLI's `comment-add` command using `--kind done`, 2-3 plain sentences, and `--attach <path printed by tools/done-video.mjs>`.
 
 ## Cleanup
 
