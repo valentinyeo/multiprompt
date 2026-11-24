@@ -179,10 +179,11 @@ test('SOFT-3084 typing chat wires a source note and recipient copy is framed', (
   const suffix = mentionSourceNote(['X']);
   assert.equal(suffix, '(Valentin wrote this to you. It also mentions X, which already got its own copy. Answer it as your own message, but do not answer for X or relay it.)');
   assert.match(suffix, /Answer it as your own message/);
-  assert.match(suffix, /Do not answer for X/);
+  assert.match(suffix, /do not answer for X or relay it/);
   const multi = mentionSourceNote(['X', 'Y']);
   assert.match(multi, /mentions X and Y/);
-  assert.match(multi, /Do not answer for X or Y/);
+  assert.match(multi, /Answer it as your own message/);
+  assert.match(multi, /do not answer for X or Y or relay it/);
   assert.deepEqual(mentionTargets('@A{live-a}', 'live-a', live), []);
 });
 
