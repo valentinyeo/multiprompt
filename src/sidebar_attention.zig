@@ -40,7 +40,7 @@ const findGroupIdx = @import("sidebar.zig").findGroupIdx;
 const tabGroupId = @import("sidebar.zig").tabGroupId;
 const layoutRows = @import("sidebar.zig").layoutRows;
 
-fn tabPassesUnreadFilter(i: usize) bool {
+pub fn tabPassesUnreadFilter(i: usize) bool {
     if (app_state.shells[i].inbox_archived and !app_state.shells[i].needs_attention and i != app_state.active_shell) return false;
     return !app_state.g_unread_only or app_state.shells[i].needs_attention or i == app_state.active_shell;
 }
