@@ -126,6 +126,7 @@ static void terminal_window_cycle(HWND parent, int check_resources) {
     active->calls = 0;
     SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 1);
     active->used = 0;
+    active->calls = 0;
     mp_terminal_window_paste(hwnd);
     assert(!strcmp(active->bytes, "\033copy"));
     assert(active->calls == 1);
