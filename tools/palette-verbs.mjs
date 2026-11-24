@@ -3,7 +3,7 @@ export const screenOnly = {
   "chat": "the chat open on this screen",
   "pane": "the browser or computer pane on this screen",
   "menu": "menus that only open another list",
-  "local": "marks stored on this PC (pin, lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools",
+  "local": "marks stored on this PC (lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools",
   "account": "sign-in and account devices",
   "focus": "focusing a tab or workspace already on screen"
 };
@@ -31,6 +31,7 @@ export const verbs = {
   "SEARCH_SHOW_FREQUENT_OFFSET": "settings",
   "SEARCH_SYNC_NAME_OFFSET": "manual",
   "SEARCH_TABCTX_END_TMUX": "close",
+  "SEARCH_TABCTX_PIN_TOP": "pin",
   "SEARCH_TABCTX_FAVORITE": "star",
   "SEARCH_TABCTX_GROUP_ADD_OFFSET": "move",
   "SEARCH_TABCTX_GROUP_NEW": "group",
@@ -244,7 +245,6 @@ export const screen = {
   "SEARCH_TABCTX_INBOX_EXCLUDE": "local",
   "SEARCH_TABCTX_KEEPALIVE": "local",
   "SEARCH_TABCTX_KEEPAWAKE": "pane",
-  "SEARCH_TABCTX_PIN_TOP": "local",
   "SEARCH_TABCTX_RECONNECT": "local",
   "SEARCH_TABCTX_UNREAD": "local",
   "SEARCH_TABSORT_INBOX_OFFSET": "window",
