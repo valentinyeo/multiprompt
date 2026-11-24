@@ -42,7 +42,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         } while ($clock.Elapsed.TotalSeconds -lt $Seconds)
         throw "Timeout: $Name"
     }
-    function Read-State { try { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json } catch { $null } }
+    function Read-State { try { [EverydayPerformance]::Tail("$settings/session.json", 0) | ConvertFrom-Json } catch { $null } }
     function Foreground {
         [void](Await 'owned composer foreground' {
             $edit = [ChatDeliveryDesktop]::Composer($main)
@@ -65,7 +65,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         })
         Foreground
         $control = @(1..100 | ForEach-Object { [EverydayPerformance]::CompositorControl() })
-        @{ compositorControlMs=$control; load=(Get-CimInstance Win32_Processor | Select-Object Name, LoadPercentage); activeProcesses=$job.ReadAccounting().ActiveProcesses } | ConvertTo-Json -Depth 6 | Set-Content "$directory/control.json"
+        @{ compositorControlMs=$control; load=(Get-CimInstance Win32_Processor | Select-Object Name, LoadPercentage); availableDiskBytes=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($root)).AvailableFreeSpace; activeProcesses=$job.ReadAccounting().ActiveProcesses } | ConvertTo-Json -Depth 6 | Set-Content "$directory/control.json"
         $observer = [Diagnostics.Process]::GetCurrentProcess()
         $observer.Refresh(); $observerBefore = $observer.TotalProcessorTime.TotalMilliseconds
         $app.Refresh(); $appBefore = $app.TotalProcessorTime.TotalMilliseconds

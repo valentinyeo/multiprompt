@@ -37,6 +37,8 @@ for file in trials:
     trial = read(file)
     if trial['failure'] or trial['errors']:
         raise ValueError(f'Failed trial: {file}: {trial["failure"]}')
+    if 'Some app changes could not be saved' in file.with_name('debug.log').read_text(encoding='utf-8-sig'):
+        raise ValueError(f'App save failure invalidates trial: {file}')
     if read(file.with_name('cleanup.json'))['ActiveProcesses'] != 0:
         raise ValueError('Owned processes leaked')
     if not read(file.with_name('stream-receipt.json'))['exactLatestFound']:
