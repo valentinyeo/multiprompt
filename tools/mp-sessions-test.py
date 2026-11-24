@@ -377,7 +377,10 @@ class MpSessionsTest(unittest.TestCase):
         rows = self.parsed(self.run_sessions("list", "--json"))
         self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
-                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
+                                       workspace=None, group=None, busy=False, running=True, self=False,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
 
 if __name__ == "__main__":

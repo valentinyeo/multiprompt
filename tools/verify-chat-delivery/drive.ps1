@@ -754,7 +754,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'palette ready for select all' { (Read-Shared "$settings/debug.log").Substring($viewStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
             $allQuery = 'chat view select all'
             foreach ($letter in $allQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-            [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($viewStart) -match ('\[palette\] ready chars=' + $allQuery.Length + ' count=1 target=\d+') })
+            [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($viewStart) -match ('\[palette\] ready chars=' + $allQuery.Length + ' count=[1-9]\d* target=6364(?:\s|$)') })
             Press @(0x0D) 'Enter: select the whole Chat View'
             Press @(0x11, 0x43) 'Ctrl+C: copy what Chat View shows'
             Start-Sleep -Milliseconds 500
