@@ -57,12 +57,32 @@ pub fn quote(a: std.mem.Allocator, message: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
+fn commandLine(message: []const u8) ?[]const u8 {
+    if (message.len < 2 or message[0] != '/') return null;
+    var end: usize = 1;
+    while (end < message.len and message[end] != '\r' and message[end] != '\n') : (end += 1) {
+        const c = message[end];
+        const named = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == ':' or c == '_' or c == '-';
+        if (!named) return null;
+    }
+    const line = trimEnd(message[0..end]);
+    return line;
+}
+
 pub fn compose(a: std.mem.Allocator, quoted: ?[]const u8, message: []const u8) ![]u8 {
     const text = quoted orelse return a.dupe(u8, message);
     if (trimEnd(text).len == 0) return a.dupe(u8, message);
     if (trimEnd(message).len == 0) return a.dupe(u8, "");
     const quoted_text = try quote(a, text);
     defer a.free(quoted_text);
+    if (commandLine(message)) |command| {
+        var pos: usize = 0;
+        while (pos < message.len and message[pos] != '\r' and message[pos] != '\n') : (pos += 1) {}
+        while (pos < message.len and (message[pos] == '\r' or message[pos] == '\n')) : (pos += 1) {}
+        const rest = message[pos..];
+        if (trimEnd(rest).len == 0) return std.fmt.allocPrint(a, "{s}\n{s}", .{ command, quoted_text });
+        return std.fmt.allocPrint(a, "{s}\n{s}\n\n{s}", .{ command, quoted_text, rest });
+    }
     return std.fmt.allocPrint(a, "{s}\n\n{s}", .{ quoted_text, message });
 }
 
