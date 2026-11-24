@@ -1,6 +1,6 @@
 # Workspaces
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-workspaces.ps1
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/workspace-switcher.ps1
 
 Read the current workspace name above the sessions. Click the name to open the workspace card, select another named workspace, or create a workspace. The workspaces journey verifies native clicks and screenshots in every theme, including AMOLED. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
 

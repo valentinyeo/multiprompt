@@ -50,7 +50,7 @@ async function fixture() {
   };
   const invoke = async (extra = [], replacements = {}) => {
     const out = [], err = [];
-    const code = await run(['spawn', '--name', replacements.name ?? 'Example', '--folder', replacements.folder ?? folder, '--workspace', replacements.workspace ?? 'Work', '--host', '0', ...extra], { ...opts, out: x => out.push(x), err: x => err.push(x) });
+    const code = await run(['spawn', '--name', replacements.name ?? 'Example', '--folder', replacements.folder ?? folder, '--workspace', replacements.workspace ?? 'Work', ...extra], { ...opts, out: x => out.push(x), err: x => err.push(x) });
     return { code, out: out.join(''), err: err.join('') };
   };
   return { opts, invoke, messages, calls, get layout() { return layout; }, conflict: () => { conflicts = 1; }, fail: () => { failPut = true; }, deny: () => { denied = true; } };
