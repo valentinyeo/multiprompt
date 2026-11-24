@@ -27,11 +27,12 @@ test('sidebar rows outside the repainted area are not drawn again', () => {
 
 test('a scroll check that changes nothing does not invalidate the main window', () => {
   const fn = body(src('chat_render.zig'), 'pub fn chatScrollStateChanged(viewport_h: i32) void {');
-  const early = fn.indexOf('was_scrolled_up == app_state.g_chat_scrolled_up) return;');
-  const notify = fn.indexOf('chatNewMessagesChanged(had_messages);');
+  const early = fn.indexOf('was_scrolled_up == app_state.g_chat_scrolled_up) {');
   assert.ok(early > 0, 'unchanged pill state returns early');
-  assert.ok(notify > early, 'the pill invalidate runs only after the unchanged check');
   assert.match(fn, /before\.value == app_state\.g_chat_new_messages\.value/);
+  const unchanged = fn.slice(early, fn.indexOf('chatNewMessagesChanged(had_messages);'));
+  assert.match(unchanged, /chatNewMessagesLog\(\);\s+return;/, 'the unchanged state only refreshes its reported line');
+  assert.doesNotMatch(unchanged, /chatNewMessagesChanged|InvalidateRect|layoutChatControls/);
 });
 
 test('IGSH-1907 an empty message poll neither rewrites the outbox nor repaints the window', () => {

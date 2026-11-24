@@ -416,19 +416,22 @@ pub fn chatNewMessagesRect() ?RECT {
 pub fn chatNewMessagesChanged(had_messages: bool) void {
     if (had_messages != (app_state.g_chat_new_messages.count() != 0)) layoutChatControls();
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
-    if (verboseLoggingEnabled()) {
-        const rc = chatNewMessagesRect() orelse std.mem.zeroes(RECT);
-        var log: [200]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&log, "[chat] new messages count={d} visible={d} up={d} rect={d},{d},{d},{d}", .{
-            app_state.g_chat_new_messages.count(),
-            @intFromBool(app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)),
-            @intFromBool(app_state.g_chat_scrolled_up),
-            rc.left,
-            rc.top,
-            rc.right,
-            rc.bottom,
-        }) catch return);
-    }
+    chatNewMessagesLog();
+}
+
+pub fn chatNewMessagesLog() void {
+    if (!verboseLoggingEnabled()) return;
+    const rc = chatNewMessagesRect() orelse std.mem.zeroes(RECT);
+    var log: [200]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] new messages count={d} visible={d} up={d} rect={d},{d},{d},{d}", .{
+        app_state.g_chat_new_messages.count(),
+        @intFromBool(app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)),
+        @intFromBool(app_state.g_chat_scrolled_up),
+        rc.left,
+        rc.top,
+        rc.right,
+        rc.bottom,
+    }) catch return);
 }
 
 pub fn chatNewMessagesDismiss() void {
