@@ -215,7 +215,7 @@ test('a master push publishes without a release journey gate and never cancels a
   assert.equal(jobs.journeys, undefined, 'release.yml must not run candidate journeys');
   assert.equal(jobs['journey-gate'], undefined, 'release.yml must not gate publication on journeys');
   assert.doesNotMatch(release, /release-journeys\.mjs|release-journey-receipt|needs\.prepare\.outputs\.features/);
-  assert.match(jobs.release, /^    needs: \[prepare, build, launch, gitleaks, resource-observation\]$/m);
+  assert.match(jobs.release, /^    needs: \[prepare, build, launch, gitleaks\]$/m);
   assert.match(release, /sha256sum -- \*\.exe \*\.zip release-notes\.json > SHA256SUMS\.txt/);
   const auto = fs.readFileSync(new URL('../.github/workflows/auto-release.yml', import.meta.url), 'utf8');
   assert.match(auto, /^concurrency:\n  group: auto-release-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false$/m);

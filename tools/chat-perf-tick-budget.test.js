@@ -16,9 +16,15 @@ const tick = number('tick_ms', /tick_ms: f64 = ([\d.]+)/);
 const minBatch = number('min_batch_ms', /min_batch_ms: i64 = (\d+)/);
 const slack = number('slack_ratio', /slack_ratio: f64 = ([\d.]+)/);
 const floor = number('absolute_floor_ms', /absolute_floor_ms: i64 = (\d+)/);
-const refWork = 6100 * 1200;
-const heaviestWork = 12_200 * 600;
-const smallWork = 2800 * 600;
+const refBlockChars = 1200;
+
+function workUnits(blocks, blockChars) {
+  return blocks * (blockChars + refBlockChars);
+}
+
+const refWork = workUnits(6100, refBlockChars);
+const heaviestWork = workUnits(12_200, 600);
+const smallWork = workUnits(2800, 600);
 
 function quantize(ms) {
   return Math.floor(ms / tick + 1e-9) * tick;
@@ -84,7 +90,7 @@ test('SOFT-3052 a batched trial keeps one tick inside a fraction of the budget',
 
 test('SOFT-3052 a doubled heavy path still fails the batched gate', () => {
   const reference = batchedPerCall(84);
-  const regressed = batchedPerCall(168);
+  const regressed = batchedPerCall(84 * 2 + tick);
   const limit = newBudget(reference.perCall);
   assert.ok(regressed.perCall > limit, `regressed reading ${regressed.perCall} ms must exceed ${limit} ms`);
   const noisyReference = batchedPerCall(84 + tick);

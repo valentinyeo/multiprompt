@@ -1,6 +1,6 @@
 # Safe release updates
 
-Source files: src/executable_rename.zig, tools/executable-rename.test.ps1, tools/fixtures/SOFT-1966/legacy-update.ps1, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1, .github/workflows/legacy-update-feed.yml, tools/legacy-update-proof.ps1
+Source files: src/executable_rename.zig, tools/executable-rename.test.ps1, tools/fixtures/SOFT-1966/legacy-update.ps1, src/update*, src/release*, src/startup.zig, src/launch_snapshot.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1, .github/workflows/legacy-update-feed.yml, tools/legacy-update-proof.ps1
 
 ## Sub-features
 

@@ -1,0 +1,1 @@
+Only deliver @ mentions when addressed or CC'd

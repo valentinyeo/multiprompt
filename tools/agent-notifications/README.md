@@ -413,15 +413,43 @@ Install the separate owner broker as the desktop SSH bridge user with
 It uses an isolated routing module; the existing notification service and
 clients are neither replaced nor restarted. No vault token is loaded.
 The endpoint is
-`/tmp/mp-browser-<relay-uid>/control.sock`. Install the other user's wrapper with
-`bash tools/install-user-browser.sh /tmp/mp-browser-<relay-uid>/control.sock`
-as that user. No vault tool or credential is installed.
+`/tmp/mp-browser-<relay-uid>/control.sock`, mode 666 in a 755 directory, so every
+local user can connect.
 
-The socket verifies the caller's Unix peer UID. Only outer tmux panes whose
-trusted `@owner_user` and `@owner_session` metadata match that caller/session
-are eligible. `tools/user-tmux.sh` writes this metadata as the bridge owner.
-The broker resolves that exact host/session through the connected desktop's
-layout, then addresses its shell ID. Missing or ambiguous ownership fails
-closed, with no shared TCP fallback. Global app operations, raw CDP and browser
-administration are not available through this channel. Browser tab selectors
-remain confined to the resolved pane by the extension's existing checks.
+The other user needs no install and no updated copy. Their hosted chat runs the
+shared runtime, which publishes `zsb`, `multiprompt-browser` and `mp-zsb` in
+`~/.multiprompt-runtime`, and the delegating host puts that directory first on
+the chat's `PATH` and exports
+`ZSB_SOCKET=/tmp/mp-browser-<relay-uid>/control.sock`. A stale
+`~/.local/bin/zsb` or `browser-socket` file is therefore never used. No vault
+tool or credential is installed for the second user.
+
+The socket verifies the caller's Unix peer UID. A hosted chat is eligible when
+the delegating host registered its session for that UID under
+`~/.local/state/multiprompt/owner-sessions`, and the broker forwards the session
+name unchanged so the app routes it to that chat's own pane. Terminal chats keep
+the outer tmux check: only panes whose trusted `@owner_user` and
+`@owner_session` metadata match the caller/session are eligible, with
+`tools/user-tmux.sh` writing that metadata as the bridge owner. The broker then
+resolves that exact host/session through the connected desktop's layout and
+addresses its shell ID. Missing or ambiguous ownership fails closed, with no
+shared TCP fallback. Global app operations, raw CDP and browser administration
+are not available through this channel. Browser tab selectors remain confined to
+the resolved pane by the extension's existing checks.
+
+### One-time server steps
+
+Run these once per server, as the desktop SSH bridge user, then reconnect the
+chat's SSH session from Multiprompt:
+
+1. `bash tools/install-owner-browser.sh <exact-desktop-SSH-host-name>` and check
+   `systemctl --user status mp-owner-browser.service` and that
+   `/tmp/mp-browser-<relay-uid>/control.sock` exists.
+2. Stop whatever else holds the pane port. `zsb status` as the second user now
+   names the process in `port_conflict`, for example an old
+   `~/.local/share/zigshell/mp_notify_relay.py` started before the relay moved to
+   `~/.local/share/multiprompt-owner-browser/`. Stop that unit or process and
+   delete nothing else; the reverse tunnel binds 19548 on the next reconnect.
+3. Delete the second user's stale `~/.local/bin/zsb`, `~/.local/bin/multiprompt-browser`
+   and `~/.config/multiprompt/browser-socket`. They are no longer read, and
+   removing them keeps a hand-run `zsb` from resolving to an old copy.
