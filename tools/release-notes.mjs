@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTicketId, unlinkedTicketId } from './ticket-id.js';
 import { ticketLine, ticketRecord } from './ticket-titles.mjs';
-import { compareTags, userFacingReleaseLine } from './version-stamp.mjs';
+import { compareTags, userFacingTitle, userFacingReleaseLine } from './version-stamp.mjs';
 
 function unlinkedText(text) {
   let value = (typeof text === 'string' ? text : '').replace(/[\x00-\x1f\x7f]/g, ' ').trim();
@@ -39,15 +39,18 @@ export function releaseNotes(source, tag, warn = () => {}) {
       }
       const prefix = `${item.ticket} `;
       if (!item.text.startsWith(prefix)) {
-        warn(`Release ${match[1]}: ${item.ticket} has no title after its key; publishing its line without a link`);
-        return unlinked(item.text);
+        const visible = userFacingTitle(item.text);
+        warn(`Release ${match[1]}: ${item.ticket} has no title after its key; ${visible ? 'publishing its line without a link' : 'leaving the line out'}`);
+        return visible ? unlinked(item.text) : [];
       }
       try {
         const record = ticketRecord(item.ticket, item.text.slice(prefix.length));
         return [{ text: ticketLine(record), ticket: record.id }];
       } catch (error) {
-        warn(`Release ${match[1]}: ${item.ticket} has no title this release can publish (${error.message}); publishing its line without a link`);
-        return unlinked(item.text);
+        const remainder = item.text.slice(prefix.length).trim();
+        const visible = !!remainder && userFacingTitle(remainder);
+        warn(`Release ${match[1]}: ${item.ticket} has no title this release can publish (${error.message}); ${visible ? 'publishing its line without a link' : 'leaving the line out'}`);
+        return visible ? unlinked(remainder) : [];
       }
     });
     const visible = kept.filter(item => !item.ticket || userFacingReleaseLine(item.text));

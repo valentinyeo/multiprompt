@@ -71,7 +71,7 @@ export function productChange(line) {
 
 const engineeringTitle = /^(?:\[INFRA\]\s*|Multiprompt verify:\s*|Multiprompt verification playbook:\s*|Release gate:\s*|CI:\s*)/i;
 
-function userFacingTitle(title) {
+export function userFacingTitle(title) {
   if (!title.trim()) return false;
   if (/checks and fixes, no visible change/i.test(title)) return false;
   if (engineeringTitle.test(title)) return false;
@@ -272,7 +272,7 @@ export function changelogTicketIds(source) {
   return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => parseTicketId(match[1])?.id).filter(Boolean))];
 }
 
-export function applyTicketTitles(source, titles, fallbacks = {}) {
+export function applyTicketTitles(source, titles, fallbacks = {}, warn = () => {}) {
   const literal = line => JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
   return source.replace(/^[ \t]*\.\{ \.text = "(?:\\.|[^"\\])*", \.ticket = "([^"\\]*)" \},\r?\n/gm, (row, id) => {
     if (!id || id === unlinkedTicketId) return row;
@@ -282,14 +282,19 @@ export function applyTicketTitles(source, titles, fallbacks = {}) {
       return `        .{ .text = ${literal(line)}, .ticket = "${canonical}" },\n`;
     }
     const fallback = fallbacks[canonical ?? id];
-    if (!fallback) throw new Error(`Missing title for ${id}`);
-    return `        .{ .text = ${literal(fallback)}, .ticket = "${unlinkedTicketId}" },\n`;
+    if (fallback) return `        .{ .text = ${literal(fallback)}, .ticket = "${unlinkedTicketId}" },\n`;
+    if (/\.text = ""/.test(row)) {
+      warn(`${id} has no title this release can publish; the line is left out`);
+      return '';
+    }
+    warn(`${id} has no title this release can publish; its published line stays unchanged`);
+    return row;
   });
 }
 
 export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog, warn = () => {}) {
   const built = buildUnresolvedChangelog(files, tag, history, commits, warn);
-  return applyTicketTitles(built.changelog, titles, built.fallbacks);
+  return applyTicketTitles(built.changelog, titles, built.fallbacks, warn);
 }
 
 function git(args, cwd, timeout) {
@@ -457,7 +462,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const built = buildUnresolvedChangelog(files, base, history, commits, line => console.error(`Release notes warning: ${line}`));
       const resolved = await resolveReleaseTitles(changelogTicketIds(built.changelog), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
       for (const [key, kind] of new Map([...built.skipped, ...resolved.unresolved])) console.error(`Release notes skip ${key}: ${kind}`);
-      fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks));
+      fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks, line => console.error(`Release notes warning: ${line}`)));
     } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
     console.error(error.message);
