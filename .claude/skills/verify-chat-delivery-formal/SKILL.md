@@ -59,9 +59,11 @@ Source/model mapping was reviewed at `76663794306268b6b3d5993176a80e77dd0b43e3` 
 
 SOFT-2524 changes only the outer runtime selection and bundle identity. The covered reader functions and their callers are unchanged; its file hash was refreshed after reviewing that boundary. Whole-file drift checks remain deliberate rather than recomputing their expected hashes at check time.
 
+SOFT-3054 merges master into the fresh-start handover branch. The handover now picks one usable reply and falls back to recent history; that sits beside the outbox and echo path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader and its test file hashes moved, and the sync commit names the merged master tip.
+
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
-SOFT-2604 saves one handover reply when a fresh start's agent answers twice. It touches only `host_fresh_reply` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
+SOFT-2604 saves one handover reply when a fresh start's agent answers twice. That rule now lives in SOFT-3054's `host_fresh_handover_pick` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
 
