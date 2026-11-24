@@ -17,7 +17,7 @@ test('MUBO-280 a history worker waits for startup rather than backing off a heal
     fs.writeFileSync(file, `
 const std = @import("std");
 const Channel = struct {};
-var channel: Channel = .{};
+var ready_channel: Channel = .{};
 const Mutex = struct { fn unlock(_: *Mutex) void {} };
 const Host = struct { mutex: Mutex = .{}, ready: ?*anyopaque = @ptrFromInt(1), starting: bool = false, running: bool = false };
 var hosts: [3]Host = @splat(.{});
@@ -28,7 +28,7 @@ fn lock(_: *Host) void {}
 fn open(index: u8, _: bool) ?*Channel {
     opens += 1;
     if (index >= hosts.len) return null;
-    if (hosts[index].running) return &channel;
+    if (hosts[index].running) return &ready_channel;
     hosts[index].starting = true;
     return null;
 }
@@ -49,7 +49,7 @@ test "cold startup and existing startup return the channel without a retry delay
         waits = 0;
         opens = 0;
         outcome = .ready;
-        try std.testing.expect(openReady(0, true) == &channel);
+        try std.testing.expect(openReady(0, true) == &ready_channel);
         try std.testing.expectEqual(@as(usize, 1), waits);
         try std.testing.expectEqual(@as(usize, 2), opens);
     }
@@ -57,7 +57,7 @@ test "cold startup and existing startup return the channel without a retry delay
 test "ready connections never wait and invalid hosts never wait" {
     hosts[0].running = true;
     waits = 0;
-    try std.testing.expect(openReady(0, false) == &channel);
+    try std.testing.expect(openReady(0, false) == &ready_channel);
     try std.testing.expect(openReady(3, false) == null);
     try std.testing.expectEqual(@as(usize, 0), waits);
 }
