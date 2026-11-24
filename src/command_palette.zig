@@ -4178,6 +4178,8 @@ pub fn updateSearchResults() void {
                 const archived = app_state.g_search_workspace_action == .restore;
                 if (e.archived != archived) continue;
             }
+            if (@import("workspaces.zig").workspaceDeleteMoveSource() != null and findMyWorkspaceSlot(e.id[0..e.id_len]) == null) continue;
+            if (@import("workspaces.zig").workspaceDeleteMoveSource()) |source| if (source == @as(u32, @intCast(wi))) continue;
             if (app_state.g_search_workspace_action == .archive and !@import("workspaces.zig").workspaceCanArchive(@intCast(wi))) continue;
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
                 if (app_state.g_ws_snoozed[slot] and !app_state.g_search_workspace_delete_mode) continue;
