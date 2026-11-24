@@ -2,6 +2,11 @@ name: Speed proof
 run-name: speed proof ${{ github.run_id }} ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: card, idle or all
+        default: all
+        required: false
   push:
     branches:
       - proof/mubo-speed-verify
@@ -16,6 +21,7 @@ env:
 jobs:
   card:
     name: usage card open time
+    if: github.event_name == 'push' || inputs.only == 'all' || inputs.only == 'card'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -33,9 +39,17 @@ jobs:
       - name: Measure card open time
         shell: pwsh
         run: |
-          foreach ($tag in @($env:BEFORE_TAG, $env:AFTER_TAG)) {
-            ./tools/mubo-speed/card-open-timing.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/$tag" -Tag $tag -Samples 7
-            Write-Host "$tag card exit $LASTEXITCODE"
+          $rounds = @(
+            @($env:BEFORE_TAG, $env:AFTER_TAG),
+            @($env:AFTER_TAG, $env:BEFORE_TAG)
+          )
+          $index = 0
+          foreach ($round in $rounds) {
+            $index++
+            foreach ($tag in $round) {
+              ./tools/mubo-speed/card-open-timing.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/$tag/round-$index" -Tag $tag -Samples 7
+              Write-Host "$tag round $index card exit $LASTEXITCODE"
+            }
           }
           exit 0
       - name: Summarise
@@ -53,6 +67,7 @@ jobs:
           retention-days: 14
   idle-bare:
     name: idle log and CPU, no chat open
+    if: github.event_name == 'push' || inputs.only == 'all' || inputs.only == 'idle'
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -92,6 +107,7 @@ jobs:
           retention-days: 14
   idle-chat:
     name: idle log and CPU, chat view open
+    if: github.event_name == 'push' || inputs.only == 'all' || inputs.only == 'idle'
     runs-on: windows-latest
     timeout-minutes: 45
     env:

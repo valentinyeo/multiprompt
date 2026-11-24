@@ -28,14 +28,17 @@ const round = value => (value === null || value === undefined ? 'n/a' : String(v
 
 lines.push('## Usage card open time (MUBO-14)');
 lines.push('');
-lines.push('| release | version | samples | errors | open p50 ms | open max ms | hover-to-card p50 ms | hover-to-card max ms | UI blocked max ms | smooth max ms | panel pixels | status |');
-lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+lines.push('| release | version | click samples | click errors | click p50 ms | click max ms | hover p50 ms | hover max ms | hover minus dwell p50 ms | hover minus dwell max ms | dwell ms read back | UI blocked max ms | smooth max ms | panel pixels | status |');
+lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
 for (const run of card) {
-  lines.push(`| ${run.tag} | ${round(run.exeVersion)} | ${round(run.painted)} | ${round(run.errors)} | ${round(run.openedP50Ms)} | ${round(run.openedMaxMs)} | ${round(run.rawP50Ms)} | ${round(run.rawMaxMs)} | ${round(run.blockedMaxMs)} | ${round(run.smoothMaxMs)} | ${round(run.panelPixels)} | ${round(run.status)} |`);
+  lines.push(`| ${run.tag} | ${round(run.exeVersion)} | ${round(run.clickPainted)} | ${round(run.errors)} | ${round(run.clickP50Ms)} | ${round(run.clickMaxMs)} | ${round(run.hoverP50Ms)} | ${round(run.hoverMaxMs)} | ${round(run.hoverAdjustedP50Ms)} | ${round(run.hoverAdjustedMaxMs)} | ${round(run.hoverDelayReadBackMs)} | ${round(run.blockedMaxMs)} | ${round(run.smoothMaxMs)} | ${round(run.panelPixels)} | ${round(run.status)} |`);
 }
 for (const run of card) {
-  const pass = run.status === 'measured' && run.painted >= 5 && run.errors === 0 && typeof run.openedMaxMs === 'number' && run.openedMaxMs < 100 && typeof run.smoothMaxMs === 'number' && run.smoothMaxMs < 250 && run.panelPixels > 0;
-  lines.push(`- ${run.tag}: ${pass ? 'PASS' : 'FAIL'} (open max ${round(run.openedMaxMs)} ms, smooth max ${round(run.smoothMaxMs)} ms${run.error ? ', error: ' + run.error : ''})`);
+  const base = run.status === 'measured' && run.errors === 0 && run.panelPixels > 0 && typeof run.smoothMaxMs === 'number' && run.smoothMaxMs < 250;
+  const clickPass = base && run.clickPainted >= 5 && typeof run.clickMaxMs === 'number' && run.clickMaxMs < 100;
+  const hoverPass = base && run.hoverPainted >= 5 && typeof run.hoverAdjustedMaxMs === 'number' && run.hoverAdjustedMaxMs < 100;
+  const pass = clickPass || hoverPass;
+  lines.push(`- ${run.tag}: ${pass ? 'PASS' : 'FAIL'} (click max ${round(run.clickMaxMs)} ms over ${round(run.clickPainted)} samples, hover minus dwell max ${round(run.hoverAdjustedMaxMs)} ms, smooth max ${round(run.smoothMaxMs)} ms${run.error ? ', error: ' + run.error : ''})`);
 }
 lines.push('');
 

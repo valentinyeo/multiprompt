@@ -30,26 +30,33 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public sealed class CardSpeedSample {
-    public double RawMs;
+    public double ClickMs;
+    public bool ClickPainted;
+    public bool ClickTimedOut;
+    public double HoverMs;
+    public bool HoverPainted;
+    public bool HoverTimedOut;
     public double BlockedMs;
-    public bool Painted;
-    public bool TimedOut;
 }
 
 public sealed class CardSpeedReport {
     public CardSpeedSample[] Samples;
-    public int Painted;
-    public double P50;
-    public double Max;
-    public double OpenP50;
-    public double OpenMax;
+    public int ClickPainted;
+    public int HoverPainted;
     public int Errors;
+    public double ClickP50;
+    public double ClickMax;
+    public double HoverP50;
+    public double HoverMax;
+    public double HoverAdjustedP50;
+    public double HoverAdjustedMax;
+    public int HoverReadBackMs;
+    public bool HoverDelayTook;
     public int PanelPixels;
     public double SmoothMaxMs;
     public string CardTitle;
     public int CardWidth;
     public int CardHeight;
-    public int HoverDelayMs;
 }
 
 public static class CardSpeed {
@@ -143,16 +150,67 @@ public static class CardSpeed {
         if (!SpiSet(0x0067, milliseconds, IntPtr.Zero, 3)) throw new InvalidOperationException("SPI_SETMOUSEHOVERTIME failed");
     }
 
+    static Mouse Absolute(int x, int y) {
+        return new Mouse { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+    }
+
     public static void MoveTo(int x, int y) {
         SetCursorPos(x, y);
         Input[] inputs = new Input[1];
-        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        inputs[0].Data.Mouse = Absolute(x, y);
         if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("pointer move failed");
+    }
+
+    public static void Click(int x, int y) {
+        SetCursorPos(x, y);
+        Input[] inputs = new Input[3];
+        inputs[0].Data.Mouse = Absolute(x, y);
+        inputs[1].Data.Mouse.Flags = 2;
+        inputs[2].Data.Mouse.Flags = 4;
+        if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("pointer click failed");
+    }
+
+    public static void Escape() {
+        Input[] inputs = new Input[2];
+        inputs[0].Type = 1;
+        inputs[0].Data.Keyboard.Key = 0x1B;
+        inputs[1].Type = 1;
+        inputs[1].Data.Keyboard.Key = 0x1B;
+        inputs[1].Data.Keyboard.Flags = 2;
+        if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("escape key failed");
     }
 
     static bool Ping(IntPtr main, uint timeout) {
         IntPtr result;
         return SendPing(main, 0, IntPtr.Zero, IntPtr.Zero, 2, timeout, out result) != IntPtr.Zero;
+    }
+
+    static bool WaitHidden(IntPtr card, int timeoutMs) {
+        Stopwatch clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < timeoutMs) {
+            if (card == IntPtr.Zero) return true;
+            if (!IsWindowVisible(card)) return true;
+            System.Threading.Thread.Sleep(2);
+        }
+        return false;
+    }
+
+    static double TimedOpen(IntPtr main, IntPtr card, int timeoutMs, bool click, int iconX, int iconY, out bool painted, out bool timedOut, out double blocked) {
+        Stopwatch clock = Stopwatch.StartNew();
+        if (click) Click(iconX, iconY); else MoveTo(iconX, iconY);
+        blocked = 0.0;
+        double since = 0.0, lastPing = -10.0;
+        bool blockedNow = false;
+        for (;;) {
+            double now = clock.Elapsed.TotalMilliseconds;
+            if (now - lastPing >= 2.0) {
+                lastPing = now;
+                if (!Ping(main, 0)) { if (!blockedNow) { blockedNow = true; since = now; } }
+                else if (blockedNow) { blocked += now - since; blockedNow = false; }
+            }
+            if (card != IntPtr.Zero && IsWindowVisible(card)) { painted = true; timedOut = false; if (blockedNow) blocked += now - since; return clock.Elapsed.TotalMilliseconds; }
+            if (now > timeoutMs) { painted = false; timedOut = true; if (blockedNow) blocked += now - since; return clock.Elapsed.TotalMilliseconds; }
+        }
     }
 
     static int PanelScan(IntPtr card, int[] panel) {
@@ -177,36 +235,30 @@ public static class CardSpeed {
 
     public static CardSpeedReport Measure(IntPtr main, string cardClass, int iconX, int iconY, int awayX, int awayY, int samples, int hoverDelayMs, int[] panel) {
         CardSpeedReport report = new CardSpeedReport();
-        report.HoverDelayMs = hoverDelayMs;
         report.Samples = new CardSpeedSample[Math.Max(1, samples)];
-        double[] raw = new double[report.Samples.Length];
+        double[] clicks = new double[report.Samples.Length];
+        double[] hovers = new double[report.Samples.Length];
         IntPtr card = Find(main, cardClass);
         for (int i = 0; i < report.Samples.Length; i++) {
             CardSpeedSample sample = new CardSpeedSample();
             report.Samples[i] = sample;
             MoveTo(awayX, awayY);
-            Stopwatch hide = Stopwatch.StartNew();
-            while (card != IntPtr.Zero && IsWindowVisible(card) && hide.Elapsed.TotalMilliseconds < 4000) System.Threading.Thread.Sleep(2);
-            if (card == IntPtr.Zero) card = Find(main, cardClass);
-            Stopwatch clock = Stopwatch.StartNew();
-            MoveTo(iconX, iconY);
-            double blocked = 0.0, since = 0.0, lastPing = -10.0;
-            bool blockedNow = false;
-            for (;;) {
-                double now = clock.Elapsed.TotalMilliseconds;
-                if (now - lastPing >= 2.0) {
-                    lastPing = now;
-                    if (!Ping(main, 0)) { if (!blockedNow) { blockedNow = true; since = now; } }
-                    else if (blockedNow) { blocked += now - since; blockedNow = false; }
-                }
-                if (card == IntPtr.Zero) card = Find(main, cardClass);
-                if (card != IntPtr.Zero && IsWindowVisible(card)) { sample.RawMs = clock.Elapsed.TotalMilliseconds; sample.Painted = true; break; }
-                if (now > 5000.0) { sample.RawMs = clock.Elapsed.TotalMilliseconds; sample.TimedOut = true; break; }
-            }
-            if (blockedNow) blocked += clock.Elapsed.TotalMilliseconds - since;
+            if (!WaitHidden(card, 2500)) { Escape(); WaitHidden(card, 2500); }
+            bool painted, timedOut;
+            double blocked;
+            sample.ClickMs = TimedOpen(main, card, 4000, true, iconX, iconY, out painted, out timedOut, out blocked);
+            sample.ClickPainted = painted;
+            sample.ClickTimedOut = timedOut;
             sample.BlockedMs = blocked;
-            if (sample.Painted) { raw[report.Painted] = sample.RawMs; report.Painted++; } else report.Errors++;
-            System.Threading.Thread.Sleep(150);
+            if (painted) { clicks[report.ClickPainted] = sample.ClickMs; report.ClickPainted++; } else report.Errors++;
+            if (painted) { Escape(); WaitHidden(card, 2500); }
+            MoveTo(awayX, awayY);
+            WaitHidden(card, 2500);
+            sample.HoverMs = TimedOpen(main, card, 4000, false, iconX, iconY, out painted, out timedOut, out blocked);
+            sample.HoverPainted = painted;
+            sample.HoverTimedOut = timedOut;
+            if (painted) { hovers[report.HoverPainted] = sample.HoverMs; report.HoverPainted++; }
+            System.Threading.Thread.Sleep(120);
         }
         if (card != IntPtr.Zero) {
             report.CardTitle = Title(card);
@@ -214,21 +266,23 @@ public static class CardSpeed {
             if (GetWindowRect(card, out rect)) { report.CardWidth = rect.Right - rect.Left; report.CardHeight = rect.Bottom - rect.Top; }
             if (IsWindowVisible(card)) report.PanelPixels = PanelScan(card, panel);
         }
-        if (report.Painted > 0) {
-            double[] ordered = new double[report.Painted];
-            Array.Copy(raw, ordered, report.Painted);
+        if (report.ClickPainted > 0) {
+            double[] ordered = new double[report.ClickPainted];
+            Array.Copy(clicks, ordered, report.ClickPainted);
             Array.Sort(ordered);
-            report.P50 = ordered[(report.Painted - 1) / 2];
-            report.Max = ordered[report.Painted - 1];
-            for (int i = 0; i < report.Painted; i++) {
-                ordered[i] = raw[i] - hoverDelayMs;
-                if (ordered[i] < 0.0) ordered[i] = 0.0;
-            }
-            Array.Sort(ordered);
-            report.OpenP50 = ordered[(report.Painted - 1) / 2];
-            report.OpenMax = ordered[report.Painted - 1];
+            report.ClickP50 = ordered[(report.ClickPainted - 1) / 2];
+            report.ClickMax = ordered[report.ClickPainted - 1];
         }
-        for (int i = 0; i < 60; i++) {
+        if (report.HoverPainted > 0) {
+            double[] ordered = new double[report.HoverPainted];
+            Array.Copy(hovers, ordered, report.HoverPainted);
+            Array.Sort(ordered);
+            report.HoverP50 = ordered[(report.HoverPainted - 1) / 2];
+            report.HoverMax = ordered[report.HoverPainted - 1];
+            report.HoverAdjustedP50 = Math.Max(0.0, report.HoverP50 - hoverDelayMs);
+            report.HoverAdjustedMax = Math.Max(0.0, report.HoverMax - hoverDelayMs);
+        }
+        for (int i = 0; i < 40; i++) {
             if (card == IntPtr.Zero || !IsWindowVisible(card)) { MoveTo(awayX, awayY); MoveTo(iconX, iconY); System.Threading.Thread.Sleep(250); }
             Stopwatch trip = Stopwatch.StartNew();
             bool answered = Ping(main, 250);
@@ -266,19 +320,23 @@ $result = [ordered]@{
     tag = $Tag
     status = 'failed'
     samples = @()
-    painted = $null
+    clickPainted = $null
+    hoverPainted = $null
     errors = $null
-    openedP50Ms = $null
-    openedMaxMs = $null
-    rawP50Ms = $null
-    rawMaxMs = $null
+    clickP50Ms = $null
+    clickMaxMs = $null
+    hoverP50Ms = $null
+    hoverMaxMs = $null
+    hoverAdjustedP50Ms = $null
+    hoverAdjustedMaxMs = $null
+    hoverDelayReadBackMs = $null
+    hoverDelayTook = $null
     blockedMaxMs = $null
     smoothMaxMs = $null
     panelPixels = $null
     cardTitle = $null
     cardWidth = $null
     cardHeight = $null
-    hoverDelayMs = $HoverDelayMs
     scale = $null
     clientWidth = $null
     clientHeight = $null
@@ -321,28 +379,41 @@ try {
     if ($hit -ne 'ZigShell') { throw "Usage icon is not under the pointer, hit class '$hit'" }
     $previous = [CardSpeed]::HoverDelay()
     [CardSpeed]::SetHoverDelay([uint32]$HoverDelayMs)
+    $result.hoverDelayReadBackMs = [CardSpeed]::HoverDelay()
+    $result.hoverDelayTook = ($result.hoverDelayReadBackMs -eq $HoverDelayMs)
     $report = [CardSpeed]::Measure($main, $cardClass, $icon[0], $icon[1], $away[0], $away[1], $Samples, $HoverDelayMs, [int[]]$geometry.card.panel)
     [CardSpeed]::SetHoverDelay($previous)
     $rows = @()
     $blocked = 0.0
     foreach ($sample in $report.Samples) {
-        $rows += [ordered]@{ rawMs = [Math]::Round($sample.RawMs, 2); painted = $sample.Painted; timedOut = $sample.TimedOut; blockedMs = [Math]::Round($sample.BlockedMs, 2) }
+        $rows += [ordered]@{
+            clickMs = [Math]::Round($sample.ClickMs, 2)
+            clickPainted = $sample.ClickPainted
+            clickTimedOut = $sample.ClickTimedOut
+            hoverMs = [Math]::Round($sample.HoverMs, 2)
+            hoverPainted = $sample.HoverPainted
+            hoverTimedOut = $sample.HoverTimedOut
+            blockedMs = [Math]::Round($sample.BlockedMs, 2)
+        }
         if ($sample.BlockedMs -gt $blocked) { $blocked = $sample.BlockedMs }
     }
     $result.samples = $rows
-    $result.painted = $report.Painted
+    $result.clickPainted = $report.ClickPainted
+    $result.hoverPainted = $report.HoverPainted
     $result.errors = $report.Errors
-    $result.openedP50Ms = [Math]::Round($report.OpenP50, 2)
-    $result.openedMaxMs = [Math]::Round($report.OpenMax, 2)
-    $result.rawP50Ms = [Math]::Round($report.P50, 2)
-    $result.rawMaxMs = [Math]::Round($report.Max, 2)
+    $result.clickP50Ms = [Math]::Round($report.ClickP50, 2)
+    $result.clickMaxMs = [Math]::Round($report.ClickMax, 2)
+    $result.hoverP50Ms = [Math]::Round($report.HoverP50, 2)
+    $result.hoverMaxMs = [Math]::Round($report.HoverMax, 2)
+    $result.hoverAdjustedP50Ms = [Math]::Round($report.HoverAdjustedP50, 2)
+    $result.hoverAdjustedMaxMs = [Math]::Round($report.HoverAdjustedMax, 2)
     $result.blockedMaxMs = [Math]::Round($blocked, 2)
     $result.smoothMaxMs = [Math]::Round($report.SmoothMaxMs, 2)
     $result.panelPixels = $report.PanelPixels
     $result.cardTitle = $report.CardTitle
     $result.cardWidth = $report.CardWidth
     $result.cardHeight = $report.CardHeight
-    $result.status = if ($report.Errors -eq 0 -and $report.Painted -ge 5) { 'measured' } else { 'failed' }
+    $result.status = if ($report.Errors -eq 0 -and ($report.ClickPainted -ge 5 -or $report.HoverPainted -ge 5)) { 'measured' } else { 'failed' }
 } catch {
     $result.error = $_.Exception.Message
     Write-Host $_.ScriptStackTrace
