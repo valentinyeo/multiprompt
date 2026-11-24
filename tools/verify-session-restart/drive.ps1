@@ -154,9 +154,15 @@ function Restart-DesktopApp {
     $stopped = $job.Stop()
     if ($stopped.ActiveProcesses -ne 0) { throw 'Owned job still has processes before desktop relaunch' }
     $job.Dispose()
+    $relaunchLogOffset = (Log-Text).Length
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Evidence/relaunch-stdout.log", "$Evidence/relaunch-stderr.log", '--single-window')
     $main = Wait-For 'relaunched window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'relaunched restore' {
+        $log = Log-Text
+        $tail = if ($log.Length -ge $relaunchLogOffset) { $log.Substring($relaunchLogOffset) } else { $log }
+        $tail -match 'launch step=browser'
+    })
     [void](Wait-For 'restored shells' { @((Read-SavedSession).tabs).Count -gt 0 })
 }
 try {
@@ -275,6 +281,13 @@ try {
     Press @(0x11, 0x4B) 'Ctrl+K: select chat after relaunch'
     Type-Text $chatName
     Press @(0x0D) 'Enter: focus restart chat after relaunch'
+    [void](Wait-For 'relaunched chat transcript' {
+        $log = Log-Text
+        $tail = if ($log.Length -ge $relaunchLogOffset) { $log.Substring($relaunchLogOffset) } else { $log }
+        $tab = Find-ChatTab (Read-SavedSession)
+        $hasSid = $null -ne $tab -and $tab.PSObject.Properties['csid'] -and -not [string]::IsNullOrWhiteSpace([string]$tab.csid) -and $tab.PSObject.Properties['shell_id']
+        $hasSid -and ($tail -match ('\[chat\] transcript load shell=' + [regex]::Escape([string]$tab.shell_id) + ' ok'))
+    } 60)
     Send-Line 'restart journey proof two'
     [void](Wait-For 'second server reply' {
         $snapshot = Server-Snapshot 'second-send'
