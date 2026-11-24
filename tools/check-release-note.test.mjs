@@ -37,7 +37,11 @@ function repo(t, files = base()) {
     fs.rmSync(path.join(dir, name), { force: true });
     git('rm', '--cached', '--ignore-unmatch', name);
   };
-  const run = () => spawnSync(process.execPath, [tool], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_HEAD_REF: '', GITHUB_REF_NAME: '' } });
+  const run = () => {
+    const env = { ...process.env };
+    for (const key of ['GITHUB_HEAD_REF', 'GITHUB_REF_NAME', 'GITHUB_REF', 'GITHUB_BASE_REF']) delete env[key];
+    return spawnSync(process.execPath, [tool], { cwd: dir, encoding: 'utf8', env });
+  };
   write(files);
   const initial = commit('Initial');
   return { dir, git, write, commit, remove, run, initial };

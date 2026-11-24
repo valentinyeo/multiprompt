@@ -10,11 +10,12 @@ import { resolveReleaseTitles } from './ticket-titles.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
+const revertBranch = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/MUBO-279/pr-1354.json'), 'utf8'));
 const main = 'pub const APP_VERSION = "0.28.1913";\n';
 const changelog = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1913", .items = &.{\n        .{ .text = "IGSH-240 Choose project folders across every server", .ticket = "IGSH-240" },\n    } },\n};\n';
 const publishedTags = '["v0.28.1913"]';
 
-function fixture(t) {
+function fixture(t, extraEnv = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-tolerance-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -36,7 +37,8 @@ function fixture(t) {
   };
   const env = { ...process.env };
   delete env.HYPERTASK_AGENT_TOKEN;
-  const run = (...args) => spawnSync(process.execPath, [tool, ...args], { cwd: dir, encoding: 'utf8', env });
+  for (const key of ['GITHUB_HEAD_REF', 'GITHUB_REF_NAME', 'GITHUB_REF', 'GITHUB_BASE_REF']) delete env[key];
+  const run = (...args) => spawnSync(process.execPath, [tool, ...args], { cwd: dir, encoding: 'utf8', env: { ...env, ...extraEnv } });
   write({ 'src/main.zig': main, 'src/changelog.zig': changelog });
   const initial = commit('Publish the baseline release');
   git('tag', 'v0.28.1913', initial);
@@ -145,4 +147,14 @@ test('the pull request check still rejects a typo ticket key', t => {
   const check = r.run('check', r.initial, head);
   assert.equal(check.status, 1, check.stdout);
   assert.match(check.stderr, /Invalid ticket ID: IGHS-12/);
+});
+
+test('the pull request check rejects the typo key on the branch the outage revert used', t => {
+  const branch = revertBranch.branch;
+  const r = fixture(t, { GITHUB_HEAD_REF: branch, GITHUB_REF_NAME: branch, GITHUB_REF: `refs/heads/${branch}` });
+  r.write({ [revertBranch.typoFragment]: 'The update card shows the newest change.\n' });
+  const head = r.commit(revertBranch.typoCommit);
+  const check = r.run('check', r.initial, head);
+  assert.equal(check.status, 1, check.stdout);
+  assert.match(check.stderr, new RegExp(revertBranch.expectedError));
 });

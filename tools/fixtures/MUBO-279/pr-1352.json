@@ -1,0 +1,39 @@
+{
+  "pullRequest": "https://github.com/valentinyeo/multiprompt/pull/1352",
+  "branch": "mbv-revert-1311",
+  "baseRef": "master",
+  "head": "cd9ea7960010e3f904ec301427a30aa45af42ea5",
+  "parent": "68a36724ed9083f824fb5c8c1b807deb3580e090",
+  "title": "SOFT-3134: Revert chat health report (#1311), it blocked every release",
+  "commitMessage": "SOFT-3134: Revert chat health report (#1311), it blocked every release\n\nRelease v0.28.1925 failed in prepare: 'IGSH-3140 fragment has no matching commit ticket' (run 45350898072). The squash title named SOFT-3140 only in brackets, and version-stamp reads only leading ticket keys. Outage rule: revert first; the real fix (title with both leading keys, or reviewed attribution) comes back through a PR.\n\nUndo: git revert this commit.",
+  "revertedCommit": {
+    "sha": "334a1616d1d405733bccf82a1ea5655bb4103d4b",
+    "subject": "SOFT-3134: Report chat health and what the PC shows (SOFT-3140) (#1311)"
+  },
+  "revertedFiles": [
+    ".claude/skills/verify-chat-still/SKILL.md",
+    ".claude/skills/verify-multiprompt/control-feature-session-open.ps1",
+    ".claude/skills/verify-multiprompt/features/session-open.md",
+    "build.zig",
+    "changelog.d/SOFT-3134-chat-health.md",
+    "changelog.d/SOFT-3140-visibility.md",
+    "openwiki/operations/chats-talk.md",
+    "src/browser_bridge.zig",
+    "src/mp_sessions.py",
+    "tools/chat-shared-runtime.test.py",
+    "tools/chat-still/coverage.json",
+    "tools/fixtures/SOFT-3134/listing-healthy.json",
+    "tools/fixtures/SOFT-3134/listing-offline.json",
+    "tools/fixtures/SOFT-3134/listing-shell-tab.json",
+    "tools/fixtures/SOFT-3140/README.md",
+    "tools/fixtures/SOFT-3140/other-host.json",
+    "tools/fixtures/SOFT-3140/states.json",
+    "tools/fixtures/SOFT-3140/yeo-ux-missing.json",
+    "tools/mb.mjs",
+    "tools/mp-sessions-health.test.py",
+    "tools/mp-sessions-test.py",
+    "tools/ticket-titles/IGSH-3134.txt",
+    "tools/ticket-titles/IGSH-3140.txt"
+  ],
+  "expectedError": "App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line"
+}

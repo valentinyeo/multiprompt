@@ -1,0 +1,12 @@
+{
+  "pullRequest": "https://github.com/valentinyeo/multiprompt/pull/1354",
+  "branch": "auto-revert/1311",
+  "baseRef": "master",
+  "head": "cd9ea7960010e3f904ec301427a30aa45af42ea5",
+  "title": "SOFT-3134: Revert chat health report (#1311), it blocked every release",
+  "failedTest": "tools/release-notes-tolerance.test.mjs:141 the pull request check still rejects a typo ticket key",
+  "inheritedEnv": ["GITHUB_HEAD_REF", "GITHUB_REF_NAME"],
+  "typoFragment": "changelog.d/IGHS-12-typo.md",
+  "typoCommit": "IGHS-12: typo fragment",
+  "expectedError": "Invalid ticket ID: IGHS-12"
+}

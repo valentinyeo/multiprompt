@@ -35,6 +35,8 @@ function repo(t, files = base()) {
   const env = { ...process.env, GITHUB_OUTPUT: path.join(dir, '.git', 'github-output') };
   delete env.GITHUB_HEAD_REF;
   delete env.GITHUB_REF_NAME;
+  delete env.GITHUB_REF;
+  delete env.GITHUB_BASE_REF;
   const check = (from, to, extra = {}) => spawnSync(process.execPath, [tool, 'check', from, to], { cwd: dir, encoding: 'utf8', env: { ...env, ...extra } });
   write(files);
   const initial = commit();
@@ -119,17 +121,20 @@ test('check accepts code edits alongside a new fragment', t => {
   assert.equal(fs.readFileSync(path.join(r.dir, '.git', 'github-output'), 'utf8'), 'kind=CODE\n');
 });
 
-test('app code needs a changelog note except on auto-revert branches', t => {
-  const r = repo(t, { ...base(), 'changelog.d/IGSH-154-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
-  r.git('rm', '-q', 'changelog.d/IGSH-154-code.md', 'src/feature.zig');
-  const head = r.commit();
-  const normal = r.check(r.initial, head, { GITHUB_HEAD_REF: 'ceo/IGSH-154' });
-  assert.equal(normal.status, 1);
-  assert.match(normal.stderr, /App code changed: add changelog\.d/);
-  const revert = r.check(r.initial, head, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
-  expectKind(revert, 'CODE', 0);
-  const dispatched = r.check(r.initial, head, { GITHUB_REF_NAME: 'auto-revert/40533455263' });
-  expectKind(dispatched, 'CODE', 0);
+test('app code needs a changelog note unless every commit undoes a commit on master', t => {
+  const r = repo(t);
+  r.write({ 'changelog.d/IGSH-154-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
+  const feature = r.commit();
+  r.git('revert', '--no-edit', 'HEAD');
+  const reverted = r.git('rev-parse', 'HEAD');
+  for (const extra of [{}, { GITHUB_HEAD_REF: 'auto-revert/40533455263' }, { GITHUB_REF_NAME: 'auto-revert/40533455263' }]) expectKind(r.check(feature, reverted, extra), 'CODE', 0);
+  r.git('rm', '-q', 'changelog.d/IGSH-154-code.md');
+  const unnoted = r.commit();
+  for (const extra of [{}, { GITHUB_HEAD_REF: 'auto-revert/40533455263' }]) {
+    const result = r.check(feature, unnoted, extra);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /App code changed: add changelog\.d/);
+  }
 });
 
 test('check rejects a stamp with an extra byte in the entry', t => {

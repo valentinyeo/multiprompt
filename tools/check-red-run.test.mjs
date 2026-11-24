@@ -52,6 +52,8 @@ function fixture(t) {
   const env = { ...process.env };
   delete env.GITHUB_HEAD_REF;
   delete env.GITHUB_REF_NAME;
+  delete env.GITHUB_REF;
+  delete env.GITHUB_BASE_REF;
   const run = (ref = base, extra = {}) => spawnSync(process.execPath, [checker, ref, git('rev-parse', 'HEAD')], { cwd: repo, encoding: 'utf8', env: { ...env, ...extra } });
   const regression = "const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('fixed value',()=>assert.equal(fs.readFileSync('src/value.txt','utf8'),'fixed'));\n";
   return { repo, git, write, commit, base, run, regression };
@@ -443,27 +445,23 @@ const after = 1;
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
     f.commit();
-    const result = f.run();
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /No changed regression tests/);
+    for (const extra of [{}, { GITHUB_HEAD_REF: 'auto-revert/40533455263' }, { GITHUB_REF_NAME: 'auto-revert/40533455263' }]) {
+      const result = f.run(f.base, extra);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /No changed regression tests/);
+    }
   });
 
-  test('auto-revert branches undo master without a new regression, other branches still need one', t => {
+  test('a real revert needs no new regression, whatever the branch is called', t => {
     const f = fixture(t);
+    f.write('src/value.txt', 'fixed');
     f.write('tools/value.test.cjs', f.regression);
-    const base = f.commit();
-    fs.unlinkSync(path.join(f.repo, 'tools/value.test.cjs'));
-    f.write('src/value.txt', 'reverted');
-    f.commit();
-    const revert = f.run(base, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
-    assert.equal(revert.status, 0, revert.stdout + revert.stderr);
-    assert.match(revert.stdout, /RED_RUN_NOT_REQUIRED auto-revert/);
-    const dispatched = f.run(base, { GITHUB_REF_NAME: 'auto-revert/40533455263' });
-    assert.equal(dispatched.status, 0, dispatched.stdout + dispatched.stderr);
-    for (const branch of ['ceo/IGSH-1-auto-revert/x', 'poteto/auto-revert']) {
-      const other = f.run(base, { GITHUB_HEAD_REF: branch });
-      assert.notEqual(other.status, 0);
-      assert.match(other.stderr, /No changed regression tests/);
+    const shipped = f.commit();
+    f.git('revert', '--no-edit', 'HEAD');
+    for (const extra of [{}, { GITHUB_HEAD_REF: 'auto-revert/40533455263' }, { GITHUB_REF_NAME: 'ceo/IGSH-1-revert' }]) {
+      const result = f.run(shipped, extra);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout, /RED_RUN_NOT_REQUIRED revert/);
     }
   });
 

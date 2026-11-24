@@ -655,7 +655,7 @@ test('permission errors fail immediately without retrying or touching master', (
   assert.ok(result.calls.every(call => !call.includes('push') && !call.includes('POST')));
 });
 
-test('auto-revert PRs pass the changelog and red-run admission rules that a revert cannot satisfy', t => {
+test('a revert pull request passes the changelog and red-run admission rules on any branch name', t => {
   const os = require('node:os');
   const path = require('node:path');
   const { execFileSync, spawnSync } = require('node:child_process');
@@ -681,14 +681,16 @@ test('auto-revert PRs pass the changelog and red-run admission rules that a reve
   const env = { ...process.env };
   delete env.GITHUB_HEAD_REF;
   delete env.GITHUB_REF_NAME;
+  delete env.GITHUB_REF;
+  delete env.GITHUB_BASE_REF;
   delete env.GITHUB_OUTPUT;
   delete env.NODE_TEST_CONTEXT;
-  const admit = (tool, args, branch) => spawnSync(process.execPath, [path.join(__dirname, tool), ...args], { cwd: repo, encoding: 'utf8', env: { ...env, GITHUB_HEAD_REF: branch } });
+  const admit = (tool, args, branch) => spawnSync(process.execPath, [path.join(__dirname, tool), ...args], { cwd: repo, encoding: 'utf8', env: { ...env, ...branch } });
   for (const [tool, args] of [['version-stamp.mjs', ['check', base, head]], ['check-red-run.mjs', [base, head]]]) {
-    const revert = admit(tool, args, 'auto-revert/40533455263');
-    assert.equal(revert.status, 0, `${tool}: ${revert.stdout}${revert.stderr}`);
-    const normal = admit(tool, args, 'ceo/DEMO-1');
-    assert.equal(normal.status, 1, `${tool}: ${normal.stdout}${normal.stderr}`);
+    for (const branch of [{}, { GITHUB_HEAD_REF: 'auto-revert/40533455263' }, { GITHUB_HEAD_REF: 'ceo/DEMO-1', GITHUB_REF_NAME: 'ceo/DEMO-1' }]) {
+      const revert = admit(tool, args, branch);
+      assert.equal(revert.status, 0, `${tool} ${JSON.stringify(branch)}: ${revert.stdout}${revert.stderr}`);
+    }
   }
 });
 

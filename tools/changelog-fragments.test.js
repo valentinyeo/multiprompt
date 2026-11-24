@@ -134,7 +134,8 @@ test('SOFT fragments pass checks and release stamps resolve the canonical ticket
 
 test('existing CI version check enforces fragments for code but preserves generated stamps', () => {
   const script = fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8');
-  assert.match(script, /if \(kind === 'CODE'\) checkFragments\(base, head, changed\);/);
+  assert.match(script, /checkFragments\(base, head, changed\);/);
+  assert.match(script, /if \(!revertPullRequest\(baseRev, headRev\)\) throw error;/);
   assert.match(script, /fragmentLines\(file, files\[file\]\);/);
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(workflow, /node tools\/version-stamp\.mjs check/);
