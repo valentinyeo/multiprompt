@@ -94,13 +94,15 @@ def check(root, replay_code=False):
     for name, body in bodies.items():
         condition, anchor_expression, fallback = held(body)
         follow_support = "follows_newest" in body
-        for event in ("history/divider", "row measurement", "late top padding", "live append", "reconciliation"):
+        for held_reader, event in [(reader, event) for reader in ([1, 0] if follow_support else [1])
+                                   for event in ("history/divider", "row measurement", "late top padding", "live append", "reconciliation")]:
             old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta = z3.Ints("old_h new_h viewport old_top new_top old_scroll divider pad delta")
             before, after = z3.Ints("previous_boundary next_boundary")
             old_newest, new_newest = z3.Ints("old_newest new_newest")
             scrolled_up = z3.Int("scrolled_up")
             offset = old_scroll - old_top - delta
             follows = z3.And(old_h > viewport, scrolled_up == 0) if follow_support else z3.BoolVal(False)
+            held_now = held_reader == 1
             values = {"old_content_h": old_h, "viewport_h": viewport, "previous_boundary.index": before,
                       "app_state.g_chat_read_boundary.index": after, "top": new_top, "anchor_offset": offset,
                       "old_scroll_y": old_scroll, "old_y": old_scroll, "anchor.?.offset": old_scroll - old_top,
@@ -123,8 +125,7 @@ def check(root, replay_code=False):
                        new_newest > new_top, new_newest < new_h,
                        new_newest + old_scroll - old_newest >= 0,
                        new_newest + old_scroll - old_newest <= new_h - viewport,
-                       scrolled_up >= 0, scrolled_up <= 1,
-                       z3.Implies(z3.Not(follow_support), scrolled_up == 1))
+                       scrolled_up == held_reader)
             if event == "late top padding":
                 solver.add(delta >= 1, delta <= 32, new_top == old_top + delta, new_h == old_h + delta, before == after)
             else:
@@ -139,11 +140,9 @@ def check(root, replay_code=False):
                 solver.add(before == after)
             if event == "live append":
                 solver.add(new_top == old_top, new_h >= old_h)
-            solver.add(z3.Or(z3.And(scrolled_up == 1, new_newest - scroll != old_newest - old_scroll),
-                             z3.And(scrolled_up == 0, scroll != new_h - viewport)) if follow_support
-                       else new_newest - scroll != old_newest - old_scroll)
+            solver.add(new_newest - scroll != old_newest - old_scroll if held_now else scroll != new_h - viewport)
             outcome = solver.check()
-            label = name + "/" + event
+            label = name + "/" + event + ("" if held_now else " while reading at the bottom")
             if outcome == z3.sat:
                 model = solver.model()
                 witness = {str(v): model.eval(v, model_completion=True).as_long() for v in (old_h, new_h, viewport, old_top, new_top, old_scroll, divider, pad, delta, before, after, old_newest, new_newest, scrolled_up)}
