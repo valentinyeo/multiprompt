@@ -133,7 +133,7 @@ class MpHelperTest(unittest.TestCase):
         self.assertEqual([call[0] for call in hosts], ["enable", "start"])
         self.assertEqual(hosts[0][1:], ["claude", result["sid"], "--tmux", result["tmux"], "--cwd", os.path.realpath(self.work), "--permission-mode", "bypassPermissions"])
         opened = [call for call in self.events("zsb") if call[0] == "session-open"]
-        self.assertEqual(opened, [["session-open", "--workspace", "Research", "--after-tab", "41", "--host", "remote-1", "--tmux", result["tmux"], "--name", "Research A", "--kind", "chat"]])
+        self.assertEqual(opened, [["session-open", "--workspace", "Research", "--after-tab", "41", "--host", "remote-1", "--tmux", result["tmux"], "--name", "Research A"]])
         submitted = [query for query in self.events("store") if query["op"] == "message_submit"]
         self.assertEqual(len(submitted), 1)
         self.assertEqual((submitted[0]["text"], submitted[0]["sid"], submitted[0]["tmux"]), ("find the bug", result["sid"], result["tmux"]))
@@ -212,7 +212,7 @@ class MpHelperTest(unittest.TestCase):
         result = json.loads(done.stdout)
         self.assertTrue(result["visible"])
         opened = [call for call in self.events("zsb") if call[0] == "session-open"]
-        self.assertEqual(opened[-1], ["session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", result["tmux"], "--name", "A", "--kind", "chat"])
+        self.assertEqual(opened[-1], ["session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", result["tmux"], "--name", "A"])
 
     def test_IGSH_2013_zsb_is_found_in_the_local_bin_when_it_is_not_on_the_path(self):
         local = self.home / ".local/bin"

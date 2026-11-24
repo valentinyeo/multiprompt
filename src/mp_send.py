@@ -245,8 +245,7 @@ def open_visible_tab(listing, tmux, title, workspace, host, group=None, after_ta
     existing = find_tab(listing, tmux)[2]
     if existing:
         return dict(ok=True, tab=existing.get("id"), existing=True)
-    kind = "chat" if tmux.startswith("live-") else "shell"
-    common = ("--host", host, "--tmux", tmux, "--name", title, "--kind", kind)
+    common = ("--host", host, "--tmux", tmux, "--name", title)
     if after_tab is not None:
         opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(after_tab), *common)
     elif group:
