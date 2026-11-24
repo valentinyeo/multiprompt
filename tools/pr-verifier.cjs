@@ -9,6 +9,7 @@ const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
 const MAX_LINE = 400;
 const SLOW_FEATURES = new Set(['browser-switch-speed', 'chat-switch-speed', 'pane-layout', 'live-chat-pane']);
+const CHAT_SEND_REPLY_JOURNEYS = new Set(['chat-delivery', 'server-chat']);
 const VERDICTS = ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED'];
 const MARKER = '<!-- pstack-verifier -->';
 const CODEX_MODEL = 'gpt-6.1-sol';
@@ -384,6 +385,12 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   if (selection.journeyNotes?.length) {
     if (final === 'PASS') final = 'PASS+NOTES';
     for (const note of selection.journeyNotes) notes.push(oneLine(note));
+  }
+  const chatFiles = Array.isArray(selection.chatFiles) ? selection.chatFiles : [];
+  const chatReplyShown = rows.some(row => CHAT_SEND_REPLY_JOURNEYS.has(row.feature) && row.head === 'passed');
+  if (chatFiles.length && !chatReplyShown && final !== 'BLOCKED') {
+    final = 'FAIL';
+    notes.unshift(`Chat source changed (${chatFiles.join(', ')}) and no selected journey that sends a message and reads the reply passed at this head; ${[...CHAT_SEND_REPLY_JOURNEYS].join(', ')} must pass.`);
   }
   if (!ran.length && final === 'PASS') {
     final = 'PASS+NOTES';
@@ -974,6 +981,7 @@ async function main(argv, env) {
     selection.unmapped = mapped.unmapped;
     selection.journeyNotes = mapped.notes || [];
     selection.ciWorkflows = mapped.ciWorkflows || [];
+    selection.chatFiles = mapped.chatFiles || [];
     if (mapped.unmapped.length) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
     }

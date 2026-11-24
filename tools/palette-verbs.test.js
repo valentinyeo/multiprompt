@@ -44,6 +44,16 @@ test('archive is a command-line verb, not a screen-only mark', async () => {
   assert.ok(claude.split('\n').length < 80);
 });
 
+test('pin is a command-line verb, not a screen-only mark', async () => {
+  const { verbs, screen, screenOnly } = await map();
+  assert.equal(verbs.SEARCH_TABCTX_PIN_TOP, 'pin');
+  assert.equal(screen.SEARCH_TABCTX_PIN_TOP, undefined);
+  assert.doesNotMatch(screenOnly.local, /\bpin\b/);
+  assert.match(usage, /^  pin /m);
+  assert.match(usage, /^  unpin /m);
+  assert.ok(claude.split('\n').length < 80);
+});
+
 test('each verb is an mb command', async () => {
   const { verbs } = await map();
   for (const name of new Set(Object.values(verbs))) assert.match(usage, new RegExp('^  ' + name + ' ', 'm'));

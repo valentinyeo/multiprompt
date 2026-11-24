@@ -52,6 +52,18 @@ test('unchanged legacy operations, metadata and checked-in fixture reads remain 
   assert.deepEqual(findHistoryInputs('tools/input.js', "execFileSync('git', ['show', 'cb15de6:src/main.zig']);\nconst unrelated = 1;", new Set([2])), []);
 });
 
+test('palette verbs and command arguments are not mistaken for git history reads', async () => {
+  const { findHistoryInputs } = await api;
+  for (const source of [
+    '"SEARCH_TABCTX_ARCHIVE": "archive",',
+    '"SEARCH_TABCTX_HIDE": "close",',
+    "const first = await h.calls(['archive', 'Fixture']);",
+    "await h.calls(['unarchive', 'fixture-7']);"
+  ]) {
+    assert.deepEqual(findHistoryInputs('tools/palette-verbs.mjs', source, new Set([1])), [], source);
+  }
+});
+
 test('only extraction using a newly created temp repository cwd is exempt', async () => {
   const { findHistoryInputs } = await api;
   const setup = "const dir = mkdtempSync(join(tmpdir(), 'fixture-'));\nexecFileSync('git', ['init'], { cwd: dir });\n";
