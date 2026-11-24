@@ -12,7 +12,7 @@ Use the account layout command, not terminal typing.
 - Confirm the user requested a session, or a lead assigned runner work.
 - Use the requested name, project folder, account workspace, and group.
 - Infer a missing folder from the current project. Read account workspaces with `list --json`; do not invent a workspace or choose another silently.
-- Pass `--host` with this server's account slot on every create; a reopen reuses the chat's recorded slot. There is no default, and the slot must identify this server in the account, not another machine.
+- Use the server's configured host slot. `MULTIPROMPT_HOST` or `--host` must identify this server in the account, not another machine.
 - An approved account service key must already be available as `MULTIPROMPT_KEY`. Never print it, put it in command arguments, or add it to agent instructions. Never create or broaden a key to finish this task.
 - Use the canonical Multiprompt checkout containing this skill and `tools/mp-layout.mjs`. The reader must already be installed for the server user. `MULTIPROMPT_READER` can select its installed location.
 - This command uses the existing Claude live host and its `bypassPermissions` mode by default. `--provider hax` starts a hax (Codex) live host instead. Use only trusted project folders. It is not a general launcher for arbitrary executables or in-session subagents.

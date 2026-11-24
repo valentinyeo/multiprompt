@@ -16,7 +16,7 @@ async function spawn(extra) {
   let revision = 0, marker, parked = false;
   const calls = [], submitted = [];
   const out = [];
-  const code = await run(['spawn', '--name', 'MP Runner 1', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--group', 'Runners', ...extra], {
+  const code = await run(['spawn', '--name', 'MP Runner 1', '--folder', 'work', '--workspace', 'Work', '--group', 'Runners', ...extra], {
     env: { HOME: home, MULTIPROMPT_KEY: 'private-key' },
     resolveFolder: () => '/work',
     fetch: async (_, request) => {
