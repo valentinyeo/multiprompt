@@ -1,1 +1,0 @@
-After a restart, server shell tabs open their previous session again and accept keyboard input.

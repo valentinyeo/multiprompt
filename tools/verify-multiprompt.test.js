@@ -2711,7 +2711,7 @@ Write-Host ('RECT=' + ($pair -join ','))
   assert.doesNotMatch(result.stdout, /RECT=20,229,56,265/);
 });
 
-test('SOFT-2762 session-actions expects the seven context ids the app appends', () => {
+test('SOFT-2762 session-actions expects the context ids the app appends', () => {
   const palette = read('src/command_palette.zig');
   const constants = new Map();
   for (const match of read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)) constants.set(match[1], Number(match[2]));
@@ -2721,9 +2721,12 @@ test('SOFT-2762 session-actions expects the seven context ids the app appends', 
     return { id: constants.get(match[1]), label: match[2] };
   });
   assert.deepEqual(rows.map(row => row.label), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Archive chat', 'Delete session']);
-  const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=7 ids=((?:\d+ ){6}\d+)/);
-  assert.ok(expected, 'the driver must assert the seven-row context menu');
-  assert.deepEqual(expected[1].split(' ').map(Number), rows.map(row => row.id), 'the driver ids must match the app table order');
+  const expected = read('tools/verify-session-actions/drive.ps1').match(/rows chars=0 count=8 ids=((?:\d+ ){7}\d+)/);
+  assert.ok(expected, 'the driver must assert the eight-row context menu');
+  assert.match(palette, /g_search_results\[app_state\.g_search_result_count\] = SEARCH_TABCTX_NEW_TAB_ON_SERVER;/);
+  const newTabOnServer = constants.get('SEARCH_TABCTX_NEW_TAB_ON_SERVER');
+  const tabRows = [rows[0], { id: newTabOnServer, label: 'New tab on server' }, ...rows.slice(1)];
+  assert.deepEqual(expected[1].split(' ').map(Number), tabRows.map(row => row.id), 'the driver ids must match the app table order');
   const query = read('tools/verify-session-actions/drive.ps1').match(/Palette '([^']+)' 7112/);
   assert.ok(query, 'the driver reaches Delete session through the global palette');
   const deleteRow = rows.find(row => row.id === 7112);

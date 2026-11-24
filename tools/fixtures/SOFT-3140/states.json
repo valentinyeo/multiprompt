@@ -1,0 +1,11 @@
+[
+  {"visible": true, "hidden_reason": null, "waiting": false, "pinned": true, "archived": false, "user_hidden": false, "broken": false},
+  {"visible": false, "hidden_reason": "filtered: unread only", "waiting": false, "pinned": false, "archived": false, "user_hidden": false, "broken": true},
+  {"visible": false, "hidden_reason": "other workspace", "waiting": false, "pinned": false, "archived": false, "user_hidden": false, "broken": true},
+  {"visible": false, "hidden_reason": "collapsed group", "waiting": false, "pinned": false, "archived": false, "user_hidden": false, "broken": true},
+  {"visible": false, "hidden_reason": "collapsed section", "waiting": false, "pinned": false, "archived": false, "user_hidden": false, "broken": true},
+  {"visible": false, "hidden_reason": "workspace snoozed", "waiting": false, "pinned": false, "archived": false, "user_hidden": false, "broken": true},
+  {"visible": false, "hidden_reason": "waiting", "waiting": true, "pinned": false, "archived": false, "user_hidden": false, "broken": false},
+  {"visible": false, "hidden_reason": "archived", "waiting": false, "pinned": false, "archived": true, "user_hidden": false, "broken": false},
+  {"visible": false, "hidden_reason": "user-hidden", "waiting": false, "pinned": false, "archived": false, "user_hidden": true, "broken": false}
+]

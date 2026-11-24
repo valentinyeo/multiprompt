@@ -9,7 +9,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 
 PROBE = """
-import json, sqlite3, tempfile
+import json, sqlite3, tempfile, time
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
@@ -78,6 +78,49 @@ with tempfile.TemporaryDirectory() as directory:
             for line in history.read_text(encoding='utf-8').splitlines():
                 rows.append((json.loads(line).get('row') or {}).get('text') or '')
     results['CarryHistory'] = results['Switched'] and any('earlier words' in row for row in rows)
+fixtures = root / 'tools/fixtures/SOFT-2469'
+
+def recorded(name):
+    return [json.loads(line) for line in (fixtures / name).read_text(encoding='utf-8').strip().splitlines()]
+
+with tempfile.TemporaryDirectory() as directory:
+    runtime = load(directory)
+    prepare(runtime)
+    rows = (('claude', 'claude-usage-limit.jsonl'), ('codex', 'codex-usage-limit.jsonl'), ('pi', 'pi-usage-limit.jsonl'))
+    hits = [any(runtime['host_usage_limit'](provider, event) for event in recorded(name)) for provider, name in rows]
+    quiet = [runtime['host_usage_limit']('claude', dict(type='result', subtype='success', is_error=False,
+                                                       result='The usage limit question is answered in the report')),
+             runtime['host_usage_limit']('codex', dict(type='error', params=dict(error=dict(message='Model stopped early')))),
+             runtime['host_usage_limit']('pi', dict(type='message_end', message=dict(role='assistant', stopReason='endTurn')))]
+    results['DetectPlan'] = all(hits) and not any(quiet)
+with tempfile.TemporaryDirectory() as directory:
+    runtime = load(directory)
+    prepare(runtime)
+    config = runtime['host_read'](runtime['host_paths']('claude', sid)['config'])
+    first = runtime['host_auto_switch_target']('claude', config)[0]
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi'], empty={'claude': time.time()})
+    second = runtime['host_auto_switch_target']('codex', config)[0]
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi'],
+                                 empty={'claude': time.time(), 'codex': time.time()})
+    third = runtime['host_auto_switch_target']('pi', config)[0]
+    results['FollowOrder'] = (first, second, third) == ('codex', 'pi', None)
+with tempfile.TemporaryDirectory() as directory:
+    runtime = load(directory)
+    prepare(runtime)
+    session = {}
+    runtime['host_session_reset'](session)
+    spawned = []
+    def trigger():
+        return runtime['host_auto_switch_trigger']('claude', sid, tmux, session, None, 'usage limit',
+                                                   spawn=lambda *args: spawned.append(args))
+    default_on = runtime['host_auto_switch_settings'](runtime['host_config']('claude', sid))['on']
+    off = runtime['host_reply'](dict(op='set_auto_switch', provider='claude', sid=sid, toggle=True))
+    quiet_trigger = trigger()
+    stayed = not spawned and runtime['host_config']('claude', sid) is not None
+    on = runtime['host_reply'](dict(op='set_auto_switch', provider='claude', sid=sid, toggle=True))
+    loud_trigger = trigger()
+    results['AutoSwitchDefaultOn'] = default_on is True and off.get('on') is False and on.get('on') is True
+    results['HonourOff'] = stayed and quiet_trigger is False and loud_trigger is True and len(spawned) == 1
 text = (root / 'src/chat_history_reader.py').read_text(encoding='utf-8')
 refuse_busy = 'host_turn_busy' in text and 'dict(status="busy"' in text
 stop_old = 'enabled=False' in text and 'switched_to=' in text
@@ -85,6 +128,10 @@ commit_after_start_fail = 'dict(status="switched"' in text
 carry_queued = "UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state='queued'" in text
 skip_locator = 'DELETE FROM message_locators WHERE provider=? AND sid=?' not in text
 print('FORMAL ' + json.dumps({
+    'AutoSwitchDefaultOn': results.get('AutoSwitchDefaultOn', False),
+    'HonourOff': results.get('HonourOff', False),
+    'DetectPlan': results.get('DetectPlan', False),
+    'FollowOrder': results.get('FollowOrder', False),
     'RefuseBusy': refuse_busy and results.get('RefuseBusy', False),
     'StopOldOnCommit': stop_old and results.get('StopOldOnCommit', False),
     'CommitAfterStartFail': commit_after_start_fail and results.get('CommitAfterStartFail', False),

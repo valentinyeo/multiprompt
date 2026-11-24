@@ -1,0 +1,1 @@
+A message blocked before the chat sees it shows as not sent

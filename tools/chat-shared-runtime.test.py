@@ -45,6 +45,38 @@ class RuntimeTest(unittest.TestCase):
     def newer(self):
         return SOURCE.replace('END = "@@MP_END@@"', 'END = "@@MP_NEW_END@@"', 1)
 
+    def legacy(self):
+        return (ROOT / 'tools/fixtures/SOFT-2524/legacy-reader.py').read_text()
+
+    def test_install_newer_then_older_leaves_runtime_unchanged(self):
+        first = self.info(self.bundle(self.newer()))
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        snapshot = {path.name: (os.readlink(path) if path.is_symlink() else path.read_bytes())
+                    for path in runtime.iterdir() if path.name != 'lock'}
+        self.assertEqual(self.info(self.legacy()), first)
+        for path in runtime.iterdir():
+            if path.name == 'lock':
+                continue
+            if path.is_symlink():
+                self.assertEqual(os.readlink(path), snapshot[path.name], path.name)
+            else:
+                self.assertEqual(path.read_bytes(), snapshot[path.name], path.name)
+        for name, _file in self.RUNNABLE_TOOLS:
+            self.assertTrue(os.access(runtime / name, os.X_OK), name)
+
+    def test_install_older_then_newer_upgrades(self):
+        old = self.info(self.legacy())
+        upgraded = self.info(self.bundle(self.newer()))
+        self.assertGreater(upgraded['generation'], old['generation'])
+        self.assertEqual(self.info(self.bundle(self.newer())), upgraded)
+
+    def test_equal_generation_install_is_idempotent(self):
+        info = self.info(self.bundle())
+        active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
+        before = active.stat().st_mtime_ns
+        self.assertEqual(self.info(self.bundle()), info)
+        self.assertEqual(active.stat().st_mtime_ns, before)
+
     def test_selection_and_idempotence_across_bootstraps(self):
         first = self.info()
         active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
@@ -159,9 +191,10 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(reader.is_symlink())
         self.assertEqual(reader.read_text(), (runtime / (info['sha256'] + '.py')).read_text())
 
-    def bundle(self):
+    def bundle(self, reader=SOURCE):
         sources = (
             ('MP_SEND_SOURCE', 'src/mp_send.py'),
+            ('FEEDBACK_SOURCE', 'src/multibot_feedback.py'),
             ('MP_FRESH_SOURCE', 'src/mp_fresh.py'),
             ('MP_HELPER_SOURCE', 'src/mp_helper.py'),
             ('MP_SHELL_SOURCE', 'src/mp_shell.py'),
@@ -170,13 +203,44 @@ class RuntimeTest(unittest.TestCase):
             ('ZSB_SOURCE', 'src/mp_zsb.sh'),
         )
         prelude = ''.join("%s = '%s'\n" % (name, base64.b64encode((ROOT / file).read_bytes()).decode()) for name, file in sources if (ROOT / file).is_file())
-        return prelude + SOURCE
+        return prelude + reader
 
     def test_mp_fresh_ships_inside_the_runtime_as_an_executable_copy(self):
         self.info(self.bundle())
         published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-fresh'
         self.assertTrue(published.is_symlink())
         self.assertTrue(os.access(published, os.X_OK))
+
+    RUNNABLE_TOOLS = (
+        ('mp-send', 'src/mp_send.py'),
+        ('multibot-feedback', 'src/multibot_feedback.py'),
+        ('mp-helper', 'src/mp_helper.py'),
+        ('mp-shell', 'src/mp_shell.py'),
+        ('mp-sessions', 'src/mp_sessions.py'),
+        ('mp-fresh', 'src/mp_fresh.py'),
+        ('mp-zsb', 'src/mp_zsb.sh'),
+        ('mp-layout', 'src/mp_layout.mjs'),
+    )
+
+    def test_every_installed_chat_tool_runs(self):
+        self.info(self.bundle())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        for name, file in self.RUNNABLE_TOOLS:
+            with self.subTest(tool=name):
+                link = runtime / name
+                self.assertTrue(link.is_symlink(), name)
+                target = runtime / os.readlink(link)
+                self.assertEqual(target.parent, runtime, name)
+                self.assertEqual(target.read_text(), (ROOT / file).read_text(), name)
+                self.assertTrue(os.access(target, os.X_OK), name + ' is not executable')
+                self.assertTrue(os.access(link, os.X_OK), name + ' does not resolve to an executable file')
+
+    def test_install_removes_leftover_temporary_files(self):
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        runtime.mkdir(mode=0o700)
+        (runtime / '.tmp-leftover').write_text('stale')
+        self.info(self.bundle())
+        self.assertEqual([path.name for path in runtime.iterdir() if path.name.startswith('.tmp-')], [])
 
     def test_mp_sessions_and_mp_layout_ship_inside_the_runtime(self):
         self.info(self.bundle())
@@ -195,6 +259,15 @@ class RuntimeTest(unittest.TestCase):
         listed = subprocess.run([str(sessions)], text=True, capture_output=True, env=self.env, timeout=30)
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertIn('STATE', listed.stdout)
+
+    def test_SOFT_3140_published_mp_sessions_health_executes_without_a_sibling_module(self):
+        self.info(self.bundle())
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        self.assertFalse((runtime / 'mp_sessions_health.py').exists())
+        result = subprocess.run([str(runtime / 'mp-sessions'), 'health', '--json'],
+                                text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [])
 
     def test_published_mp_layout_answers_help_from_the_runtime_copy(self):
         self.info(self.bundle())

@@ -668,16 +668,17 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
     var name_buf: [192]u8 = undefined;
     const name_n: usize = if (shell.name_len > 0 and shell.name_len <= shell.name.len) (std.unicode.utf16LeToUtf8(&name_buf, shell.name[0..shell.name_len]) catch 0) else 0;
     const source_name: []const u8 = if (name_n > 0) name_buf[0..name_n] else if (source_len > 0) source_session[0..source_len] else "this chat";
-    var targets_buf: [16]mention.Chat = undefined;
-    const found = mention.mentionTargets(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
+    var targets_buf: [16]mention.Delivery = undefined;
+    const found = mention.mentionDeliveries(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
     if (found.len == 0) return;
-    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8 } = undefined;
+    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8, kind: mention.DeliveryKind } = undefined;
     const count = @min(found.len, plan.len);
-    for (found[0..count], 0..) |chat, i| {
-        const n = @min(chat.session.len, plan[i].session.len);
-        @memcpy(plan[i].session[0..n], chat.session[0..n]);
+    for (found[0..count], 0..) |delivery, i| {
+        const n = @min(delivery.chat.session.len, plan[i].session.len);
+        @memcpy(plan[i].session[0..n], delivery.chat.session[0..n]);
         plan[i].session_len = @intCast(n);
-        plan[i].index = chat.index;
+        plan[i].index = delivery.chat.index;
+        plan[i].kind = delivery.kind;
     }
     var visible_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
     const visible = mention.copyVisible(text, &.{}, &visible_buf);
@@ -696,7 +697,10 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
         const session = target.session[0..target.session_len];
         if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
         var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
-        const note = mention.mentionNote(source_name, visible, context, &note_buf) orelse continue;
+        const note = (if (target.kind == .fyi)
+            mention.mentionFyiNote(source_name, visible, context, &note_buf)
+        else
+            mention.mentionNote(source_name, visible, context, &note_buf)) orelse continue;
         if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
         mention.mentionMarkDelivered(message_id, session);
     }
@@ -1801,7 +1805,6 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
-            .confirmed = e.message_v1 and chat_echo.phaseTaken(std.mem.sliceTo(&e.message_phase, 0)),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };
