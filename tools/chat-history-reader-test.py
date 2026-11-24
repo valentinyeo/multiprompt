@@ -9049,6 +9049,50 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class MUBO282_PermissionRequestTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = ROOT / 'tools/fixtures/MUBO-282'
+
+    def scan(self, name):
+        path = Path(self.temp.name) / (name + '.jsonl')
+        path.write_bytes((self.folder / (name + '.jsonl')).read_bytes())
+        with path.open('rb') as source:
+            return reader.open_permission_request(source, path.stat().st_size, 'claude')
+
+    def test_open_auto_mode_request_is_reported_with_why_and_detail(self):
+        request = self.scan('auto-open-request')
+        self.assertIsNotNone(request)
+        self.assertEqual(request['mode'], 'auto')
+        self.assertEqual(request['tool'], 'Bash')
+        self.assertEqual(request['toolUseId'], 'toolu_EXAMPLE_AUTO_OPEN')
+        self.assertIn('drop table old_events', request['detail'])
+        self.assertIn('auto mode safety check', request['why'])
+        self.assertTrue(request['askedAt'])
+
+    def test_answered_request_is_closed(self):
+        self.assertIsNone(self.scan('auto-answered-request'))
+
+    def test_classifier_refusal_is_not_an_open_request(self):
+        self.assertIsNone(self.scan('auto-blocked'))
+
+    def test_other_providers_never_report_requests(self):
+        path = self.folder / 'auto-open-request.jsonl'
+        with path.open('rb') as source:
+            self.assertIsNone(reader.open_permission_request(source, path.stat().st_size, 'codex'))
+
+    def test_status_row_carries_the_open_request(self):
+        path = Path(self.temp.name) / 'status.jsonl'
+        path.write_bytes((self.folder / 'auto-open-request.jsonl').read_bytes())
+        with path.open('rb') as source:
+            status = reader.status_header(source, path.stat().st_size, 'claude')
+        self.assertEqual(status['permission_request']['tool'], 'Bash')
+        with path.open('rb') as source:
+            again = reader.status_header(source, path.stat().st_size, 'claude')
+        self.assertEqual(again['permission_request'], status['permission_request'])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:

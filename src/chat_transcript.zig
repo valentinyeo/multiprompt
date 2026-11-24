@@ -75,6 +75,34 @@ pub const QueueItem = struct {
     injected: bool = false,
     sender: [64]u16 = @splat(0),
 };
+pub const Request = struct {
+    open: bool = false,
+    tool: [64]u16 = @splat(0),
+    tool_len: usize = 0,
+    detail: [512]u16 = @splat(0),
+    detail_len: usize = 0,
+    why: [160]u16 = @splat(0),
+    why_len: usize = 0,
+    asked_at: [40]u8 = @splat(0),
+    asked_at_len: usize = 0,
+
+    pub fn toolText(self: *const Request) []const u16 {
+        return self.tool[0..self.tool_len];
+    }
+
+    pub fn detailText(self: *const Request) []const u16 {
+        return self.detail[0..self.detail_len];
+    }
+
+    pub fn whyText(self: *const Request) []const u16 {
+        return self.why[0..self.why_len];
+    }
+
+    pub fn askedAt(self: *const Request) []const u8 {
+        return self.asked_at[0..self.asked_at_len];
+    }
+};
+
 pub const Status = struct {
     received: [20]u64 = @splat(0),
     received_len: usize = 0,
@@ -92,6 +120,7 @@ pub const Status = struct {
     total: usize = 0,
     done: usize = 0,
     todos_known: bool = false,
+    request: Request = .{},
 
     pub fn known(self: *const Status) bool {
         return self.todos_known;
@@ -180,7 +209,8 @@ fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { received: ?[]const []const u8 = null, role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
+    const WirePermission = struct { tool: []const u8 = "", toolUseId: []const u8 = "", detail: []const u8 = "", mode: []const u8 = "", why: []const u8 = "", askedAt: []const u8 = "" };
+    const WireStatus = struct { received: ?[]const []const u8 = null, role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null, permission_request: ?WirePermission = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
@@ -218,6 +248,14 @@ pub fn parseStatus(line: []const u8) ?Parsed {
             result.done += @intFromBool(item.status == .completed);
             result.total += 1;
         }
+    }
+    if (value.permission_request) |request| {
+        result.request.open = true;
+        result.request.tool_len = statusText(&result.request.tool, request.tool);
+        result.request.detail_len = statusText(&result.request.detail, request.detail);
+        result.request.why_len = statusText(&result.request.why, request.why);
+        result.request.asked_at_len = @min(request.askedAt.len, result.request.asked_at.len);
+        @memcpy(result.request.asked_at[0..result.request.asked_at_len], request.askedAt[0..result.request.asked_at_len]);
     }
     return .{ .len = 0, .count = 0, .status = result };
 }
@@ -787,6 +825,18 @@ test "IGSH-682 status row carries the shell queue sent first and the box draft" 
     try std.testing.expect(empty.live_known);
     try std.testing.expect(empty.draft_known);
     try std.testing.expectEqual(@as(usize, 0), empty.queue_len);
+}
+
+test "MUBO-282 status row carries the open auto mode permission request" {
+    const wire = "{\"role\":\"status\",\"permission_request\":{\"tool\":\"Bash\",\"toolUseId\":\"toolu_EXAMPLE_AUTO_OPEN\",\"detail\":\"psql -c 'drop table old_events'\",\"mode\":\"auto\",\"why\":\"It is waiting for your yes because the auto mode safety check wants your yes before it runs.\",\"askedAt\":\"2026-01-01T00:00:00.000Z\"}}";
+    const parsed = (parseStatus(wire).?).status;
+    try std.testing.expect(parsed.request.open);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Bash"), parsed.request.toolText());
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("psql -c 'drop table old_events'"), parsed.request.detailText());
+    try std.testing.expect(std.mem.indexOf(u16, parsed.request.whyText(), std.unicode.utf8ToUtf16LeStringLiteral("auto mode safety check")) != null);
+    try std.testing.expectEqualStrings("2026-01-01T00:00:00.000Z", parsed.request.askedAt());
+    const closed = (parseStatus("{\"role\":\"status\",\"queue\":[]}").?).status;
+    try std.testing.expect(!closed.request.open);
 }
 
 test "IGSH-722 long queued envelopes and clipped old reader strings become incoming notes" {

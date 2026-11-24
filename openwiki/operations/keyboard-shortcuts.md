@@ -183,6 +183,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Reopen server shell | List the detached sessions on this tab's server and attach the one you pick |
 | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
+| Ctrl+K -&gt; Permission requests | List the chats whose auto mode safety check waits for your yes, newest first, and open one |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
 | Space in All Sessions | Mark or unmark the selected unattached session |
 | x in All Sessions | Close the marked unattached sessions, or the selected one, after a confirmation |

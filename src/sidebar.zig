@@ -126,6 +126,9 @@ const SEARCH_WORKSPACE_ALL_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_AL
 const SEARCH_WORKSPACE_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FREQUENT_OFFSET;
 const SEARCH_WORKSPACE_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_FAVORITES_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_PERMISSION_REQUESTS_MENU_OFFSET = @import("app_state.zig").SEARCH_PERMISSION_REQUESTS_MENU_OFFSET;
+const SEARCH_PERMISSION_REQUEST_ROW_OFFSET = @import("app_state.zig").SEARCH_PERMISSION_REQUEST_ROW_OFFSET;
+const MAX_PERMISSION_REQUEST_ROWS = @import("app_state.zig").MAX_PERMISSION_REQUEST_ROWS;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
 const SEARCH_SHOW_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_SHOW_FAVORITES_OFFSET;
@@ -730,7 +733,7 @@ pub fn clearSelectedTabDotOnReturn() void {
     if (!app_state.ISSUE_274_DOT_ON_SELECTED_TAB or app_state.active_shell >= app_state.shell_count) return;
     const s = &app_state.shells[app_state.active_shell];
     if (!s.needs_attention or !userPresentOnSelectedTab()) return;
-    if (s.last_blue_dot_source == .manual or s.last_blue_dot_source == .restore) return;
+    if (s.last_blue_dot_source == .manual or s.last_blue_dot_source == .restore or s.last_blue_dot_source == .permission) return;
     s.needs_attention = false;
     recordShellDiagEvent(app_state.active_shell, "blue dot cleared", "returned");
     invalidateSidebar();
@@ -759,6 +762,28 @@ pub fn setBlueDot(i: usize, source: attention_rules.Source, done_after_activity:
     debugLog(msg);
     recordShellDiagEvent(i, "blue dot", @tagName(source));
     return true;
+}
+
+pub fn setPermissionRequestMark(i: usize, open: bool) void {
+    if (i >= app_state.shell_count) return;
+    const s = &app_state.shells[i];
+    if (open) {
+        if (s.permission_marked and s.needs_attention and s.last_blue_dot_source == .permission) return;
+        s.permission_marked = true;
+        s.needs_attention = true;
+        s.last_blue_dot_source = .permission;
+        s.last_blue_dot_time = nowFileTime();
+        recordShellDiagEvent(i, "permission request", "open");
+        invalidateSidebar();
+        publishInboxState();
+        return;
+    }
+    if (!s.permission_marked) return;
+    s.permission_marked = false;
+    recordShellDiagEvent(i, "permission request", "closed");
+    if (s.last_blue_dot_source == .permission) s.needs_attention = false;
+    invalidateSidebar();
+    publishInboxState();
 }
 
 pub fn noteRestoredBlueDot(i: usize) void {
@@ -2971,7 +2996,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_session_overview_row = result_idx >= SEARCH_SESSION_OVERVIEW_ROW_OFFSET and result_idx < SEARCH_SESSION_OVERVIEW_ROW_OFFSET + MAX_SESSION_OVERVIEW_SEARCH_ROWS;
                     const is_archived_view = result_idx == SEARCH_ARCHIVED_VIEW_OFFSET;
                     const is_room_result = result_idx >= app_state.SEARCH_ROOM_ROW_OFFSET and result_idx < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS;
-                    const is_renamewin = !is_room_result and !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_session_overview_menu and !is_session_overview_row and !is_archived_view and result_idx >= SEARCH_RENAMEWIN_OFFSET;
+                    const is_permission_menu = result_idx == SEARCH_PERMISSION_REQUESTS_MENU_OFFSET;
+                    const is_permission_row = result_idx >= SEARCH_PERMISSION_REQUEST_ROW_OFFSET and result_idx < SEARCH_PERMISSION_REQUEST_ROW_OFFSET + MAX_PERMISSION_REQUEST_ROWS;
+                    const is_renamewin = !is_permission_menu and !is_permission_row and !is_room_result and !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_session_overview_menu and !is_session_overview_row and !is_archived_view and result_idx >= SEARCH_RENAMEWIN_OFFSET;
                     const is_wsmove_workspace = app_state.g_search_ws_move_mode and !is_addfavicon and !is_mobile_toggle and !is_renamewin and result_idx >= SEARCH_WORKSPACE_OFFSET and result_idx < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES;
                     const is_workspace = !is_room_result and !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_renamewin and !is_wsmove_workspace and result_idx >= SEARCH_WORKSPACE_OFFSET;
                     const is_workspace_delete = !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and result_idx >= SEARCH_WORKSPACE_DELETE_OFFSET and result_idx < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES;
@@ -5076,6 +5103,17 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const hint_w: i32 = if (sess.title_len > 0) 160 else 90;
                         var rtag_rc = RECT{ .left = ox + overlay_w - hint_w, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&tag_buf2), @intCast(tbi2), &rtag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_permission_menu or is_permission_row) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var request_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        if (is_permission_menu) {
+                            _ = paletteDrawText(hdc, L("Permission requests"), -1, &request_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        } else {
+                            const requests = @import("chat_permission_requests.zig");
+                            const row_text = requests.rowText(result_idx - SEARCH_PERMISSION_REQUEST_ROW_OFFSET) orelse &.{};
+                            _ = @import("dwrite_text.zig").draw(hdc, row_text.ptr, @intCast(row_text.len), &request_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        }
                     } else {
                         const shell_idx = result_idx;
                         if (shell_idx >= app_state.shell_count) {

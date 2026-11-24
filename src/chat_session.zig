@@ -1577,6 +1577,9 @@ pub fn chatFileOnReady() void {
             if (!disk and !history.more and preview_content_changed) entry.preview_loaded_ms = history.received_ms;
             if (!disk and !history.more and (preview_status_changed or entry.preview_status_ms == 0)) entry.preview_status_ms = if (history.received_ms != 0) history.received_ms else GetTickCount64();
             entry.key.sid = history.sid;
+            if (findShellById(entry.key.shell_id)) |request_idx| {
+                @import("sidebar.zig").setPermissionRequestMark(request_idx, history.status.request.open);
+            }
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);

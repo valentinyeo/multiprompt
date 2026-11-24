@@ -302,6 +302,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Reopen server shell", .b = "List the detached sessions on this tab's server and attach the one you pick", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
+    .{ .a = "Ctrl+K -> Permission requests", .b = "List the chats whose auto mode safety check waits for your yes, newest first, and open one", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
     .{ .a = "Space in All Sessions", .b = "Mark or unmark the selected unattached session", .header = false },
     .{ .a = "x in All Sessions", .b = "Close the marked unattached sessions, or the selected one, after a confirmation", .header = false },

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Source = enum { hook_done, heuristic, notification, restore, manual };
+pub const Source = enum { hook_done, heuristic, notification, restore, manual, permission };
 
 pub const State = struct {
     hook_capable: bool = false,
@@ -12,6 +12,7 @@ pub const State = struct {
 };
 
 pub fn allow(source: Source, state: State) bool {
+    if (source == .permission) return true;
     if (source == .manual) return !state.turn_active and !state.console_working;
     if (state.selected_tab and state.user_present) return false;
     if (source == .notification) return true;
@@ -20,7 +21,7 @@ pub fn allow(source: Source, state: State) bool {
         .hook_done => state.done_after_activity and !state.turn_active,
         .heuristic => !state.hook_capable and !state.turn_active,
         .restore => !state.turn_active,
-        .notification, .manual => unreachable,
+        .notification, .manual, .permission => unreachable,
     };
 }
 
@@ -112,6 +113,11 @@ pub fn workingStatusText(line: []const u16, out: []u16) ?usize {
         n += elapsed.len;
     }
     return n;
+}
+
+test "MUBO-282 a pending permission marks the tab even while the user looks at it" {
+    try std.testing.expect(allow(.permission, .{}));
+    try std.testing.expect(allow(.permission, .{ .selected_tab = true, .user_present = true, .console_working = true, .turn_active = true }));
 }
 
 test "hooked Claude quiet while working cannot gain a dot" {

@@ -41,6 +41,8 @@ SCAN_BYTES = 512 * 1024
 TAIL_BYTES = 512 * 1024
 TAIL_VISIBLE_BYTES = 4 * TAIL_BYTES
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
+PERMISSION_SCAN_BYTES = TAIL_BYTES
+PERMISSION_MODES = ("auto", "default", "acceptEdits")
 STATUS_CACHE = {}
 QUEUE_CACHE = {}
 TAIL_CACHE = {}
@@ -1211,6 +1213,77 @@ def read_tail(source, size, agent, captured=None, fill=True):
     return base, end, data
 
 
+def permission_detail(value):
+    if not isinstance(value, dict):
+        return ""
+    for key in ("command", "description", "file_path", "path", "query", "pattern"):
+        text = value.get(key)
+        if isinstance(text, str) and text.strip():
+            return " ".join(text.split())[:512]
+    return ""
+
+
+def permission_why(mode):
+    if mode == "auto":
+        return "It is waiting for your yes because the auto mode safety check wants your yes before it runs."
+    if mode == "acceptEdits":
+        return "It is waiting for your yes because this chat runs in accept edits mode and this step is outside it."
+    return "It is waiting for your yes because this chat asks before every step."
+
+
+def open_permission_request(source, size, agent):
+    if agent != "claude" or size <= 0:
+        return None
+    start = max(0, size - PERMISSION_SCAN_BYTES)
+    try:
+        source.seek(start)
+        data = source.read(size - start)
+    except (OSError, ValueError):
+        return None
+    mode = None
+    answered = set()
+    latest = None
+    for raw in data.splitlines():
+        try:
+            event = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(event, dict) or event.get("isSidechain"):
+            continue
+        kind = event.get("type")
+        if kind == "permission-mode":
+            if isinstance(event.get("permissionMode"), str):
+                mode = event["permissionMode"]
+            continue
+        if isinstance(event.get("permissionMode"), str):
+            mode = event["permissionMode"]
+        message = event.get("message")
+        parts = message.get("content") if isinstance(message, dict) and kind in ("assistant", "user") else None
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "tool_result" and isinstance(part.get("tool_use_id"), str):
+                answered.add(part["tool_use_id"])
+            elif kind == "assistant" and part.get("type") == "tool_use" and isinstance(part.get("id"), str):
+                latest = (event, part)
+    if latest is None or mode not in PERMISSION_MODES:
+        return None
+    event, part = latest
+    if part["id"] in answered:
+        return None
+    asked = event.get("timestamp")
+    return {
+        "tool": str(part.get("name") or "")[:64],
+        "toolUseId": part["id"][:128],
+        "detail": permission_detail(part.get("input")),
+        "mode": mode,
+        "why": permission_why(mode),
+        "askedAt": asked[:64] if isinstance(asked, str) else "",
+    }
+
+
 def status_header(source, size, agent, captured=()):
     key = (str(Path(source.name).resolve()), os.fstat(source.fileno()).st_ino)
     previous = STATUS_CACHE.get(key)
@@ -1364,10 +1437,13 @@ def status_header(source, size, agent, captured=()):
             question = previous[6]
             if question is not None and question["id"] in completed_questions:
                 question = None
-    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question)
+    request = previous[7] if previous is not None and len(previous) > 8 and previous[8] == size else open_permission_request(source, size, agent)
+    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question, request, size)
     if len(STATUS_CACHE) > 256:
         del STATUS_CACHE[next(iter(STATUS_CACHE))]
     result = {"role": "status"}
+    if request is not None:
+        result["permission_request"] = request
     if question is not None or previous is not None and previous[6] is not None:
         result["question"] = question
     if model:
