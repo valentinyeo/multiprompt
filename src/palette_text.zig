@@ -66,3 +66,6 @@ test "palette labels use sentence case without changing acronyms" {
     try std.testing.expectEqualSlices(u16, L("Commands: Edit commands.json"), sentence(L("Commands: Edit commands.json"), &out));
 }
 
+test {
+    _ = @import("palette_rename_test.zig");
+}
