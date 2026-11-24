@@ -5211,11 +5211,11 @@ def host_rejected_command(provider, sid, tmux, session, event):
     output = unknown_command(event)
     if output is None or not output.startswith("Unknown command: /"):
         return
-    wanted = squashed(output.split(":", 1)[1].strip())
+    wanted = " ".join(output.split(":", 1)[1].split())
     for item in session.get("sends") or []:
         if item.get("accepted") or not item.get("text"):
             continue
-        sent = squashed(item["text"])
+        sent = " ".join(item["text"].split())
         if sent == wanted or sent.startswith(wanted + " "):
             host_unsent(provider, sid, tmux, session, item["id"], "unknown_command")
             return
