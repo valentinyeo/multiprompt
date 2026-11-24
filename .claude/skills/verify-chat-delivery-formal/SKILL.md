@@ -63,6 +63,8 @@ SOFT-3054 merges master into the fresh-start handover branch. The handover now p
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-3086 reviewed the pill range at `e11386929a20a51d87f0d91c429a097324c5571b` and, after merging master `f64e17a9f`, removes the leading-position gates so a known skill keeps its pill at the start, middle or end of a message. The covered user-message flow, `chatRelayout`, `chatEchoNotSent`, `ChatOutboxEntry` and every modeled decision are unchanged; only the render file's whole-file hash and the sync commit move. Slash-pill painting, agent-input rewriting and whether a skill runs stay outside the delivery model. Bounds, probes and mutation checks remain unchanged.
+
 SOFT-2604 saves one handover reply when a fresh start's agent answers twice. That rule now lives in SOFT-3054's `host_fresh_handover_pick` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
