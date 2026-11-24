@@ -7,7 +7,7 @@ Use one command for visible live chats and background runners. Run it on the ser
 - Node.js 22, Python 3, tmux, and `flock` on the Unix server.
 - The Multibot reader already installed for the server user.
 - An approved account service key in `MULTIPROMPT_KEY`. A workspace key is limited to its own workspace. Keep keys out of arguments, logs, transcripts, and agent instructions.
-- `--host` names this server's account slot, 0 through 2, on every create. A reopen reuses the slot recorded when the chat was created. There is no default slot. Never publish a local session under another server's slot.
+- `MULTIPROMPT_HOST` identifies this server's account slot, 0 through 2. `--host` overrides it. Never publish a local session under another server's slot.
 - Visible chats need signed-in, online desktop and phone clients. Headless chats need account authorization, but no running client.
 - Group placement needs the service's `groups` capability. Older services are refused before setup when a group is requested.
 

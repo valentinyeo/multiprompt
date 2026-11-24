@@ -599,15 +599,37 @@ pub fn archiveHasNewContentSnapshot(shell: *const Shell, content: *const archive
     return shell.archive_content_valid and archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, content) != .none;
 }
 
-pub fn archiveHasNewContent(i: usize) bool {
-    const content = readArchiveContent(i) orelse return false;
-    if (!app_state.shells[i].archive_content_valid) {
-        app_state.shells[i].archive_content = content;
-        app_state.shells[i].archive_content_valid = true;
-        saveSession();
-        return false;
+fn shellUsesHostedArchive(shell: *const Shell) bool {
+    return shell.pid == 0 or shell.hook_capable or shell.claude_sid_len > 0;
+}
+
+fn hostedArchiveHasNewContent(shell: *const Shell) bool {
+    if (shell.archive_time == 0) return false;
+    if (shell.archive_active > shell.archive_time and shell.archive_active > shell.archive_done) return true;
+    if (shell.last_done_time > shell.archive_done and shell.last_done_time > shell.archive_time) return true;
+    if (shell.last_done_content_valid) {
+        if (shell.archive_content_valid) {
+            return archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, &shell.last_done_content) != .none;
+        }
+        return shell.last_done_time > shell.archive_done;
     }
-    return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    return false;
+}
+
+pub fn archiveHasNewContent(i: usize) bool {
+    if (i >= app_state.shell_count) return false;
+    if (readArchiveContent(i)) |content| {
+        if (!app_state.shells[i].archive_content_valid) {
+            app_state.shells[i].archive_content = content;
+            app_state.shells[i].archive_content_valid = true;
+            saveSession();
+            return false;
+        }
+        return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    }
+    const shell = &app_state.shells[i];
+    if (shellUsesHostedArchive(shell)) return hostedArchiveHasNewContent(shell);
+    return false;
 }
 
 pub fn logUnarchive(i: usize, reason: []const u8) void {
@@ -5468,6 +5490,37 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+}
+
+test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_ws = app_state.g_active_workspace;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_ws;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 2;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].workspace = 2;
+    app_state.shells[0].pid = 0;
+    app_state.shells[0].hook_capable = true;
+    app_state.shells[0].inbox_archived = true;
+    app_state.shells[0].archive_time = 1000;
+    app_state.shells[0].archive_done = 1000;
+    app_state.shells[0].last_done_time = 1000;
+    try std.testing.expect(isTabHidden(0));
+    try std.testing.expect(!archiveHasNewContent(0));
+    app_state.shells[0].last_done_time = 2000;
+    try std.testing.expect(archiveHasNewContent(0));
 }
 
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {

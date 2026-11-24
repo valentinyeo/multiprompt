@@ -79,6 +79,8 @@ MUBO-246 adds failing-first cases for a prompt a UserPromptSubmit hook blocked b
 
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
+MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified mention deliveries and format read-along copies for FYI/CC mentions. All nine covered send functions, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged, so only `src/chat_send.zig`'s whole-file hash and the sync commit move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one echo, with skill tokens allowed to change position. These execute unchanged in native probes. |
