@@ -1,0 +1,131 @@
+name: Speed proof
+run-name: speed proof ${{ github.run_id }} ${{ github.ref_name }}
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - proof/mubo-speed-verify
+permissions:
+  contents: read
+concurrency:
+  group: speed-proof-${{ github.run_id }}
+  cancel-in-progress: false
+env:
+  BEFORE_TAG: v0.28.1683
+  AFTER_TAG: v0.28.1953
+jobs:
+  card:
+    name: usage card open time
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Download both released binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/mubo-speed/download-releases.ps1 -Tags @($env:BEFORE_TAG, $env:AFTER_TAG)
+      - name: Measure card open time
+        shell: pwsh
+        run: |
+          foreach ($tag in @($env:BEFORE_TAG, $env:AFTER_TAG)) {
+            ./tools/mubo-speed/card-open-timing.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/$tag" -Tag $tag -Samples 7
+            Write-Host "$tag card exit $LASTEXITCODE"
+          }
+          exit 0
+      - name: Summarise
+        if: always()
+        shell: pwsh
+        run: |
+          node tools/mubo-speed/summarize.mjs evidence
+          if (Test-Path evidence/summary.md) { Get-Content evidence/summary.md -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: speed-proof-card-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
+  idle-bare:
+    name: idle log and CPU, no chat open
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SCENARIO: bare
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Download both released binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/mubo-speed/download-releases.ps1 -Tags @($env:BEFORE_TAG, $env:AFTER_TAG)
+      - name: Measure idle log and CPU
+        shell: pwsh
+        run: |
+          foreach ($tag in @($env:BEFORE_TAG, $env:AFTER_TAG)) {
+            ./tools/mubo-speed/idle-log-cpu.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/$tag" -Tag $tag -Scenario $env:SCENARIO -IdleSeconds 660
+            Write-Host "$tag idle exit $LASTEXITCODE"
+          }
+          exit 0
+      - name: Summarise
+        if: always()
+        shell: pwsh
+        run: |
+          node tools/mubo-speed/summarize.mjs evidence
+          if (Test-Path evidence/summary.md) { Get-Content evidence/summary.md -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: speed-proof-idle-bare-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
+  idle-chat:
+    name: idle log and CPU, chat view open
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SCENARIO: chat
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Download both released binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/mubo-speed/download-releases.ps1 -Tags @($env:BEFORE_TAG, $env:AFTER_TAG)
+      - name: Measure idle log and CPU
+        shell: pwsh
+        run: |
+          foreach ($tag in @($env:BEFORE_TAG, $env:AFTER_TAG)) {
+            ./tools/mubo-speed/idle-log-cpu.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/$tag" -Tag $tag -Scenario $env:SCENARIO -IdleSeconds 660
+            Write-Host "$tag idle exit $LASTEXITCODE"
+          }
+          exit 0
+      - name: Summarise
+        if: always()
+        shell: pwsh
+        run: |
+          node tools/mubo-speed/summarize.mjs evidence
+          if (Test-Path evidence/summary.md) { Get-Content evidence/summary.md -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: speed-proof-idle-chat-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
