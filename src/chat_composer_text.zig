@@ -108,7 +108,7 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
                 if (!dwrite.drawPositioned(dc, text[lo..hi], advances[lo..hi], left.x, origin.y, clip, accent)) return false;
             }
             var scan: usize = 0;
-            const live = @import("chat_mention.zig").currentLive(null);
+            const live = @import("chat_mention.zig").currentLive();
             while (scan < n) {
                 const span = @import("chat_mention.zig").spanAt(text[0..n], scan, live) orelse {
                     scan += 1;
