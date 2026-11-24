@@ -4280,7 +4280,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
-            app_state.g_search_permission_requests_mode = false;
             app_state.g_search_active = true;
             list_input.palette.keyboard();
             if (wp == 1 and foregroundIsOurs()) {
@@ -4326,6 +4325,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_group_move_mode = false;
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
+            app_state.g_search_permission_requests_mode = false;
             app_state.g_search_pi_models_mode = false;
             app_state.g_search_tabctx_mode = false;
             app_state.g_workspace_color_target = null;
@@ -4635,9 +4635,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             clearSearchBackdrop();
             showActiveShellAfterOverlay();
             _ = InvalidateRect(hwnd, null, 0);
-            if (app_state.shell_count > 0) {
-                _ = SetTimer(hwnd, TIMER_REFOCUS, 100, null);
-            }
+            if (app_state.shell_count > 0) _ = SetTimer(hwnd, TIMER_REFOCUS, 100, null);
             return 0;
         },
         WM_APP_SHORTCUTS_SCROLL => {
