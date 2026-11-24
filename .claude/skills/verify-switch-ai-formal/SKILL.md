@@ -47,11 +47,15 @@ MUBO-246 also gates that blocked settlement behind `blocked_settlement` in the h
 
 MUBO-246 handles a prompt a UserPromptSubmit hook blocked before the chat read it: a settlement fact from the transcript, a not-sent send in the host stream and a not-sent fact from the connector. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-454 rewrites the mention wire note and drops `currentLive`'s exclude argument. That sits outside every covered switch function, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
+
 MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. All of it sits outside the covered switch functions, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns, while a hosted hax chat still answers from the host history only. hax is not a switch target and no covered switch, usage-limit or auto-switch function calls that resolver, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
 MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish` for `~/.local/state/multiprompt/chat-names.json`. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash moves; the sync commit names the merged master tip.
+
+MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |

@@ -216,15 +216,47 @@ class MpSessionsTest(unittest.TestCase):
                 self.assertEqual(done.stdout, "")
                 self.assertIn("this chat", done.stderr)
 
-    def test_SOFT_2451_whoami_requires_a_live_desktop_name(self):
+    def test_SOFT_2451_whoami_falls_back_to_local_name_or_tmux_without_a_desktop_tab(self):
         self.identity_chat()
+        self.state_file.write_text("{}", encoding="utf-8")
+        cached = self.home / ".local/state/multiprompt/chat-names.json"
         for listing in (dict(ok=False, error="offline"), LISTING):
-            with self.subTest(listing=listing):
-                self.state_file.write_text("{}", encoding="utf-8")
-                done = self.run_sessions("whoami", "--json", MULTIPROMPT_TAB="live-caller",
-                                         MP_SESSIONS_TEST_LIST=json.dumps(listing))
-                self.assertEqual(done.returncode, 2)
-                self.assertEqual(done.stdout, "")
+            for name in ("Published caller", "live-caller"):
+                with self.subTest(listing=listing, name=name):
+                    cached.write_text(json.dumps({"live-caller": dict(name=name)}), encoding="utf-8")
+                    if name == "live-caller":
+                        cached.unlink()
+                    identity = self.parsed(self.run_sessions(
+                        "whoami", "--json", MULTIPROMPT_TAB="live-caller",
+                        MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+                    self.assertEqual(identity, dict(name=name, sid="caller-session", provider="claude",
+                                                    tmux="live-caller", link=("@" if " " in name else "") + name + "{live-caller}"))
+
+    def test_SOFT_2451_whoami_through_content_addressed_runtime_symlinks(self):
+        self.identity_chat()
+        cached = self.home / ".local/state/multiprompt/chat-names.json"
+        cached.write_text(json.dumps({"live-caller": dict(name="Published caller")}), encoding="utf-8")
+        runtime = self.home / ".multiprompt-runtime"
+        runtime.mkdir()
+        for name, body in (("mp-sessions", (ROOT / "src/mp_sessions.py").read_text(encoding="utf-8")),
+                           ("mp-send", (ROOT / "src/mp_send.py").read_text(encoding="utf-8")),
+                           ("mp-zsb", FAKE_ZSB.replace("/usr/bin/env python3", sys.executable))):
+            target = runtime / (hashlib.sha256(body.encode()).hexdigest() + "-" + name)
+            target.write_text(body, encoding="utf-8")
+            target.chmod(0o700)
+            (runtime / name).symlink_to(target.name)
+        (self.bin / "zsb").unlink()
+        for online, name in ((True, "My Chat"), (False, "Published caller")):
+            with self.subTest(online=online):
+                listing = dict(LISTING, ok=online)
+                done = subprocess.run([sys.executable, str(runtime / "mp-sessions"), "whoami", "--json"],
+                                      capture_output=True, text=True, cwd=str(self.work), timeout=10,
+                                      env=self.env(MULTIPROMPT_TAB="live-caller",
+                                                   MP_SESSIONS_TEST_LIST=json.dumps(listing)))
+                self.assertEqual(self.parsed(done), dict(name=name, sid="caller-session", provider="claude",
+                                                        tmux="live-caller", link="@" + name + "{live-caller}"))
+        self.assertEqual(self.events("zsb"), [["workspace-list"], ["workspace-list"]])
+        self.assertEqual(self.events("host"), [])
 
     def test_SOFT_2451_whoami_refuses_duplicate_terminal_names_across_hosts(self):
         self.identity_chat()

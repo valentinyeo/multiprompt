@@ -119,7 +119,8 @@ function mentionSourceNote(names) {
   if (names.length === 0) return '';
   const listed = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
   const warn = names.length === 1 ? names[0] : names.join(' or ');
-  return `(This line is addressed to ${listed} and was already delivered to ${names.length === 1 ? 'it' : 'them'}. Do not answer for ${warn} or relay it unless you are also asked.)`;
+  const copy = names.length === 1 ? 'its own copy' : 'their own copies';
+  return `(Valentin wrote this to you. It also mentions ${listed}, which already got ${copy}. Answer it as your own message, but do not answer for ${warn} or relay it.)`;
 }
 
 const live = [
@@ -176,11 +177,13 @@ test('SOFT-3084 typing chat wires a source note and recipient copy is framed', (
   assert.match(note, /This message is for you/);
   assert.match(note, /user: context/);
   const suffix = mentionSourceNote(['X']);
-  assert.match(suffix, /addressed to X/);
-  assert.match(suffix, /Do not answer for X/);
+  assert.equal(suffix, '(Valentin wrote this to you. It also mentions X, which already got its own copy. Answer it as your own message, but do not answer for X or relay it.)');
+  assert.match(suffix, /Answer it as your own message/);
+  assert.match(suffix, /do not answer for X or relay it/);
   const multi = mentionSourceNote(['X', 'Y']);
-  assert.match(multi, /addressed to X and Y/);
-  assert.match(multi, /Do not answer for X or Y/);
+  assert.match(multi, /mentions X and Y/);
+  assert.match(multi, /Answer it as your own message/);
+  assert.match(multi, /do not answer for X or Y or relay it/);
   assert.deepEqual(mentionTargets('@A{live-a}', 'live-a', live), []);
 });
 
@@ -213,4 +216,19 @@ test('MUBO-247 real mention shapes separate addressing, reference, fyi and unsur
   assert.equal(isMentionNote(fyiNote), true);
   assert.match(fyiNote, /FYI only; read along, do not act unless asked/);
   assert.deepEqual(mentionDeliveries(`${fyiNote}\n@Builder{live-builder} ping`, 'live-current', chats), []);
+});
+test('MUBO-454 the typing chat answers a line that mentions another chat', () => {
+  const chats = [
+    { name: 'A', session: 'live-a', index: 0 },
+    { name: 'X', session: 'live-x', index: 1 },
+    { name: 'Y', session: 'live-y', index: 2 },
+  ];
+  assert.deepEqual(mentionTargets('@X{live-x} ship it', 'live-a', chats).map((row) => row.session), ['live-x']);
+  const suffix = mentionSourceNote(['X']);
+  assert.match(suffix, /Valentin wrote this to you/);
+  assert.match(suffix, /already got its own copy/);
+  assert.match(suffix, /do not answer for X or relay it/);
+  assert.match(mentionSourceNote(['X', 'Y']), /already got their own copies/);
+  assert.deepEqual(mentionTargets('@A{live-a} note to me', 'live-a', chats), []);
+  assert.equal(mentionNote('A', '@X ship it', ''), 'Valentin mentioned you in A. This message is for you. Context:\n\n@X ship it');
 });
