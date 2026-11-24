@@ -8860,6 +8860,47 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class MUBO_245_PinnedSkillTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'sid.jsonl'
+        self.path.write_text('')
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+
+    def submit(self, provider, token, text, pinned='pospeak'):
+        request = dict(message_protocol=1, provider=provider, sid='sid', tmux='fixture', op='message_submit',
+                       message_id=token, text=text)
+        if pinned:
+            request['pinned'] = dict(name=pinned, instructions='Rule one: plain words. Rule two: bold verdict first.')
+        return reader.message_store_request(request)['message']
+
+    def test_marker_is_prepended_once_on_every_provider(self):
+        for provider in ('claude', 'codex', 'pi', 'hax'):
+            with self.subTest(provider=provider):
+                message = self.submit(provider, 'mubo245-marker-' + provider, 'What is 17 + 25?')
+                self.assertTrue(message['text'].startswith('[Pinned skill: pospeak'), message['text'])
+                self.assertTrue(message['text'].endswith('What is 17 + 25?'), message['text'])
+                repeat = self.submit(provider, 'mubo245-marker-' + provider, message['text'], pinned='pospeak')
+                self.assertEqual(repeat['text'], message['text'])
+
+    def test_unpin_stops_the_marker_on_the_next_message(self):
+        self.submit('claude', 'mubo245-pinned-message', 'first pinned prompt')
+        after = self.submit('claude', 'mubo245-unpinned-message', 'second plain prompt', pinned=None)
+        self.assertEqual(after['text'], 'second plain prompt')
+
+    def test_marker_never_renders_in_the_users_own_message(self):
+        marked = self.submit('claude', 'mubo245-render-message', 'render this prompt')['text']
+        rows = reader.conversation_rows(dict(type='multiprompt_history', row=dict(role='user', text=marked, id='row-1')), 'claude')
+        self.assertEqual([row['text'] for row in rows], ['render this prompt'])
+        self.assertEqual(reader.visible_prompt(marked), 'render this prompt')
+        self.assertEqual(reader.conversation_rows(dict(type='multiprompt_history', row=dict(role='user', text=reader.format_pinned_skill_marker('pospeak', ''), id='row-2')), 'claude'), [])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:

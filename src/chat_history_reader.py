@@ -48,6 +48,10 @@ QUEUE_SCAN_BYTES = 4 * 1024 * 1024
 QUEUE_SHOWN = 8
 QUEUE_TEXT = 500
 _TRACKED_ID = re.compile(r"\n\[mp:([0-9a-f]{16})\]\s*\Z")
+PINNED_SKILL_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
+_PINNED_SKILL_MARKER = re.compile(r"\A\[Pinned skill:\s*[A-Za-z0-9_.:-]{1,80}(?:\s*(?:—|--|-|:)\s*[^\n\]]*)?\][ \t]*(?:\r?\n){1,2}")
+_PINNED_SKILL_MARKER_ONLY = re.compile(r"\A\[Pinned skill:\s*[A-Za-z0-9_.:-]{1,80}(?:\s*(?:—|--|-|:)\s*[^\n\]]*)?\][ \t]*\Z")
+PINNED_SKILL_MAX_INSTRUCTIONS = 800
 DRAFT_TEXT = 4000
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
@@ -176,8 +180,60 @@ def missing_response(q, reason):
         return f"@mp\t{q['id']}\tsettle\terror\t{reason}\t0\n{END}\n"
     return f"@mp\t{q['id']}\thistory\tmissing\t-\t0\t{reason}\n{END}\n"
 
+def strip_pinned_skill_marker(text):
+    if not isinstance(text, str) or not text.startswith("[Pinned skill:"):
+        return text
+    cleaned = text
+    while True:
+        updated = _PINNED_SKILL_MARKER.sub("", cleaned, count=1)
+        if updated == cleaned:
+            break
+        cleaned = updated
+    if _PINNED_SKILL_MARKER_ONLY.fullmatch(cleaned):
+        return ""
+    return cleaned
+
+
+def clean_pinned_skill_instructions(text):
+    if not isinstance(text, str):
+        return ""
+    body = text.lstrip("\ufeff \t\r\n")
+    if body.startswith("---"):
+        end = body.find("\n---", 3)
+        if end >= 0:
+            body = body[end + 4:]
+    cleaned = " ".join(body.replace("]", ")").split())
+    if len(cleaned) > PINNED_SKILL_MAX_INSTRUCTIONS:
+        cleaned = cleaned[:PINNED_SKILL_MAX_INSTRUCTIONS].rstrip()
+    return cleaned
+
+
+def format_pinned_skill_marker(skill, instructions=""):
+    summary = clean_pinned_skill_instructions(instructions)
+    if summary:
+        return f"[Pinned skill: {skill} \u2014 {summary}]"
+    return f"[Pinned skill: {skill}]"
+
+
+def apply_pinned_skill(text, pinned):
+    if not pinned or not isinstance(text, str) or not text.strip():
+        return text
+    if isinstance(pinned, dict):
+        skill = pinned.get("name") or pinned.get("skill") or ""
+        instructions = pinned.get("instructions") or ""
+    elif isinstance(pinned, str):
+        skill, instructions = pinned, ""
+    else:
+        return text
+    if not isinstance(skill, str) or PINNED_SKILL_NAME.fullmatch(skill) is None:
+        return text
+    if _PINNED_SKILL_MARKER.match(text) or _PINNED_SKILL_MARKER_ONLY.fullmatch(text):
+        return text
+    return format_pinned_skill_marker(skill, instructions) + "\n\n" + text
+
+
 def visible_prompt(text):
-    return _TRACKED_ID.sub("", text) if isinstance(text, str) else text
+    return _TRACKED_ID.sub("", strip_pinned_skill_marker(text)) if isinstance(text, str) else text
 
 def command_reply(command, arguments):
     lines = arguments.splitlines()
@@ -1031,7 +1087,14 @@ def tool_events(event, agent, search=False):
 def conversation_rows(event, agent, offset=0, search=False):
     if isinstance(event, dict) and event.get("type") == "multiprompt_history":
         row = event.get("row")
-        return [dict(row)] if isinstance(row, dict) and row.get("role") in ("user", "assistant", "tool", "tool_result") else []
+        if not isinstance(row, dict) or row.get("role") not in ("user", "assistant", "tool", "tool_result"):
+            return []
+        copied = dict(row)
+        if copied.get("role") == "user" and isinstance(copied.get("text"), str):
+            copied["text"] = visible_prompt(copied["text"])
+            if not copied["text"].strip():
+                return []
+        return [copied]
     message = conversation_event(event, agent)
     if message and event.get("kind") in ("user", "assistant"):
         message["id"] = "hax:" + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
@@ -4099,7 +4162,7 @@ def host_fresh_archive(provider, sid, tmux, session):
                             seen.add(token)
                             message = db.execute("SELECT text FROM shared_messages WHERE id=?", (token,)).fetchone()
                             if message:
-                                append(dict(role="user", text=message[0], id=token))
+                                append(dict(role="user", text=visible_prompt(message[0]), id=token))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
@@ -4710,7 +4773,7 @@ def host_switch_rows(provider, sid, tmux):
             elif event.get("room_scope") is None and event.get("kind") == "turn.started":
                 message = db.execute("SELECT text FROM shared_messages WHERE id=?", (payload.get("message_id"),)).fetchone()
                 if message:
-                    rows.append(dict(role="user", text=message[0], id=payload.get("message_id")))
+                    rows.append(dict(role="user", text=visible_prompt(message[0]), id=payload.get("message_id")))
     return rows
 
 
@@ -5507,7 +5570,7 @@ def host_accept(provider, sid, tmux, session, event, only=None):
     for entry in sends:
         entry["accepted"] = True
         if entry.get("text") and entry.get("room_scope") is None:
-            host_history_append(provider, sid, session, dict(role="user", text=entry["text"], id=entry["id"]))
+            host_history_append(provider, sid, session, dict(role="user", text=visible_prompt(entry["text"]), id=entry["id"]))
         digest = hashlib.sha256(("host:" + sid + ":" + entry["id"] + ":" + entry["attempt"]).encode()).hexdigest()
         fact = dict(kind="accepted", sid=sid, id=entry["id"], attempt=entry["attempt"],
                     event_id="host:accepted:" + digest, provenance=HOST_ADAPTERS[provider]["provenance"])
@@ -7072,6 +7135,7 @@ def message_store_transaction(q):
             token, text = q.get('message_id'), q.get('text')
             if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or not text.strip() or '\x00' in text:
                 raise ValueError('invalid message')
+            text = apply_pinned_skill(text, q.get('pinned'))
             origin = q.get('origin', 'human')
             if origin not in ('human', 'agent'):
                 raise ValueError('invalid message origin')
