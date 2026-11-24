@@ -69,7 +69,9 @@ test('IGSH-813 extends the existing Windows journey through every new-message tr
   }
   assert.match(driver, /Click-NewMessages \$true/);
   assert.match(driver, /Click-NewMessages \$false/);
-  assert.match(driver, /pillOrigin.Y -lt \$bounds.Bottom/);
+  assert.match(driver, /pillOrigin.Y -lt \$bounds.Top/);
+  assert.match(driver, /pillOrigin.Y -ge \$bounds.Bottom/);
+  assert.match(driver, /pillEnd.Y -gt \$composerTop/);
   const oracle = read('tools/chat-messages-only-proof.mjs');
   assert.match(oracle, /assert.equal\(observation.newMessages\?\.passed, true/);
   for (const shot of ['new-messages-visible', 'new-messages-dismissed', 'new-messages-jumped']) {

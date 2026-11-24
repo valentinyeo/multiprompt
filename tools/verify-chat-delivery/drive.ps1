@@ -1113,7 +1113,8 @@ foreach ($plan in $plans) {
             $bounds = Transcript-Viewport
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
-            if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
+            $composerTop = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle.Top
+            if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Top -or $pillOrigin.Y -ge $bounds.Bottom -or $pillEnd.Y -gt $composerTop -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill must float over the bottom of the transcript, clear of the composer and centered' }
             Shot 'new-messages-visible'
             $scrollLogStart = Scroll-Transcript -120
             [void](Require-NewMessages 2 1 1 'scrolling retains count' $scrollLogStart)
