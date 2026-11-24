@@ -5218,6 +5218,7 @@ pub fn updateSearchResults() void {
         }
 
         appendChatActions(app_state.active_shell);
+        @import("chat_pin.zig").appendTabContextRows(app_state.active_shell);
     }
 
     if (app_state.g_single_window) {

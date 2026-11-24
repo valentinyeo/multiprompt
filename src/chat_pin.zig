@@ -294,9 +294,14 @@ fn closePaletteForPin() void {
     _ = win32.InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+fn actionShell() ?u32 {
+    if (app_state.g_search_tabctx_mode) return @import("inbox.zig").findShellById(app_state.g_tabctx_sid);
+    return if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+}
+
 pub fn handleAction(target: usize) bool {
     if (target == app_state.SEARCH_TABCTX_UNPIN_SKILL) {
-        if (@import("inbox.zig").findShellById(app_state.g_tabctx_sid)) |ti| _ = setForShell(ti, null);
+        if (actionShell()) |ti| _ = setForShell(ti, null);
         closePaletteForPin();
         return true;
     }
@@ -316,8 +321,7 @@ pub fn handleAction(target: usize) bool {
 
 pub fn consumePick(name: []const u8) bool {
     if (!app_state.g_search_pin_skill_mode) return false;
-    const ti = @import("inbox.zig").findShellById(app_state.g_tabctx_sid);
-    if (ti) |idx| _ = setForShell(idx, name);
+    if (actionShell()) |idx| _ = setForShell(idx, name);
     closePaletteForPin();
     return true;
 }
@@ -390,6 +394,28 @@ test "MUBO-245 a local command tab has no chat key to pin" {
     app_state.shells[0].tmux_session_len = 0;
     try std.testing.expect(!hasChatKey(0));
     try std.testing.expect(!setForShell(0, "pospeak"));
+}
+
+test "MUBO-245 the pin action follows the tab the palette was opened on" {
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_mode = app_state.g_search_tabctx_mode;
+    const saved_sid = app_state.g_tabctx_sid;
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_search_tabctx_mode = saved_mode;
+        app_state.g_tabctx_sid = saved_sid;
+    }
+    app_state.shell_count = 2;
+    app_state.shells[0].shell_id = 71;
+    app_state.shells[1].shell_id = 72;
+    app_state.active_shell = 1;
+    app_state.g_search_tabctx_mode = false;
+    try std.testing.expectEqual(@as(u32, 1), actionShell().?);
+    app_state.g_search_tabctx_mode = true;
+    app_state.g_tabctx_sid = 71;
+    try std.testing.expectEqual(@as(u32, 0), actionShell().?);
 }
 
 test "MUBO-245 pin palette rows follow the pinned state" {

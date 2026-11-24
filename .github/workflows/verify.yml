@@ -82,6 +82,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_pin_proof:
+        description: Pin a skill from the tab palette, send, and prove the view shows only the typed text
+        required: false
+        default: false
+        type: boolean
       chat_retention_proof:
         description: Retain 2000 messages through 200 arrivals and source resets
         required: false
@@ -447,6 +452,7 @@ jobs:
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
+      CHAT_PIN_PROOF: ${{ inputs.chat_pin_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ (inputs.chat_reactions_proof || matrix.feature == 'chat-double-click') && '1' || '' }}
       CHAT_DOUBLE_CLICK_PROOF: ${{ matrix.feature == 'chat-double-click' && '1' || '' }}
       CHAT_RESYNC_PROOF: ${{ (inputs.chat_resync_proof || (github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11')) && '1' || '' }}

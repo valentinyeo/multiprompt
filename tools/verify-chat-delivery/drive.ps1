@@ -24,6 +24,7 @@ if ($recoveryPair -and $ExpectedHash -ine '22cd593c3c4146860d140606b2104e86459de
 if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reply proof requires chat-delivery' }
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
 if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
+if ($env:CHAT_PIN_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Pin proof requires chat-delivery' }
 if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
 if ($env:CHAT_RECALL_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Handed recall proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
@@ -42,6 +43,7 @@ $plans = @(
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
 if ($Feature -in @('chat-full-history', 'chat-newest')) { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
+if ($env:CHAT_PIN_PROOF -eq '1') { $plans = @(@{name='pin-skill'; mode='idle'; text='pinned skill message'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $plans = @(@{name='live-delivery'; mode='busy'; text='continuous busy-session delivery'}) }
@@ -624,7 +626,7 @@ foreach ($plan in $plans) {
         $tailTools = if ($isHistory -and $Feature -eq 'chat-full-history') { 240 } else { 0 }
         if ($tailTools -gt 0) { $standIn.soft2779Tail = $tailTools }
         Save $standIn "$state/state.json"
-        if ($env:CHAT_SKILLS_PROOF -eq '1') {
+        if ($env:CHAT_SKILLS_PROOF -eq '1' -or $env:CHAT_PIN_PROOF -eq '1') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-zebra/SKILL.md", "---`nname: verify-zebra`ndescription: Existing fixture skill`n---`nFixture")
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-yak" | Out-Null
@@ -707,6 +709,57 @@ foreach ($plan in $plans) {
             if ($isRecovery) { . "$PSScriptRoot/resync-recovery.ps1" } else { . "$PSScriptRoot/resync.ps1" }
         } elseif ($isHax) {
             . "$PSScriptRoot/hax-sessions.ps1"
+        } elseif ($env:CHAT_PIN_PROOF -eq '1') {
+            $pinFile = "$settings/chat-pins.txt"
+            $pinLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x11, 0x4B) 'Ctrl+K: find the pin row'
+            [void](Wait-For 'palette ready for the pin query' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $pinQuery = 'pin a skill'
+            foreach ($letter in $pinQuery.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            [void](Wait-For 'pin row offered for the chat tab' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match ('\[palette\] ready chars=' + $pinQuery.Length + ' count=\d+ target=7136(?:\s|$)') })
+            Shot 'tab-palette-pin-row'
+            Press @(0x0D) 'Enter: open the skill list for the pin'
+            [void](Wait-For 'skill list offered for the pin' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match '\[palette\] ready chars=0 count=\d+ target=41\d\d(?:\s|$)' })
+            $skillQuery = 'verify-zebra'
+            foreach ($letter in $skillQuery.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            [void](Wait-For 'the fixture skill is the pin match' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match ('\[palette\] ready chars=' + $skillQuery.Length + ' count=\d+ target=41\d\d(?:\s|$)') })
+            Press @(0x0D) 'Enter: pin the fixture skill'
+            [void](Wait-For 'pin saved for this chat' { (Test-Path $pinFile) -and ((Read-Shared $pinFile) -match '^0:verify-agent\tverify-zebra') } 10)
+            Copy-Item $pinFile "$caseDir/chat-pins.txt" -Force
+            $pinnedLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x11, 0x4B) 'Ctrl+K: show the unpin row'
+            [void](Wait-For 'palette ready for the unpin query' { (Read-Shared "$settings/debug.log").Substring($pinnedLogStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $unpinQuery = 'unpin'
+            foreach ($letter in $unpinQuery.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            [void](Wait-For 'unpin row offered once the chat is pinned' { (Read-Shared "$settings/debug.log").Substring($pinnedLogStart) -match ('\[palette\] ready chars=' + $unpinQuery.Length + ' count=\d+ target=7137(?:\s|$)') })
+            Shot 'tab-palette-unpin-row'
+            Press @(0x1B) 'Esc: leave the palette'
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Type-Composer $plan.text
+            [void](Wait-For 'typed message in the composer' { [ChatDeliveryDesktop]::Text($composer) -ceq $plan.text })
+            $sendStart = (Read-Shared "$state/agent-buffer.jsonl").Length
+            Press @(0x0D) 'Enter: send with the pin' $true
+            [void](Wait-For 'raw submit carries the pin marker' { (Read-Shared "$state/agent-buffer.jsonl").Substring($sendStart).Contains('[Pinned skill: verify-zebra') } 30)
+            Copy-Item "$state/agent-buffer.jsonl" "$caseDir/agent-buffer.jsonl" -Force
+            $rawSubmit = (Read-Shared "$state/agent-buffer.jsonl").Substring($sendStart)
+            if (-not $rawSubmit.Contains($plan.text)) { throw 'Raw submit lost the typed text' }
+            Shot 'pin-sent-message'
+            $viewStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x11, 0x4B) 'Ctrl+K: select the whole Chat View'
+            [void](Wait-For 'palette ready for select all' { (Read-Shared "$settings/debug.log").Substring($viewStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $allQuery = 'chat view select all'
+            foreach ($letter in $allQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+            [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($viewStart) -match ('\[palette\] ready chars=' + $allQuery.Length + ' count=1 target=\d+') })
+            Press @(0x0D) 'Enter: select the whole Chat View'
+            Press @(0x11, 0x43) 'Ctrl+C: copy what Chat View shows'
+            Start-Sleep -Milliseconds 500
+            $shown = [Windows.Forms.Clipboard]::GetText()
+            [IO.File]::WriteAllText("$caseDir/chat-view-copied.txt", $shown)
+            if (-not $shown.Contains($plan.text)) { throw 'Chat View does not show the typed message' }
+            if ($shown.Contains('[Pinned skill:')) { throw 'Chat View leaked the pin marker' }
+            Press @(0x1B) 'Esc: clear selection'
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            $observation.pin = @{file=(Read-Shared $pinFile); typed=$plan.text; raw=$rawSubmit; view=$shown}
         } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
             Type-Composer '/verify-zebra'
             if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
@@ -1651,7 +1704,9 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
     exit 0
 }
-if ($env:CHAT_SKILLS_PROOF -eq '1') {
+if ($env:CHAT_PIN_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-pin-proof.mjs" $Evidence
+} elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($env:CHAT_RETENTION_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-history-retention-proof.mjs" $Evidence
