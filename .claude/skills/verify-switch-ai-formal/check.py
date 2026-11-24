@@ -15,7 +15,8 @@ from replay import replay
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-RULES = ("OneLiveChat", "IdentityStable", "NoLostOrDuplicate", "HistoryReadable", "FailedSwitchKeepsOld")
+RULES = ("OneLiveChat", "IdentityStable", "NoLostOrDuplicate", "HistoryReadable", "FailedSwitchKeepsOld",
+         "ToggleOffKeepsChat", "PlanOutMovesChat", "AutoSwitchFollowsOrder")
 TLC_SHA = "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
 
 
@@ -87,7 +88,7 @@ def check(values, output, reliable=False):
         cfg = output / (rule + ".cfg")
         scenario = "reliable" if reliable else "all"
         cfg.write_text(config(values, rule, scenario))
-        result = subprocess.run([os.environ.get("JAVA", "java"), "-XX:+UseParallelGC", "-Xmx256m", "-cp", str(jar()), "tlc2.TLC", "-workers", "1", "-seed", "1", "-metadir", str(output / (rule + "-states")), "-config", str(cfg), str(output / "Switch.tla")], text=True, capture_output=True, timeout=90)
+        result = subprocess.run([os.environ.get("JAVA", "java"), "-XX:+UseParallelGC", "-Xmx512m", "-cp", str(jar()), "tlc2.TLC", "-workers", "1", "-seed", "1", "-metadir", str(output / (rule + "-states")), "-config", str(cfg), str(output / "Switch.tla")], text=True, capture_output=True, timeout=240)
         text = result.stdout + result.stderr
         (output / (rule + ".log")).write_text(text)
         violated = "Error: Invariant " + rule + " is violated."
@@ -109,19 +110,28 @@ def base_tables(baseline, output):
         root = pathlib.Path(directory)
         (root / "src").mkdir()
         (root / "src/chat_history_reader.py").write_bytes(subprocess.check_output(["git", "show", baseline + ":src/chat_history_reader.py"], cwd=ROOT))
+        fixtures = root / "tools/fixtures/SOFT-2469"
+        fixtures.mkdir(parents=True)
+        for name in (ROOT / "tools/fixtures/SOFT-2469").iterdir():
+            shutil.copyfile(name, fixtures / name.name)
         return decisions(root, output)
 
 
 MUTATIONS = (
-    ("doubled chat", ("OneLiveChat", "IdentityStable"), 'src/chat_history_reader.py',
-     '            db.execute("DELETE FROM message_locators WHERE provider=? AND sid=?", (provider, sid))',
-     '            pass'),
-    ("lost chat", ("HistoryReadable",), 'src/chat_history_reader.py',
-     'for row in rows + [divider]',
-     'for row in [divider]'),
-    ("lost message", ("NoLostOrDuplicate",), 'src/chat_history_reader.py',
-     '            db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state=\'queued\'",\n                       (target, new_sid, provider, sid))',
-     '            pass'),
+    ("doubled chat", ("OneLiveChat", "IdentityStable"), 'src/chat_history_reader.py', (
+        ('            db.execute("DELETE FROM message_locators WHERE provider=? AND sid=?", (provider, sid))',
+         '            pass'),)),
+    ("lost chat", ("HistoryReadable",), 'src/chat_history_reader.py', (
+        ('for row in rows + [divider]', 'for row in [divider]'),)),
+    ("lost message", ("NoLostOrDuplicate",), 'src/chat_history_reader.py', (
+        ('            db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state=\'queued\'",\n                       (target, new_sid, provider, sid))',
+         '            pass'),)),
+    ("toggle ignored", ("ToggleOffKeepsChat",), 'src/chat_history_reader.py', (
+        ('return dict(on=saved.get("on") is not False, order=order,', 'return dict(on=True, order=order,'),)),
+    ("wrong fallback", ("AutoSwitchFollowsOrder",), 'src/chat_history_reader.py', (
+        ('    for name in settings["order"]:', '    for name in reversed(settings["order"]):'),)),
+    ("missed usage limit", ("PlanOutMovesChat",), 'src/chat_history_reader.py', (
+        ('    kind = event.get("type") or event.get("method") or event.get("event")', '    kind = None'),)),
 )
 
 
@@ -130,15 +140,21 @@ def self_test(root, output):
     if any(result["status"] != "PASS" for result in reliable.values()):
         raise ValueError("Reliable mutation control must pass before planting a break")
     caught = []
-    for name, rules, file, before, after in MUTATIONS:
+    for name, rules, file, edits in MUTATIONS:
         with tempfile.TemporaryDirectory(prefix="switch-break-") as directory:
             scratch = pathlib.Path(directory)
             (scratch / "src").mkdir()
             shutil.copyfile(root / file, scratch / file)
+            fixtures = scratch / "tools/fixtures/SOFT-2469"
+            fixtures.mkdir(parents=True)
+            for item in (ROOT / "tools/fixtures/SOFT-2469").iterdir():
+                shutil.copyfile(item, fixtures / item.name)
             source = (scratch / file).read_text()
-            if source.count(before) != 1:
-                raise ValueError("Mutation " + name + " no longer matches")
-            (scratch / file).write_text(source.replace(before, after, 1))
+            for before, after in edits:
+                if source.count(before) != 1:
+                    raise ValueError("Mutation " + name + " no longer matches")
+                source = source.replace(before, after, 1)
+            (scratch / file).write_text(source)
             values = decisions(scratch, output / name / "native")
             result = check(values, output / name, reliable=True)
             failed = [rule for rule in RULES if result[rule]["status"] == "FAIL"]

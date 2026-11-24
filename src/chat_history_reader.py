@@ -30,6 +30,7 @@ SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+_MENTION_WIRE_NOTE = re.compile(r"\n\n\(This line is addressed to .*? or relay it unless you are also asked\.\)\s*\Z", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
@@ -231,6 +232,7 @@ def clean_command_markup(text):
             if command and not command.startswith("/"):
                 command = "/" + command
             arguments = args.group(1).strip() if args else ""
+            arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
             if not command:
                 return arguments
             return command_reply(command, arguments)
@@ -814,7 +816,6 @@ def conversation_event(event, agent):
     else:
         text = content if isinstance(content, str) else ""
     text = _SYSTEM_REMINDER.sub("", text)
-    tracked = _TRACKED_ID.search(text) if role == "user" else None
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
@@ -825,8 +826,6 @@ def conversation_event(event, agent):
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
-    if tracked:
-        result["client_id"] = tracked.group(1)
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -1081,13 +1080,33 @@ def pair_tool_rows(rows):
     return paired
 
 
-def settlement_event(event, agent):
+ORIGINAL_PROMPT = "Original prompt:"
+
+
+def blocked_prompt(event):
+    ending = event.get("promptSubmitEnding") if isinstance(event, dict) else None
+    if not isinstance(ending, dict) or ending.get("promptKept") is not False:
+        return None
+    content = event.get("content")
+    if not isinstance(content, str):
+        return None
+    index = content.rfind(ORIGINAL_PROMPT)
+    if index < 0:
+        return None
+    text = visible_prompt(content[index + len(ORIGINAL_PROMPT):].strip()).strip()
+    return text or None
+
+
+def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
     kind = event.get("type")
     operation = event.get("operation")
     content = event.get("content", "")
-    if kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
+    blocked = blocked_prompt(event) if blocked_settlement else None
+    if blocked is not None:
+        fact = dict(operation="blocked", content=blocked)
+    elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
         fact = dict(operation=operation, content=content if isinstance(content, str) else "")
     elif (kind == "system" and event.get("subtype") == "informational" and
           event.get("level") in ("warning", "error") and isinstance(content, str) and
@@ -1674,20 +1693,46 @@ def pin_hosted_claude(q, agent, as_owner=False):
     return q
 
 
+def hosted_claude_transcript_sid(sid, config):
+    native = config.get("native_session") if isinstance(config, dict) else None
+    if isinstance(native, str) and SESSION_ID.fullmatch(native):
+        return native
+    try:
+        with host_paths("claude", sid)["log"].open("rb") as source:
+            end = source.seek(0, os.SEEK_END)
+            pending = b""
+            while end:
+                count = min(end, 65536)
+                end -= count
+                source.seek(end)
+                lines = (source.read(count) + pending).split(b"\n")
+                pending = lines.pop(0) if end else b""
+                for raw in reversed(lines):
+                    event = load_line(raw)
+                    detail = event.get("detail") if isinstance(event, dict) and event.get("event") == "init" else None
+                    native = detail.get("session") if isinstance(detail, dict) else None
+                    if isinstance(native, str) and SESSION_ID.fullmatch(native):
+                        return native
+    except OSError:
+        pass
+    return sid
+
+
 def resolve_response_path(q, source=None, as_owner=False):
     rid = q["id"]
     agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
     sid, tmux, cwd = q["sid"], q["tmux"], q["cwd"]
-    hosted = host_config(agent, sid) if isinstance(sid, str) and SESSION_ID.fullmatch(sid) else None
-    if isinstance(hosted, dict) and isinstance(hosted.get("cwd"), str) and Path(hosted["cwd"]).is_absolute():
-        cwd = q["cwd"] = hosted["cwd"]
     if (not isinstance(rid, int) or rid < 0 or
             sid and not SESSION_ID.fullmatch(sid) or
-            tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
-            cwd and not Path(cwd).is_absolute()):
+            tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux):
         raise ValueError("invalid identity")
     if not sid and tmux and not as_owner:
         sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
+    hosted = host_config(agent, sid) if sid else None
+    if isinstance(hosted, dict) and isinstance(hosted.get("cwd"), str) and Path(hosted["cwd"]).is_absolute():
+        cwd = q["cwd"] = hosted["cwd"]
+    if cwd and not Path(cwd).is_absolute():
+        raise ValueError("invalid identity")
     if hosted and host_session_state(agent, sid).get("display_history"):
         history = host_paths(agent, sid)["history"]
         if history.is_file():
@@ -1703,6 +1748,29 @@ def resolve_response_path(q, source=None, as_owner=False):
     pin_hosted_claude(q, agent, as_owner)
     sid = q["sid"]
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
+    if agent == "claude" and sid and not as_owner and host_dispatch_switch(agent, sid):
+        native = hosted_claude_transcript_sid(sid, hosted)
+        if native != sid:
+            owner = conversation_owner(cwd)
+            denied = False
+            for home in ([None, owner[1]] if owner and owner[1] != HOME else [None]):
+                try:
+                    path = conversation_path(agent, native, cwd, home)
+                except PermissionError:
+                    path, denied = None, True
+                if path is not None:
+                    return agent, sid, path, None
+            if denied and owner and source is not None:
+                query = dict(q, sid=native, follow=False,
+                             cached_sid=native if q.get("cached_sid") == sid else q.get("cached_sid", ""))
+                wire = owner_response(query, owner, source)
+                operation = "search" if "search" in q else "history"
+                prefix = f"@mp\t{rid}\t{operation}\tok\t{native}\t"
+                if wire.startswith(prefix):
+                    wire = f"@mp\t{rid}\t{operation}\tok\t{sid}\t" + wire[len(prefix):]
+                return agent, sid, None, wire
+            wire = missing_response(q, "permission denied") if denied else empty_history_response(q, sid, tmux)
+            return agent, sid, None, wire
     denied = False
     delegated = None
     try:
@@ -1716,15 +1784,6 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             hosted = None
         return (agent, sid, hosted, None) if hosted is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
-    if agent == "claude" and path is not None and sid and not as_owner and host_dispatch_switch(agent, sid):
-        native = host_session_state(agent, sid).get("native_session")
-        if isinstance(native, str) and SESSION_ID.fullmatch(native) and native != sid:
-            try:
-                cleared = conversation_path(agent, native, cwd)
-            except PermissionError:
-                cleared = None
-            if cleared is not None:
-                path = cleared
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
         delegated = owner_response(dict(q, sid=""), owner, source)
@@ -1963,6 +2022,7 @@ def search_response(q, path, agent, sid):
 
 def tail_view(q, agent, fill):
     return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(q.get("blocked_settlement")),
             bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
             bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
 
@@ -2013,45 +2073,6 @@ def fit_tail(rows, oldest):
     if kept and isinstance(kept[0].get("offset"), int):
         oldest = kept[0]["offset"]
     return kept, oldest
-
-
-def history_client_ids(rows, provider, sid):
-    import sqlite3
-    import uuid
-    from contextlib import closing
-    path = message_store_path()
-    if not path.exists() or not any(row.get('role') == 'user' for row in rows):
-        return
-    aliases = {}
-    def bind(native, client):
-        if isinstance(native, str) and native:
-            aliases[native] = client if native not in aliases or aliases[native] == client else None
-    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
-        for (client,) in db.execute('SELECT id FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)):
-            bind(client, client)
-            if provider == 'claude':
-                bind(str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + client)), client)
-        for client, raw in db.execute('SELECT id,binding FROM message_attempts WHERE provider=? AND sid=?', (provider, sid)):
-            binding = json.loads(raw)
-            bind(binding.get('app_id'), client)
-            for native in binding.get('uuids') or []:
-                bind(native, client)
-        for (raw,) in db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='turn.started'", (provider, sid)):
-            event = json.loads(raw)
-            if event.get('kind') != 'turn.started':
-                continue
-            payload = event.get('payload') or {}
-            client = payload.get('message_id')
-            if not isinstance(client, str) or event.get('room_scope') is not None:
-                continue
-            for native in payload.get('uuids') or []:
-                bind(native, client)
-    for row in rows:
-        if row.get('role') != 'user':
-            continue
-        client = aliases.get(row.get('client_id')) or aliases.get(row.get('id'))
-        if client:
-            row['client_id'] = client
 
 
 def response(q, source=None, as_owner=False, resolved=None):
@@ -2171,7 +2192,7 @@ def response(q, source=None, as_owner=False, resolved=None):
                     elif operation in ("enqueue", "remove") and stamp >= previous[0]:
                         queue_stamps[content] = (stamp, timestamp)
             if message is None and q.get("settlement"):
-                fact = settlement_event(event, agent)
+                fact = settlement_event(event, agent, bool(q.get("blocked_settlement")))
                 if fact:
                     messages.insert(0, fact)
             if q.get("source_offsets"):
@@ -2222,7 +2243,6 @@ def response(q, source=None, as_owner=False, resolved=None):
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
         paired = pair_tool_rows(rows)
-        history_client_ids(paired, agent, sid)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
@@ -2821,6 +2841,10 @@ HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
 HOST_FRESH_RETRY_WAIT = 120
+HOST_FRESH_CONTEXT_LIMIT = 6000
+HOST_FRESH_CONTEXT_MESSAGE_LIMIT = 1200
+HOST_FRESH_HANDOVER_NOISE = re.compile(
+    r"(?:^Reloaded skills:|hit your \d+-hour limit|hit your .* limit|^You've hit your )", re.I | re.M)
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -3344,6 +3368,8 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "switch_ai":
         return host_switch_ai(provider, sid, query.get("to"))
+    if query.get("op") == "set_auto_switch":
+        return host_auto_switch_set(provider, sid, query)
     if query.get("op") == "set_effort" and provider not in ("claude",):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
@@ -4156,6 +4182,81 @@ def host_fresh_busy(session):
     return session["turn"] is not None or session["sends"] or session["parked"]
 
 
+def host_fresh_handover_usable(text):
+    if not isinstance(text, str):
+        return False
+    raw = text.strip()
+    if not raw or raw.startswith("---\n"):
+        return False
+    if "<command-message>" in raw or "<local-command-" in raw:
+        return False
+    cleaned = clean_command_markup(raw).strip()
+    if not cleaned or HOST_FRESH_HANDOVER_NOISE.search(cleaned):
+        return False
+    return True
+
+
+def host_fresh_handover_pick(chunks):
+    if not isinstance(chunks, dict):
+        return None
+    values = [text.strip() for text in chunks.values() if host_fresh_handover_usable(text)]
+    if not values:
+        return None
+    return max(values, key=len)
+
+
+def host_fresh_context_from_rows(rows):
+    lines = []
+    for row in rows:
+        text = row.get("text")
+        role = row.get("role")
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        text = text.strip()
+        if not text or text.startswith("---\n"):
+            continue
+        if role == "assistant" and not host_fresh_handover_usable(text):
+            continue
+        if len(text) > HOST_FRESH_CONTEXT_MESSAGE_LIMIT:
+            text = text[:HOST_FRESH_CONTEXT_MESSAGE_LIMIT] + " [shortened]"
+        lines.append(("You" if role == "assistant" else "User") + ": " + text)
+    kept, size = [], 0
+    for line in reversed(lines):
+        size += len(line.encode("utf-8")) + 2
+        if size > HOST_FRESH_CONTEXT_LIMIT:
+            break
+        kept.append(line)
+    kept.reverse()
+    return "\n\n".join(kept) if kept else "No earlier messages were saved."
+
+
+def host_fresh_recent_context(provider, sid, tmux):
+    try:
+        rows = host_switch_rows(provider, sid, tmux)
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        rows = []
+    return host_fresh_context_from_rows(rows)
+
+
+def host_fresh_handover_from_history(provider, sid, tmux):
+    body = host_fresh_recent_context(provider, sid, tmux)
+    if body == "No earlier messages were saved.":
+        return None
+    return ("No handover reply was captured. Recent conversation before the fresh start, oldest first:\n\n" + body)
+
+
+def host_fresh_resume_body(provider, sid, tmux, fresh, saved):
+    text = saved.get("text") if isinstance(saved, dict) else None
+    if host_fresh_handover_usable(text):
+        return ("The host read only your saved handover file, " + fresh["file"] + ":\n\n" + text.strip() +
+                "\n\nAcknowledge reading this handover and name the next unfinished task. "
+                "Do not execute work or call tools in this first reply.")
+    context = host_fresh_recent_context(provider, sid, tmux)
+    return ("The saved handover did not contain usable text. Recent context from before the fresh start:\n\n" +
+            context + "\n\nAcknowledge what you can continue from and name the next unfinished task. "
+            "Do not execute work or call tools in this first reply.")
+
+
 def host_fresh_handover_path(provider, sid):
     return host_paths(provider, sid)["root"] / (host_key(provider, sid) + ".handover-" + uuid.uuid4().hex + ".json")
 
@@ -4401,7 +4502,9 @@ def host_fresh_finish(provider, sid, tmux, session, status):
         return
     if fresh["phase"] != "handover":
         return
-    text = "\n\n".join(fresh["text"].values()).strip()
+    text = host_fresh_handover_pick(fresh.get("text"))
+    if not text:
+        text = host_fresh_handover_from_history(provider, sid, tmux)
     if status != "completed" or not text or len(text.encode("utf-8")) > HOST_EVENT_TEXT_LIMIT:
         host_fresh_error(provider, sid, tmux, session, "The handover did not finish.")
         return
@@ -4442,23 +4545,26 @@ def host_fresh_resume(provider, sid, tmux, session):
     if not saved or not isinstance(saved.get("text"), str) or not saved["text"].strip():
         host_fresh_error(provider, sid, tmux, session, "Could not read the saved handover.")
         return
+    body = host_fresh_resume_body(provider, sid, tmux, fresh, saved)
     if fresh.get("switch_from") in HOST_AI_NAMES:
         prompt = ("You are the same chat, now running on " + HOST_AI_NAMES[provider] + " instead of " +
                   HOST_AI_NAMES[fresh["switch_from"]] + ". Your name, picture, address and board login "
-                  "are unchanged. Your earlier conversation stays visible above as display history, not context. "
-                  "The host read only your saved handover file, " + fresh["file"] + ":\n\n" + saved["text"] +
-                  "\n\nAcknowledge reading this handover and name the next unfinished task. "
-                  "Do not execute work or call tools in this first reply.")
+                  "are unchanged. Your earlier conversation stays visible above as display history, not context. " +
+                  body)
     elif session["state"].get("valentin_mode"):
-        handover_path = (host_paths(provider, sid)["root"] / fresh["file"]).resolve()
-        prompt = ("/valentin-mode Fresh start: read the handover at " + str(handover_path) +
-                  ", re-run /board-drain, resume.")
+        text = saved.get("text") if isinstance(saved, dict) else None
+        if host_fresh_handover_usable(text):
+            prompt = ("/valentin-mode Fresh start. The host inlined your saved handover:\n\n" + text.strip() +
+                      "\n\nRe-run /board-drain and resume. Acknowledge the handover and name the next unfinished task. "
+                      "Do not execute work or call tools in this first reply.")
+        else:
+            context = host_fresh_recent_context(provider, sid, tmux)
+            prompt = ("/valentin-mode Fresh start. The saved handover was not usable. Recent context:\n\n" + context +
+                      "\n\nRe-run /board-drain and resume. Acknowledge what you can continue from and name the next "
+                      "unfinished task. Do not execute work or call tools in this first reply.")
     else:
         prompt = ("You are the same chat after a fresh start. Your name, picture, address and board login "
-                  "are unchanged. Your previous conversation is display history, not context. "
-                  "The host read only your saved handover file, " + fresh["file"] + ":\n\n" + saved["text"] +
-                  "\n\nAcknowledge reading this handover and name the next unfinished task. "
-                  "Do not execute work or call tools in this first reply.")
+                  "are unchanged. Your previous conversation is display history, not context. " + body)
     if not host_fresh_send(provider, sid, tmux, session, prompt):
         host_fresh_error(provider, sid, tmux, session, "Could not deliver the saved handover.")
         return
@@ -4467,9 +4573,186 @@ def host_fresh_resume(provider, sid, tmux, session):
 
 HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi")
 HOST_SWITCH_TARGETS = ("claude", "codex", "pi")
-HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly")
+HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
+HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
+HOST_AUTO_SWITCH_COOLDOWN = 60 * 60
+HOST_AUTO_SWITCH_WAIT = 120
+HOST_AUTO_SWITCH_TRIGGERS = dict(claude=("result",), codex=("error",), pi=("message_end", "agent_settled"),
+                                 antigravity=("result",), cursor=("result",))
+HOST_USAGE_LIMIT_PHRASES = ("usage limit", "usage_limit", "rate limit", "rate_limit", "rate-limit", "quota",
+                            "resource_exhausted", "resource exhausted", "insufficient_quota")
+HOST_USAGE_LIMIT_CODES = ("429", "resource_exhausted", "insufficient_quota")
+HOST_AUTO_SWITCH_STAYS = "No plan left anywhere. This chat stays on "
+
+
+def host_auto_switch_settings(config):
+    saved = config.get("auto_switch") if isinstance(config, dict) else None
+    saved = saved if isinstance(saved, dict) else {}
+    order = [name for name in saved.get("order") or [] if name in HOST_SWITCH_TARGETS]
+    for name in HOST_AUTO_SWITCH_ORDER:
+        if name in HOST_SWITCH_TARGETS and name not in order:
+            order.append(name)
+    empty = saved.get("empty") if isinstance(saved.get("empty"), dict) else {}
+    return dict(on=saved.get("on") is not False, order=order,
+                empty={name: at for name, at in empty.items() if name in HOST_SWITCH_TARGETS and type(at) in (int, float)})
+
+
+def host_auto_switch_save(provider, sid, settings):
+    config = host_read(host_paths(provider, sid)["config"])
+    if not isinstance(config, dict):
+        return None
+    config["auto_switch"] = dict(on=settings["on"], order=settings["order"], empty=settings["empty"])
+    host_write(host_paths(provider, sid)["config"], config)
+    return config
+
+
+def host_auto_switch_mark_empty(provider, sid):
+    config = host_read(host_paths(provider, sid)["config"])
+    if not isinstance(config, dict):
+        return None
+    settings = host_auto_switch_settings(config)
+    settings["empty"][provider] = time.time()
+    return host_auto_switch_save(provider, sid, settings)
+
+
+def host_auto_switch_target(provider, config, now=None):
+    now = time.time() if now is None else now
+    settings = host_auto_switch_settings(config)
+    if not settings["on"]:
+        return None, settings
+    for name in settings["order"]:
+        if name == provider:
+            continue
+        marked = settings["empty"].get(name)
+        if name in settings["empty"] and (type(marked) not in (int, float) or now - marked < HOST_AUTO_SWITCH_COOLDOWN):
+            continue
+        return name, settings
+    return None, settings
+
+
+def host_auto_switch_set(provider, sid, request):
+    lock = host_lock(provider, sid)
+    if lock is None:
+        return dict(status="unavailable", reason="host_starting")
+    try:
+        config = host_read(host_paths(provider, sid)["config"])
+        if not isinstance(config, dict) or config.get("enabled") is not True:
+            return dict(status="refused", reason="host_disabled")
+        settings = host_auto_switch_settings(config)
+        on = request.get("on")
+        settings["on"] = (not settings["on"]) if request.get("toggle") is True else (on if type(on) is bool else settings["on"])
+        if host_auto_switch_save(provider, sid, settings) is None:
+            return dict(status="error", reason="config_write_failed")
+        host_log(provider, sid, "auto_switch_setting", dict(on=settings["on"]))
+        return dict(status="ok", on=settings["on"])
+    finally:
+        host_release(lock)
+
+
+def host_usage_limit_strings(value, depth=0):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict) and depth < 3:
+        for item in value.values():
+            yield from host_usage_limit_strings(item, depth + 1)
+    elif isinstance(value, list) and depth < 3:
+        for item in value:
+            yield from host_usage_limit_strings(item, depth + 1)
+
+
+def host_usage_limit(provider, event):
+    kinds = HOST_AUTO_SWITCH_TRIGGERS.get(provider)
+    kind = event.get("type") or event.get("method") or event.get("event")
+    if not isinstance(kinds, tuple) or kind not in kinds:
+        return None
+    if provider == "claude" and event.get("is_error") is not True and not str(event.get("subtype") or "").startswith("error"):
+        return None
+    if provider in ("antigravity", "cursor"):
+        body = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if body.get("status") == "SUCCESS":
+            return None
+    if provider == "pi" and kind == "message_end":
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        if message.get("stopReason") != "error":
+            return None
+    for text in host_usage_limit_strings(event):
+        lowered = text.casefold()
+        if any(phrase in lowered for phrase in HOST_USAGE_LIMIT_PHRASES) or any(re.search(r"\b" + code + r"\b", lowered) for code in HOST_USAGE_LIMIT_CODES):
+            return host_event_text(text, 200)
+    return None
+
+
+def host_auto_switch_spawn(provider, sid, target, message_id):
+    source = host_reader_source()
+    if not isinstance(source, str) or not source:
+        host_log(provider, sid, "auto_switch_skipped", dict(reason="reader_unavailable"))
+        return False
+    bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
+                 "exec(compile(s,'<auto-switch>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
+    args = [sys.executable, "-u", "-c", bootstrap, "--auto-switch", provider, sid, target, message_id or ""]
+    try:
+        child = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+        child.stdin.write(base64.b64encode(source.encode("utf-8")) + b"\n")
+        child.stdin.close()
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def host_auto_switch_trigger(provider, sid, tmux, session, inflight, text, spawn=None):
+    config = host_read(host_paths(provider, sid)["config"])
+    settings = host_auto_switch_settings(config)
+    if not settings["on"]:
+        host_log(provider, sid, "auto_switch_skipped", dict(reason="off", text=text))
+        return False
+    config = host_auto_switch_mark_empty(provider, sid)
+    target, settings = host_auto_switch_target(provider, config or {})
+    if target is None:
+        host_event(provider, sid, tmux, session, "text.done",
+                   dict(text=HOST_AUTO_SWITCH_STAYS + HOST_AI_NAMES[provider] + " until another plan frees up."),
+                   "auto-switch-" + uuid.uuid4().hex)
+        host_log(provider, sid, "auto_switch_skipped", dict(reason="no_plan_left", text=text))
+        return False
+    message_id = inflight.get("id") if isinstance(inflight, dict) else None
+    if not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", message_id) is None:
+        message_id = None
+    host_log(provider, sid, "auto_switch", dict(to=target, message=message_id, text=text))
+    (host_auto_switch_spawn if spawn is None else spawn)(provider, sid, target, message_id)
+    return True
+
+
+def host_auto_switch_redeliver(tmux, message_id, reply):
+    provider, sid = reply.get("provider"), reply.get("sid")
+    if not host_identity(provider, sid) or not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", message_id) is None:
+        return False
+    from contextlib import closing
+    now = time.time()
+    with closing(message_store_db(tmux)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        changed = db.execute("UPDATE shared_messages SET provider=?,sid=?,state='queued',attempt=?,epoch=0,deadline=?,receipt=NULL,created=? "
+                             "WHERE id=? AND state IN ('sent','accepted','failed')",
+                             (provider, sid, uuid.uuid4().hex, now + 15, now, message_id)).rowcount
+        if not changed:
+            return False
+        message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (message_id,)).fetchone()))
+    start_message_worker(dict(tmux=tmux, provider=provider, sid=sid), host_reader_source(), only_if_work=True)
+    message_store_request(dict(message_protocol=1, tmux=tmux, provider=provider, sid=sid, op="message_dispatch"))
+    return True
+
+
+def host_auto_switch_run(provider, sid, target, message_id):
+    deadline = time.time() + HOST_AUTO_SWITCH_WAIT
+    while time.time() < deadline and host_turn_busy(provider, sid):
+        time.sleep(0.5)
+    reply = host_switch_ai(provider, sid, target, reason="usage_limit")
+    host_log(provider, sid, "auto_switch", dict(to=target, status=reply.get("status"), reason=reply.get("reason")))
+    if reply.get("status") != "switched":
+        return reply
+    reply["redelivered"] = host_auto_switch_redeliver(reply.get("tmux"), message_id, reply)
+    return reply
 
 
 def host_switched_path():
@@ -4529,7 +4812,7 @@ def host_switch_rows(provider, sid, tmux):
     return rows
 
 
-def host_switch_handover(rows, provider, target):
+def host_switch_handover(rows, provider, target, reason=None):
     lines = []
     for row in rows:
         text = row.get("text")
@@ -4546,8 +4829,9 @@ def host_switch_handover(rows, provider, target):
             break
         kept.append(line)
     kept.reverse()
-    head = ("This chat ran on " + HOST_AI_NAMES[provider] + " until now and continues on " + HOST_AI_NAMES[target] +
-            ". The recent conversation, oldest first:\n\n")
+    head = ("This chat ran on " + HOST_AI_NAMES[provider] + " until now and continues on " + HOST_AI_NAMES[target] + ". " +
+            (HOST_AI_NAMES[provider] + " ran out of plan, so the host moved the chat. " if reason == "usage_limit" else "") +
+            "The recent conversation, oldest first:\n\n")
     return head + ("\n\n".join(kept) if kept else "No earlier messages were saved.")
 
 
@@ -4558,7 +4842,7 @@ def host_switch_abort(target, new_sid, paths=None):
         host_write(paths["config"], dict(pending, enabled=False))
 
 
-def host_switch_ai(provider, sid, target):
+def host_switch_ai(provider, sid, target, reason=None):
     moved = host_switch_follow(sid)
     if moved is not None:
         provider, sid = moved
@@ -4576,14 +4860,16 @@ def host_switch_ai(provider, sid, target):
         return dict(status="busy", reason="chat_busy")
     try:
         rows = host_switch_rows(provider, sid, tmux)
-        text = host_switch_handover(rows, provider, target)
+        text = host_switch_handover(rows, provider, target, reason)
     except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
         return dict(status="error", reason="history_unavailable")
     new_sid = str(uuid.uuid4())
     paths = host_paths(target, new_sid)
     handover = paths["root"] / (paths["key"] + ".handover-" + uuid.uuid4().hex + ".json")
-    divider = dict(role="assistant", text="---\nSwitched AI: " + HOST_AI_NAMES[provider] + " to " + HOST_AI_NAMES[target] + "\n---",
-                   id="history-" + uuid.uuid4().hex, timestamp=datetime.now().isoformat())
+    label = ("Switched AI automatically: " + HOST_AI_NAMES[provider] + " ran out of plan" if reason == "usage_limit"
+             else "Switched AI: " + HOST_AI_NAMES[provider] + " to " + HOST_AI_NAMES[target])
+    divider = dict(role="assistant", text="---\n" + label + "\n---", id="history-" + uuid.uuid4().hex,
+                   timestamp=datetime.now().isoformat())
     try:
         history = "".join(json.dumps(dict(type="multiprompt_history", row=dict(row, id=row.get("id") or "history-" + uuid.uuid4().hex,
                                                                                   timestamp=row.get("timestamp") or datetime.now().isoformat())),
@@ -4655,9 +4941,9 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
     inflight = session.get("inflight")
     isolated = isinstance(inflight, dict) and inflight.get("room_scope") is not None
     if not isolated and kind == "text.done" and isinstance(payload, dict) and payload.get("text"):
-        if isinstance(fresh, dict) and fresh.get("phase") == "handover":
+        if isinstance(fresh, dict) and fresh.get("phase") == "handover" and host_fresh_handover_usable(payload["text"]):
             fresh["text"][item or "reply"] = payload["text"]
-        host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"]))
+        host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"], id=item))
     elif not isolated and kind == "item.started" and isinstance(payload, dict) and payload.get("type") == "tool_call":
         host_history_append(provider, sid, session,
                             dict(role="tool", id=item, text=tool_summary(payload.get("tool") or "Tool", payload.get("input") or {}),
@@ -4825,15 +5111,11 @@ def host_bind_uuid(provider, sid, tmux, session, event):
     if not uuids or not sends:
         return
     sends[-1]["uuid"] = uuids
-    if tmux is not None:
-        entry = sends[-1]
-        with host_db(provider, sid, tmux, session) as db:
-            db.execute("UPDATE message_attempts SET binding=json_set(binding,'$.uuids',json(?)) WHERE provider=? AND sid=? AND id=? AND attempt=?",
-                       (json.dumps(uuids), provider, sid, entry['id'], entry['attempt']))
     host_turn_started(provider, sid, tmux, session, sends[-1])
 
 
 def host_turn_started(provider, sid, tmux, session, entry):
+    session.pop("usage_limit", None)
     host_event(provider, sid, tmux, session, "turn.started",
                dict(message_id=entry["id"], text_sha256=entry["sha256"], uuids=list(entry.get("uuid") or [])),
                turn=entry["turn"])
@@ -5347,8 +5629,15 @@ def host_agent_event(provider, sid, tmux, session, raw):
         event = json.loads(raw)
     except (ValueError, UnicodeError):
         return
-    if isinstance(event, dict):
-        HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
+    if not isinstance(event, dict):
+        return
+    limit = host_usage_limit(provider, event)
+    if limit is not None and (session.get("inflight") is not None or session.get("sends")):
+        session["usage_limit"] = limit
+    HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
+    if provider == "codex" and session.get("usage_limit") is not None and (session.get("inflight") is not None or session.get("sends")):
+        host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="usage_limit", usage={}),
+                      dict(subtype="usage_limit"))
 
 
 def host_cursor_event(provider, sid, tmux, session, event):
@@ -5372,6 +5661,9 @@ def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
     if kind == "system":
+        if event.get("subtype") == "informational":
+            host_blocked_prompt(provider, sid, tmux, session, event)
+            return
         if event.get("subtype") == "init":
             session["ready"] = True
             capabilities = event.get("capabilities")
@@ -5391,6 +5683,9 @@ def host_claude_event(provider, sid, tmux, session, event):
                              dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
                 session["state"]["native_session"] = event["session_id"]
+                config = host_config(provider, sid)
+                if config is not None:
+                    host_write(host_paths(provider, sid)["config"], dict(config, native_session=event["session_id"]))
             host_state_write(provider, sid, session["state"])
             host_log(provider, sid, "init", dict(session=event.get("session_id")))
             host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
@@ -5440,6 +5735,18 @@ def host_claude_open(provider, sid, tmux, session):
 
 def host_cursor_open(provider, sid, tmux, session):
     pass
+
+
+def host_blocked_prompt(provider, sid, tmux, session, event):
+    prompt = blocked_prompt(event)
+    if prompt is None:
+        return
+    wanted = squashed(prompt)
+    entry = next((item for item in session.get("sends") or []
+                  if not item.get("accepted") and item.get("text") and squashed(item["text"]) == wanted), None)
+    if entry is None:
+        return
+    host_unsent(provider, sid, tmux, session, entry["id"], "blocked_by_hook")
 
 
 def host_claude_write(provider, sid, session, token, text):
@@ -5493,6 +5800,9 @@ def host_claude_send_now(provider, sid, tmux, session, request):
 
 def host_turn_end(provider, sid, tmux, session, payload, detail):
     inflight = session.get("inflight")
+    limit = session.pop("usage_limit", None)
+    if limit is not None:
+        payload = dict(payload, status="failed", reason="usage_limit")
     host_stream_finish(provider, sid, tmux, session)
     host_event(provider, sid, tmux, session, "turn.ended", payload)
     session["state"]["inflight"] = None
@@ -5506,6 +5816,8 @@ def host_turn_end(provider, sid, tmux, session, payload, detail):
     host_fresh_finish(provider, sid, tmux, session, payload.get("status"))
     if session["turn"] is None and not session["sends"] and not session["parked"]:
         host_fresh_drain_queued(provider, sid, tmux, session)
+    if limit is not None:
+        host_auto_switch_trigger(provider, sid, tmux, session, inflight, limit)
 
 
 def host_codex_policy(session):
@@ -8543,7 +8855,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "set_auto_switch", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -8629,6 +8941,8 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
     held_queue_worker(sys.argv[2], sys.argv[3], Path(sys.argv[4]))
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
+elif __name__ == "__main__" and sys.argv[1:2] == ["--auto-switch"]:
+    print(json.dumps(host_auto_switch_run(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]), separators=(",", ":")))
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
     code = host_main(sys.argv[2], sys.argv[3])
     host_log(sys.argv[2], sys.argv[3], "exit", dict(code=code))
@@ -8710,19 +9024,42 @@ if __name__ == '__main__':
                             return stream.read(limit + 1)
                     finally:
                         _os.close(fd)
-                def publish(name, data):
-                    fd, path = _tempfile.mkstemp(prefix='.tmp-', dir=_os.path.join(home, '.multiprompt-runtime'))
+                runtime_root = _os.path.join(home, '.multiprompt-runtime')
+                temporary_prefix = '.tmp-'
+                TOOLS = (
+                    ('mp-send', 'mp-send', 'MP_SEND_SOURCE'),
+                    ('multibot-feedback', 'multibot-feedback', 'FEEDBACK_SOURCE'),
+                    ('mp-helper', 'mp-helper', 'MP_HELPER_SOURCE'),
+                    ('mp-shell', 'mp-shell', 'MP_SHELL_SOURCE'),
+                    ('mp-sessions', 'mp-sessions', 'MP_SESSIONS_SOURCE'),
+                    ('mp-fresh', 'mp-fresh', 'MP_FRESH_SOURCE'),
+                    ('mp-zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('mp-layout', 'mp-layout.mjs', 'MP_LAYOUT_SOURCE'),
+                )
+
+                def remove_stale_temporaries():
+                    for entry in _os.listdir(runtime_root):
+                        if entry.startswith(temporary_prefix):
+                            try:
+                                _os.unlink(entry, dir_fd=directory)
+                            except FileNotFoundError:
+                                pass
+
+                def publish(name, data, mode=0o600):
+                    fd, path = _tempfile.mkstemp(prefix=temporary_prefix, dir=runtime_root)
                     try:
                         with _os.fdopen(fd, 'wb') as stream:
+                            _os.fchmod(stream.fileno(), mode)
                             stream.write(data)
                             stream.flush()
                             _os.fsync(stream.fileno())
                         _os.replace(path, name, dst_dir_fd=directory)
                         _os.fsync(directory)
                     finally:
-                        if _os.path.exists(path):
+                        try:
                             _os.unlink(path)
-                runtime_root = _os.path.join(home, '.multiprompt-runtime')
+                        except FileNotFoundError:
+                            pass
 
                 def relink(name, target):
                     path = _os.path.join(runtime_root, name)
@@ -8732,75 +9069,29 @@ if __name__ == '__main__':
                         pass
                     _os.symlink(target, path)
 
-                def publish_named_tool(name, payload):
-                    digest = _hashlib.sha256(payload).hexdigest()
-                    stem = digest + '-' + name
-                    publish(stem, payload)
+                def publish_named_tool(name, suffix, payload):
+                    stem = _hashlib.sha256(payload).hexdigest() + '-' + suffix
+                    publish(stem, payload, 0o700)
                     relink(name, stem)
-                    return stem
 
                 def publish_tools(data):
+                    try:
+                        remove_stale_temporaries()
+                    except OSError:
+                        pass
                     try:
                         reader_digest = _hashlib.sha256(data).hexdigest()
                         publish(reader_digest + '.py', data)
                         relink('reader.py', reader_digest + '.py')
                     except OSError:
                         pass
-                    mp_send_source = globals().get('MP_SEND_SOURCE')
-                    if isinstance(mp_send_source, str) and mp_send_source:
+                    for name, suffix, variable in TOOLS:
+                        tool = globals().get(variable)
+                        if not isinstance(tool, str) or not tool:
+                            continue
                         try:
-                            published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
+                            publish_named_tool(name, suffix, _base64.b64decode(tool))
                         except (ValueError, OSError):
-                            pass
-                    feedback_source = globals().get('FEEDBACK_SOURCE')
-                    if isinstance(feedback_source, str) and feedback_source:
-                        try:
-                            publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
-                            _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    helper_source = globals().get('MP_HELPER_SOURCE')
-                    if isinstance(helper_source, str) and helper_source:
-                        try:
-                            publish_named_tool('mp-helper', _base64.b64decode(helper_source))
-                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    shell_source = globals().get('MP_SHELL_SOURCE')
-                    if isinstance(shell_source, str) and shell_source:
-                        try:
-                            publish_named_tool('mp-shell', _base64.b64decode(shell_source))
-                            _os.chmod('mp-shell', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    sessions_source = globals().get('MP_SESSIONS_SOURCE')
-                    if isinstance(sessions_source, str) and sessions_source:
-                        try:
-                            publish_named_tool('mp-sessions', _base64.b64decode(sessions_source))
-                            _os.chmod('mp-sessions', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    layout_source = globals().get('MP_LAYOUT_SOURCE')
-                    if isinstance(layout_source, str) and layout_source:
-                        try:
-                            relink('mp-layout', publish_named_tool('mp-layout.mjs', _base64.b64decode(layout_source)))
-                            _os.chmod('mp-layout', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
-                            pass
-                    fresh_source = globals().get('MP_FRESH_SOURCE')
-                    if isinstance(fresh_source, str) and fresh_source:
-                        try:
-                            published = publish_named_tool('mp-fresh', _base64.b64decode(fresh_source))
-                            _os.chmod(published, 0o700, dir_fd=directory)
-                        except (ValueError, OSError):
-                            pass
-                    zsb_source = globals().get('ZSB_SOURCE')
-                    if isinstance(zsb_source, str) and zsb_source:
-                        try:
-                            publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
-                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
-                        except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
                 try:

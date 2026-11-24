@@ -306,9 +306,6 @@ test('executed production Zig decision, show, picker-close and input paths pass;
 });
 
 function chatHandoffHarness(text) {
-  const nativeImport = /@import\("native_session\.zig"\)/g;
-  const focusFuncs = ['focusActiveShell', 'focusActiveShellInner']
-    .map(name => fn(text, name).replaceAll(nativeImport, 'NativeSession'));
   const open = fn(text, 'openChatView')
     .replaceAll('@import("focus.zig").parkMainWindowBeforeActiveShellRemoval', 'parkMainWindowBeforeActiveShellRemoval')
     .replaceAll('@import("win32.zig").TIMER_CHAT_BROWSER_SWAP', 'TIMER_CHAT_BROWSER_SWAP')
@@ -328,10 +325,7 @@ const g_chat_transcript_hwnd: HANDLE = 101;
 const g_chat_composer_hwnd: HANDLE = 102;
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
-var shells = [_]struct { hwnd: HANDLE = 10, shell_id: u32 = 1, chat_view_on: bool = false, native_terminal: bool = false }{.{}};
-const NativeSession = struct {
-    fn ensureWindow(_: u32) bool { return false; }
-};
+var shells = [_]struct { hwnd: HANDLE = 10, shell_id: u32 = 1, chat_view_on: bool = false }{.{}};
 var g_chat_browser_swap = struct {
     shell_id: u32 = 1,
     fn request(self: *@This(), id: u32, _: u64) void { self.shell_id = id; }
@@ -413,8 +407,8 @@ fn ShowWindowAsync(hwnd: HANDLE, _: i32) i32 {
 }
 ${fn(text, 'unlockBrowserForeground')}
 ${fn(text, 'parkMainWindowBeforeActiveShellRemoval')}
-${focusFuncs[0]}
-${focusFuncs[1]}
+${fn(text, 'focusActiveShell')}
+${fn(text, 'focusActiveShellInner')}
 ${open}
 test "IGSH-1771 background chat opening leaves Inbox in front and preserves the saved view" {
     g_inbox_active = true;

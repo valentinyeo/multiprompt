@@ -37,9 +37,9 @@ test('both initializers and every persisted restore/reconnect path retain favori
   assert.match(jsonReader, /"favorite"/);
   assert.match(jsonReader, /@field\(tab, key\) = boolTrue\(obj, key\)/);
   assert.match(between('fn preserveFailedRemoteSavedTab(', 'fn parseSessionTabs('), /shell\.favorite = tab\.favorite/);
-  assert.match(between('fn applySavedTabFields(', 'fn restoreCachedSavedTab('), /shells\[idx\]\.favorite = tab\.favorite/);
+  assert.match(between('fn spawnSavedTab(', 'fn restoreSession('), /shells\[idx\]\.favorite = tabs\[t\]\.favorite/);
   assert.match(between('fn respawnShellInPlace(', 'fn faviconHostForShell('), /\.favorite = saved_favorite/);
-  assert.equal((source.match(/shells\[idx\]\.favorite = tabs\[t\]\.favorite/g) || []).length, 1);
+  assert.equal((source.match(/shells\[idx\]\.favorite = tabs\[t\]\.favorite/g) || []).length, 2);
 });
 
 test('tab moves carry favorites over COPYDATA and new-window adoption', () => {
@@ -54,7 +54,8 @@ test('favorite action saves and immediately publishes both true and false states
   const publisher = between('fn publishInboxStateNow(', 'fn deleteInboxStateFile(');
   assert.ok(publisher.includes('if (shells[i].favorite) ",\\"favorite\\":true" else ",\\"favorite\\":false"'));
   assert.match(between('fn loadInboxFile(', 'fn inboxRowLess('), /\.favorite = json_reader\.boolTrue\(o, "favorite"\)/);
-  assert.match(between('fn inboxRowVisible(', 'fn inboxNameBounds('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
+  assert.match(between('fn inboxRowVisible(', 'fn rowVisibleInSplit('), /rowVisibleInSplit\(r, g_inbox_tab, /);
+  assert.match(between('fn rowVisibleInSplit(', 'test "cached inbox navigation'), /!favoriteSplitMatches\(split, r.ws, r.favorite\)\) return false/);
 });
 
 test('Favorites split follows Frequent and ALL by default and shares configured split navigation', () => {
