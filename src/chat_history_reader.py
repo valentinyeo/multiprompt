@@ -6590,7 +6590,8 @@ def host_agent_retryable(provider, sid):
 
 def host_start_agent_retry(provider, sid, server, mode=None):
     reason = None
-    for attempt, wait in enumerate(HOST_START_RETRY_STEPS if host_agent_retryable(provider, sid) else (0,)):
+    steps = HOST_START_RETRY_STEPS if host_agent_retryable(provider, sid) else (0,)
+    for attempt, wait in enumerate(steps or (0,)):
         if wait and attempt:
             host_log(provider, sid, "start_retry_wait", dict(attempt=attempt, wait=wait, reason=reason))
             host_start_wait(server, wait)
