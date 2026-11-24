@@ -167,7 +167,7 @@ const MOVE_ZSB = `#!${process.execPath}
 const { readFileSync, writeFileSync } = require('node:fs');
 const [verb, ...flags] = process.argv.slice(2);
 const stateFile = process.env.MB_MOVE_STATE;
-require('node:fs').appendFileSync(process.env.MB_MOVE_LOG, JSON.stringify([verb, ...flags]) + '\n');
+require('node:fs').appendFileSync(process.env.MB_MOVE_LOG, JSON.stringify([verb, ...flags]) + '\\n');
 const state = JSON.parse(readFileSync(stateFile, 'utf8'));
 const value = name => flags.includes(name) ? flags[flags.indexOf(name) + 1] : null;
 if (verb === 'workspace-list') {
@@ -182,17 +182,20 @@ const tabId = Number(value('--tab'));
 const workspaceName = value('--workspace');
 const groupName = value('--group');
 let moved = null;
+let origin = null;
 for (const workspace of state.listing.workspaces) {
   for (const tab of [...(workspace.tabs || [])]) {
     if (tab.id !== tabId) continue;
     workspace.tabs.splice(workspace.tabs.indexOf(tab), 1);
     moved = tab;
+    origin = workspace;
   }
   for (const group of workspace.groups || []) {
     for (const tab of [...(group.tabs || [])]) {
       if (tab.id !== tabId) continue;
       group.tabs.splice(group.tabs.indexOf(tab), 1);
       moved = tab;
+      origin = workspace;
     }
   }
 }
@@ -200,7 +203,7 @@ if (!moved) {
   console.log(JSON.stringify({ ok: false, error: 'unknown_tab' }));
   process.exit(0);
 }
-const target = state.listing.workspaces.find(workspace => workspaceName === null || workspace.name === workspaceName);
+const target = workspaceName === null ? origin : state.listing.workspaces.find(workspace => workspace.name === workspaceName);
 if (!target) {
   console.log(JSON.stringify({ ok: false, error: 'unknown_workspace', valid_names: state.listing.workspaces.map(workspace => workspace.name) }));
   process.exit(0);
@@ -236,7 +239,7 @@ test('moving a tab to a workspace or group puts it there and repeats the same re
   };
   writeFileSync(state, JSON.stringify({ listing }));
   const log = join(dir, 'calls.jsonl');
-  const env = { HOME: dir, PATH: `${bin}:${process.env.PATH}`, MB_MOVE_STATE: state, MB_MOVE_LOG: log };
+  const env = { HOME: dir, PATH: `${bin}:${process.env.PATH}`, MULTIPROMPT_HOST: '0', MB_MOVE_STATE: state, MB_MOVE_LOG: log };
   const call = async args => {
     const lines = [], errors = [];
     const code = await run(args, {
