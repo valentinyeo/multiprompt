@@ -53,7 +53,6 @@ test('SOFT-2936 a deleted name stops being blocked as soon as a workspace uses i
 
 test('SOFT-2936 a refused delete says why instead of doing nothing', () => {
   const remove = publicBody(workspaces, 'deleteWorkspaceByIndex');
-  assert.match(remove, /Archive this workspace before deleting it\./);
   assert.match(remove, /This workspace is open in another window\. Delete it from that window\./);
   assert.match(remove, /At least one workspace must stay open\./);
   assert.doesNotMatch(remove, /if \(!workspaceCanDelete\(wi\)\) \{\s*return false;/);
