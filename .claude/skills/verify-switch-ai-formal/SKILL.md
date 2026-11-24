@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `28135885b5b63344a2b71e2e278d502658fd6ea8`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `523e24c54945b5d8968dc26770ab4a08d794e936`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-245 adds the pinned-skill marker on the shared submit path and strips it wherever the desktop renders the user's own message. Among the covered files the only change is `host_switch_rows`, which now renders each carried user row through `visible_prompt`; rows are added, dropped, ordered and read back exactly as before, so `historyOk` and every other modelled property keep their meaning. The marker helpers, the submit prepend and the other render call sites sit outside the switch path, the recorded provider events and probes are unchanged, and the decision table is unchanged. Only the reader hash and the sync commit move.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
