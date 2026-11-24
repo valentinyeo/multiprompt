@@ -43,6 +43,22 @@ test('rejects the ticketless master titles that blocked the release', () => {
   }
 });
 
+test('rejects a key from another board or a typo before merge', () => {
+  for (const title of [
+    'VSTA-162: Block heavy local builds and tests in this repo\'s chats',
+    'IGHS-12: Fix the update card',
+    'XYZ-1: Tidy the sidebar',
+  ]) {
+    assert.throws(() => checkTitle(title), /is not a ticket this repository releases from/, title);
+    const result = run(title);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /is not a ticket this repository releases from/);
+  }
+  for (const title of ['MUBO-235: Release notes never block a release', 'IGSH-1: Keep the update card', 'HYCI-9: Prove the release build', 'SOFT-2: Keep saved chats']) {
+    assert.equal(checkTitle(title), title);
+  }
+});
+
 test('the failure tells the author the title to use', () => {
   const result = run('ci(verifier): scope PR journeys and move full drives nightly (#1092)');
   assert.equal(result.status, 1);
