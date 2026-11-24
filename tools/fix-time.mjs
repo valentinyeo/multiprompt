@@ -44,8 +44,9 @@ export function firstSuccessfulRun(runs, workflowName, headSha) {
 export function analyzePullRequest(pr, runs, releaseRuns) {
   if (!pr?.mergedAt) return null;
   const mergeSha = pr.mergeCommit?.oid || pr.headRefOid;
-  const tests = firstSuccessfulRun(runs, 'Tests', mergeSha);
-  const verifier = firstSuccessfulRun(runs, 'PR verifier', mergeSha);
+  const prRuns = runs.filter(run => Date.parse(run.updated_at || run.created_at) <= Date.parse(pr.mergedAt));
+  const tests = firstSuccessfulRun(prRuns, 'Tests', pr.headRefOid);
+  const verifier = firstSuccessfulRun(prRuns, 'PR verifier', pr.headRefOid);
   const release = pickReleaseRun(releaseRuns, mergeSha);
   const openedAt = pr.createdAt;
   const testsAt = tests?.updated_at || tests?.created_at;
@@ -95,23 +96,14 @@ function ghJson(io, repo, query, parameters = {}) {
 }
 
 function ghRest(io, route) {
-  const result = io.exec('gh', ['api', route, '--paginate']);
+  const result = io.exec('gh', ['api', route, '--paginate', '--slurp']);
   if (result.status !== 0) throw new Error(String(result.stderr || result.stdout || `gh api ${route} failed`).trim());
-  const text = result.stdout.trim();
-  if (!text) return [];
-  return text.split('\n').filter(Boolean).flatMap(line => {
-    try {
-      const parsed = JSON.parse(line);
-      return Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
-      return [];
-    }
-  });
+  return JSON.parse(result.stdout).flatMap(page => page.workflow_runs || []);
 }
 
 export function loadFixTimings(io, repo, { days = 7, limit = 40 } = {}) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const query = `query($owner:String!,$name:String!,$since:DateTime!,$limit:Int!) {
+  const query = `query($owner:String!,$name:String!,$limit:Int!) {
     repository(owner:$owner,name:$name) {
       pullRequests(states:MERGED,first:$limit,orderBy:{field:UPDATED_AT,direction:DESC}) {
         nodes {
@@ -122,7 +114,7 @@ export function loadFixTimings(io, repo, { days = 7, limit = 40 } = {}) {
       }
     }
   }`;
-  const data = ghJson(io, repo, query, { since, limit });
+  const data = ghJson(io, repo, query, { limit });
   const pulls = (data.data?.repository?.pullRequests?.nodes || [])
     .map(node => ({
       number: node.number,

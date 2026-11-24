@@ -19,14 +19,6 @@ const VERIFIER_MODELS = [
   { engine: 'openai', family: 'openai' },
   { engine: 'deepseek', family: 'deepseek' },
 ];
-const LADDER_LANE_FAMILIES = {
-  'opencode-go': 'deepseek',
-  'vercel-ai-gateway': 'deepseek',
-  'vercel-ai-gateway-zai': 'google',
-  openrouter: 'deepseek',
-  google: 'google',
-  cursor: 'cursor',
-};
 const MAX_FILE_CHARS = 6000;
 const ARTIFACT_ATTEMPTS = 5;
 const ARTIFACT_RETRY_MS = 3000;
@@ -355,12 +347,6 @@ function pickVerifier(body, commitMessages = []) {
   const verifier = VERIFIER_MODELS.find(candidate => !families.includes(candidate.family));
   if (!verifier) return { problem: 'no verifier from another model family' };
   return { engine: verifier.engine };
-}
-
-function ladderFamily(lane) {
-  const name = String(lane || '').trim();
-  if (!name) return '';
-  return LADDER_LANE_FAMILIES[name] || modelFamily(name);
 }
 
 function judgeLabel(engine, lane = '') {
@@ -815,20 +801,16 @@ function ladderMessageContent(payload) {
 function parseLadderAnswer(env) {
   const file = env.LADDER_ANSWER_FILE;
   const lane = String(env.LADDER_LANE || '').trim();
-  if (!file || !fs.existsSync(file)) throw new Error('ladder-call answer file is missing');
-  let payload;
+  let verdict;
   try {
-    payload = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    throw new Error('ladder-call answer was not JSON');
-  }
-  const text = ladderMessageContent(payload);
-  if (!text) throw new Error(`ladder-call returned empty content (${payload.choices?.[0]?.finish_reason || 'no finish reason'})`);
-  const verdict = parseModelJson(text, 'ladder-call');
-  if (!VERDICTS.includes(verdict?.verdict)) {
-    const family = ladderFamily(lane);
-    if (!family) throw new Error(`ladder lane ${lane || '(missing)'} has no model family for retry`);
-    setOutputs({ ladder_needs_retry: family, ladder_invalid_reason: oneLine(verdict?.verdict || 'empty verdict') });
+    if (!file || !fs.existsSync(file)) throw new Error('ladder-call answer file is missing');
+    const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const text = ladderMessageContent(payload);
+    if (!text) throw new Error(`ladder-call returned empty content (${payload.choices?.[0]?.finish_reason || 'no finish reason'})`);
+    verdict = parseModelJson(text, 'ladder-call');
+    if (!VERDICTS.includes(verdict?.verdict)) throw new Error(`Invalid ladder verdict: ${oneLine(verdict?.verdict || 'empty verdict')}`);
+  } catch (error) {
+    setOutputs({ ladder_needs_retry: 'true', ladder_invalid_reason: oneLine(error.message) });
     return;
   }
   const evidence = (Array.isArray(verdict.evidence) ? verdict.evidence : []).slice(0, MAX_EVIDENCE_LINES - 1).map(line => oneLine(line));
@@ -1100,11 +1082,10 @@ async function main(argv, env) {
     } catch {
       verdict = null;
     }
-    let judgeRetryBlockedReason = '';
-    if (env.LADDER_RETRY_FAILED === 'true') {
-      judgeRetryBlockedReason = oneLine(env.LADDER_INVALID_REASON) ||
-        'The ladder judge returned no valid assessment on two lanes; verification is BLOCKED.';
-    }
+    const judgeRetryBlockedReason = env.LADDER_RETRY_FAILED === 'true'
+      ? `The ladder judge returned no valid assessment after one retry; verification is BLOCKED. ${oneLine(env.LADDER_INVALID_REASON)}`
+      : '';
+    if (judgeRetryBlockedReason) verdict = null;
     const { final, body } = finalize({
       verdict,
       headSha: env.HEAD_SHA,
@@ -1127,7 +1108,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, LADDER_LANE_FAMILIES, modelFamily, authorModelLines, pickVerifier, ladderFamily, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, authorModelLines, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

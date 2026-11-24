@@ -326,7 +326,7 @@ test('a pull request with no independent verifier FAILs and names the reason', (
   assert.match(body, /^Judge: none$/m);
 });
 
-test('a missing Author model line BLOCKS with an unknown note instead of FAIL', () => {
+test('a missing Author model line adds an unknown note without failing', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   const { final, body } = verifier.finalize({
     verdict: { verdict: 'PASS', evidence: [] },
@@ -398,9 +398,9 @@ test('the judge order is ladder-call then Codex then Claude with ladder retry be
   assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 2);
   assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
-  assert.match(workflow, /id: ladder_call_retry\n[\s\S]*?exclude-families: \$\{\{ steps\.ladder\.outputs\.ladder_needs_retry \}\}/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == ''\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == '' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /id: ladder_call_retry\n        if: .*steps\.ladder\.outputs\.ladder_needs_retry != ''/);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == '' && steps\.ladder\.outputs\.ladder_needs_retry == ''\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outputs\.structured_output == '' && steps\.ladder_retry\.outputs\.structured_output == '' && steps\.ladder\.outputs\.ladder_needs_retry == '' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder_retry\.outputs\.ladder_lane \|\| steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
   assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder_retry\.outputs\.structured_output \|\| steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
@@ -418,8 +418,8 @@ test('an invalid ladder verdict requests the next lane and BLOCKED names both at
   try {
     verifier.parseLadderAnswer({ LADDER_ANSWER_FILE: answer, LADDER_LANE: 'opencode-go' });
     const lines = Object.fromEntries(fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8').trim().split('\n').map(line => line.split('=')));
-    assert.equal(lines.ladder_needs_retry, 'deepseek');
-    assert.equal(lines.ladder_invalid_reason, 'MAYBE');
+    assert.equal(lines.ladder_needs_retry, 'true');
+    assert.match(lines.ladder_invalid_reason, /MAYBE/);
     assert.equal('structured_output' in lines, false);
     const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
     const blocked = verifier.finalize({
@@ -460,6 +460,57 @@ test('a ladder answer is turned into the same verdict shape', () => {
     process.env.GITHUB_OUTPUT = prev;
   }
 });
+
+for (const [label, answer] of [
+  ['malformed envelope', '{'],
+  ['empty content', JSON.stringify({ choices: [] })],
+  ['malformed verdict', JSON.stringify({ choices: [{ message: { content: 'not JSON' } }] })],
+]) test(`a ladder ${label} requests a retry instead of a product FAIL`, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-invalid-'));
+  try {
+    const file = path.join(dir, 'answer.json');
+    const output = path.join(dir, 'output');
+    fs.writeFileSync(file, answer);
+    const result = require('node:child_process').spawnSync(process.execPath, [modulePath, 'parse-ladder-answer'], {
+      encoding: 'utf8',
+      env: { ...process.env, LADDER_ANSWER_FILE: file, LADDER_LANE: 'opencode-go', GITHUB_OUTPUT: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const lines = fs.readFileSync(output, 'utf8');
+    assert.match(lines, /ladder_needs_retry=true/);
+    assert.doesNotMatch(lines, /structured_output=/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const [tests, expected] of [['PASS', 'BLOCKED'], ['FAIL', 'FAIL']]) {
+  test(`an exhausted ladder retry with Tests ${tests} produces ${expected}, even with a fallback PASS`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-exhausted-'));
+    try {
+      const selectionFile = path.join(dir, 'selection.json');
+      const summaryFile = path.join(dir, 'summary.json');
+      const output = path.join(dir, 'output');
+      fs.writeFileSync(selectionFile, JSON.stringify(selection([])));
+      fs.writeFileSync(summaryFile, JSON.stringify({ head: {} }));
+      const result = require('node:child_process').spawnSync(process.execPath,
+        [modulePath, 'finalize', selectionFile, summaryFile, dir], {
+          encoding: 'utf8',
+          env: { ...process.env, PR_NUMBER: '', RUN_ID: '', GITHUB_OUTPUT: output, HEAD_SHA: head,
+            JOB_RESULTS: JSON.stringify(tests === 'FAIL' ? { tests: { result: 'failure', outputs: { result: tests } } } : {}),
+            LADDER_RETRY_FAILED: 'true', LADDER_INVALID_REASON: 'Invalid ladder verdict: MAYBE',
+            VERDICT: JSON.stringify({ verdict: 'PASS', evidence: [] }), AUTHOR_MODEL_UNKNOWN: 'true' },
+        });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(fs.readFileSync(output, 'utf8'), new RegExp(`result=${expected}\\nconclusion=failure`));
+      const comment = fs.readFileSync(path.join(dir, 'comment.md'), 'utf8');
+      assert.match(comment, /after one retry/);
+      if (tests === 'FAIL') assert.match(comment, /Tests failed for this head/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('build-ladder-request writes judge messages for ladder-call', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));

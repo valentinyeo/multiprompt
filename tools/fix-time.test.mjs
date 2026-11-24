@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   analyzePullRequest,
   bugFixPullRequest,
+  loadFixTimings,
   minutesBetween,
   percentile,
   summarizeSamples,
@@ -46,6 +47,51 @@ test('analyzePullRequest splits open-to-release stages', () => {
   }, runs, releaseRuns);
   assert.equal(sample.total, 360);
   assert.deepEqual(sample.stages, { tests: 90, verifier: 30, merge_wait: 120, release: 120 });
+});
+
+test('PR checks use the head SHA while the release uses the squash SHA', () => {
+  const headSha = 'b'.repeat(40);
+  const sample = analyzePullRequest({
+    number: 241, createdAt: opened, mergedAt: merged,
+    mergeCommit: { oid: mergeSha }, headRefOid: headSha,
+  }, [
+    { name: 'Tests', conclusion: 'success', head_sha: headSha, updated_at: testsDone },
+    { name: 'PR verifier', conclusion: 'success', head_sha: headSha, updated_at: verifyDone },
+    { name: 'Tests', conclusion: 'success', head_sha: mergeSha, updated_at: released },
+  ], [{ conclusion: 'success', head_sha: mergeSha, updated_at: released }]);
+  assert.equal(sample.total, 360);
+  assert.deepEqual(sample.stages, { tests: 90, verifier: 30, merge_wait: 120, release: 120 });
+});
+
+test('loadFixTimings reads paginated workflow objects and declares only used GraphQL variables', () => {
+  const now = Date.now();
+  const at = minutes => new Date(now - minutes * 60_000).toISOString();
+  const headSha = 'b'.repeat(40);
+  const io = { exec(command, args) {
+    assert.equal(command, 'gh');
+    if (args.includes('graphql')) {
+      const query = args.find(arg => arg.startsWith('query='));
+      assert.doesNotMatch(query, /\$since/);
+      assert.equal(args.some(arg => arg.startsWith('since=')), false);
+      return { status: 0, stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [{
+        number: 241, title: 'Fix verifier', labels: { nodes: [] },
+        createdAt: at(360), mergedAt: at(120), headRefOid: headSha,
+        mergeCommit: { oid: mergeSha },
+      }] } } } }) };
+    }
+    assert.ok(args.includes('--paginate'));
+    assert.ok(args.includes('--slurp'));
+    const route = args[1];
+    const isTests = route.includes('/test.yml/');
+    const isVerifier = route.includes('/pr-verifier.yml/');
+    const run = { conclusion: 'success', head_sha: isTests || isVerifier ? headSha : mergeSha,
+      updated_at: at(isTests ? 270 : isVerifier ? 240 : 0) };
+    return { status: 0, stdout: JSON.stringify([{ workflow_runs: [] }, { workflow_runs: [run] }], null, 2) };
+  } };
+  const samples = loadFixTimings(io, 'owner/repo');
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0].total, 360);
+  assert.deepEqual(samples[0].stages, { tests: 90, verifier: 30, merge_wait: 120, release: 120 });
 });
 
 test('weekly verification maintenance reports median and p90', () => {
