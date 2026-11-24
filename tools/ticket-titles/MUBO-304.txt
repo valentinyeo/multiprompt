@@ -1,0 +1,1 @@
+Command line: wait until a tab is ready

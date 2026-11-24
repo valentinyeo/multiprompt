@@ -18,6 +18,7 @@ commands:
   close <name> [--host N]
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
+  wait <name> [--host N] [--json]
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -354,8 +355,7 @@ function listingTabs(listing) {
   return tabs;
 }
 
-async function pinSession(ctx, flags, pinned) {
-  const verb = pinned ? 'pin' : 'unpin';
+async function desktopTab(ctx, flags, verb) {
   if (flags._.length !== 1) throw new Failure(`${verb} needs one tab name`);
   const host = flags.host === undefined ? null : hostSlot(flags.host);
   const listing = zsbCall(ctx, ['workspace-list']);
@@ -366,12 +366,25 @@ async function pinSession(ctx, flags, pinned) {
     (String(tab.title || '').toLowerCase() === wanted || String(tab.tmux || '').toLowerCase() === wanted));
   if (matches.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
   if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
-  const tab = matches[0];
+  return matches[0];
+}
+
+async function pinSession(ctx, flags, pinned) {
+  const verb = pinned ? 'pin' : 'unpin';
+  const tab = await desktopTab(ctx, flags, verb);
   const changed = (tab.pinned === true) !== pinned;
   if (changed) zsbCall(ctx, [pinned ? 'session-pin' : 'session-unpin', '--tab', String(tab.id)]);
   const word = pinned ? 'pinned' : 'unpinned';
   if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed, tab: tab.id, pinned }));
   else ctx.out(`${changed ? word : 'already ' + word} ${tab.title}`);
+}
+
+async function waitSession(ctx, flags) {
+  const tab = await desktopTab(ctx, flags, 'wait');
+  const changed = tab.waiting !== true;
+  if (changed) zsbCall(ctx, ['session-wait', '--tab', String(tab.id)]);
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb: 'wait', changed, tab: tab.id, waiting: true }));
+  else ctx.out(`${changed ? 'waiting' : 'already waiting'} ${tab.title}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -921,6 +934,10 @@ export async function run(argv, overrides = {}) {
       const home = env.HOME;
       if (!home) throw new Failure('HOME is required');
       return await health({ env, out, err }, flags);
+    }
+    if (command === 'wait') {
+      await waitSession({ env, out, err }, parse(rest));
+      return 0;
     }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
