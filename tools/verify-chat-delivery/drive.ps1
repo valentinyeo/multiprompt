@@ -741,11 +741,11 @@ foreach ($plan in $plans) {
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Type-Composer $plan.text
             [void](Wait-For 'typed message in the composer' { [ChatDeliveryDesktop]::Text($composer) -ceq $plan.text })
-            $sendStart = (Read-Shared "$state/agent-buffer.jsonl").Length
+            $sendStart = (Read-Shared "$state/queue-trace.jsonl").Length
             Press @(0x0D) 'Enter: send with the pin' $true
-            [void](Wait-For 'raw submit carries the pin marker' { (Read-Shared "$state/agent-buffer.jsonl").Substring($sendStart).Contains('[Pinned skill: verify-zebra') } 30)
-            Copy-Item "$state/agent-buffer.jsonl" "$caseDir/agent-buffer.jsonl" -Force
-            $rawSubmit = (Read-Shared "$state/agent-buffer.jsonl").Substring($sendStart)
+            [void](Wait-For 'raw submit carries the pin marker' { (Read-Shared "$state/queue-trace.jsonl").Substring($sendStart).Contains('[Pinned skill: verify-zebra') } 30)
+            Copy-Item "$state/queue-trace.jsonl" "$caseDir/queue-trace.jsonl" -Force
+            $rawSubmit = (Read-Shared "$state/queue-trace.jsonl").Substring($sendStart)
             if (-not $rawSubmit.Contains($plan.text)) { throw 'Raw submit lost the typed text' }
             Shot 'pin-sent-message'
             $viewStart = (Read-Shared "$settings/debug.log").Length
