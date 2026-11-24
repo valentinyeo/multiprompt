@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
+import * as requests from './permission-requests.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -34,6 +35,7 @@ commands:
   group rename <old> <new>
   group delete <name>
   roster apply <file> [--dry-run]
+  permission-requests [--dir DIR] [--json]
   health [--json] [--ping]
 
 every write names its server: --host is required to create a tab, and a reopen takes the
@@ -61,7 +63,7 @@ const REFUSALS = {
 
 function parse(argv) {
   const flags = { _: [] };
-  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to']);
+  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to', 'dir']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
@@ -824,6 +826,34 @@ function mpSessionsScript(env) {
   return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
 }
 
+function permissionChats(dir, host) {
+  const found = [];
+  let projects = [];
+  try { projects = readdirSync(dir, { withFileTypes: true }); } catch { return found; }
+  for (const project of projects) {
+    if (!project.isDirectory()) continue;
+    let files = [];
+    try { files = readdirSync(join(dir, project.name), { withFileTypes: true }); } catch { continue; }
+    const newest = files.filter(file => file.isFile() && file.name.endsWith('.jsonl')).map(file => join(dir, project.name, file.name)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+    if (!newest) continue;
+    let transcript = '';
+    try { transcript = readFileSync(newest, 'utf8'); } catch { continue; }
+    const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(transcript);
+    const folder = cwd ? cwd[1].split('/').filter(Boolean).pop() : project.name;
+    found.push({ id: newest.slice(newest.lastIndexOf('/') + 1, -6), title: folder || project.name, host: host || '', transcript });
+  }
+  return found;
+}
+
+async function permissionRequests(ctx, flags) {
+  const dir = flags.dir || join(ctx.env.HOME || '', '.claude', 'projects');
+  if (!dir) throw new Failure('HOME is required');
+  const rows = requests.openRequests(permissionChats(dir, ctx.env.HOSTNAME || ''));
+  if (flags.json) { ctx.out(JSON.stringify(rows)); return; }
+  if (!rows.length) { ctx.out('no open permission requests'); return; }
+  for (const row of rows) ctx.out(`${row.askedAt}  ${row.title}  ${requests.describeRequest(row)}  ${row.detail}`);
+}
+
 async function health(ctx, flags) {
   if (flags._.length) throw new Failure('health takes no arguments');
   const args = ['health'];
@@ -855,6 +885,12 @@ export async function run(argv, overrides = {}) {
       const home = env.HOME;
       if (!home) throw new Failure('HOME is required');
       return await health({ env, out, err }, flags);
+    }
+    if (command === 'permission-requests') {
+      const flags = parse(rest);
+      if (flags._.length) throw new Failure('permission-requests takes no arguments');
+      await permissionRequests({ env, out, err }, flags);
+      return 0;
     }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
