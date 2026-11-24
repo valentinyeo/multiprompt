@@ -1,0 +1,1 @@
+A hosted chat shows its current conversation after a clear or compaction

@@ -332,6 +332,43 @@ test "archive JSON grows beyond the former entry and file-size limits" {
     try std.testing.expectEqualStrings("archive-test-159", last.tmux_session[0..last.tmux_session_len]);
 }
 
+test "MUBO-234 an archived chat stays hidden after a layout sync lists it again" {
+    const allocator = std.testing.allocator;
+    const tmux_closed = @import("tmux_closed.zig");
+    const session: []const u8 = "pi-chat";
+    var entries: std.ArrayList(ArchivedEntry) = .empty;
+    defer entries.deinit(allocator);
+    var entry = ArchivedEntry{};
+    const label: []const u8 = "Pi";
+    @memcpy(entry.name[0..label.len], label);
+    entry.name_len = @intCast(label.len);
+    @memcpy(entry.tmux_session[0..session.len], session);
+    entry.tmux_session_len = @intCast(session.len);
+    entry.tmux_host = TMUX_HOST_UK;
+    try entries.append(allocator, entry);
+
+    var out: [2048]u8 = undefined;
+    const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
+    var restarted: std.ArrayList(ArchivedEntry) = .empty;
+    defer restarted.deinit(allocator);
+    try std.testing.expect(parseArchiveJson(allocator, out[0..len], &restarted));
+
+    const elsewhere = [_]tmux_closed.LayoutTab{.{ .host = TMUX_HOST_UK, .session = "other-chat" }};
+    const listed = [_]tmux_closed.LayoutTab{.{ .host = TMUX_HOST_UK, .session = session }};
+    var closed = tmux_closed.Closed{};
+    defer closed.entries.deinit(allocator);
+    try closed.close(allocator, TMUX_HOST_UK, session, tmux_closed.now());
+    closed.reconcile(elsewhere[0..]);
+    closed.reconcile(listed[0..]);
+    closed.hold(allocator, TMUX_HOST_UK, session);
+    closed.reconcile(listed[0..]);
+
+    try std.testing.expect(closed.contains(TMUX_HOST_UK, session));
+    try std.testing.expect(archivedListHas(restarted.items, TMUX_HOST_UK, session));
+    try std.testing.expect(!archivedListHas(restarted.items, TMUX_HOST_UK, "other-chat"));
+    try std.testing.expect(!archivedListHas(restarted.items, TMUX_HOST_INNE, session));
+}
+
 pub fn loadArchiveFromDisk(force: bool) void {
     var path_buf: [512]u8 = undefined;
     const path = getArchivePath(&path_buf) orelse return;
@@ -386,6 +423,19 @@ pub fn loadArchiveFromDisk(force: bool) void {
 
 pub fn loadArchiveIfNeeded() void {
     loadArchiveFromDisk(false);
+}
+
+pub fn loadArchivedEntries() []const ArchivedEntry {
+    loadArchiveIfNeeded();
+    return app_state.g_archived.items[0..app_state.g_archived_count];
+}
+
+pub fn archivedListHas(entries: []const ArchivedEntry, host: u8, session: []const u8) bool {
+    if (session.len == 0) return false;
+    for (entries) |*entry| {
+        if (archivedEntryMatches(entry, host, session)) return true;
+    }
+    return false;
 }
 
 fn saveArchive() bool {

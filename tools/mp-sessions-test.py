@@ -57,6 +57,20 @@ else:
     print(json.dumps(dict(ok=True)))
 '''
 
+LEGACY_SEND = '''
+import os
+
+class RateLimited(ValueError):
+    pass
+
+def live_chats():
+    return [dict(name="Legacy Chat", provider="claude", sid="legacy-session", tmux="live-legacy",
+                 cwd="/work", state="idle")]
+
+def own_tmux():
+    return os.environ.get("MULTIPROMPT_TAB")
+'''
+
 LISTING = dict(ok=True, hosts=["remote-1"], workspaces=[
     dict(id=0, name="Home", active=True, groups=[], tabs=[dict(id=40, title="Anchor", host="remote-1", tmux="live-anchor")]),
     dict(id=1, name="Away", active=False, groups=[], tabs=[]),
@@ -90,8 +104,9 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
-        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID"):
+        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID", "MULTIPROMPT_HOST"):
             base.pop(name, None)
+        base["MULTIPROMPT_HOST"] = "0"
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
 
@@ -225,6 +240,49 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(own["sid"], "caller-session")
         self.assertEqual(own["provider"], "claude")
 
+    def legacy_runtime(self):
+        runtime = self.home / ".multiprompt-runtime"
+        runtime.mkdir()
+        for name, body in (("mp-sessions", (ROOT / "src/mp_sessions.py").read_text(encoding="utf-8")),
+                           ("mp-send", LEGACY_SEND)):
+            target = hashlib.sha256(body.encode()).hexdigest() + "-" + name
+            (runtime / target).write_text(body, encoding="utf-8")
+            (runtime / name).symlink_to(target)
+        return runtime / "mp-sessions"
+
+    def test_SOFT_3055_mixed_runtime_lists_without_desktop_helpers(self):
+        sessions = self.legacy_runtime()
+        for args in ([], ["list"], ["--json"], ["list", "--json"]):
+            with self.subTest(args=args):
+                done = subprocess.run([sys.executable, str(sessions), *args], capture_output=True, text=True,
+                                      env=self.env(MULTIPROMPT_TAB="live-legacy"), timeout=10)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn("Legacy Chat", done.stdout)
+                self.assertEqual(done.stderr, "")
+                if "--json" in args:
+                    self.assertEqual(json.loads(done.stdout)[0]["sid"], "legacy-session")
+                else:
+                    self.assertIn("*Legacy Chat", done.stdout)
+        self.assertEqual(self.events("zsb"), [])
+
+    def test_SOFT_3055_mixed_runtime_session_commands_explain_the_helper_mismatch(self):
+        sessions = self.legacy_runtime()
+        commands = (["whoami"], ["list", "--workspace", "mine"], ["start", "--name", "New"],
+                    ["restart", "Legacy Chat"], ["rename", "Legacy Chat", "New"],
+                    ["move", "Legacy Chat", "--workspace", "Home"], ["close", "Legacy Chat"],
+                    ["send", "Legacy Chat", "hello"])
+        for args in commands:
+            with self.subTest(args=args):
+                done = subprocess.run([sys.executable, str(sessions), *args], capture_output=True, text=True,
+                                      env=self.env(MULTIPROMPT_TAB="live-legacy"), timeout=10)
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertEqual(done.stdout, "")
+                self.assertIn("mp-send", done.stderr)
+                self.assertIn("update", done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+        self.assertEqual(self.events("zsb"), [])
+        self.assertEqual(self.events("host"), [])
+
     def test_SOFT_3055_start_creates_once_and_is_idempotent(self):
         first = self.parsed(self.run_sessions("start", "--name", "Daily chat"))
         again = self.parsed(self.run_sessions("start", "--name", "daily chat"))
@@ -319,7 +377,10 @@ class MpSessionsTest(unittest.TestCase):
         rows = self.parsed(self.run_sessions("list", "--json"))
         self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
-                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}"))
+                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
+                                       workspace=None, group=None, busy=False, running=True, self=False,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
 
 if __name__ == "__main__":

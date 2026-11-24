@@ -668,16 +668,17 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
     var name_buf: [192]u8 = undefined;
     const name_n: usize = if (shell.name_len > 0 and shell.name_len <= shell.name.len) (std.unicode.utf16LeToUtf8(&name_buf, shell.name[0..shell.name_len]) catch 0) else 0;
     const source_name: []const u8 = if (name_n > 0) name_buf[0..name_n] else if (source_len > 0) source_session[0..source_len] else "this chat";
-    var targets_buf: [16]mention.Chat = undefined;
-    const found = mention.mentionTargets(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
+    var targets_buf: [16]mention.Delivery = undefined;
+    const found = mention.mentionDeliveries(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
     if (found.len == 0) return;
-    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8 } = undefined;
+    var plan: [16]struct { index: u32, session: [64]u8, session_len: u8, kind: mention.DeliveryKind } = undefined;
     const count = @min(found.len, plan.len);
-    for (found[0..count], 0..) |chat, i| {
-        const n = @min(chat.session.len, plan[i].session.len);
-        @memcpy(plan[i].session[0..n], chat.session[0..n]);
+    for (found[0..count], 0..) |delivery, i| {
+        const n = @min(delivery.chat.session.len, plan[i].session.len);
+        @memcpy(plan[i].session[0..n], delivery.chat.session[0..n]);
         plan[i].session_len = @intCast(n);
-        plan[i].index = chat.index;
+        plan[i].index = delivery.chat.index;
+        plan[i].kind = delivery.kind;
     }
     var visible_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
     const visible = mention.copyVisible(text, &.{}, &visible_buf);
@@ -696,7 +697,10 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
         const session = target.session[0..target.session_len];
         if (session.len == 0 or mention.mentionDelivered(message_id, session)) continue;
         var note_buf: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
-        const note = mention.mentionNote(source_name, visible, context, &note_buf) orelse continue;
+        const note = (if (target.kind == .fyi)
+            mention.mentionFyiNote(source_name, visible, context, &note_buf)
+        else
+            mention.mentionNote(source_name, visible, context, &note_buf)) orelse continue;
         if (chatEchoEnqueueForShell(target.index, note, .queued) == null) continue;
         mention.mentionMarkDelivered(message_id, session);
     }
@@ -1264,10 +1268,17 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         }
                         entry.retry_nonce = json_reader.uintDefault(mobj, "retry_nonce", 0);
                         entry.reset_pending = json_reader.uintDefault(mobj, "reset_pending", 0) != 0;
-                        if (entry.message_v1 and entry.message_phase[0] == 0 and !entry.reset_pending and entry.state != .cancelled) {
-                            entry.state = .queued;
-                            entry.write_started = false;
-                            entry.channel_sent = false;
+                        if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and
+                            chat_echo.v1PhaseUnconfirmed(std.mem.sliceTo(&entry.message_phase, 0)))
+                        {
+                            if (entry.message_phase[0] == 0) {
+                                entry.state = .queued;
+                                entry.write_started = false;
+                                entry.channel_sent = false;
+                            } else {
+                                entry.write_started = true;
+                                entry.channel_sent = false;
+                            }
                         }
                         const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
                         const saved_ms = if (entry.anchor.sent_ms > 0) entry.anchor.sent_ms else entry.anchor.after_ms;
@@ -1790,14 +1801,10 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
         if (chatOutboxShellForKey(e.key[0..e.key_len])) |idx| {
             if (app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent >= 2) continue;
         }
-        const wire = std.mem.sliceTo(&e.message_wire_id, 0);
-        if (wire.len == 0) continue;
         pending[result.count] = .{
-            .client_id = @import("chat_markdown.zig").rowKey(wire),
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
-            .confirmed = e.message_v1 and chat_echo.phaseTaken(std.mem.sliceTo(&e.message_phase, 0)),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };
@@ -1814,7 +1821,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     for (blocks, 0..) |b, bi| {
         if (b.role != .user or user_count >= users.len) continue;
         const disp = chatBlockDisplayRange(buf, b);
-        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id, .client_id = b.client_id };
+        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id };
         user_at[user_count] = bi;
         user_count += 1;
     }
@@ -1912,12 +1919,16 @@ fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock, e: Cha
 }
 
 fn chatConfirmedHas(key: []const u8, block_norm: []const u16, stamp_ms: i64, message_id: u64) bool {
-    _ = block_norm;
-    _ = stamp_ms;
-    if (key.len == 0 or message_id == 0) return false;
+    if (key.len == 0 or block_norm.len == 0) return false;
     for (app_state.g_chat_confirmed.items) |c| {
         if (!std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) continue;
-        if (c.message_id == message_id) return true;
+        if (c.message_id != 0 and message_id != 0) {
+            if (c.message_id == message_id) return true;
+            continue;
+        }
+        if (c.stamp_ms != 0 and stamp_ms != 0 and c.stamp_ms != stamp_ms) continue;
+        const p = c.prefix[0..@as(usize, c.prefix_len)];
+        if (p.len > 0 and chatEchoPrefixMatches(block_norm, p)) return true;
     }
     return false;
 }
@@ -2983,7 +2994,14 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
             if (GetTickCount64() < history.send_next_tick) return false;
         }
     }
-    if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
+    const send_entry = &app_state.g_chat_outbox.items[e];
+    const resubmit = chat_echo.v1NeedsResubmit(
+        send_entry.message_v1,
+        send_entry.write_started,
+        std.mem.sliceTo(&send_entry.message_phase, 0),
+        send_entry.state,
+    );
+    if (!resubmit and !chat_echo.mayType(send_entry.state, send_entry.write_started, false, false)) return false;
     if (chatOutboxSendBlockedIn(&app_state.g_chat_outbox, app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)]) or app_state.g_chat_tmux_send_job != null) return false;
     const channel = chatTmuxSendEligible(shell_index);
     if (chatOutboxHeldByLink(chatLinkLooksDown(shell_index), app_state.g_chat_outbox.items[e].message_v1, channel)) return false;
@@ -3067,9 +3085,14 @@ pub fn chatOutboxTick() void {
         if (key.len > 0 and reply_ms > 0 and chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, reply_ms, now_ms, false, true)) changed = true;
     }
     if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, "", 0, now_ms, false, true)) changed = true;
+    const send_job_active = app_state.g_chat_tmux_send_job != null;
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS)) {
+            if (chat_echo.v1ChannelOrphaned(entry.channel_pending, send_job_active)) {
+                entry.channel_pending = false;
+                changed = true;
+            }
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, send_job_active, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS)) {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;
@@ -3706,8 +3729,6 @@ fn chatEchoTestAssign(blocks: []const ChatBlock, buf: []const u16, anchor: chat_
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, "tmux:7:echo-test", text, .sending)) return error.EnqueueFailed;
     app_state.g_chat_outbox.items[0].write_started = true;
     app_state.g_chat_outbox.items[0].anchor = anchor;
-    @memset(&app_state.g_chat_outbox.items[0].message_wire_id, 0);
-    @memcpy(app_state.g_chat_outbox.items[0].message_wire_id[0..20], "desktop-test-message");
     var assignment: ChatEchoAssignment = .{};
     chatEchoAssignForKey("tmux:7:echo-test", blocks, buf, window_full, &assignment);
     return chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id);
@@ -3733,7 +3754,6 @@ test "IGSH-1010 held input cannot borrow an unrelated identical transcript recei
     chatEchoAssignForKey("tmux:7:host-test", blocks[0..n], buf, true, &assignment);
     try std.testing.expectEqual(@as(usize, 0), assignment.count);
     app_state.g_chat_outbox.items[0].host_confirmed = true;
-    blocks[0].client_id = @import("chat_markdown.zig").rowKey(std.mem.sliceTo(&app_state.g_chat_outbox.items[0].message_wire_id, 0));
     chatEchoAssignForKey("tmux:7:host-test", blocks[0..n], buf, true, &assignment);
     try std.testing.expectEqual(@as(usize, 1), assignment.count);
     try std.testing.expect(chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id) != null);
@@ -3754,8 +3774,6 @@ fn chatEchoTestAssignV1(blocks: []const ChatBlock, buf: []const u16, anchor: cha
     entry.write_started = submitted;
     entry.channel_sent = submitted;
     entry.anchor = anchor;
-    @memset(&entry.message_wire_id, 0);
-    @memcpy(entry.message_wire_id[0..20], "desktop-test-message");
     var assignment: ChatEchoAssignment = .{};
     chatEchoAssignForKey("tmux:7:echo-test", blocks, buf, window_full, &assignment);
     return chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id);
@@ -3767,12 +3785,11 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     );
     var blocks: [8]ChatBlock = undefined;
     const n = chatClassifyBlocks(buf, &blocks);
-    blocks[2].client_id = @import("chat_markdown.zig").rowKey("desktop-test-message");
     const text = std.unicode.utf8ToUtf16LeStringLiteral("wich effort?");
     const anchor = chat_echo.Anchor{ .user_count = 1, .counted = true };
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
-    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) != null);
+    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
 }
 
 test "SOFT-2929 a message the host accepted keeps waiting until its transcript row is known" {
@@ -3826,28 +3843,26 @@ test "IGSH-1266 the first message of a new chat stops its bubble once the transc
     const buf = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} say ok\r\n");
     var blocks: [8]ChatBlock = undefined;
     const n = chatClassifyBlocks(buf, &blocks);
-    blocks[0].client_id = @import("chat_markdown.zig").rowKey("desktop-test-message");
     const text = std.unicode.utf8ToUtf16LeStringLiteral("say ok\n");
     const anchor = chat_echo.Anchor{ .sent_ms = 1761999999000 };
     try std.testing.expectEqual(@as(?usize, 0), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
 }
 
-test "SOFT-2526 an owned user block matches despite a stale anchor or rewritten text" {
+test "Chat View echo matches only user blocks after the baseline" {
     const buf = std.unicode.utf8ToUtf16LeStringLiteral(
         "\u{276f} old message\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} hello wrapped\r\n",
     );
     var blocks: [8]ChatBlock = undefined;
     const n = chatClassifyBlocks(buf, &blocks);
-    blocks[2].client_id = @import("chat_markdown.zig").rowKey("desktop-test-message");
     const text = std.unicode.utf8ToUtf16LeStringLiteral("hello   wrapped");
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 1, .counted = true }, false, text));
-    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text)) != null);
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text)) == null);
     const other = std.unicode.utf8ToUtf16LeStringLiteral("totally other");
-    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .counted = true }, false, other)) != null);
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .counted = true }, false, other)) == null);
 }
 
-test "SOFT-2526 a full transcript window confirms only the owned id" {
+test "Chat View echo in a full transcript window confirms only from newer entries" {
     const buf = std.unicode.utf8ToUtf16LeStringLiteral(
         "\u{276f} hello wrapped\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} hello wrapped\r\n",
     );
@@ -3857,9 +3872,8 @@ test "SOFT-2526 a full transcript window confirms only the owned id" {
     try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 1, .counted = true }, true, text)) == null);
     blocks[0].stamp_ms = 1_000;
     blocks[2].stamp_ms = 3_000;
-    blocks[2].client_id = @import("chat_markdown.zig").rowKey("desktop-test-message");
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssign(blocks[0..n], buf, .{ .after_ms = 2_000 }, true, text));
-    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .after_ms = 3_000 }, true, text)) != null);
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .after_ms = 3_000 }, true, text)) == null);
 }
 
 test "Chat View echo persistence retains a reserved send without retyping" {
@@ -3949,7 +3963,6 @@ test "Chat View echo confirmation survives CRLF, wrapping and a slash command" {
     );
     var blocks: [8]ChatBlock = undefined;
     const n = chatClassifyBlocks(buf, &blocks);
-    blocks[0].client_id = @import("chat_markdown.zig").rowKey("desktop-test-message");
     var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
     const p = chatEchoNormalizePrefix(typed, &prefix);
     try std.testing.expectEqual(@as(usize, CHAT_ECHO_PREFIX_CAP), p.len);

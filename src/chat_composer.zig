@@ -150,6 +150,7 @@ const appendSshExe = @import("console.zig").appendSshExe;
 const tmuxSshTarget = @import("console.zig").tmuxSshTarget;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const fetchAcPersistent = @import("vps.zig").fetchAcPersistent;
+const shellKnownRemotePath = @import("vps.zig").shellKnownRemotePath;
 const sshOneShotCaptureInput = @import("vps.zig").sshOneShotCaptureInput;
 const TMUX_HOST_DE = @import("app_state.zig").TMUX_HOST_DE;
 const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
@@ -163,6 +164,7 @@ const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
 const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
+const Shell = @import("app_state.zig").Shell;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chat_keynav = @import("chat_keynav.zig");
@@ -1322,13 +1324,92 @@ pub fn chatAcRequest(slot_index: usize) void {
     thread.detach();
 }
 
+const AC_SYNC_SHIM = @embedFile("completer_sync_shim.py");
+const AC_COMPLETER_SOURCE = @embedFile("mp_complete.py");
+const AC_SYNC_RETRY_MS: u64 = 60_000;
+
+comptime {
+    if (std.base64.standard.Encoder.calcSize(AC_SYNC_SHIM.len) > 2048) @compileError("completer_sync_shim.py no longer fits one ssh command");
+}
+
+var g_ac_sync_started = [_]std.atomic.Value(bool){ std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false) };
+var g_ac_sync_done = [_]std.atomic.Value(bool){ std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false), std.atomic.Value(bool).init(false) };
+var g_ac_sync_retry = [_]std.atomic.Value(u64){ std.atomic.Value(u64).init(0), std.atomic.Value(u64).init(0), std.atomic.Value(u64).init(0) };
+
+fn acSyncCommand(host: u8, out: *[4096]u8) ?[]const u8 {
+    var encoded_buf: [2048]u8 = undefined;
+    const encoded = std.base64.standard.Encoder.encode(&encoded_buf, AC_SYNC_SHIM);
+    var pos: usize = 0;
+    if (!appendSshExe(out, &pos)) return null;
+    const tail = std.fmt.bufPrint(out[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} python3 -c 'import base64,sys;exec(base64.b64decode(sys.argv[2]))' ~/.local/share/zigshell/mp_complete.py {s}", .{ tmuxSshTarget(host), encoded }) catch return null;
+    return out[0 .. pos + tail.len];
+}
+
+fn acSyncPayload() ?HANDLE {
+    var path_buf: [560]u8 = undefined;
+    const appdata_len = GetEnvironmentVariableA("APPDATA", &path_buf, 300);
+    if (appdata_len == 0 or appdata_len >= 290) return null;
+    const folder = "\\ZigShell\\ac";
+    const name = "\\completer.py";
+    @memcpy(path_buf[appdata_len .. appdata_len + folder.len], folder);
+    const folder_path = path_buf[0 .. appdata_len + folder.len];
+    win32MakePath(folder_path);
+    @memcpy(path_buf[folder_path.len .. folder_path.len + name.len], name);
+    const path = path_buf[0 .. folder_path.len + name.len];
+    const writer = @import("file_io.zig").win32OpenWrite(path) orelse return null;
+    win32WriteAll(writer, AC_COMPLETER_SOURCE);
+    _ = FlushFileBuffers(writer);
+    _ = CloseHandle(writer);
+    return @import("file_io.zig").win32OpenRead(path);
+}
+
+fn syncAcCompleter(host: u8) void {
+    if (host >= g_ac_sync_done.len or g_ac_sync_done[host].load(.acquire)) return;
+    if (g_ac_sync_started[host].swap(true, .acq_rel)) return;
+    const now = GetTickCount64();
+    if (now - g_ac_sync_retry[host].load(.acquire) < AC_SYNC_RETRY_MS) {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    }
+    g_ac_sync_retry[host].store(now, .release);
+    var command_buf: [4096]u8 = undefined;
+    const command = acSyncCommand(host, &command_buf) orelse {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    };
+    const payload = acSyncPayload() orelse {
+        g_ac_sync_started[host].store(false, .release);
+        return;
+    };
+    defer _ = CloseHandle(payload);
+    var output: [512]u8 = undefined;
+    const result = sshOneShotCaptureInput(command, &output, payload, 20_000);
+    if (result.success) {
+        g_ac_sync_done[host].store(true, .release);
+        return;
+    }
+    debugLog("chat-ac: completer sync failed");
+    g_ac_sync_started[host].store(false, .release);
+}
+
+fn chatAcShellPath(shell: *const Shell, host: u8) []const u8 {
+    if (shellKnownRemotePath(shell, host)) |path| return path;
+    return shell.claude_cwd[0..shell.claude_cwd_len];
+}
+
+fn chatAcCompleterHost(host: u8, cwd: []const u8) u8 {
+    if (cwd.len >= "/home/inne".len and std.mem.startsWith(u8, cwd, "/home/inne") and (cwd.len == "/home/inne".len or cwd["/home/inne".len] == '/'))
+        return TMUX_HOST_INNE;
+    return host;
+}
+
 fn chatAcFetchThread(req: ChatAcRequest) void {
     var wire: [512]u8 = undefined;
     const op = if (req.agent == .codex and req.mode == .dollar) "skills" else "slash";
     const session = std.mem.sliceTo(&req.session, 0);
     const cwd = std.mem.sliceTo(&req.cwd, 0);
-    const owner_account = req.host == TMUX_HOST_DE and (std.mem.eql(u8, cwd, "/home/inne") or std.mem.startsWith(u8, cwd, "/home/inne/"));
-    const ac_host = if (owner_account) TMUX_HOST_INNE else req.host;
+    const ac_host = chatAcCompleterHost(req.host, cwd);
+    syncAcCompleter(ac_host);
     const agent = if (req.agent == .codex) "codex" else "claude";
     const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
     const started = GetTickCount64();
@@ -1420,7 +1501,7 @@ fn chatAcCatalog(mode: chat_complete.Mode) ?usize {
     }
     const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
     const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
-    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    const cwd = chatAcShellPath(shell, host);
     var index: usize = 0;
     var found = false;
     for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
@@ -1519,7 +1600,7 @@ pub fn chatAcAfterSend(text: []const u16) void {
     if (!isRemoteShellKind(shell.kind)) return;
     const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
     const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
-    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    const cwd = chatAcShellPath(shell, host);
     for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
         if (slot.agent != .claude or slot.host != host or !std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) or
             !std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd)) continue;

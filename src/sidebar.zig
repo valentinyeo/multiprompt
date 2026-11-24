@@ -254,6 +254,7 @@ const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFS
 const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_AUTO_SWITCH_OFFSET = @import("app_state.zig").SEARCH_CHAT_AUTO_SWITCH_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
@@ -597,15 +598,37 @@ pub fn archiveHasNewContentSnapshot(shell: *const Shell, content: *const archive
     return shell.archive_content_valid and archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, content) != .none;
 }
 
-pub fn archiveHasNewContent(i: usize) bool {
-    const content = readArchiveContent(i) orelse return false;
-    if (!app_state.shells[i].archive_content_valid) {
-        app_state.shells[i].archive_content = content;
-        app_state.shells[i].archive_content_valid = true;
-        saveSession();
-        return false;
+fn shellUsesHostedArchive(shell: *const Shell) bool {
+    return shell.pid == 0 or shell.hook_capable or shell.claude_sid_len > 0;
+}
+
+fn hostedArchiveHasNewContent(shell: *const Shell) bool {
+    if (shell.archive_time == 0) return false;
+    if (shell.archive_active > shell.archive_time and shell.archive_active > shell.archive_done) return true;
+    if (shell.last_done_time > shell.archive_done and shell.last_done_time > shell.archive_time) return true;
+    if (shell.last_done_content_valid) {
+        if (shell.archive_content_valid) {
+            return archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, &shell.last_done_content) != .none;
+        }
+        return shell.last_done_time > shell.archive_done;
     }
-    return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    return false;
+}
+
+pub fn archiveHasNewContent(i: usize) bool {
+    if (i >= app_state.shell_count) return false;
+    if (readArchiveContent(i)) |content| {
+        if (!app_state.shells[i].archive_content_valid) {
+            app_state.shells[i].archive_content = content;
+            app_state.shells[i].archive_content_valid = true;
+            saveSession();
+            return false;
+        }
+        return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    }
+    const shell = &app_state.shells[i];
+    if (shellUsesHostedArchive(shell)) return hostedArchiveHasNewContent(shell);
+    return false;
 }
 
 pub fn logUnarchive(i: usize, reason: []const u8) void {
@@ -2866,7 +2889,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_theme_mode)
                 L("Search themes...")
             else if (app_state.g_search_workspace_delete_mode)
-                L("Search workspaces to delete...")
+                if (@import("workspaces.zig").workspaceDeleteMoveSource() != null) L("Where should the chats go?") else L("Search workspaces to delete...")
             else if (app_state.g_search_workspace_mode)
                 switch (app_state.g_search_workspace_action) {
                     .open => L("Search workspaces to open..."),
@@ -2935,6 +2958,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_restart_all = result_idx == SEARCH_CHAT_RESTART_ALL_OFFSET;
                     const is_chat_fresh_start = result_idx == app_state.SEARCH_CHAT_FRESH_START_OFFSET;
                     const is_chat_switch_ai = result_idx == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET;
+                    const is_chat_auto_switch = result_idx == SEARCH_CHAT_AUTO_SWITCH_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
@@ -2955,7 +2979,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
                     const is_chat_setting = (result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or (result_idx >= SEARCH_CHAT_MODEL_FABLE_OFFSET and result_idx <= SEARCH_CHAT_MODEL_ASTRA_OFFSET);
-                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all or is_chat_fresh_start or is_chat_switch_ai;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all or is_chat_fresh_start or is_chat_switch_ai or is_chat_auto_switch;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3934,11 +3958,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var find_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all or is_chat_fresh_start or is_chat_switch_ai) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all or is_chat_fresh_start or is_chat_switch_ai or is_chat_auto_switch) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Jump to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_fresh_start) L("Chat View: Fresh start") else if (result_idx == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) L("Chat View: Switch AI to Claude") else if (result_idx == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) L("Chat View: Switch AI to Codex") else if (is_chat_switch_ai) L("Chat View: Switch AI to Pi") else if (is_chat_restart) L("Chat View: Restart this chat on the newest version") else if (is_chat_restart_all) L("Chat View: Restart every idle live chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Jump to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_fresh_start) L("Chat View: Fresh start") else if (result_idx == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) L("Chat View: Switch AI to Claude") else if (result_idx == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) L("Chat View: Switch AI to Codex") else if (is_chat_switch_ai) L("Chat View: Switch AI to Pi") else if (is_chat_auto_switch) L("Chat View: Auto-switch AI when a plan runs out") else if (is_chat_restart) L("Chat View: Restart this chat on the newest version") else if (is_chat_restart_all) L("Chat View: Restart every idle live chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4591,7 +4615,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var ws_buf: [112]u16 = undefined;
                             var wsl: usize = 0;
                             const confirming = if (app_state.g_search_workspace_delete_confirm) |c| c == @as(u32, @intCast(workspace_idx)) else false;
-                            const prefix = if (confirming) "Press Enter Again: " else "Delete Workspace: ";
+                            const moving = @import("workspaces.zig").workspaceDeleteMoveSource() != null;
+                            const prefix = if (moving) "Move Chats To: " else if (confirming) "Press Enter Again: " else "Delete Workspace: ";
                             for (prefix) |c| {
                                 ws_buf[wsl] = c;
                                 wsl += 1;
@@ -4606,7 +4631,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                             var ws_hint: [64]u16 = undefined;
-                            const hint: []const u8 = if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
+                            const hint: []const u8 = if (moving) "move" else if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
                             const id_len = @min(hint.len, ws_hint.len);
                             for (0..id_len) |ii| ws_hint[ii] = @intCast(hint[ii]);
                             var ws_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -5460,6 +5485,37 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+}
+
+test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_ws = app_state.g_active_workspace;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_ws;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 2;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].workspace = 2;
+    app_state.shells[0].pid = 0;
+    app_state.shells[0].hook_capable = true;
+    app_state.shells[0].inbox_archived = true;
+    app_state.shells[0].archive_time = 1000;
+    app_state.shells[0].archive_done = 1000;
+    app_state.shells[0].last_done_time = 1000;
+    try std.testing.expect(isTabHidden(0));
+    try std.testing.expect(!archiveHasNewContent(0));
+    app_state.shells[0].last_done_time = 2000;
+    try std.testing.expect(archiveHasNewContent(0));
 }
 
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {

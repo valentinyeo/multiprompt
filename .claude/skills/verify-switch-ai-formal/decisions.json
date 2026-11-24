@@ -6,5 +6,9 @@
   "CarryIdentity": true,
   "CarryHistory": true,
   "SkipLocatorDelete": false,
+  "AutoSwitchDefaultOn": true,
+  "HonourOff": true,
+  "DetectPlan": true,
+  "FollowOrder": true,
   "Providers": "{\"claude\",\"codex\",\"pi\"}"
 }

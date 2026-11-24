@@ -67,10 +67,17 @@ fn SetTimer(_: anytype, _: anytype, _: anytype, _: anytype) i32 { return 1; }
 fn chatAcRank(_: []const u16, _: chat_complete.Token) void {}
 fn chatAcRequest(_: usize) void {}
 fn tmuxSshTarget(host: u8) []const u8 { return switch (host) { 2 => "remote-3", 1 => "remote-2", else => "remote-1" }; }
+fn shellKnownRemotePath(shell: *const Shell, host: u8) ?[]const u8 {
+    _ = host;
+    const cached = shell.claude_cwd[0..shell.claude_cwd_len];
+    if (cached.len == 0) return null;
+    return cached;
+}
 fn GetTickCount64() u64 { return 1; }
 fn Sleep(_: u32) void {}
 fn PostMessageW(_: anytype, _: anytype, _: anytype, _: anytype) i32 { return 1; }
 fn debugLog(_: []const u8) void {}
+fn syncAcCompleter(_: u8) void {}
 fn appendSshExe(buf: []u8, pos: *usize) bool { @memcpy(buf[0..4], "ssh "); pos.* = 4; return true; }
 fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
     received_host = host;
@@ -93,6 +100,8 @@ fn sshOneShotCaptureInput(command: []const u8, buf: []u8, _: anytype, _: u32) st
     }
     return .{ .len = 0, .success = false, .exit_code = 255 };
 }
+${fn('chatAcShellPath')}
+${fn('chatAcCompleterHost')}
 ${fn('chatAcCatalog')}
 ${fn('chatAcFetchThread')}
 ${fn('chatAcOnFetchDone')}
@@ -115,7 +124,22 @@ test "failure cause survives into menu state" {
         try std.testing.expectEqualStrings(case.expected, slot.error_text[0..slot.error_len]);
     }
 }
+test "inne host catalog routing" {
+    app_state.shells[0].tmux_host = 2;
+    const cwd = "/home/inne/projects/sample";
+    @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
+    app_state.shells[0].claude_cwd_len = cwd.len;
+    const index = chatAcCatalog(.slash).?;
+    const slot = &app_state.g_chat_ac_slots[index];
+    try std.testing.expectEqual(@as(u8, 2), slot.host);
+    try std.testing.expectEqualStrings(cwd, std.mem.sliceTo(&slot.cwd, 0));
+    slot.pending = 9;
+    chatAcFetchThread(.{ .slot = index, .id = 9, .host = slot.host, .agent = slot.agent, .mode = slot.mode, .session = slot.session, .cwd = slot.cwd });
+    try std.testing.expectEqual(@as(u8, 2), received_host);
+}
 test "owner catalog routing" {
+    app_state.shells[0].tmux_host = 0;
+    persistent_calls = 0;
     const cwd = "/home/inne/projects/sample";
     @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
     app_state.shells[0].claude_cwd_len = cwd.len;

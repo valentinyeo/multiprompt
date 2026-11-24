@@ -826,7 +826,6 @@ const ReleaseMutex = @import("win32.zig").ReleaseMutex;
 const windowOwnerProcessStillActive = @import("workspaces.zig").windowOwnerProcessStillActive;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
 const findAndFocusWorkspaceWindow = @import("workspaces.zig").findAndFocusWorkspaceWindow;
-const deleteWorkspaceByIndex = @import("workspaces.zig").deleteWorkspaceByIndex;
 const saveWorkspaceRegistry = @import("workspaces.zig").saveWorkspaceRegistry;
 const gcDefaultNamedWindowOnClose = @import("workspaces.zig").gcDefaultNamedWindowOnClose;
 const setWorkspaceRestoreAndSave = @import("workspaces.zig").setWorkspaceRestoreAndSave;
@@ -1464,14 +1463,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn openNewRoom(hwnd: HANDLE) void {
-    app_state.g_search_active = false;
-    clearSearchBackdrop();
-    if (app_state.g_inbox_active) closeInbox(hwnd);
-    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-    @import("room_frontend.zig").openCreate();
-    _ = InvalidateRect(hwnd, null, 0);
-}
+const openNewRoom = @import("room_frontend.zig").openNewRoom;
 
 fn browserFocusHotkey() void {
     const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
@@ -4371,6 +4363,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
             loadSnippetsIfChanged();
+            @import("workspace_delete_palette.zig").takeRequested();
             if (app_state.g_search_pick_repo_mode) requestAllRepoRefresh();
             updateSearchResults();
             if (!was_search_active and !app_state.g_search_from_inbox) {
@@ -5495,13 +5488,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                if (target == SEARCH_CHAT_RESYNC_OFFSET or target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    @import("chat_session.zig").chatResync();
+                    clearSearchBackdrop(); showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_CHAT_AUTO_SWITCH_OFFSET) _ = @import("chat_auto_switch.zig").startToggle(app_state.active_shell) else @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7392,21 +7384,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target >= SEARCH_WORKSPACE_DELETE_OFFSET and target < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) {
-                    const workspace_idx: u32 = @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET);
-                    if (app_state.g_search_workspace_delete_confirm) |confirm_idx| {
-                        if (confirm_idx == workspace_idx) {
-                            _ = deleteWorkspaceByIndex(workspace_idx);
-                            app_state.g_search_workspace_delete_confirm = null;
-                            app_state.g_search_len = 0;
-                            app_state.g_search_sel = 0;
-                            app_state.g_search_scroll = 0;
-                            updateSearchResults();
-                            _ = InvalidateRect(hwnd, null, 0);
-                            return 0;
-                        }
-                    }
-                    app_state.g_search_workspace_delete_confirm = workspace_idx;
-                    _ = InvalidateRect(hwnd, null, 0);
+                    @import("workspace_delete_palette.zig").confirm(hwnd, @intCast(target - SEARCH_WORKSPACE_DELETE_OFFSET));
                     return 0;
                 }
                 if (target == app_state.SEARCH_TABCTX_PIN_PAGE or target == app_state.SEARCH_TABCTX_UNPIN_PAGE) {
