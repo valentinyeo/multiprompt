@@ -1419,6 +1419,21 @@ test "settlement: remove dequeue and popAll track the matching queue entry, not 
     try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, later)).removed_ms);
 }
 
+test "MUBO-246 a prompt a hook blocked is a send failure for that message only" {
+    const a = std.testing.allocator;
+    const prompt = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on this queue");
+    var h = History{};
+    defer h.deinit(a);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-11-22T23:47:01.315Z\",\"settlement\":{\"operation\":\"blocked\",\"content\":\"/pstack:poteto-mode full autopilot on this queue\"}}\n");
+    const pending = echo.Pending{ .prefix = prompt, .text = prompt, .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect((try h.deliveryEvidence(a, pending)).refused);
+    const elsewhere = echo.Pending{ .prefix = prompt, .text = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on another queue"), .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect(!(try h.deliveryEvidence(a, elsewhere)).refused);
+    var older = pending;
+    older.anchor.after_ms = echo.stampMs("2026-11-22T23:47:01.315Z");
+    try std.testing.expect(!(try h.deliveryEvidence(a, older)).refused);
+}
+
 test "ISSUE-349 incomplete queue cannot blame A for C before A is delivered" {
     const a = std.testing.allocator;
     const key = transcript.Identity.init(1, 0, false, "sid", "");

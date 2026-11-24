@@ -29,6 +29,16 @@ SPEC.loader.exec_module(reader)
 FIXTURE_SPEC = importlib.util.spec_from_file_location('soft2779_fixture', ROOT / 'tools/fixtures/SOFT-2779/fixture.py')
 fixture = importlib.util.module_from_spec(FIXTURE_SPEC)
 FIXTURE_SPEC.loader.exec_module(fixture)
+MUBO_246_PROMPT = '/pstack:poteto-mode full autopilot on this queue'
+MUBO_246_FIXTURE = ROOT / 'tools/fixtures/MUBO-246/blocked-by-hook.jsonl'
+
+
+def mubo_246_events():
+    return [event for event in (json.loads(line) for line in MUBO_246_FIXTURE.read_text().splitlines() if line.strip())]
+
+
+def mubo_246_blocked_row():
+    return next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is False)
 
 
 class HistoryReaderTest(unittest.TestCase):
@@ -2148,6 +2158,24 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIsNone(reader.settlement_event(dict(refused, content='Compacted while idle'), 'claude'))
         self.assertIsNone(reader.settlement_event(refused, 'codex'))
 
+    def test_mubo_246_a_prompt_a_hook_blocked_is_a_send_failure(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        blocked = mubo_246_blocked_row()
+        fact = reader.settlement_event(blocked, 'claude')
+        self.assertEqual(fact['settlement'], dict(operation='blocked', content=MUBO_246_PROMPT))
+        self.assertEqual(fact['timestamp'], blocked['timestamp'])
+        kept = next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is True)
+        self.assertIsNone(reader.settlement_event(kept, 'claude'))
+        delivered = next(event for event in mubo_246_events() if event.get('type') == 'user')
+        self.assertIsNone(reader.settlement_event(delivered, 'claude'))
+        self.assertIsNone(reader.settlement_event(dict(blocked, isSidechain=True), 'claude'))
+        self.assertIsNone(reader.settlement_event(blocked, 'codex'))
+        self.query.update(settlement=True, offset=0, cached_sid='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row.get('role') == 'user'], ['summarise the open pull requests'])
+
     def test_queue_removal_and_contentless_dequeue_popall_survive_delta_paging(self):
         self.query['settlement'] = True
         enqueue = dict(type='queue-operation', operation='enqueue', content='please review my offer', timestamp='2026-10-13T11:06:22.591Z')
@@ -4077,6 +4105,33 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
+
+    def test_mubo_246_a_prompt_blocked_by_a_hook_says_not_sent(self):
+        self.submit(text=MUBO_246_PROMPT)
+        self.request('dispatch')
+        self.assertEqual(self.status()['state'], 'sent')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('blocked_by_hook', message['receipt'])
+
+    def test_mubo_246_a_block_for_another_prompt_leaves_a_delivered_message_alone(self):
+        self.submit(text='synthetic prompt')
+        self.request('dispatch')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        self.assertEqual(self.status()['state'], 'sent')
+
+    def test_mubo_246_the_host_stream_marks_a_blocked_prompt_not_sent(self):
+        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', epoch=1, accepted=False,
+                                             text=MUBO_246_PROMPT)])
+        with patch.object(reader, 'host_apply', return_value=True) as apply:
+            reader.host_claude_event('claude', 'sid', 'fixture', session, mubo_246_blocked_row())
+        fact = apply.call_args.args[3][0]
+        self.assertEqual((fact['kind'], fact['id'], fact['reason']),
+                         ('not_sent', 'message_fixture_0001', 'blocked_by_hook'))
+        self.assertEqual(session['sends'], [])
 
     def test_soft_2989_connector_not_sent_keeps_the_reason_it_returned(self):
         connector = dict(

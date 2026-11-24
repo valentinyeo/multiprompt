@@ -69,6 +69,8 @@ SOFT-3145 publishes the bundled tools from one table, sets their mode before the
 
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
 
+MUBO-246 adds failing-first cases for a prompt a UserPromptSubmit hook blocked before the chat read it. The reader and shared-store cases read `tools/fixtures/MUBO-246/blocked-by-hook.jsonl`, and a `chat_history.zig` case asks the delivery evidence for that message. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, so only the reader-test hash and the sync commit move.
+
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 | Source | Covered behavior |
