@@ -66,7 +66,7 @@ try {
     Wait-ChatFocus 'Edit' 'fresh-start-ready'
     $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'
     Wait-Until {
-        (Get-Content $log -Raw) -match '\[chat\] transcript load shell=\d+ ok'
+        ((Get-Content $log -Raw) -join '') -match '\[chat\] transcript load shell=\d+ ok'
     } 'seeded transcript painted before send' 90
     for ($n = 1; $n -le 2; $n++) {
         $text = "fresh-start probe $n"
@@ -83,7 +83,7 @@ try {
     Invoke-JourneyCommand 'Chat View: Fresh start' -Confirm {
         Press @(0x0D) 'Enter: confirm Chat View: Fresh start'
     }
-    $start = if (Test-Path $log) { (Get-Content $log -Raw).Length } else { 0 }
+    $start = if (Test-Path $log) { ((Get-Content $log -Raw) -join '').Length } else { 0 }
     Wait-Until {
         $identity = Read-HostIdentity $before.csid
         if ($null -eq $identity) { return $false }
@@ -91,7 +91,7 @@ try {
         $hostState = Get-Content $statePath -Raw | ConvertFrom-Json
         $hostReady = -not ($hostState.PSObject.Properties.Name -contains 'fresh_start')
         $rotated = $identity.native_session -and $identity.native_session -cne $before.native_session
-        $raw = if (Test-Path $log) { (Get-Content $log -Raw) } else { '' }
+        $raw = if (Test-Path $log) { (Get-Content $log -Raw) -join '' } else { '' }
         $traceStart = [Math]::Min($start, $raw.Length)
         $trace = if ($raw.Length -gt $traceStart) { $raw.Substring($traceStart) } else { '' }
         $hostJsonl = Join-Path $remoteState 'fresh-start-host.jsonl'

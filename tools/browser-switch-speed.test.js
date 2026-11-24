@@ -527,7 +527,7 @@ function assertsRealBridge(driver, yaml) {
   const wait = driver.slice(driver.indexOf('function Wait-SwitchNativeHost'), driver.indexOf('function Read-BrowserFrozen'));
   for (const step of ["'multiprompt-browser-isolated'", '$pipe.Connect(100)', '$pipe.IsConnected', '$pipe.Dispose()', "'native messaging host reconnect on extension keepalive' 90"]) assert.ok(wait.includes(step), step);
   assert.match(driver, /\$pane = Open-BrowserPane \(\$mode \+ '-' \+ \$tab\)\s+Wait-SwitchNativeHost\s+Wait-Until/);
-  assert.ok(driver.indexOf("Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'") < driver.indexOf("$env:USERPROFILE = Join-Path $scratch 'profile'"));
+  assert.ok(driver.indexOf("Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'") < driver.indexOf("$env:USERPROFILE = Join-Path $scratch $(if ($Feature -eq 'fresh-start') { 'profile/home' } else { 'profile' })"));
   assert.match(driver, /\$edge = \$chrome\s+\$profile = Join-Path \$env:LOCALAPPDATA 'ZigShell\/ChromeUserData'/);
 }
 
