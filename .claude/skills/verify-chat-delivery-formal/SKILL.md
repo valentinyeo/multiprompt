@@ -83,6 +83,8 @@ SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one 
 
 MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified mention deliveries and format read-along copies for FYI/CC mentions. All nine covered send functions, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged, so only `src/chat_send.zig`'s whole-file hash and the sync commit move.
 
+MUBO-267 gives the opening scroll hold a follow path at the bottom in `src/chat_render.zig`'s `chatSetTopPad` and `src/chat_session.zig`, and moves the new-message pill over the transcript. `chatRelayout`, `chatEchoNotSent`, `ChatOutboxEntry`, `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, all nine covered send functions, the extracted timeout branch, the native probes and `decisions.json` are unchanged, because the model covers counting a pending bubble and its failure label, not where the pill or the transcript sits. Only `src/chat_render.zig`'s whole-file hash and the sync commit move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_echo.zig`: `mayType`, `stateOnLoad`, `showsNotSent`, `assign` | Send eligibility, uncertain written sends on restart, failure label and matching one echo, with skill tokens allowed to change position. These execute unchanged in native probes. |
