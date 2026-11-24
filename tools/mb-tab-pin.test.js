@@ -217,3 +217,16 @@ test('pin --starred sets only the starred pin, twice', async t => {
   assert.deepEqual(JSON.parse(json.lines[0]), { ok: true, verb: 'pin', changed: false, tab: 42, pinned: true, starred: true });
   assert.deepEqual(h.bridge(), ['session-pin --tab 42 --starred']);
 });
+
+test('unpin still reaches a desktop whose listing has no explicit pin fields', async t => {
+  const h = harness();
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+  const legacy = JSON.parse(readFileSync(h.statePath, 'utf8'));
+  delete legacy.workspaces[1].groups[0].tabs[0].pinned_top;
+  delete legacy.workspaces[1].groups[0].tabs[0].starred_pinned_top;
+  writeFileSync(h.statePath, JSON.stringify(legacy));
+  const first = await h.calls(['unpin', 'Fixture']);
+  assert.equal(first.code, 0, first.errors.join('\n'));
+  assert.deepEqual(first.lines, ['unpinned Fixture']);
+  assert.deepEqual(h.bridge(), ['session-unpin --tab 42']);
+});

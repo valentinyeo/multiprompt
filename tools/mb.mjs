@@ -356,7 +356,8 @@ async function pinSession(ctx, flags, pinned) {
   if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
   const tab = matches[0];
   const view = flags.starred ? 'starred_pinned_top' : 'pinned_top';
-  const changed = (tab[view] === true) !== pinned;
+  const current = tab[view];
+  const changed = current === undefined ? true : current !== pinned;
   if (changed) {
     const call = [pinned ? 'session-pin' : 'session-unpin', '--tab', String(tab.id)];
     if (flags.starred) call.push('--starred');
