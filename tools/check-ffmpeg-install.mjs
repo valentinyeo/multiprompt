@@ -64,6 +64,9 @@ export function actionProblems(source) {
   if (!/install failed after \$limit attempts/.test(source) || !/exit 1/.test(source)) {
     problems.push(`${actionFile}: does not fail the step once the retries run out`);
   }
+  if (!/does not run; installing a fresh copy/.test(source)) {
+    problems.push(`${actionFile}: trusts a restored cache without checking it runs, so one bad cache entry fails every journey until the key changes`);
+  }
   return problems;
 }
 

@@ -3365,6 +3365,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
         _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
     for (@import("workspace_view.zig").builtins) |view| {
         if (ws_in != @intFromEnum(view)) continue;
+        _ = @import("sidebar.zig").thawSidebarOrder();
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
         app_state.g_starred_workspace = false;
@@ -3380,6 +3381,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
     }
     if (!app_state.g_single_window) return;
     const was_view = app_state.g_sidebar_view != null;
+    if (was_view) _ = @import("sidebar.zig").thawSidebarOrder();
     if (ws_in == @import("workspace_view.zig").starred) {
         app_state.g_sidebar_view = null;
         captureWorkspaceFocus();
