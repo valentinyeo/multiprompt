@@ -69,6 +69,42 @@ test('MUBO-291 a real Ctrl+Tab during dictation stops the recording and both cha
   }
 });
 
+function switchContract(files) {
+  const { console, voice, composer } = files;
+  assert.match(console, /if \(idx != app_state\.active_shell\) \{\n        @import\("voice\.zig"\)\.cancelDictationOnTabSwitch\(\);/);
+  const stop = voice.slice(voice.indexOf('pub fn cancelDictationOnTabSwitch()'), voice.indexOf('pub fn handleDictationReady()'));
+  assert.ok(stop.length > 0);
+  for (const required of [
+    'if (!app_state.g_dictation_running.load(.acquire)) return;',
+    'if (app_state.g_voice_listening_active.load(.acquire)) return;',
+    'app_state.g_dictation_cancelled.store(true, .release);',
+    'cancelDictation();',
+    'dictationAudit("chat-switch", 0);',
+  ]) assert.ok(stop.includes(required), required);
+  const discard = composer.slice(composer.indexOf('pub fn chatDictationLiveDiscard()'), composer.indexOf('fn chatLiveStripFromStore()'));
+  assert.ok(discard.length > 0);
+  assert.match(discard, /if \(!live_draft\.active\) return;\n    chatLiveStripFromStore\(\);/);
+}
+
+test('MUBO-291 one tab switch stops the recording and drops the words from the stored draft', () => {
+  const files = {
+    console: read('src/console.zig'),
+    voice: read('src/voice.zig'),
+    composer: read('src/chat_composer.zig'),
+  };
+  switchContract(files);
+  for (const [field, from, to] of [
+    ['console', '        @import("voice.zig").cancelDictationOnTabSwitch();\n', ''],
+    ['voice', '    cancelDictation();\n', ''],
+    ['composer', '    chatLiveStripFromStore();\n    live_draft.sealed = false;', '    live_draft.sealed = false;'],
+  ]) {
+    const broken = { ...files };
+    broken[field] = files[field].replace(from, to);
+    assert.notEqual(broken[field], files[field], field);
+    assert.throws(() => switchContract(broken), assert.AssertionError, field);
+  }
+});
+
 test('MUBO-291 the journey is registered, indexed and seeded with two chats', () => {
   assert.match(driver, /ValidateSet\([^\n]*'chat-dictation-switch'/);
   assert.match(driver, /\n        'chat-dictation-switch' \{\n            \. \(Join-Path \$PSScriptRoot 'control-feature-chat-dictation-switch\.ps1'\)\n        \}/);
