@@ -729,7 +729,7 @@ foreach ($plan in $plans) {
             Press @(0x0D) 'Enter: pin the fixture skill'
             [void](Wait-For 'the pin is written for the fixture skill' { (Read-Shared "$settings/debug.log").Substring($pinLogStart) -match '\[chat-pin\] saved shell=\d+ key=0:verify-agent skill=verify-zebra' } 10)
             $pinLine = '0:verify-agent' + [char]9 + 'verify-zebra'
-            [void](Wait-For 'pin saved for this chat' { (Test-Path $pinFile) -and (@((Read-Shared $pinFile) -split "\r?\n") | Where-Object { $_ -ceq $pinLine }).Count -eq 1 } 10)
+            [void](Wait-For 'pin saved for this chat' { (Test-Path $pinFile) -and (@((Read-Shared $pinFile) -split "\r?\n" | Where-Object { $_ -ceq $pinLine }).Count -eq 1) } 10)
             Copy-Item $pinFile "$caseDir/chat-pins.txt" -Force
             $pinnedLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x11, 0x4B) 'Ctrl+K: show the unpin row'
