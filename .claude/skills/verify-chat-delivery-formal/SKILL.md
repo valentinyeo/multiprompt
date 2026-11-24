@@ -83,6 +83,8 @@ SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one 
 
 MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified mention deliveries and format read-along copies for FYI/CC mentions. All nine covered send functions, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged, so only `src/chat_send.zig`'s whole-file hash and the sync commit move.
 
+MUBO-293 keeps a slash command turn readable and reports a refused one. The reader rebuilds the typed command from `<command-message>` when `<command-name>` is absent, and records an unknown-command answer from a local command row or a system informational row as a `rejected` settlement fact. The host stream marks the matching unaccepted send not sent with `unknown_command`. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, `chatEchoWaitsOnTranscript`, the extracted timeout branch, the restore guard, the native probes and `decisions.json` are unchanged, because no recorded decision covers a refused slash command; only the reader and reader-test hashes move.
+
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns; a hosted hax chat still answers from the host history only. `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged, so only the reader and reader-test hashes move, on top of master 158ebc74.
 
 | Source | Covered behavior |
