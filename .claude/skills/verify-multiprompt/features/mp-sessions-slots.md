@@ -1,6 +1,6 @@
 # Multi Bot session verbs and server slots
 
-Source files: src/mp_sessions.py, src/mp_layout.mjs, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-294/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
+Source files: src/mp_sessions.py, src/mp_send.py, src/mp_layout.mjs, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-194/*, tools/fixtures/MUBO-294/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
 CI workflow: mp-sessions-slots.yml
 
 ## Sub-features
@@ -23,6 +23,6 @@ On the base, which is master with 1302 reverted, the head tests fail: nothing re
 
 ## Gotchas
 
-These are Linux command tests, not a desktop journey: they prove the verbs, the slot order and the shipped servers files, and say nothing about how the Windows window paints. `server-open-group` and `session-open` still run for desktop import and the real `zsb` session-open path, and both are selected by `src/mp_sessions.py` and `src/mp_layout.mjs`.
+These are Linux command tests, not a desktop journey: they prove the verbs, the slot order and the shipped servers files, and say nothing about how the Windows window paints. The published sender, `src/mp_send.py`, is covered here too: `tools/mp-sessions-test.py` runs sends through the published tools, so a change to the sender is proven by this workflow rather than by a desktop journey. `server-open-group` and `session-open` still run for desktop import and the real `zsb` session-open path, and both are selected by `src/mp_sessions.py` and `src/mp_layout.mjs`.
 
 Both older-shape snapshots, `tools/fixtures/MUBO-294/servers.json` and `tools/fixtures/SOFT-3139/servers.json`, stay in the guard's exception list, so a shipped file that only models an older install is allowed to lack a slot and a current one is not. The slot guard on its own passes on base because the shipped files were already valid; it fails only when a shipped `servers.json` loses a slot. The live `~/.local/share/vstack/config/servers.json` is fixed by the vstack installer and is not part of this receipt; the code refuses rather than guessing a server when it has no slot.
