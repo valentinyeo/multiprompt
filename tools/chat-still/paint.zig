@@ -6,7 +6,7 @@ fn chatStillFrame(hwnd: HANDLE) void {
     if (GetClientRect(hwnd, &client) == 0) return;
     const view_h = @max(1, client.bottom - app_state.g_chat_bottom_inset);
     var log: [384]u8 = undefined;
-    debugLog(std.fmt.bufPrint(&log, "[chat-still] begin shell={d} dirty={d} width={d} layout={d} height={d} view_h={d} view_top={d}", .{ app_state.shells[app_state.active_shell].shell_id, @intFromBool(app_state.g_chat_layout_dirty), client.right, app_state.g_chat_layout_width, app_state.g_chat_content_h, view_h, app_state.g_chat_top_pad }) catch return);
+    debugLog(std.fmt.bufPrint(&log, "[chat-still] begin shell={d} dirty={d} width={d} layout={d} height={d} view_h={d} view_top={d} up={d}", .{ app_state.shells[app_state.active_shell].shell_id, @intFromBool(app_state.g_chat_layout_dirty), client.right, app_state.g_chat_layout_width, app_state.g_chat_content_h, view_h, app_state.g_chat_top_pad, @intFromBool(app_state.g_chat_scrolled_up) }) catch return);
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, i| {
         if (block.role == .tool or g_reaction_view.hides(i)) continue;
         const bounds = chatMessageBounds(i);

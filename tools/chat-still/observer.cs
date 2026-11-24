@@ -31,7 +31,7 @@ public sealed class ChatStillObserver {
     long streamStartedUtc;
     long position;
     string carry = "";
-    bool target, building;
+    bool target, building, scrolledUp;
     int dirty, width, layout, paints, height, viewHeight, viewTop;
     readonly HashSet<int> heights = new HashSet<int>();
     volatile bool stop;
@@ -149,10 +149,11 @@ public sealed class ChatStillObserver {
         if (first < 0) { key = latest; first = clock.Elapsed.TotalMilliseconds; }
         int[] rect;
         if (!rows.TryGetValue(key, out rect)) throw new InvalidOperationException("Newest initially visible message disappeared: " + key);
+        if (!scrolledUp) throw new InvalidOperationException("Stillness requires a reader scrolled up from the bottom");
         var origin = new Point();
         if (!ClientToScreen(view, ref origin)) throw new InvalidOperationException("Transcript screen origin unavailable");
         var screen = new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
-        var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "view_height", viewHeight }, { "view_top", viewTop }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
+        var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "view_height", viewHeight }, { "view_top", viewTop }, { "kind", kind }, { "scrolled_up", scrolledUp }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
         samples.Add(sample);
         if (baseline == null) baseline = screen;
         AssertFrame(baseline, screen, dirty, width, layout);
@@ -175,12 +176,13 @@ public sealed class ChatStillObserver {
         while ((end = carry.IndexOf('\n')) >= 0) {
             string line = carry.Substring(0, end);
             carry = carry.Substring(end + 1);
-            var header = Regex.Match(line, @"\[chat-still\] begin shell=(\d+) dirty=(\d+) width=(\d+) layout=(\d+) height=(\d+) view_h=(\d+) view_top=(\d+)");
+            var header = Regex.Match(line, @"\[chat-still\] begin shell=(\d+) dirty=(\d+) width=(\d+) layout=(\d+) height=(\d+) view_h=(\d+) view_top=(\d+) up=([01])");
             if (header.Success) {
                 if (building) throw new InvalidOperationException("Native paint geometry was incomplete before the next paint");
                 target = header.Groups[1].Value == shell;
                 building = true;
                 rows.Clear(); latest = null;
+                scrolledUp = header.Groups[8].Value == "1";
                 dirty = Int32.Parse(header.Groups[2].Value); width = Int32.Parse(header.Groups[3].Value); layout = Int32.Parse(header.Groups[4].Value); height = Int32.Parse(header.Groups[5].Value); viewHeight = Int32.Parse(header.Groups[6].Value); viewTop = Int32.Parse(header.Groups[7].Value);
             }
             var row = Regex.Match(line, @"\[chat-still\] row message=(\d+) offset=(\d+) rect=(-?\d+,-?\d+,-?\d+,-?\d+)");

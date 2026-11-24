@@ -24,9 +24,11 @@ $observer.GetType().GetField('key', $flags).SetValue($observer, '42/10')
 $observer.GetType().GetField('latest', $flags).SetValue($observer, '99/10')
 $observer.GetType().GetField('target', $flags).SetValue($observer, $true)
 Reject { $observer.GetType().GetMethod('Sample', $flags).Invoke($observer, @([IntPtr]::Zero, 'paint')) } 'message disappeared'
+$observer.GetType().GetField('rows', $flags).GetValue($observer).Add('42/10', $rect)
+Reject { $observer.GetType().GetMethod('Sample', $flags).Invoke($observer, @([IntPtr]::Zero, 'paint')) } 'requires a reader scrolled up'
 $log = [IO.Path]::Combine($env:RUNNER_TEMP, 'chat-still-oracle.log')
 try {
-    [IO.File]::WriteAllText($log, "[chat-still] begin shell=7 dirty=0 width=800 layout=800 height=2000 view_h=600 view_top=0`n[chat-still] end`n")
+    [IO.File]::WriteAllText($log, "[chat-still] begin shell=7 dirty=0 width=800 layout=800 height=2000 view_h=600 view_top=0 up=1`n[chat-still] end`n")
     Reject { $observer.GetType().GetMethod('Read', $flags).Invoke($observer, @([string]$log, '7', [IntPtr]::Zero)) } 'flickered blank'
 } finally { Remove-Item $log -ErrorAction SilentlyContinue }
 Write-Host 'PASS: exact rectangle, first-frame dirty layout, width mismatch, missing identity and blank paint controls'

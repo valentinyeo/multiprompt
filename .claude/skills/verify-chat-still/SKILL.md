@@ -5,7 +5,7 @@ description: Check the native chat scroll invariant after changes to history ref
 
 # Verify that a shown chat stays still
 
-The newest message visible when the chat appears must keep its screen position until the user deliberately scrolls. Moving that message while history settles makes the chat jump and flicker.
+While a reader is scrolled up, the newest visible message must keep its screen position until the user deliberately scrolls. Moving that message while history settles makes the chat jump and flicker. A reader at bottom follows arriving messages instead, as required by MUBO-280; `chat-messages-only` and `chat-newest` verify that path.
 
 ## Run
 

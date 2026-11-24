@@ -6,23 +6,23 @@ Verify on: pull_request
 
 ## Sub-features
 
-- From the first nonempty painted frame, the newest visible message keeps its exact screen rectangle.
+- A reader who scrolls up keeps the newest visible message at its exact screen rectangle from the first nonempty frame after that input. A reader at bottom follows new arrivals instead, as required by MUBO-280 and verified by `chat-messages-only` and `chat-newest`.
 - No scrolling, tolerance, warm-up frame, settle delay or baseline reset is permitted after that frame.
 - Observe at least two seconds without input, then at least two seconds overlapping a streaming reply.
 - A missing anchored message, blank repaint, dirty layout or first-paint width mismatch fails immediately.
-- The message selected in the first frame remains the reference throughout idle, streaming and settlement. A new reply does not replace it. Only a deliberate scroll-to-bottom may start a different viewing position; this journey never scrolls.
-- The new-message band is reserved whether or not the pill is showing, so a pill arriving never changes the transcript layout, the message rectangle or the on-screen crop.
+- The message selected in the first frame remains the reference throughout idle, streaming and settlement. A new reply does not replace it. Only deliberate scrolling may start a different viewing position; this journey sends no further input after the initial wheel notch.
+- The pill floats over the transcript without reserving a band, so a pill arriving never changes the transcript layout, the message rectangle or the on-screen crop.
 - A pixel change anywhere in the message fails, except inside the app's own floating new-message pill. The oracle reads that pill's rectangle from the app's log and masks the whole pill; any other change, and any undeclared pill, still fails.
 
 ## How to get to it (user POV)
 
-Switch from one Chat View session to another long session with Ctrl+2. Leave it alone while the agent replies.
+Switch from one Chat View session to another long session with Ctrl+2. Scroll up one wheel notch to read older messages, then leave it alone while the agent replies.
 
 ## Driving it with control.ps1
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=chat-still` and download `verify-chat-still`.
 
-The existing remote boundary seeds five saved Chat View tabs and 400 question/answer rounds per transcript before launch. No app cache or layout state is written. The initial tab must actually render, then the observer starts before the genuine Ctrl+2 input switches to the second chat.
+The existing remote boundary seeds five saved Chat View tabs and 400 question/answer rounds per transcript before launch. No app cache or layout state is written. The initial tab must actually render. Genuine Ctrl+2 input switches to the second chat, whose probe must report a nonempty bottom frame. An ownership-checked SendInput wheel notch scrolls up. The observer consumes the log from immediately before that wheel input and keeps its first resulting frame as the continuous baseline across idle, streaming and settlement. Every observed frame must report `up=1`; a no-op wheel or accidental return to bottom fails rather than silently testing the wrong reader state.
 
 `tools/chat-still/observer.cs` samples on each DWM composition frame. The verification build injects a read-only `WM_PAINT` measurement probe from `tools/chat-still/paint.zig`; no probe is added to shipped product code. Its original source, instrumented source and probe hashes are retained in `chat-still-instrumentation.json`, including for base comparisons. It emits complete, unthrottled visible message rectangles only under `MULTIPROMPT_CHAT_STILL_PROOF=1` and `ZIGSHELL_DEBUG=1`. Each display sample also captures actual screen pixels with `Graphics.CopyFromScreen`, compares every RGB byte inside the fixed visible message crop, and records the crop and SHA-256. A blank first crop fails; no frame is discarded to establish a later baseline. First, last and failing pixel crops are retained as PNGs. The observer consumes every completed native paint between samples too, so a one-paint displacement that returns before the next sample still fails. Each display sample converts the retained message rectangle through the live transcript HWND's screen origin. Each paint must already have a clean layout at the actual client width. The final message in the first visible frame becomes the fixed identity; later rows cannot silently replace it.
 

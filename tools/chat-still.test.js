@@ -40,6 +40,19 @@ test('stillness checks real pixels on display frames, not only paint logs', () =
   assert.match(read('tools/chat-still/observer.test.ps1'), /AssertPixels\(\$pixels, \$changed/);
 });
 
+test('stillness observes a real scrolled-up reader rather than rejecting bottom following', () => {
+  const driver = read('.claude/skills/verify-multiprompt/control-feature-chat-still.ps1');
+  const observer = read('tools/chat-still/observer.cs');
+  assert.match(driver, /target chat painted at bottom/);
+  assert.match(driver, /\[VerifyNative\]::WheelClientPoint\([^\n]+, 120\)/);
+  assert.ok(driver.indexOf('$offset = (Get-Item $log).Length') < driver.indexOf('::WheelClientPoint('));
+  assert.ok(driver.indexOf('::WheelClientPoint(') < driver.indexOf('$observer.Start('));
+  assert.match(driver, /\$observer\.Start\([^\n]+\$offset,/);
+  assert.match(observer, /if \(!scrolledUp\) throw new InvalidOperationException/);
+  assert.match(read('tools/chat-still/paint.zig'), /@intFromBool\(app_state\.g_chat_scrolled_up\)/);
+  assert.match(read('tools/chat-still/observer.test.ps1'), /'requires a reader scrolled up'/);
+});
+
 test('the pixel oracle masks only the floating new-message pill the app declares', () => {
   const observer = read('tools/chat-still/observer.cs');
   assert.match(observer, /new messages count=\(\\d\+\) visible=\(\\d\+\) up=\(\\d\+\) rect=/, 'the oracle reads the app\'s own pill rectangle');

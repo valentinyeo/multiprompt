@@ -14,9 +14,23 @@ try {
     } 'manual tab order saved'
     Snapshot 'before'
     $target = (Read-Session).tabs[1]
+    $switchOffset = (Get-Item $log).Length
+    Press @(0x11, 0x32) 'Ctrl+2: open the long chat at its newest message'
+    Wait-Until { (Get-Content $log -Raw).Substring($switchOffset) -match "\[chat-still\] begin shell=$($target.shell_id) .*?up=0[\s\S]*?\[chat-still\] row message=" } 'target chat painted at bottom'
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $process.Id })
+    if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
+    $view = [IntPtr]$views[0].Current.NativeWindowHandle
+    $bounds = New-Object VerifyNative+Rect
+    if (-not [VerifyNative]::GetClientRect($view, [ref]$bounds)) { throw 'Transcript bounds unavailable' }
+    Doctor
+    Wait-Foreground
+    Record 'Wheel up in the owned transcript: read older messages during idle, streaming and reconciliation'
+    $offset = (Get-Item $log).Length
+    [VerifyNative]::WheelClientPoint($script:window, [uint32]$process.Id, $view, [int]($bounds.Right / 2), [int]($bounds.Bottom / 2), 120)
     $observer = New-Object ChatStillObserver
-    $observer.Start($process.Id, $script:window, $log, (Get-Item $log).Length, [string]$target.shell_id, $remoteState, $Evidence)
-    Press @(0x11, 0x32) 'Ctrl+2: switch to a long chat; observe idle, live streaming and reconciliation without scrolling'
+    $observer.Start($process.Id, $script:window, $log, $offset, [string]$target.shell_id, $remoteState, $Evidence)
     $observation = $observer.Finish()
     Save-Json $observation 'chat-still.json'
     foreach ($phase in @('idle', 'streaming')) {
