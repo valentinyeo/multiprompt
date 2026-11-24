@@ -103,7 +103,7 @@ function Server-Snapshot([string]$Name) {
 }
 function Invoke-LinuxMpSessions([string[]]$CliArgs, [string]$Label) {
     $safe = ($CliArgs | ForEach-Object { "'" + ($_ -replace "'", "'\\''") + "'" }) -join ' '
-    $remote = "export MULTIPROMPT_HOST=0 MULTIPROMPT_READER_SOURCE='$repo/src/chat_history_reader.py'; python3 '$repo/src/mp_sessions.py' $safe"
+    $remote = 'export MULTIPROMPT_HOST=0; ~/.multiprompt-runtime/mp-sessions ' + $safe
     $out = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', $remote) -Evidence $Evidence -Name $Label
     $out.Trim()
 }
@@ -174,7 +174,7 @@ try {
     Press @(0x11, 0x31) 'Ctrl+1: open anchor server tab'
     [void](Wait-For 'anchor transcript' { (Log-Text) -match '\[chat\] transcript load shell=\d+ ok' })
     [void](Wait-For 'shared connection saved' { (Read-SavedSession).shared_server_connection -eq $true } 60)
-    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'test -f ~/.local/state/multiprompt/relay-v1') -Evidence $Evidence -Name 'relay-ready')
+    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'test -f ~/.local/state/multiprompt/relay-v1 && test -x ~/.multiprompt-runtime/mp-sessions && test -x ~/.multiprompt-runtime/mp-zsb') -Evidence $Evidence -Name 'relay-ready')
     Press @(0x11, 0x4E) 'Ctrl+N: new workspace'
     [void](Wait-For 'extra workspace' { @((Read-SavedSession).workspaces).Count -ge 2 })
     Press @(0x11, 0x4B) 'Ctrl+K: rename workspace'
