@@ -112,7 +112,7 @@ pub fn parse(pins: *Pins, text: []const u8) void {
     pins.* = .{};
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |raw| {
-        const line = std.mem.trimRight(u8, raw, "\r");
+        const line = std.mem.trimEnd(u8, raw, "\r");
         if (line.len == 0 or line[0] == '#') continue;
         const tab = std.mem.indexOfScalar(u8, line, '\t') orelse continue;
         if (tab == 0 or tab > MAX_CHAT) continue;
@@ -200,16 +200,16 @@ pub fn captureInto(idx: u32, name_buf: []u8, note_buf: []u8) Capture {
     return .{ .name_len = len, .note_len = note.len };
 }
 
-fn labelContains(label: []const u8, query: []const u16) bool {
+fn labelContains(text: []const u8, query: []const u16) bool {
     if (query.len == 0) return true;
-    if (query.len > label.len) return false;
-    const limit = label.len - query.len + 1;
+    if (query.len > text.len) return false;
+    const limit = text.len - query.len + 1;
     for (0..limit) |start| {
         var ok = true;
         for (query, 0..) |qc, i| {
             const raw: u8 = if (qc < 128) @intCast(qc) else 0;
             const a: u8 = if (raw >= 'A' and raw <= 'Z') raw + 32 else raw;
-            const c = label[start + i];
+            const c = text[start + i];
             const b: u8 = if (c >= 'A' and c <= 'Z') c + 32 else c;
             if (a != b) {
                 ok = false;
@@ -278,7 +278,7 @@ pub fn appendTabContextRows(tc_idx: ?u32) void {
     const is_pinned = pinned(ti) != null;
     const room = app_state.g_search_results.len - app_state.g_search_result_count;
     const written = tabContextRows(true, is_pinned, query, app_state.g_search_results[app_state.g_search_result_count..][0..room]);
-    app_state.g_search_result_count += written;
+    app_state.g_search_result_count += @intCast(written);
 }
 
 fn closePaletteForPin() void {
