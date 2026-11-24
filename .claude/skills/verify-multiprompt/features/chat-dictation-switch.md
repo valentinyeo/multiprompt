@@ -41,4 +41,4 @@ The fix lives on the one path every tab switch takes, so a click on another chat
 
 The second chat needs Chat View already on in the saved session, otherwise the switch closes the composer and the empty message box cannot be read. The composer Edit control is shared across chats, so the journey re-resolves it from the window after the switch instead of trusting the first handle.
 
-Red proof: the journey is dispatched on the commit that adds it, before the app change. It fails at the `chat-switch` wait with the recording still running. The green dispatch after the fix passes the same recipe.
+Red proof: [run 45463197212](https://github.com/valentinyeo/multiprompt/actions/runs/45463197212) on journey commit `43191bbe` fails at the `chat-switch` wait, and its audit log holds only `start` and `fixture-audio-bytes` after the switch, so the recording kept running. Green proof: [run 45470820802](https://github.com/valentinyeo/multiprompt/actions/runs/45470820802) on fix commit `2a60b35c` passes the same recipe with `cancel` and `chat-switch` 361 ms after Ctrl+Tab, no transcription or delivery stage, and both message boxes empty.
