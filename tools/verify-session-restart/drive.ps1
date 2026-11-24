@@ -153,6 +153,8 @@ function Restart-DesktopApp {
     if (-not $app.WaitForExit(20000)) { $app.Kill(); $app.WaitForExit() }
     $stopped = $job.Stop()
     if ($stopped.ActiveProcesses -ne 0) { throw 'Owned job still has processes before desktop relaunch' }
+    $job.Dispose()
+    $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Evidence/relaunch-stdout.log", "$Evidence/relaunch-stderr.log", '--single-window')
     $main = Wait-For 'relaunched window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'restored shells' { @((Read-SavedSession).tabs).Count -gt 0 })
