@@ -92,10 +92,14 @@ fn openTab(blocks: usize) void {
   chatRelayoutPreservingScroll(800, 600);
 }
 fn dividerTop() i32 { return app_state.g_chat_read_divider_y - app_state.g_chat_top_pad; }
-test "IGSH-1924 a switch opens on the New divider and later content never moves it" {
+test "MUBO-280 a cold reopen lands at newest and scrolling up holds the unread position" {
   openTab(40);
   try std.testing.expect(app_state.g_chat_read_boundary.index != null);
-  try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  app_state.g_chat_scroll_y = dividerTop();
+  chatScrollStateChanged(600);
+  try std.testing.expect(app_state.g_chat_scrolled_up);
   const first = app_state.g_chat_scroll_y;
   app_state.next_blocks = 56;
   refreshChatTranscript(false);
@@ -144,13 +148,11 @@ test "MUBO-280 short unread at the bottom follows later replies" {
 }
 test "IGSH-1924 a fitting cache opens the full conversation at its newest message" {
   openTab(1);
-  app_state.has_unread = false;
   try std.testing.expect(app_state.g_chat_content_h < 600);
   app_state.next_blocks = 40;
   refreshChatTranscript(false);
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
   openTab(1);
-  app_state.has_unread = false;
   app_state.g_chat_block_count = 40;
   chatRelayoutPreservingScroll(800, 600);
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
@@ -204,13 +206,23 @@ function run(scroll, historySource = history) {
 
 const current = between(session, 'pub fn refreshChatTranscript(force: bool) void {', 'pub fn chatLatestAgentReply');
 
-test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
+test('MUBO-280 unread chats open at newest and scrolled-up readers keep their place', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /All 10 tests passed/);
 });
 
-test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {
+test('MUBO-280 requiring a previous tall layout breaks cold reopen and fitting-cache arrivals', () => {
+  const before = current.replaceAll('chat_history.followsNewest(app_state.g_chat_scrolled_up)', 'old_content_h > viewport_h and chat_history.followsNewest(app_state.g_chat_scrolled_up)');
+  assert.notEqual(before, current);
+  const result = run(before);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  for (const name of ['a cold reopen lands at newest', 'a fitting cache opens the full conversation']) {
+    assert.match(result.stderr, new RegExp(name + String.raw`[^]*?FAIL \(TestExpectedEqual\)`));
+  }
+});
+
+test('IGSH-1924 the previous switch path moves a scrolled-up reader', () => {
   const result = run(masterScroll);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /expected -?\d+, found -?\d+/);

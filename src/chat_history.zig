@@ -1041,8 +1041,8 @@ pub fn holdsReadPosition(scrolled_up: bool) bool {
     return scrolled_up;
 }
 
-pub fn followsNewest(old_content_h: i32, viewport_h: i32, scrolled_up: bool) bool {
-    return old_content_h > viewport_h and !holdsReadPosition(scrolled_up);
+pub fn followsNewest(scrolled_up: bool) bool {
+    return !holdsReadPosition(scrolled_up);
 }
 
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
@@ -1066,9 +1066,8 @@ pub fn openingScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: Re
 test "MUBO-280 a reader at the bottom is never held and lands on the newest message" {
     try std.testing.expect(!holdsReadPosition(false));
     try std.testing.expect(holdsReadPosition(true));
-    try std.testing.expect(followsNewest(4020, 600, false));
-    try std.testing.expect(!followsNewest(4020, 600, true));
-    try std.testing.expect(!followsNewest(0, 600, false));
+    try std.testing.expect(followsNewest(false));
+    try std.testing.expect(!followsNewest(true));
     const unread: ReadBoundary = .{ .index = 400 };
     try std.testing.expectEqual(@as(i32, 10280), openingScroll(10906, 626, 80, unread, 5000, null, true));
     try std.testing.expectEqual(@as(i32, 4920), openingScroll(10906, 626, 80, unread, 5000, null, false));

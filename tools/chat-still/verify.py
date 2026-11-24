@@ -101,7 +101,7 @@ def check(root, replay_code=False):
             old_newest, new_newest = z3.Ints("old_newest new_newest")
             scrolled_up = z3.Int("scrolled_up")
             offset = old_scroll - old_top - delta
-            follows = z3.And(old_h > viewport, scrolled_up == 0) if follow_support else z3.BoolVal(False)
+            follows = (scrolled_up == 0) if follow_support else z3.BoolVal(False)
             held_now = held_reader == 1
             values = {"old_content_h": old_h, "viewport_h": viewport, "previous_boundary.index": before,
                       "app_state.g_chat_read_boundary.index": after, "top": new_top, "anchor_offset": offset,
