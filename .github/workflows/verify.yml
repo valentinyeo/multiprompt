@@ -532,10 +532,9 @@ jobs:
           additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
         if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
-        shell: pwsh
-        run: |
-          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
-          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+        uses: ./.github/actions/install-ffmpeg
+        with:
+          version: '7.1.1'
       - name: Check browser recovery journey contract
         continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs

@@ -55,9 +55,15 @@ function catalogTitles(catalog) {
   return titles;
 }
 
+function skipError(kind, message) {
+  const error = new Error(message);
+  error.kind = kind;
+  return error;
+}
+
 async function fetchTicketTitle(id, token, request, remaining) {
   const ticket = parseTicketId(id);
-  if (!token) throw new Error(`Missing title for ${id}; provide a catalog or release token`);
+  if (!token) throw skipError('no-token', `Missing title for ${id}; provide a catalog or release token`);
   let response;
   try {
     response = await request(`https://api.hypertask.ai/api/mcp/tasks?ticket_number=${id}`, {
@@ -66,12 +72,12 @@ async function fetchTicketTitle(id, token, request, remaining) {
       redirect: 'error',
     });
   } catch {
-    throw new Error(`Title lookup failed for ${id}`);
+    throw skipError('lookup-failed', `Title lookup failed for ${id}`);
   }
-  if (!response.ok) throw new Error(`Title lookup failed for ${id}`);
+  if (!response.ok) throw skipError('lookup-failed', `Title lookup failed for ${id}`);
   const data = await response.json().catch(() => null);
   const task = data?.tasks?.[0];
-  if (data?.success !== true || !Array.isArray(data.tasks) || data.tasks.length !== 1 || !acceptsTaskForId(id, ticket, task)) throw new Error(`Unresolved title for ${id}`);
+  if (data?.success !== true || !Array.isArray(data.tasks) || data.tasks.length !== 1 || !acceptsTaskForId(id, ticket, task)) throw skipError('not-found', `Unresolved title for ${id}`);
   return ticketRecord(id, task.title).title;
 }
 
@@ -98,10 +104,10 @@ export async function resolveReleaseTitles(ids, catalog, token, request = fetch)
     if (Object.hasOwn(titles, id)) continue;
     try {
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error('Ticket title lookup timed out');
+      if (remaining <= 0) throw skipError('timed-out', 'Ticket title lookup timed out');
       titles[id] = await fetchTicketTitle(id, token, request, remaining);
     } catch (error) {
-      unresolved.push([id, error.message]);
+      unresolved.push([id, error.kind || 'lookup-failed']);
     }
   }
   return { titles, unresolved };
