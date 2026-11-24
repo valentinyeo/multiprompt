@@ -456,17 +456,24 @@ pub fn reconnect(idx: u32) bool {
     return true;
 }
 
-pub fn launch(shell_id: u32, sid: []const u8) void {
-    const slot = find(shell_id) orelse return;
-    if (sid.len == 0 or sid.len > 48 or slot.command_len == 0) return;
-    const command = a.dupe(u8, slot.command[0..slot.command_len]) catch return;
-    const owned_sid = a.dupe(u8, sid) catch {
-        a.free(command);
+pub fn launch(identity: @import("session_identity.zig").Session) void {
+    const shell_id = identity.owner;
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    if (sid.len == 0) return;
+    const slot = find(shell_id) orelse {
+        failStart(shell_id, sid);
         return;
     };
-    const thread = std.Thread.spawn(.{}, launchWorker, .{ shell_id, slot.host, command, owned_sid }) catch {
+    if (slot.host != identity.host.index() or slot.command_len == 0) {
+        failStart(shell_id, sid);
+        return;
+    }
+    const command = a.dupe(u8, slot.command[0..slot.command_len]) catch {
+        failStart(shell_id, sid);
+        return;
+    };
+    const thread = std.Thread.spawn(.{}, launchWorker, .{ identity, command }) catch {
         a.free(command);
-        a.free(owned_sid);
         _ = @import("chat_live.zig").startFailed(shell_id, sid, LAUNCH_FAILED);
         return;
     };
@@ -476,12 +483,19 @@ pub fn launch(shell_id: u32, sid: []const u8) void {
 const LAUNCH_FAILED = "This chat could not start on the server. Open a new chat to try again.";
 const LAUNCH_TIMEOUT_MS: u64 = 60_000;
 
-fn launchWorker(shell_id: u32, host: u8, command: []u8, sid: []u8) void {
+fn failStart(shell_id: u32, sid: []const u8) void {
+    if (@import("chat_live.zig").startFailed(shell_id, sid, LAUNCH_FAILED)) {
+        if (app_state.g_main_hwnd) |main| w.postChatFileReady(main);
+    }
+}
+
+fn launchWorker(identity: @import("session_identity.zig").Session, command: []u8) void {
+    const shell_id = identity.owner;
+    const sid = std.mem.sliceTo(&identity.sid, 0);
     defer a.free(command);
-    defer a.free(sid);
     var output: [4096]u8 = undefined;
     var total: usize = 0;
-    if (transport.openCommand(host, command)) |channel| {
+    if (transport.openCommand(identity.host.index(), command)) |channel| {
         if (transport.write(channel, "")) {
             const deadline = w.GetTickCount64() + LAUNCH_TIMEOUT_MS;
             while (w.GetTickCount64() < deadline and total < output.len) {
@@ -517,6 +531,18 @@ fn launchStarted(output: []const u8) bool {
     };
 }
 
+test "SOFT-1925 a live chat with no start command says it could not start" {
+    const live = @import("chat_live.zig");
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const shell_id: u32 = 9925;
+    try std.testing.expect(live.starting(shell_id, 1, sid));
+    try std.testing.expect(live.running(shell_id));
+    launch(@import("chat_transcript.zig").Identity.init(shell_id, 1, false, sid, "").checked().?);
+    try std.testing.expect(!live.running(shell_id));
+    try std.testing.expect(live.held(shell_id));
+    live.release(shell_id);
+}
+
 test "a live chat start counts only a started or already running host" {
     try std.testing.expect(launchStarted("{\"status\":\"started\",\"pid\":7}\n"));
     try std.testing.expect(launchStarted("noise\n{\"status\":\"already\",\"reason\":\"host_running\"}\n"));
@@ -533,6 +559,11 @@ pub fn restyle(shell_id: u32) void {
     shellFont(&font);
     mp_terminal_window_style(slot.hwnd, &font, @import("themes.zig").themeConsoleFg(), @import("themes.zig").themeConsoleBg(), palette());
     mp_terminal_window_report(slot.hwnd.?);
+}
+
+pub fn interrupt(shell_id: u32) void {
+    const slot = find(shell_id) orelse return;
+    emitInput(slot, "\x03");
 }
 
 pub fn copy(hwnd: w.HANDLE) bool {

@@ -120,6 +120,26 @@ class Completion(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 complete.main()
 
+    def test_cross_owner_chat_errors_when_delegate_fails(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            with patch.object(complete, "owner_for_cwd", return_value="inne"), \
+                    patch.object(complete, "owner_response", return_value=None):
+                result = complete.request("11\tslash\tclaude\t-\t/home/inne/projects/app\t\n")
+            self.assertIn("@mp\t11\tslash\terror\t", result)
+            self.assertNotIn("@@MP_END@@\n", result.split("\n")[1:2])
+
+    def test_folder_skills_use_a_mtime_cache(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+            with patch.object(complete, "HOME", Path(home)):
+                project = Path(repo)
+                skill = project / ".claude/skills/verify-multiprompt/SKILL.md"
+                skill.parent.mkdir(parents=True)
+                skill.write_text("---\nname: verify-multiprompt\ndescription: check\n---\n", encoding="utf-8")
+                complete.PROJECT_SCAN_CACHE.clear()
+                rows = complete.project_and_plugins(project, {})
+                self.assertIn("verify-multiprompt", [row[1] for row in rows])
+                self.assertIn(str(project), complete.PROJECT_SCAN_CACHE)
+
     def test_only_current_enabled_plugin_is_scanned(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
             home = Path(tmp)

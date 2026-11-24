@@ -24,7 +24,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 ## Hard rules
 
-- Every inner reader edit increments `RUNTIME_GENERATION` in `src/chat_history_reader.py`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
+- The helper bundle derives its runtime fingerprint from its contents; never hand-bump `RUNTIME_GENERATION`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
 - Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.
 - **Never compile on the laptop.** Use the in-app updater.
@@ -49,12 +49,17 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Keep source feature coverage visible; it never gates a pull request. | `tools/check-feature-coverage.mjs` reports in `maintain-verification.yml` with `continue-on-error: true`; existing gaps belong to Part H, w-2567h |
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
-| Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
+| Every reader and bundled helper edit changes its runtime fingerprint automatically. | `tools/check-runtime-generation.mjs` runs `tools/runtime-fingerprint.test.py` (test workflow) |
+| Every installed chat tool is executable, and an install leaves no temporary files behind. | `tools/chat-shared-runtime.test.py` (`test_every_installed_chat_tool_runs`, `test_install_removes_leftover_temporary_files`) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
+| Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
+| Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
-| Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every PR commit in `test.yml` |
+| Author and committer emails must be `348741585+software-factory-runners[bot]@users.noreply.github.com`, `3296316+valentinyeo@users.noreply.github.com` or `noreply@github.com`; no Co-authored-by lines. Workers use the bot identity. | `tools/check-commit-identities.mjs` checks every new commit on a pull request and on a master push in `test.yml`; the squash-merge helper strips trailers |
+| Merge titles come from the PR's changelog fragments, never from a typed squash title; a key mismatch warns and publishes. | `tools/merge-title.js` builds the squash title in `tools/automerge-admit-run.js`; `tools/check-pr-title.mjs` refuses a PR title whose keys disagree with its fragments; `tools/version-stamp.mjs` and `tools/release-notes.mjs` publish with a `Release notes warning` line |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |

@@ -76,10 +76,18 @@ function writeAccountDesktop(dir) {
 
 const chatMention = `pub const Chat = struct { name: []const u8 = "", session: []const u8 = "", index: u32 = 0 };
 pub const Span = struct { start: usize = 0, visible_end: usize = 0, end: usize = 0 };
+pub const DeliveryKind = enum { address, fyi };
+pub const Delivery = struct { chat: Chat = .{}, kind: DeliveryKind = .address };
 pub fn currentLive(_: ?u32) []const Chat {
     return &.{};
 }
 pub fn spanAt(_: []const u16, _: usize, _: []const Chat) ?Span {
+    return null;
+}
+pub fn plainNameLinkAt(_: []const u16, _: usize) ?struct { start: usize, end: usize } {
+    return null;
+}
+pub fn liveSessionForName(_: []const u16) ?[]const u8 {
     return null;
 }
 pub fn hasMarker(_: []const u16) bool {
@@ -95,6 +103,9 @@ pub fn clearPicks() void {}
 pub fn isMentionNote(_: []const u16) bool {
     return false;
 }
+pub fn mentionDeliveries(_: []const u16, _: []const u8, _: []const Chat, out: []Delivery) []Delivery {
+    return out[0..0];
+}
 pub fn mentionTargets(_: []const u16, _: []const u8, _: []const Chat, out: []Chat) []Chat {
     return out[0..0];
 }
@@ -104,7 +115,19 @@ pub fn providerName(_: u8) []const u8 {
 pub fn revealChatNames(_: []u16, len: usize) usize {
     return len;
 }
-pub fn mentionNote(_: []const u8, _: []const u8, _: []const u8, _: []const u16, _: []u16) ?[]const u16 {
+pub fn mentionNote(_: []const u8, _: []const u16, _: []const u8, _: []u16) ?[]const u16 {
+    return null;
+}
+pub fn mentionFyiNote(_: []const u8, _: []const u16, _: []const u8, _: []u16) ?[]const u16 {
+    return null;
+}
+pub fn composeWireText(_: []const u8, _: []const Chat, text: []const u16, _: []u16) []const u16 {
+    return text;
+}
+pub fn trimWireNote(text: []const u16) []const u16 {
+    return text;
+}
+pub fn mentionContextTail(_: anytype, _: []const u16, _: bool, _: []u8) ?[]const u8 {
     return null;
 }
 pub fn mentionDelivered(_: u64, _: []const u8) bool {

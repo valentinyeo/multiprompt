@@ -23,27 +23,38 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - uses: valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test the squash merge helper builds its own title
+        run: node --test tools/automerge-admit-run.test.js
       - name: Test commit identity enforcement
         run: node --test tools/check-commit-identities.test.mjs
-      - name: Check every pull request commit identity
-        if: github.event_name == 'pull_request'
+      - name: Check every pushed commit identity
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: node tools/check-commit-identities.mjs "$BASE" "$HEAD"
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then BASE=$(git merge-base "$BASE" "$HEAD"); fi
+          node tools/check-commit-identities.mjs "$BASE" "$HEAD"
       - name: Test the pull request title names its ticket
-        run: node --test tools/check-pr-title.test.mjs
-      - name: Check the pull request title names its ticket
+        run: node --test tools/check-pr-title.test.mjs tools/merge-title.test.js
+      - name: Check the pull request title names its ticket and its fragments
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node tools/check-pr-title.mjs
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PR_FILES=$(git diff --name-only --diff-filter=AM "$(git merge-base "origin/$BASE" "$HEAD")" "$HEAD") node tools/check-pr-title.mjs
+      - name: Test the deploy proof keeps its secrets masked
+        run: node --test tools/check-deploy-proof-secrets.test.mjs
       - name: Test touched-journey selection and workflow cancellation
         run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/pr-verifier-ci.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
       - name: Test automatic crash report triage
@@ -54,13 +65,17 @@ jobs:
         run: node --test tools/package-symbols.test.mjs
       - name: Test the release workflow keeps its publication gates
         run: node --test tools/release-update-gate.test.mjs
-      - name: Test the runtime generation guard
+      - name: Test the runtime fingerprint guard
         run: node --test tools/check-runtime-generation.test.js
+      - name: Test automatic helper bundle versions
+        run: python3 tools/runtime-fingerprint.test.py -v
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat
         run: node --test tools/chat-send-now.test.js
-      - name: Guard the reader runtime generation
+      - name: Preserve slash skill positions in agent input
+        run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
+      - name: Guard the reader runtime fingerprint
         env:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}
@@ -71,8 +86,20 @@ jobs:
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands
         run: node tools/check-journey-commands.mjs
+      - name: Test the journey evidence guard
+        run: node --test tools/check-journey-evidence.test.js
+      - name: Require journey evidence to survive every run
+        run: node tools/check-journey-evidence.mjs
+      - name: Test the FFmpeg install guard
+        run: node --test tools/check-ffmpeg-install.test.js
+      - name: Require a cached, retried FFmpeg install
+        run: node tools/check-ffmpeg-install.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
+      - name: Test the source file-size ratchet
+        run: node --test tools/check-file-size.test.js
+      - name: Cap Zig source file size
+        run: node tools/check-file-size.mjs
       - name: Test the timer ratchet
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes
@@ -89,6 +116,8 @@ jobs:
         run: python3 -W error::DeprecationWarning tools/computer-discovery.test.py -v
       - name: Check every hosted chat read shape returns its replies
         run: python3 tools/verify-hosted-chat-reads.py
+      - name: Report every chat exit with its cause
+        run: python3 tools/chat-exit-report.test.py -v
 
   test:
     name: test-windows (${{ matrix.group }})
@@ -247,9 +276,11 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js tools/release-notes-tolerance.test.mjs tools/release-never-stops-on-keys.test.mjs tools/version-stamp.test.mjs tools/ticket-title-contract.test.js tools/release-unstick.test.js
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
+        run: |
+          node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
+          node --test tools/internet-responsive.test.js
       - name: Test the test laptop release check
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/laptop-check/run.test.js
@@ -569,7 +600,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -622,6 +653,9 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test hosted rows retire once above their replies
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 180 node --test tools/chat-row-identity.test.js
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs
@@ -634,6 +668,9 @@ jobs:
       - name: Build release executables for arm64
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
         run: zig build -Dtarget=aarch64-windows-gnu --summary all
+      - name: Cross-compile the Windows version label
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu
       - name: Prepare throwaway update-test signing key
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der

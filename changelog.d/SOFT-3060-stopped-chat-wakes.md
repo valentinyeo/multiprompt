@@ -1,0 +1,1 @@
+A message to a stopped chat starts that chat again instead of leaving it unreachable.

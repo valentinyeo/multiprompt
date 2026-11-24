@@ -1,0 +1,1 @@
+Master commits break the commit identity rule

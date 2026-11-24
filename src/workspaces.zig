@@ -29,6 +29,7 @@ const SW_RESTORE = @import("win32.zig").SW_RESTORE;
 const WM_APP_FOCUS = @import("win32.zig").WM_APP_FOCUS;
 const WM_APP_SHELL_EXITED = @import("win32.zig").WM_APP_SHELL_EXITED;
 const WM_APP_SWITCH_WORKSPACE = @import("win32.zig").WM_APP_SWITCH_WORKSPACE;
+pub const WM_APP_WORKSPACE_MENU_REGISTRY_READY = @import("win32.zig").WM_APP_WORKSPACE_MENU_REGISTRY_READY;
 const WM_COPYDATA = @import("win32.zig").WM_COPYDATA;
 const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
@@ -505,7 +506,10 @@ fn unlockWorkspaceRegistry(mutex: HANDLE) void {
     _ = CloseHandle(mutex);
 }
 
+var registry_revision: u64 = 0;
+
 fn writeWorkspaceRegistryFile() void {
+    registry_revision +%= 1;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
     var path_buf: [512]u8 = undefined;
@@ -565,8 +569,35 @@ pub fn workspaceCanDelete(wi: u32) bool {
     if (id.len == 0) return false;
     if (std.mem.eql(u8, id, "default") or std.mem.eql(u8, id, getInstanceName())) return false;
     if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) return app_state.g_lws_count > 1;
-    if (!e.archived) return false;
     return e.host_len == 0;
+}
+
+pub fn workspaceChats(id: []const u8) u32 {
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            var count: u32 = 0;
+            for (app_state.shells[0..app_state.shell_count]) |shell| {
+                if (shell.workspace == slot) count += 1;
+            }
+            return count;
+        }
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = getSessionPathForWorkspace(&path_buf, id) orelse return 0;
+    const h = win32OpenRead(path) orelse return 0;
+    defer _ = CloseHandle(h);
+    const buf = std.heap.page_allocator.alloc(u8, SESSION_JSON_CAPACITY) catch return 0;
+    defer std.heap.page_allocator.free(buf);
+    const n = win32ReadAll(h, buf);
+    if (n == 0) return 0;
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    return if (parseSessionTabs(buf[0..n], &tabs) > 0) 1 else 0;
+}
+
+pub fn workspaceHasChatsByIndex(wi: u32) bool {
+    if (wi >= app_state.g_workspace_count) return false;
+    const e = &app_state.g_workspaces[wi];
+    return workspaceChats(e.id[0..e.id_len]) > 0;
 }
 
 fn workspaceCanOpen(wi: u32) bool {
@@ -1099,7 +1130,6 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
         if (identity.len == 0) return workspaceDeleteFailed("This workspace has no saved identity. Close and reopen the workspace list.");
         if (app_state.g_single_window and findMyWorkspaceSlot(identity) != null and app_state.g_lws_count <= 1) return workspaceDeleteFailed("At least one workspace must stay open.");
         if (entry.host_len != 0) return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
-        if (!entry.archived) return workspaceDeleteFailed("Archive this workspace before deleting it.");
         return workspaceDeleteFailed("The workspace list is still busy. Open Delete workspace again.");
     }
     const e = &app_state.g_workspaces[wi];
@@ -1112,6 +1142,7 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     const name_len = @min(e.name_len, name_copy.len - 1);
     @memcpy(name_copy[0..name_len], e.name[0..name_len]);
     debugLog2("workspace-delete target=", id);
+    if (workspaceChats(id) > 0) return workspaceDeleteFailed("Choose where this workspace's chats go");
 
     var local = false;
     if (app_state.g_single_window) {
@@ -1149,6 +1180,73 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     rememberRemovedWorkspace(name_copy[0..name_len]);
     debugLog2("workspace-delete result=deleted id=", id);
     return true;
+}
+
+pub fn deleteWorkspaceMovingChats(wi: u32, dest_wi: u32) bool {
+    if (wi >= app_state.g_workspace_count or dest_wi >= app_state.g_workspace_count) return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    var id_copy: [64]u8 = std.mem.zeroes([64]u8);
+    var name_copy: [64]u8 = std.mem.zeroes([64]u8);
+    var dest_id_copy: [64]u8 = std.mem.zeroes([64]u8);
+    const e = &app_state.g_workspaces[wi];
+    const id_len = @min(e.id_len, id_copy.len - 1);
+    if (id_len == 0) return workspaceDeleteFailed("This workspace has no saved identity.");
+    @memcpy(id_copy[0..id_len], e.id[0..id_len]);
+    const name_len = @min(e.name_len, name_copy.len - 1);
+    @memcpy(name_copy[0..name_len], e.name[0..name_len]);
+    const dest = &app_state.g_workspaces[dest_wi];
+    const dest_len = @min(dest.id_len, dest_id_copy.len - 1);
+    if (dest_len == 0) return workspaceDeleteFailed("Choose an open workspace for the chats.");
+    @memcpy(dest_id_copy[0..dest_len], dest.id[0..dest_len]);
+    const id = id_copy[0..id_len];
+    const dest_id = dest_id_copy[0..dest_len];
+    const dest_slot = if (app_state.g_single_window) findMyWorkspaceSlot(dest_id) else null;
+    const target = dest_slot orelse return workspaceDeleteFailed("Choose an open workspace for the chats.");
+    var source = if (app_state.g_single_window) findMyWorkspaceSlot(id) else null;
+    if (source == null) {
+        if (!absorbWorkspaceIntoSlots(id, name_copy[0..name_len])) return workspaceDeleteFailed("Open this workspace before deleting it.");
+        source = findMyWorkspaceSlot(id);
+    }
+    const from = source orelse return workspaceDeleteFailed("Open this workspace before deleting it.");
+    if (from == target) return workspaceDeleteFailed("Choose a different workspace for the chats.");
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        if (shell.workspace == from) shell.workspace = target;
+    }
+    if (app_state.g_active_workspace == from) app_state.g_active_workspace = target;
+    if (!app_state.g_restoring) saveSession();
+    publishInboxState();
+    const current = findWorkspace(id) orelse return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    return deleteWorkspaceByIndex(current);
+}
+
+var requested_delete_workspace_id: [64]u8 = std.mem.zeroes([64]u8);
+var requested_delete_workspace_id_len: u32 = 0;
+var delete_move_source: ?u32 = null;
+
+pub fn workspaceDeleteMoveSource() ?u32 {
+    return delete_move_source;
+}
+
+pub fn setWorkspaceDeleteMoveSource(wi: u32) void {
+    delete_move_source = wi;
+}
+
+pub fn clearWorkspaceDeleteFlow() void {
+    delete_move_source = null;
+}
+
+pub fn requestWorkspaceDelete(id: []const u8) void {
+    const len = @min(id.len, requested_delete_workspace_id.len - 1);
+    if (len == 0) return;
+    @memcpy(requested_delete_workspace_id[0..len], id[0..len]);
+    requested_delete_workspace_id_len = @intCast(len);
+}
+
+pub fn takeRequestedWorkspaceDelete(buf: *[64]u8) ?[]const u8 {
+    const len = requested_delete_workspace_id_len;
+    requested_delete_workspace_id_len = 0;
+    if (len == 0) return null;
+    @memcpy(buf[0..len], requested_delete_workspace_id[0..len]);
+    return buf[0..len];
 }
 
 pub fn saveWorkspaceRegistry() void {
@@ -1253,6 +1351,104 @@ fn upsertMySlotEntries() void {
         const nm = workspaceDisplayName(ws, &nbuf);
         addOrUpdateWorkspaceHosted(app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], nm, false, me);
     }
+}
+
+var menu_wake: HANDLE = null;
+var menu_reading = std.atomic.Value(bool).init(false);
+var menu_snapshot_ready = std.atomic.Value(bool).init(false);
+var menu_snapshot: [8192]u8 = undefined;
+var menu_snapshot_len: usize = 0;
+var menu_snapshot_revision: u64 = 0;
+
+fn readMenuRegistry() void {
+    const revision = registry_revision;
+    menu_snapshot_len = 0;
+    var path_buf: [512]u8 = undefined;
+    if (getWorkspaceRegistryPath(&path_buf)) |path| {
+        if (lockWorkspaceRegistryWithTimeout(5000)) |mutex| {
+            defer unlockWorkspaceRegistry(mutex);
+            menu_snapshot_len = readWorkspaceRegistryBytes(path, &menu_snapshot) orelse 0;
+        }
+    }
+    menu_snapshot_revision = revision;
+    menu_snapshot_ready.store(true, .release);
+    if (menu_wake) |wake| _ = @import("focus.zig").PostMessageW(wake, WM_APP_WORKSPACE_MENU_REGISTRY_READY, 0, 0);
+}
+
+pub fn prepareMenuEntries() void {
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+}
+
+pub fn refreshMenuRegistry(wake: HANDLE) void {
+    menu_wake = wake;
+    if (menu_snapshot_ready.load(.acquire) or menu_reading.load(.acquire)) return;
+    menu_reading.store(true, .release);
+    const thread = std.Thread.spawn(.{}, readMenuRegistry, .{}) catch {
+        menu_reading.store(false, .release);
+        return;
+    };
+    thread.detach();
+}
+
+fn menuSnapshotUsable(len: usize, read_revision: u64) bool {
+    return len > 0 and read_revision == registry_revision;
+}
+
+pub fn takeMenuRegistrySnapshot() bool {
+    if (!menu_snapshot_ready.swap(false, .acq_rel)) return false;
+    menu_reading.store(false, .release);
+    if (!menuSnapshotUsable(menu_snapshot_len, menu_snapshot_revision)) return false;
+    app_state.g_workspace_count = 0;
+    parseWorkspaceRegistryJson(menu_snapshot[0..menu_snapshot_len]);
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+    return true;
+}
+
+fn holdWorkspaceRegistryForTest(started: *std.atomic.Value(bool), stop: *std.atomic.Value(bool)) void {
+    const mutex = lockWorkspaceRegistryWithTimeout(5000);
+    started.store(true, .release);
+    while (!stop.load(.acquire)) std.atomic.spinLoopHint();
+    if (mutex) |held| unlockWorkspaceRegistry(held);
+}
+
+test "SOFT-2374 the workspace menu opens while another window holds the registry" {
+    const old_workspaces = app_state.g_workspaces;
+    const old_count = app_state.g_workspace_count;
+    const old_single = app_state.g_single_window;
+    defer {
+        app_state.g_workspaces = old_workspaces;
+        app_state.g_workspace_count = old_count;
+        app_state.g_single_window = old_single;
+    }
+    app_state.g_workspace_count = 0;
+    app_state.g_single_window = false;
+    var holding = std.atomic.Value(bool).init(false);
+    var stopped = std.atomic.Value(bool).init(false);
+    const holder = std.Thread.spawn(.{}, holdWorkspaceRegistryForTest, .{ &holding, &stopped }) catch return error.SkipZigTest;
+    while (!holding.load(.acquire)) std.atomic.spinLoopHint();
+    const began = GetTickCount64();
+    prepareMenuEntries();
+    refreshMenuRegistry(null);
+    const elapsed = GetTickCount64() - began;
+    stopped.store(true, .release);
+    holder.join();
+    try std.testing.expect(elapsed < 250);
+    const deadline = GetTickCount64() + 5000;
+    while (!menu_snapshot_ready.load(.acquire) and GetTickCount64() < deadline) std.atomic.spinLoopHint();
+    try std.testing.expect(menu_snapshot_ready.load(.acquire));
+    _ = takeMenuRegistrySnapshot();
+}
+
+test "SOFT-2374 a finished read is used only when no local save came after it" {
+    const saved = registry_revision;
+    defer registry_revision = saved;
+    registry_revision = 7;
+    try std.testing.expect(menuSnapshotUsable(24, 7));
+    try std.testing.expect(!menuSnapshotUsable(0, 7));
+    registry_revision = 8;
+    try std.testing.expect(!menuSnapshotUsable(24, 7));
 }
 
 pub fn syncInProcessWorkspacesToRegistry() void {
@@ -3005,6 +3201,49 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     for (starred_layout.tabs, 0..) |tab, ws| try std.testing.expectEqualStrings(starred_layout.workspaces[ws].name, tab.workspace);
 }
 
+pub fn sidebarViewShellVisible(idx: usize) bool {
+    const view = app_state.g_sidebar_view orelse return false;
+    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |*row| {
+        if (row.sid == app_state.shells[idx].shell_id and row.ws < app_state.g_inbox_ws_count and
+            app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
+            return @import("inbox.zig").rowVisibleInSplit(row, view.split(), now_ms);
+    }
+    return false;
+}
+
+pub fn refreshSidebarView() void {
+    const view = app_state.g_sidebar_view orelse return;
+    @import("inbox.zig").publishInboxStateNow();
+    @import("inbox.zig").loadInboxModel();
+    if (app_state.active_shell < app_state.shell_count and sidebarViewShellVisible(app_state.active_shell)) return;
+    var target: ?u32 = null;
+    var best: app_state.InboxRow = .{};
+    const now_ms = @import("frequent.zig").unixMs(@import("inbox.zig").nowFileTime() / 10_000);
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
+        if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd != @intFromPtr(app_state.g_main_hwnd)) continue;
+        if (!@import("inbox.zig").rowVisibleInSplit(&row, view.split(), now_ms)) continue;
+        const idx = @import("inbox.zig").findShellById(row.sid) orelse continue;
+        if (target == null or @import("inbox.zig").rowLessForSplit(view.split(), now_ms, row, best)) {
+            target = idx;
+            best = row;
+        }
+    }
+    if (target) |idx| {
+        if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+    } else {
+        const chat_on = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on else false;
+        @import("chat_composer.zig").closeChatView();
+        if (app_state.active_shell < app_state.shell_count) {
+            app_state.shells[app_state.active_shell].chat_view_on = chat_on;
+            if (app_state.shells[app_state.active_shell].hwnd != null) _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        }
+        app_state.active_shell = app_state.shell_count;
+        hideBrowserFloatingChrome();
+        parkStrayBrowserPanes(null);
+    }
+}
+
 pub fn starredShellVisible(idx: usize) bool {
     const shell = &app_state.shells[idx];
     return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
@@ -3051,7 +3290,7 @@ fn rememberWorkspaceFocus(ws: u8, shell_id: u32, input: app_state.WorkspaceFocus
 }
 
 pub fn captureWorkspaceFocus() void {
-    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.g_sidebar_view != null or app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
     if (app_state.g_single_window and shell.workspace != app_state.g_active_workspace) return;
     const input: app_state.WorkspaceFocus = if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null and
@@ -3122,14 +3361,32 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
 }
 
 pub fn switchToWorkspace(ws_in: u32) void {
+    if (ws_in >= @intFromEnum(@import("workspace_view.zig").Builtin.all) and ws_in <= @import("workspace_view.zig").starred)
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
+    for (@import("workspace_view.zig").builtins) |view| {
+        if (ws_in != @intFromEnum(view)) continue;
+        captureWorkspaceFocus();
+        _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
+        app_state.g_starred_workspace = false;
+        app_state.g_sidebar_view = view;
+        app_state.g_browser_focus_mode = false;
+        app_state.g_inbox_step_context_active = false;
+        app_state.g_sidebar_scroll = 0;
+        refreshSidebarView();
+        focusActiveShell();
+        updateMainWindowTitle();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
     if (!app_state.g_single_window) return;
+    const was_view = app_state.g_sidebar_view != null;
     if (ws_in == @import("workspace_view.zig").starred) {
+        app_state.g_sidebar_view = null;
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
         app_state.g_browser_focus_mode = false;
         app_state.g_starred_workspace = true;
         @import("inbox.zig").loadInboxModel();
-        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
         app_state.g_inbox_step_context_active = false;
         app_state.g_sidebar_scroll = 0;
         for (0..app_state.shell_count) |i| {
@@ -3151,7 +3408,8 @@ pub fn switchToWorkspace(ws_in: u32) void {
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
     captureWorkspaceFocus();
     app_state.g_browser_focus_mode = false;
-    const was_starred = app_state.g_starred_workspace;
+    const was_starred = app_state.g_starred_workspace or was_view;
+    app_state.g_sidebar_view = null;
     app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
     if (ws != app_state.g_active_workspace) {
@@ -3675,6 +3933,7 @@ fn leaveSingleWindowMode() bool {
 
     app_state.g_single_window = false;
     app_state.g_starred_workspace = false;
+    app_state.g_sidebar_view = null;
     setWindowDisplayNameUtf8(active_name_buf[0..active_name_len]);
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
@@ -3725,6 +3984,7 @@ pub fn newWorkspace() void {
     captureWorkspaceFocus();
     _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
     app_state.g_starred_workspace = false;
+    app_state.g_sidebar_view = null;
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;

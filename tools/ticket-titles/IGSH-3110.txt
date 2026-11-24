@@ -1,0 +1,1 @@
+Test the automatic AI switch when a plan runs out

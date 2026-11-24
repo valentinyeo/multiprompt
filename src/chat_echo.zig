@@ -214,7 +214,6 @@ pub const Pending = struct {
     text: []const u16 = &.{},
     anchor: Anchor,
     unanchored_delivery: bool = false,
-    confirmed: bool = false,
 };
 
 const Normalized = struct {
@@ -285,9 +284,21 @@ const Normalized = struct {
     }
 };
 
+const mention_wire_note = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
+
+fn trimMentionWireNote(text: []const u16) []const u16 {
+    const ending = std.unicode.utf8ToUtf16LeStringLiteral(" or relay it unless you are also asked.)");
+    if (!std.mem.endsWith(u16, text, ending)) return text;
+    const mark = mention_wire_note[0..mention_wire_note.len];
+    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
+    return text[0..idx];
+}
+
 pub fn sameText(a: []const u16, b: []const u16) bool {
-    var left = Normalized{ .text = a };
-    var right = Normalized{ .text = b };
+    const at = trimMentionWireNote(a);
+    const bt = trimMentionWireNote(b);
+    var left = Normalized{ .text = at };
+    var right = Normalized{ .text = bt };
     while (true) {
         const l = left.next();
         const r = right.next();
@@ -313,18 +324,43 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
 
 pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
 
-pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
-    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
+pub fn v1PhaseUnconfirmed(phase: []const u8) bool {
+    return phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "sent");
+}
+
+pub fn v1NeedsResubmit(message_v1: bool, write_started: bool, phase: []const u8, state: OutboxState) bool {
+    if (!message_v1 or !write_started or state == .cancelled or state == .not_sent) return false;
+    return v1PhaseUnconfirmed(phase);
+}
+
+pub fn v1ChannelOrphaned(channel_pending: bool, send_job_active: bool) bool {
+    return channel_pending and !send_job_active;
+}
+
+pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, send_job_active: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    if (state != .sending or sent_tick_ms <= 0 or now_ms < sent_tick_ms) return false;
+    if (channel_pending and send_job_active) return false;
+    return now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
 }
 
 test "a host message left sending with no job settles after the deadline" {
-    try std.testing.expect(v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
-    try std.testing.expect(!v1SendingAbandoned(.sending, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
-    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 10));
+    try std.testing.expect(v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
+    try std.testing.expect(!v1SendingAbandoned(.sending, true, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(v1SendingAbandoned(.sending, true, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, false, 0, V1_SENDING_DEADLINE_MS * 10));
     for ([_]OutboxState{ .queued, .not_sent, .delivered, .cancelled }) |state| {
-        try std.testing.expect(!v1SendingAbandoned(state, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+        try std.testing.expect(!v1SendingAbandoned(state, false, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
     }
+}
+
+test "SOFT-3038 a relaunched host message with an unconfirmed phase can submit again" {
+    try std.testing.expect(v1NeedsResubmit(true, true, "queued", .queued));
+    try std.testing.expect(v1NeedsResubmit(true, true, "sent", .sending));
+    try std.testing.expect(!v1NeedsResubmit(true, true, "accepted", .delivered));
+    try std.testing.expect(!v1NeedsResubmit(true, false, "queued", .queued));
+    try std.testing.expect(v1ChannelOrphaned(true, false));
+    try std.testing.expect(!v1ChannelOrphaned(true, true));
 }
 
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
@@ -670,7 +706,7 @@ fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (sameText(block, p.text)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
-    if (p.confirmed and sameSkillText(body, norm)) return true;
+    if (sameSkillText(body, norm)) return true;
     if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
@@ -749,7 +785,7 @@ test "SOFT-2929 a mention suffix the transcript adds still matches the waiting c
     const extended = w("deploy the fix to staging @Builder{live-0123abcd} and reboot");
     var buf: [64]u16 = undefined;
     const prefix = prefixOf("deploy the fix to staging @Builder", &buf);
-    var pending = [_]Pending{.{ .prefix = prefix, .text = &typed, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
+    var pending = [_]Pending{.{ .prefix = prefix, .text = &typed, .anchor = .{ .sent_ms = 1000 } }};
     const blocks = [_]UserBlock{.{ .text = &marked, .stamp_ms = 2000 }};
     var out: [1]?usize = @splat(null);
     assign(&pending, &blocks, false, &.{}, &out);
@@ -759,6 +795,15 @@ test "SOFT-2929 a mention suffix the transcript adds still matches the waiting c
     try std.testing.expect(blockMatches(&marked, prefix));
     try std.testing.expect(!sameText(&typed, &elsewhere));
     try std.testing.expect(!sameText(&typed, &extended));
+}
+
+test "SOFT-3084 only a complete mention wire note is ignored during echo matching" {
+    const typed = w("ask @Builder{live-builder}");
+    const framed = w("ask @Builder{live-builder}\n\n(This line is addressed to Builder and was already delivered to it. Do not answer for Builder or relay it unless you are also asked.)");
+    const unfinished = w("ask @Builder{live-builder}\n\n(This line is addressed to someone else");
+    try std.testing.expect(sameText(&typed, &framed));
+    try std.testing.expect(sameText(&framed, &typed));
+    try std.testing.expect(!sameText(&typed, &unfinished));
 }
 
 test "SOFT-2929 a slash command wrapped in command tags matches the typed copy" {
@@ -775,6 +820,11 @@ test "SOFT-2929 a slash command wrapped in command tags matches the typed copy" 
     try std.testing.expect(sameText(&keep, &message_only));
     try std.testing.expectEqualSlices(u16, &keep, normalize(&message_only, &buf));
     try std.testing.expect(!sameText(&drop, &message_only));
+}
+
+fn skillMatchesBlock(block: []const u16, norm: []const u16) bool {
+    var buf: [BLOCK_NORM_CAP]u16 = undefined;
+    return sameSkillText(normalize(block, &buf), norm);
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {
@@ -797,7 +847,7 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
         } else false);
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
         const sent_after = p.anchor.sent_ms > 0 and isNewBlock(p.anchor, b.stamp_ms, bi, window_full);
-        if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !(p.confirmed and sameSkillText(b.text, norm))))) continue;
+        if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !skillMatchesBlock(b.text, norm)))) continue;
         const already_claimed = for (claimed) |claim| {
             if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
             if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
@@ -1409,19 +1459,36 @@ test "IGSH-1605 a send that failed when the link dropped is requeued by its clie
 }
 
 
-test "IGSH-1831 reordered skills match only confirmed messages and preserve words and multiplicity" {
+test "SOFT-3097 a queued skill message with a quote reconciles once with its transcript row" {
     const original = w("guess why /deeper /pstack:poteto-mode");
     const reordered = w("/pstack:poteto-mode guess why /deeper");
-    var pending = [_]Pending{.{ .prefix = &original, .text = &original, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
+    var pending = [_]Pending{.{ .prefix = &original, .text = &original, .anchor = .{ .sent_ms = 1000 } }};
     const blocks = [_]UserBlock{.{ .text = &reordered, .stamp_ms = 2000 }};
     var chosen: [1]?usize = undefined;
     assign(&pending, &blocks, false, &.{}, &chosen);
     try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
-    pending[0].confirmed = false;
-    assign(&pending, &blocks, false, &.{}, &chosen);
-    try std.testing.expect(chosen[0] == null);
     try std.testing.expect(!sameSkillText(&original, &w("/deeper why guess /pstack:poteto-mode")));
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /deeper")));
     try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /pstack:poteto-mode /extra")));
     try std.testing.expect(!sameSkillText(&w("ordinary words"), &w("words ordinary")));
+}
+
+test "SOFT-3097 a skill message with a quote matches the row the reader renders" {
+    const sent = w("/pstack:correct\n> quoted line one\n>\n> quoted line two\n> … own question @Builder{live-builder} ?\n\n(This line is addressed to Builder and was already delivered to it. Do not answer for Builder or relay it unless you are also asked.)");
+    const rendered = w("/pstack:correct > quoted line one\n>\n> quoted line two\n> … own question @Builder{live-builder} ?");
+    try std.testing.expect(sameText(&sent, &rendered));
+    try std.testing.expect(sameText(&rendered, &sent));
+    const queued_copy = w("/pstack:correct\n> quoted line one\n>\n> quoted line two\n\nmy question");
+    const quote_first = w("> quoted line one\n>\n> quoted line two\n\n/pstack:correct my question");
+    try std.testing.expect(!sameText(&queued_copy, &quote_first));
+    try std.testing.expect(sameSkillText(&quote_first, &queued_copy));
+    const blocks = [_]UserBlock{.{ .text = &quote_first, .stamp_ms = 3000 }};
+    var pending = [_]Pending{
+        .{ .prefix = &queued_copy, .text = &queued_copy, .anchor = .{ .sent_ms = 1000 } },
+        .{ .prefix = &queued_copy, .text = &queued_copy, .anchor = .{ .sent_ms = 1000 } },
+    };
+    var chosen: [2]?usize = undefined;
+    assign(&pending, &blocks, false, &.{}, &chosen);
+    try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
+    try std.testing.expectEqual(@as(?usize, null), chosen[1]);
 }

@@ -14,6 +14,9 @@ function Get-WorkspaceCard {
 }
 
 function Open-WorkspaceCard([string]$Shot) {
+    Doctor
+    [VerifyNative]::BringToForeground($script:window)
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace header click'
     $state = Read-Session
     if (($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)) { throw 'Workspace header must be expanded and visible' }
     $top = if ($state.hide_pills) { 0 } else { 34 }
@@ -35,21 +38,57 @@ function Get-PaletteRowIds([string]$Trace, [int]$Chars) {
     return $found[$found.Count - 1].Groups[1].Value.Trim()
 }
 
+function Test-EmptyHomeCardRow([int]$Index, $State) {
+    $workspace = $State.workspaces[$Index]
+    if ($workspace.wid -cne 'default') { return $false }
+    if ($State.active_workspace -eq $Index) { return $false }
+    return (@($State.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $Index }).Count -eq 0)
+}
+
+function Get-WorkspaceCardRow([int]$Workspace) {
+    $state = Read-Session
+    $row = 3
+    for ($index = 0; $index -lt $state.workspace_count; $index++) {
+        if ($state.workspaces[$index].PSObject.Properties['archived'] -and $state.workspaces[$index].archived) { continue }
+        if (Test-EmptyHomeCardRow $index $state) { continue }
+        if ($index -eq $Workspace) { return $row }
+        $row++
+    }
+    throw 'Target workspace missing from visible card rows'
+}
+
+function Dismiss-WorkspaceCard([string]$Label, [switch]$WithEscape) {
+    $card = Get-WorkspaceCard
+    if ($card -eq [IntPtr]::Zero) { return }
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before dismissing workspace card'
+    Record $Label
+    [VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, 5)
+    if ($WithEscape) { Press @(0x1B) ($Label + ' with Escape') }
+    Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'workspace card dismissed'
+}
+
+function Get-VisibleWorkspaceCardRows() {
+    $state = Read-Session
+    $count = 0
+    for ($index = 0; $index -lt $state.workspace_count; $index++) {
+        if ($state.workspaces[$index].PSObject.Properties['archived'] -and $state.workspaces[$index].archived) { continue }
+        if (Test-EmptyHomeCardRow $index $state) { continue }
+        $count++
+    }
+    return $count
+}
+
 function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
-    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
-    $target = -1
-    for ($index = 0; $index -lt $windows.Count; $index++) {
-        if ($windows[$index].id -ceq $state.workspaces[$Workspace].wid) { $target = $index + 1 }
-    }
-    if ($target -lt 1) { throw 'Target workspace missing from the card registry' }
+    $target = Get-WorkspaceCardRow $Workspace
+    $visibleRows = Get-VisibleWorkspaceCardRows
     $rect = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetClientRect($card, [ref]$rect)) { throw 'Card rectangle unavailable' }
-    if ($rect.Bottom -lt (19 + ($windows.Count + 2) * 28)) { throw 'Fixture requires all workspace rows visible' }
+    if ($rect.Bottom -lt (19 + ($visibleRows + 4) * 28)) { throw 'Fixture requires all workspace rows visible' }
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card row click'
     Record ('Click named workspace row ' + $state.workspaces[$Workspace].name)
-    [VerifyNative]::ClickClient($card, 50, (6 + $target * 28 + 14))
+    [VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, (6 + $target * 28 + 14))
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq $Workspace -and -not (Read-Session).starred_view } 'card closed and chosen workspace saved'
     Snapshot $Shot
     Save-Json (Read-Session) ($Shot + '.session.json')
@@ -87,6 +126,40 @@ Wait-Until { (Read-Session).active_workspace -eq $created -and -not (Read-Sessio
 Snapshot 'workspace-shortcut-return'
 $result.checks += @{ name = 'workspace-number-shortcuts'; home = 0; created = $created }
 
+function Read-WorkspaceView {
+    $path = Join-Path $scratch 'roaming/ZigShell/inbox-default.json'
+    if (-not (Test-Path $path)) { return $null }
+    try { return Get-Content $path -Raw | ConvertFrom-Json } catch { return $null }
+}
+
+$viewWorkspaceCount = (Read-Session).workspace_count
+$viewNames = @('All', 'Frequent', 'Favorites')
+for ($viewIndex = 0; $viewIndex -lt $viewNames.Count; $viewIndex++) {
+    $viewName = $viewNames[$viewIndex]
+    $card = Open-WorkspaceCard ("workspace-view-$viewName-open")
+    Record ("Click built-in workspace view $viewName")
+    [VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, (6 + $viewIndex * 28 + 14))
+    Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-WorkspaceView).sidebar_view -ceq $viewName } 'built-in view selected without creating a workspace'
+    Snapshot ("workspace-view-$viewName")
+    if ((Read-Session).workspace_count -ne $viewWorkspaceCount) { throw 'Built-in view became a stored workspace' }
+    Save-Json (Read-WorkspaceView) ("workspace-view-$viewName.inbox.json")
+    Select-WorkspaceCard $created ("workspace-view-$viewName-real-return")
+    Press @(0x12, 0x10, (0x31 + $viewIndex)) ("Alt+Shift+" + ($viewIndex + 1) + ': select ' + $viewName)
+    Wait-Until { (Read-WorkspaceView).sidebar_view -ceq $viewName } 'view keyboard shortcut selected the same view'
+    Select-WorkspaceCard $created ("workspace-view-$viewName-shortcut-return")
+}
+Press @(0x12, 0x10, 0x31) 'Alt+Shift+1: All before opening a new tab'
+Wait-Until { (Read-WorkspaceView).sidebar_view -ceq 'All' } 'All selected before new tab'
+$viewTabCount = @((Read-Session).tabs).Count
+Press @(0x11, 0x10, 0x31) 'Ctrl+Shift+1: new CMD from a workspace view'
+Wait-Until {
+    $saved = Read-Session
+    $null -ne $saved -and @($saved.tabs).Count -eq $viewTabCount + 1 -and
+        $saved.active_workspace -eq $created -and (Read-WorkspaceView).sidebar_view -ceq ''
+} 'new tab leaves the view for the last real workspace'
+Save-Json (Read-Session) 'workspace-view-new-tab.session.json'
+$result.checks += @{ name = 'workspace-built-in-views'; views = $viewNames; storedWorkspaces = $viewWorkspaceCount; newTabWorkspace = $created }
+
 foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system')) {
     $query = if ($theme -eq 'edgegray') { 'edge grey' } else { $theme }
     Select-Theme $query ("workspace-$theme-theme") $theme
@@ -95,46 +168,39 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $look = [VerifyNative]::MenuLook($card)
     $expected = if ($theme -eq 'light') { 'F9F9F9' } elseif ($theme -eq 'system') { $null } elseif ($theme -eq 'multiprompt') { '0F1011' } else { '262626' }
     if ($null -ne $expected -and $look.fill -cne $expected) { throw "Workspace card unreadable fill in ${theme}: $($look.fill)" }
-    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $expectedHeight = 19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28
+    $visibleCount = Get-VisibleWorkspaceCardRows
+    $expectedHeight = 19 + ($visibleCount + 4) * 28
     if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
-    Record 'Escape closes workspace card without switching'
-    [VerifyNative]::Chord(@(0x1B))
-    Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'workspace card dismissed'
+    Dismiss-WorkspaceCard 'Miss-click the workspace card padding to dismiss without switching' -WithEscape
     if ((Read-Session).active_workspace -ne $created) { throw 'Dismissing card changed workspace' }
     $result.checks += @{ name = 'workspace-card-theme'; theme = $theme; fill = $look.fill; screenshot = "workspace-$theme-card.png" }
 }
 
 $card = Open-WorkspaceCard 'workspace-keyboard-open'
-$state = Read-Session
-$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
-$currentRow = -1
-$targetRow = -1
-for ($index = 0; $index -lt $windows.Count; $index++) {
-    if ($windows[$index].id -ceq $state.workspaces[$created].wid) { $currentRow = $index + 1 }
-    if ($windows[$index].id -ceq $state.workspaces[0].wid) { $targetRow = $index + 1 }
-}
-if ($currentRow -lt 1 -or $targetRow -lt 1) { throw 'Keyboard fixture workspaces missing' }
+$currentRow = Get-WorkspaceCardRow $created
+$targetRow = Get-WorkspaceCardRow 0
+Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card keyboard navigation'
 Record 'Arrow Up and Down preserve selection, then arrows select first workspace'
-[VerifyNative]::Chord(@(0x26))
-[VerifyNative]::Chord(@(0x28))
+Press @(0x26) 'Arrow Up in workspace card'
+Press @(0x28) 'Arrow Down in workspace card'
 $arrow = if ($targetRow -lt $currentRow) { 0x26 } else { 0x28 }
-for ($index = 0; $index -lt [Math]::Abs($targetRow - $currentRow); $index++) { [VerifyNative]::Chord(@($arrow)) }
+for ($index = 0; $index -lt [Math]::Abs($targetRow - $currentRow); $index++) {
+    Press @($arrow) 'Arrow to the target workspace row'
+}
 Snapshot 'workspace-keyboard-selected'
-[VerifyNative]::Chord(@(0x0D))
+Press @(0x0D) 'Enter activates arrow-selected workspace'
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq 0 -and -not (Read-Session).starred_view } 'Enter activates arrow-selected workspace'
 $result.checks += @{ name = 'workspace-card-arrow-enter'; workspace = 0 }
 Select-WorkspaceCard $created 'workspace-keyboard-return'
 $result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphite 2'; reason = 'Not a shipped theme; Edge Grey is separate' }
 
 $card = Open-WorkspaceCard 'workspace-new-open'
-$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$newRow = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 1
+$newRow = (Get-VisibleWorkspaceCardRows) + 3
 $count = (Read-Session).workspace_count
+Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before workspace card new row click'
 Record 'Click New workspace in workspace card'
-[VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
+[VerifyNative]::ClickOwnedChildClient($card, $script:window, 50, (6 + $newRow * 28 + 7 + 14))
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspace_count -eq $count + 1 } 'card created one workspace and closed'
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
 
@@ -252,6 +318,10 @@ $result.checks += @{ name = 'workspace-delete-main-protected'; persistentSeconds
 Snapshot 'workspace-delete-complete'
 Snapshot 'after'
 
+$beforeArchiveCreate = (Read-Session).workspace_count
+Press @(0x11, 0x4E) 'Ctrl+N: create a separate workspace for archive and restore'
+Wait-Until { (Read-Session).workspace_count -eq $beforeArchiveCreate + 1 } 'separate archive workspace and CMD tab persisted'
+$created = (Read-Session).active_workspace
 Select-WorkspaceCard $created 'archive-before'
 $archiveBefore = Read-Session
 $archiveId = [string]$archiveBefore.workspaces[$created].wid
@@ -283,7 +353,7 @@ Snapshot 'archive-hidden'
 $card = Open-WorkspaceCard 'archive-card-hidden'
 $look = [VerifyNative]::MenuLook($card)
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-if ($look.height -ne (19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28)) { throw 'Archived workspace still occupies a card row' }
+if ($look.height -ne (19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 4) * 28)) { throw 'Archived workspace still occupies a card row' }
 Press @(0x1B) 'Escape: close workspace card'
 Invoke-JourneyCommand 'Open workspace' -Confirm {
     Press @(0x0D) 'Enter: open workspace list'
@@ -345,10 +415,8 @@ $relaunchCard = Open-WorkspaceCard 'workspace-delete-relaunch-card'
 $relaunchLook = [VerifyNative]::MenuLook($relaunchCard)
 $relaunchRegistry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
 $relaunchRows = @($relaunchRegistry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
-if ($relaunchLook.height -ne (19 + ($relaunchRows.Count + 2) * 28)) { throw 'Relaunched workspace card does not match the stored workspaces' }
+if ($relaunchLook.height -ne (19 + ($relaunchRows.Count + 4) * 28)) { throw 'Relaunched workspace card does not match the stored workspaces' }
 Snapshot 'workspace-delete-relaunch-card'
-Record 'Escape closes the relaunched workspace card'
-[VerifyNative]::Chord(@(0x1B))
-Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero } 'relaunched workspace card dismissed'
+Dismiss-WorkspaceCard 'Miss-click the relaunched workspace card padding to dismiss'
 $result.checks += @{ name = 'workspace-delete-relaunch'; deleted = $deletedNames; restoredWorkspaceKept = $archiveId }
 Snapshot 'workspace-delete-relaunch-complete'

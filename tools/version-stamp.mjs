@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
-import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
-import { canonicalTicketId, fragmentTicketId } from './ticket-id.js';
+import { ticketRecord, ticketLine, resolveReleaseTitles, loadTicketTitles } from './ticket-titles.mjs';
+import { canonicalTicketId, fragmentTicketId, parseTicketId, ticketIds, ticketKeyKind, unlinkedTicketId } from './ticket-id.js';
 const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
@@ -48,6 +48,7 @@ export const reviewedCommits = {
   '7ec797b681c2cf39aa1cd25671d05b91e8322137': 'SOFT-2713',
   '5c89a320fecee297eda83b6671ad5aede4031ec7': 'SOFT-2721',
   '9ea1f1e25baa3c00a8c0b35906d965bffdcdb1b9': 'SOFT-2902',
+  '4629193865d76f4f99483934dfc1eb26f1206424': ['SOFT-2883', 'SOFT-3075'],
 };
 
 const mainPath = 'src/main.zig';
@@ -70,7 +71,7 @@ export function productChange(line) {
 
 const engineeringTitle = /^(?:\[INFRA\]\s*|Multiprompt verify:\s*|Multiprompt verification playbook:\s*|Release gate:\s*|CI:\s*)/i;
 
-function userFacingTitle(title) {
+export function userFacingTitle(title) {
   if (!title.trim()) return false;
   if (/checks and fixes, no visible change/i.test(title)) return false;
   if (engineeringTitle.test(title)) return false;
@@ -89,6 +90,10 @@ export function userFacingReleaseLine(line) {
 
 export function fragmentLines(file, text) {
   fragmentTicketId(file);
+  return fragmentText(file, text);
+}
+
+function fragmentText(file, text) {
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
   if (lines.some(line => !plainChange(line))) throw new Error(`${file}: write plain product lines without ticket ids, file names, paths or PR numbers`);
@@ -178,14 +183,26 @@ export function classifyTrees(base, head, changed) {
 const fragmentFiles = tree => Object.fromEntries(Object.entries(tree).filter(([file]) => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md'));
 const addedSince = (current, previous) => Object.fromEntries(Object.entries(current).filter(([file, text]) => previous[file] !== text));
 
-function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
+function buildUnresolvedChangelog(files, tag, history = [], commits = [], warn = () => {}) {
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw new Error('Invalid release tag');
   const version = tag.slice(1);
   if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) {
     if (compareTags(tag, 'v0.28.1027') >= 0) throw new Error(`Release ${tag} already exists in source; generate from the previous release`);
-    return files[changelogPath];
+    return { changelog: files[changelogPath], fallbacks: {}, skipped: new Map() };
   }
   let result = { ...files };
+  const fallbacks = {};
+  const skipped = new Map();
+  const releaseNote = (value, fallback, unlinked) => {
+    const id = parseTicketId(value)?.id;
+    if (!id) {
+      if (value) skipped.set(value, ticketKeyKind(value));
+      if (fallback) unlinked.add(fallback);
+      return null;
+    }
+    if (fallback) fallbacks[id] = fallback;
+    return id;
+  };
   const stamp = (stepTag, fragments, stepCommits, sha, current) => {
     if (compareTags(stepTag, 'v0.28.1027') < 0) {
       const tickets = new Set();
@@ -203,26 +220,41 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     const reviewed = reviewedReleases[stepTag];
     if (reviewed && sha !== reviewed[0]) throw new Error(`${stepTag}: reviewed release commit does not match ${sha || 'missing commit'}`);
     const notes = new Map(Object.entries(reviewed?.[1] || {}));
+    const unlinked = new Set();
+    const commitTickets = new Set();
     if (!reviewed) {
       for (const commit of stepCommits || []) {
         const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
         const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
-        if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
-        for (const ticket of tickets.map(canonicalTicketId)) {
-          if (!notes.has(ticket)) notes.set(ticket, null);
+        const text = (lead ? commit.subject.slice(lead.length).replace(/^\s*[,:]\s*/, '') : commit.subject).trim();
+        for (const key of ticketIds(commit.subject)) commitTickets.add(key);
+        if (!tickets.length) {
+          if (current) warn(`${stepTag}: commit ${commit.sha.slice(0, 7)} has no ticket key; publishing its line without a link`);
+          if (text) unlinked.add(text);
+          continue;
+        }
+        for (const ticket of tickets) {
+          const id = releaseNote(ticket, text, unlinked);
+          if (id && !notes.has(id)) notes.set(id, text);
         }
       }
     }
     for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
-      fragmentLines(file, text);
-      const ticket = fragmentTicketId(file);
-      if (!reviewed && !notes.has(ticket)) throw new Error(`${stepTag}: ${ticket} fragment has no matching commit ticket`);
-      if (!notes.has(ticket)) notes.set(ticket, null);
+      const lines = fragmentText(file, text);
+      const id = releaseNote(/^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-[^/]+\.md$/.exec(file)?.[1], lines[0], unlinked);
+      if (!id) continue;
+      if (!notes.has(id)) {
+        if (!reviewed && current && !commitTickets.has(id)) warn(`${stepTag}: ${id} fragment has no matching commit ticket; publishing it from its fragment text`);
+        notes.set(id, lines[0]);
+      }
     }
-    if (!notes.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
+    if (!notes.size && !unlinked.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
     if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
     const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
-    const bullets = [...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`);
+    const bullets = [
+      ...[...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`),
+      ...[...unlinked].map(text => `        .{ .text = "${escape(text)}", .ticket = "${unlinkedTicketId}" },`),
+    ];
     result[changelogPath] = result[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${stepTag.slice(1)}", .items = &.{\n${bullets.join('\n')}\n    } },`);
   };
   let previous = history.length ? fragmentFiles(history[0].files) : {};
@@ -232,35 +264,46 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     previous = fragmentFiles(step.files);
   }
   stamp(tag, addedSince(fragmentFiles(files), previous), commits, undefined, true);
-  return result[changelogPath];
+  return { changelog: result[changelogPath], fallbacks, skipped };
 }
 
 
 export function changelogTicketIds(source) {
-  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => match[1]).filter(Boolean).map(canonicalTicketId))];
+  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => parseTicketId(match[1])?.id).filter(Boolean))];
 }
 
-export function applyTicketTitles(source, titles) {
+export function applyTicketTitles(source, titles, fallbacks = {}, warn = () => {}) {
+  const literal = line => JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
   return source.replace(/^[ \t]*\.\{ \.text = "(?:\\.|[^"\\])*", \.ticket = "([^"\\]*)" \},\r?\n/gm, (row, id) => {
-    if (!id) throw new Error('Unidentified changelog row; remove pre-ticket legacy rows before release');
-    id = canonicalTicketId(id);
-    const line = ticketLine(ticketRecord(id, titles[id]));
-    const literal = JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
-    return `        .{ .text = ${literal}, .ticket = "${id}" },\n`;
+    if (!id || id === unlinkedTicketId) return row;
+    const canonical = parseTicketId(id)?.id;
+    if (canonical && titles[canonical] !== undefined) {
+      const line = ticketLine(ticketRecord(canonical, titles[canonical]));
+      return `        .{ .text = ${literal(line)}, .ticket = "${canonical}" },\n`;
+    }
+    const fallback = fallbacks[canonical ?? id];
+    if (fallback) return `        .{ .text = ${literal(fallback)}, .ticket = "${unlinkedTicketId}" },\n`;
+    if (/\.text = ""/.test(row)) {
+      warn(`${id} has no title this release can publish; the line is left out`);
+      return '';
+    }
+    warn(`${id} has no title this release can publish; its published line stays unchanged`);
+    return row;
   });
 }
 
-export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog) {
-  return applyTicketTitles(buildUnresolvedChangelog(files, tag, history, commits), titles);
+export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog, warn = () => {}) {
+  const built = buildUnresolvedChangelog(files, tag, history, commits, warn);
+  return applyTicketTitles(built.changelog, titles, built.fallbacks, warn);
 }
 
 function git(args, cwd, timeout) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
 }
 
-export function readTree(rev, cwd, remaining, sourcePaths = []) {
+export function readTree(rev, cwd, remaining, sourcePaths = [], only = null) {
   const read = args => git(args, cwd, remaining?.());
-  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/', ...sourcePaths]).split('\0').filter(Boolean);
+  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', ...(only ?? [mainPath, changelogPath, 'changelog.d/', ...sourcePaths])]).split('\0').filter(Boolean);
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
 }
 
@@ -276,7 +319,81 @@ export function previousReleaseTag(tags, tag) {
   return tags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags).at(-1) ?? null;
 }
 
-function releaseHistory(tag, changelog, publishedTags) {
+const historyWorkers = 8;
+
+async function pool(items, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(historyWorkers, items.length) }, run));
+  return results;
+}
+
+function gitAsync(args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}${stderr ? `: ${stderr.trim()}` : ''}`;
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+function tagObjects(text) {
+  return new Map(text.split(/\r?\n/).filter(Boolean).map(line => {
+    const [name, object, peeled] = line.split(' ');
+    return [name, peeled || object];
+  }));
+}
+
+function blobIds(text) {
+  return new Map(text.split('\0').filter(Boolean).map(entry => {
+    const tab = entry.indexOf('\t');
+    return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]];
+  }));
+}
+
+async function historyTrees(history) {
+  const refs = new Map(history.map(name => [name, `refs/tags/${name}`]));
+  const list = () => gitAsync(['for-each-ref', '--format=%(refname:short) %(objectname) %(*objectname)', 'refs/tags']);
+  let objects = tagObjects(await list());
+  const missing = history.filter(name => !objects.has(name));
+  for (const name of missing) await gitAsync(['fetch', '--no-tags', 'origin', `${refs.get(name)}:${refs.get(name)}`]);
+  if (missing.length) objects = tagObjects(await list());
+  for (const name of history) if (!objects.has(name)) throw new Error(`Missing release tag ${name}`);
+  const blobs = await pool(history, name => gitAsync(['ls-tree', '-r', '-z', refs.get(name), '--', 'changelog.d/']).then(blobIds));
+  const contents = new Map();
+  const unread = new Map();
+  history.forEach((name, i) => {
+    const batch = new Map();
+    for (const [file, id] of blobs[i]) {
+      if (contents.has(id) || batch.has(id)) continue;
+      batch.set(id, file);
+    }
+    if (batch.size) unread.set(refs.get(name), batch);
+    for (const id of batch.keys()) contents.set(id, null);
+  });
+  await pool([...unread], async ([ref, batch]) => {
+    const ids = [...batch.keys()];
+    const tree = readTree(ref, undefined, undefined, [], ids.map(id => batch.get(id)));
+    for (const id of ids) {
+      const text = tree[batch.get(id)];
+      if (text === undefined) throw new Error(`Missing release fragment ${batch.get(id)} at ${ref}`);
+      contents.set(id, text);
+    }
+  });
+  return history.map((name, i) => ({ sha: objects.get(name), files: Object.fromEntries([...blobs[i]].map(([file, id]) => [file, contents.get(id)])) }));
+}
+
+async function releaseHistory(tag, changelog, publishedTags) {
   const older = publishedTags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
   if (!older.length) {
     if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') throw new Error('Shallow checkout has no release tags; fetch tags before building');
@@ -285,32 +402,28 @@ function releaseHistory(tag, changelog, publishedTags) {
   const stamped = changelog.match(/\.ver\s*=\s*"(\d+\.\d+\.\d+)"/)?.[1];
   const base = stamped ? older.findLastIndex(name => compareTags(name, `v${stamped}`) <= 0) : -1;
   const history = older.slice(Math.max(base, 0));
-  for (const name of history) {
-    const ref = `refs/tags/${name}`;
-    try {
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
-    } catch {
-      git(['fetch', '--no-tags', 'origin', `${ref}:${ref}`]);
-    }
-  }
-  return history.map((name, i) => {
-    const ref = `refs/tags/${name}`;
-    return {
-      tag: name,
-      files: readTree(ref),
-      sha: git(['rev-parse', `${ref}^{commit}`]).trim(),
-      commits: i && compareTags(name, 'v0.28.1027') >= 0 && !reviewedReleases[name] ? releaseCommits(`refs/tags/${history[i - 1]}`, ref) : [],
-    };
+  const [snapshots, commits] = await Promise.all([
+    historyTrees(history),
+    pool(history, (name, i) => i && compareTags(name, 'v0.28.1027') >= 0 && !reviewedReleases[name] ? releaseCommitsAsync(`refs/tags/${history[i - 1]}`, `refs/tags/${name}`) : []),
+  ]);
+  return history.map((name, i) => ({ tag: name, files: snapshots[i].files, sha: snapshots[i].sha, commits: commits[i] }));
+}
+
+function parseCommits(text) {
+  return text.split(/\r?\n/).filter(Boolean).map(line => {
+    const tab = line.indexOf('\t');
+    return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
   });
 }
 
 function releaseCommits(previous, head) {
   git(['merge-base', '--is-ancestor', previous, head]);
-  return git(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`])
-    .split(/\r?\n/).filter(Boolean).map(line => {
-      const tab = line.indexOf('\t');
-      return { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
-    });
+  return parseCommits(git(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
+}
+
+async function releaseCommitsAsync(previous, head) {
+  await gitAsync(['merge-base', '--is-ancestor', previous, head]);
+  return parseCommits(await gitAsync(['log', '--reverse', '--format=%H%x09%s', `${previous}..${head}`]));
 }
 
 function check(baseRev, headRev) {
@@ -340,15 +453,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const lines = Object.entries(changes).flatMap(([file, text]) => fragmentLines(file, text).filter(productChange));
       if (lines.length) console.log(lines.join('\n'));
     } else if (command === 'build' && base && !extra.length) {
-      const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+      const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases?per_page=100', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
       if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
       const files = readTree('HEAD');
-      const history = releaseHistory(base, files[changelogPath], publishedTags);
+      const history = await releaseHistory(base, files[changelogPath], publishedTags);
       if (!history.length && compareTags(base, 'v0.28.1027') >= 0) throw new Error('No published baseline; fetch published release tags before building');
       const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
-      const unresolved = buildUnresolvedChangelog(files, base, history, commits);
-      const titles = await resolveTicketTitles(changelogTicketIds(unresolved), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
-      fs.writeFileSync(changelogPath, applyTicketTitles(unresolved, titles));
+      const built = buildUnresolvedChangelog(files, base, history, commits, line => console.error(`Release notes warning: ${line}`));
+      const resolved = await resolveReleaseTitles(changelogTicketIds(built.changelog), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
+      for (const [key, kind] of new Map([...built.skipped, ...resolved.unresolved])) console.error(`Release notes skip ${key}: ${kind}`);
+      fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks, line => console.error(`Release notes warning: ${line}`)));
     } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
     console.error(error.message);

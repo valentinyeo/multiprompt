@@ -29,6 +29,16 @@ SPEC.loader.exec_module(reader)
 FIXTURE_SPEC = importlib.util.spec_from_file_location('soft2779_fixture', ROOT / 'tools/fixtures/SOFT-2779/fixture.py')
 fixture = importlib.util.module_from_spec(FIXTURE_SPEC)
 FIXTURE_SPEC.loader.exec_module(fixture)
+MUBO_246_PROMPT = '/pstack:poteto-mode full autopilot on this queue'
+MUBO_246_FIXTURE = ROOT / 'tools/fixtures/MUBO-246/blocked-by-hook.jsonl'
+
+
+def mubo_246_events():
+    return [event for event in (json.loads(line) for line in MUBO_246_FIXTURE.read_text().splitlines() if line.strip())]
+
+
+def mubo_246_blocked_row():
+    return next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is False)
 
 
 class HistoryReaderTest(unittest.TestCase):
@@ -2120,6 +2130,14 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
         self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [1, 4])
 
+    def test_soft_3097_skill_quote_echo_keeps_the_command_in_front(self):
+        self.path.write_text((ROOT / 'tools/fixtures/SOFT-3097/skill-quote-echo.jsonl').read_text())
+        _, rows = self.read()
+        quoted = ('> quoted line one\n>\n> quoted line two\n>\n> quoted line three\n>\n'
+                  '> quoted line four\n>\n> quoted line five\n>\n> … own question @Builder{live-builder} ?')
+        self.assertEqual([(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')],
+                         [('user', '/pstack:correct ' + quoted), ('assistant', 'echo reply')])
+
     def test_refused_slash_command_facts_are_opt_in_and_additive(self):
         prompt = '/hormozi-skills:audit-offer can you use this also to review my own offer'
         enqueue = dict(type='queue-operation', operation='enqueue', timestamp='2026-10-13T11:06:22.591Z', content=prompt)
@@ -2139,6 +2157,46 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIsNone(reader.settlement_event(dict(refused, isSidechain=True), 'claude'))
         self.assertIsNone(reader.settlement_event(dict(refused, content='Compacted while idle'), 'claude'))
         self.assertIsNone(reader.settlement_event(refused, 'codex'))
+
+    def test_mubo_246_a_prompt_a_hook_blocked_is_a_send_failure(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        blocked = mubo_246_blocked_row()
+        self.assertIsNone(reader.settlement_event(blocked, 'claude'))
+        fact = reader.settlement_event(blocked, 'claude', True)
+        self.assertEqual(fact['settlement'], dict(operation='blocked', content=MUBO_246_PROMPT))
+        self.assertEqual(fact['timestamp'], blocked['timestamp'])
+        kept = next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is True)
+        self.assertIsNone(reader.settlement_event(kept, 'claude', True))
+        delivered = next(event for event in mubo_246_events() if event.get('type') == 'user')
+        self.assertIsNone(reader.settlement_event(delivered, 'claude', True))
+        self.assertIsNone(reader.settlement_event(dict(blocked, isSidechain=True), 'claude', True))
+        self.assertIsNone(reader.settlement_event(blocked, 'codex', True))
+        self.query.update(settlement=True, blocked_settlement=True, offset=0, cached_sid='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row.get('role') == 'user'], ['summarise the open pull requests'])
+
+    def test_mubo_246_a_client_without_the_opt_in_reads_master_output(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(settlement=True, offset=0, cached_sid='')
+        wire = reader.response(dict(self.query))
+        self.assertNotIn('blocked', wire)
+        without_opt_in = wire.splitlines()[1:-1]
+        self.assertEqual([json.loads(row)['text'] for row in without_opt_in], ['summarise the open pull requests', 'Two are open.'])
+        ignored = [event for event in mubo_246_events() if event.get('promptSubmitEnding')]
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in mubo_246_events() if event not in ignored))
+        self.query.update(cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        master = reader.response(dict(self.query))
+        self.assertEqual(without_opt_in, master.splitlines()[1:-1])
+        self.assertNotIn('blocked', master)
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(blocked_settlement=True, cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant' and row['text']], ['Two are open.'])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'user'], ['summarise the open pull requests'])
 
     def test_queue_removal_and_contentless_dequeue_popall_survive_delta_paging(self):
         self.query['settlement'] = True
@@ -2404,13 +2462,13 @@ class HistoryReaderTest(unittest.TestCase):
         server.stdin.flush()
         return server
 
-    def server_request(self, server, query):
+    def server_request(self, server, query, timeout=10):
         line = query if isinstance(query, bytes) else json.dumps(query).encode()
         server.stdin.write(line + b'\n')
         server.stdin.flush()
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
-            self.assertTrue(selector.select(timeout=5), 'reader reply timed out')
+            self.assertTrue(selector.select(timeout=timeout), 'reader reply timed out')
         line = server.stdout.readline()
         self.assertTrue(line.startswith(b'{'), 'reader must keep a framed connection: ' + repr(line))
         reply = json.loads(line)
@@ -4070,6 +4128,62 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.submit(text='different synthetic prompt')
         self.assertEqual(self.status()['state'], 'sent')
 
+    def test_mubo_246_a_prompt_blocked_by_a_hook_says_not_sent(self):
+        self.submit(text=MUBO_246_PROMPT)
+        self.request('dispatch')
+        self.assertEqual(self.status()['state'], 'sent')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('blocked_by_hook', message['receipt'])
+
+    def test_mubo_246_a_block_for_another_prompt_leaves_a_delivered_message_alone(self):
+        self.submit(text='synthetic prompt')
+        self.request('dispatch')
+        self.append(mubo_246_blocked_row())
+        self.poll()
+        self.assertEqual(self.status()['state'], 'sent')
+
+    def test_mubo_246_the_host_stream_marks_a_blocked_prompt_not_sent(self):
+        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', epoch=1, accepted=False,
+                                             text=MUBO_246_PROMPT)])
+        with patch.object(reader, 'host_apply', return_value=True) as apply:
+            reader.host_claude_event('claude', 'sid', 'fixture', session, mubo_246_blocked_row())
+        fact = apply.call_args.args[3][0]
+        self.assertEqual((fact['kind'], fact['id'], fact['reason']),
+                         ('not_sent', 'message_fixture_0001', 'blocked_by_hook'))
+        self.assertEqual(session['sends'], [])
+
+    def test_soft_2989_connector_not_sent_keeps_the_reason_it_returned(self):
+        connector = dict(
+            capabilities=lambda ctx: dict(protocol=1, provider='claude'),
+            submit=lambda ctx, row, state, services: dict(handoff='not_sent', facts=[], state=state, reason='draft_present'),
+        )
+        self.submit()
+        with patch.object(reader, 'message_connector', return_value=connector):
+            self.request('dispatch')
+        message = self.status()
+        self.assertEqual(message['state'], 'failed')
+        self.assertIn('draft_present', message['receipt'])
+
+    def test_soft_2989_a_busy_desktop_bridge_says_the_chat_was_busy(self):
+        session = dict(state={}, sends=[dict(id='message_fixture_0001', attempt='a1', accepted=False)])
+        with patch.object(reader, 'host_apply', return_value=True) as apply:
+            reader.host_hax_event('claude', 'sid', 'fixture', session, dict(type='bridge_busy', id='message_fixture_0001'))
+        self.assertEqual(apply.call_args.args[3][0].get('reason'), 'owner_busy')
+
+    def test_soft_2989_a_message_that_runs_out_of_time_says_why(self):
+        self.submit()
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent',deadline=? WHERE id='message_fixture_0001'", (time.time() - 1,))
+        reader.message_expire(db, 'claude', 'sid')
+        receipt = db.execute("SELECT receipt FROM shared_messages WHERE id='message_fixture_0001'").fetchone()[0]
+        db.close()
+        self.assertEqual(self.status()['state'], 'failed')
+        self.assertEqual(receipt, 'waiting_too_long')
+
     def test_remove_works_for_failed_unknown_and_reset_messages(self):
         self.submit()
         with patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'not_sent', 'reason': 'draft_present'}):
@@ -4412,27 +4526,43 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         polled = threading.Event()
         self.send.side_effect = lambda *args, **kwargs: (sent.set(), {'status': 'sent'})[1]
         original_poll = reader.message_poll
+        original_select = selectors.DefaultSelector.select
+        original_wake = reader.message_worker_wake
+        wakes = []
+        select_phase = 'startup'
+        idle_select_timeouts = []
 
         def poll(*args):
             original_poll(*args)
             polled.set()
 
+        def wake(lock_path):
+            wakes.append(lock_path)
+            return original_wake(lock_path)
+
+        def select(selector_self, timeout=None):
+            result = original_select(selector_self, timeout)
+            if select_phase == 'waiting' and not sent.is_set():
+                idle_select_timeouts.append('ready' if result else 'timeout')
+            return result
+
         with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 1), \
-                patch.object(reader, 'message_poll', side_effect=poll):
+                patch.object(reader, 'message_poll', side_effect=poll), \
+                patch.object(reader, 'message_worker_wake', side_effect=wake), \
+                patch.object(selectors.DefaultSelector, 'select', select):
             worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
             worker.start()
             self.assertTrue(polled.wait(5), 'the worker never started')
             time.sleep(0.15)
-            started = time.monotonic()
+            select_phase = 'waiting'
             self.submit('message_fixture_0002', 'second prompt')
             reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
-            self.assertTrue(sent.wait(3), 'the second message was never sent')
-            waited = time.monotonic() - started
+            self.assertTrue(sent.wait(5), 'the second message was never sent')
             self.accept('second prompt')
             worker.join(10)
-        print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
         self.assertFalse(worker.is_alive(), 'the worker did not stop')
-        self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
+        self.assertEqual(len(wakes), 1, 'submit must signal the running worker instead of spawning another')
+        self.assertEqual(idle_select_timeouts[:1], ['ready'], idle_select_timeouts)
 
     def test_native_history_continues_after_started(self):
         self.submit()
@@ -4633,7 +4763,7 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def run_main(self, module, reader_stub, *args):
         import contextlib
         module._reader = reader_stub
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with patch.object(module, 'resolve_destination', side_effect=lambda r, p, s, t: (s, t)), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return module.main(list(args))
 
     def test_IGSH_1900_a_failed_message_makes_mp_send_exit_three_without_wait(self):
@@ -4687,6 +4817,136 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
 
         code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-wait', '--wait', '--timeout', '1')
         self.assertEqual(code, 3)
+
+
+class SOFT_3085_MpSendDestinationTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.module = IGSH_1900_MpSendReportTest().module()
+        self.module._reader = reader
+        self.sid = '11111111-2222-3333-4444-555555555555'
+        self.tmux = 'live-destination'
+        self.bound = patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        self.requests = patch.object(reader, 'message_store_request', side_effect=self.request).start()
+        patch.object(reader, 'host_start', side_effect=AssertionError('must not start a host')).start()
+        self.queries = []
+        self.state = 'accepted'
+
+    def request(self, query):
+        self.queries.append(query)
+        return dict(message=dict(id=query.get('message_id'), state=self.state, receipt=None))
+
+    def host(self, sid=None, alive=True, tmux=None):
+        sid = sid or self.sid
+        paths = reader.host_paths('claude', sid)
+        reader.host_write(paths['config'], dict(enabled=True, provider='claude', sid=sid, tmux=tmux or self.tmux))
+        if alive:
+            reader.host_write(paths['owner'], dict(owner='host', pid=os.getpid()))
+
+    def send(self, sid=None, *flags):
+        import contextlib
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.module.main(['claude', sid or self.sid, 'hello', *flags])
+        return code, out.getvalue(), err.getvalue()
+
+    def refused(self, sid=None, *flags):
+        code, out, err = self.send(sid, *flags)
+        self.assertNotEqual(code, 0)
+        self.assertIn('no live host or pane agent', err)
+        self.assertEqual(out, '')
+        self.assertEqual(self.queries, [])
+        self.assertFalse(reader.message_store_path().exists())
+
+    def test_SOFT_3085_unknown_sid_with_tmux_is_refused_before_submission(self):
+        self.refused(None, '--tmux', self.tmux)
+        self.assertFalse(reader.host_paths('claude', self.sid)['config'].exists())
+
+    def test_SOFT_3085_installed_sender_refuses_an_unknown_sid_without_creating_a_host(self):
+        home = Path(self.temp.name)
+        installed = home / '.multiprompt-runtime/mp-send'
+        installed.parent.mkdir()
+        installed.write_bytes((ROOT / 'src/mp_send.py').read_bytes())
+        tmux = installed.with_name('tmux')
+        tmux.write_text('#!/bin/sh\nexit 1\n')
+        tmux.chmod(0o700)
+        done = subprocess.run([sys.executable, str(installed), '--reader', str(ROOT / 'src/chat_history_reader.py'),
+                               '--tmux', self.tmux, 'claude', self.tmux, 'hello'],
+                              capture_output=True, text=True, timeout=20,
+                              env=dict(os.environ, HOME=str(home), PATH=str(installed.parent)))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, '')
+        self.assertIn('no live host or pane agent', done.stderr)
+        self.assertFalse(reader.message_store_path().exists())
+        self.assertFalse(reader.host_paths('claude', self.tmux)['config'].exists())
+
+    def test_SOFT_3085_dead_host_config_is_not_restarted(self):
+        self.host(alive=False)
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_a_different_pane_sid_is_not_the_requested_chat(self):
+        self.bound.return_value = ('another-session', Path('/unused/transcript'))
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_live_host(self):
+        self.host()
+        code, out, err = self.send(self.tmux, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out.strip(), r'\Amp-[0-9a-f]{32}\Z')
+        self.assertTrue(self.queries)
+        self.assertTrue(all(q['sid'] == self.sid and q['tmux'] == self.tmux for q in self.queries))
+        self.assertFalse(reader.host_paths('claude', self.tmux)['config'].exists())
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_live_host_without_flag(self):
+        self.tmux = 'live.destination'
+        self.host()
+        code, _, err = self.send(self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_tmux_given_as_sid_resolves_to_the_pane_agent(self):
+        self.bound.return_value = (self.sid, Path('/unused/transcript'))
+        code, _, err = self.send(self.tmux, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_ambiguous_host_bindings_are_refused(self):
+        self.host()
+        self.host('another-session')
+        self.refused(self.tmux, '--tmux', self.tmux)
+
+    def test_SOFT_3085_host_for_another_terminal_is_refused(self):
+        self.host(tmux='another-terminal')
+        self.refused(None, '--tmux', self.tmux)
+
+    def test_SOFT_3085_valid_sid_uses_its_host_without_tmux_flag(self):
+        self.host()
+        code, _, err = self.send()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_valid_pane_sid_is_unchanged(self):
+        self.bound.return_value = (self.sid, Path('/unused/transcript'))
+        code, _, err = self.send(None, '--tmux', self.tmux)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.queries[0]['sid'], self.sid)
+
+    def test_SOFT_3085_no_handoff_is_not_success(self):
+        self.host()
+        self.state = 'queued'
+        code, _, err = self.send(None, '--tmux', self.tmux, '--timeout', '0')
+        self.assertEqual(code, 4)
+        self.assertIn('timed out', err)
+
+    def test_SOFT_3085_failure_receipt_is_printed_without_wait(self):
+        self.host()
+        self.requests.side_effect = lambda q: dict(message=dict(id=q.get('message_id'), state='failed', receipt='session_unavailable'))
+        code, _, err = self.send(None, '--tmux', self.tmux)
+        self.assertEqual(code, 3)
+        self.assertIn('session_unavailable', err)
 
 
 class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
@@ -5113,7 +5373,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 27)
+        self.assertEqual(len(base), 31)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -5319,7 +5579,7 @@ const {run} = await import(process.argv[1]);
 const temp = {};
 for (const key of ['TMPDIR', 'TMP', 'TEMP']) if (process.env[key]) temp[key] = process.env[key];
 const runtimeEnv = {HOME: process.argv[2], PATH: process.env.PATH, LANG: 'C.UTF-8', ...temp};
-process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder', process.argv[2], '--workspace', 'Work', '--mode', 'headless', '--task', process.argv[4]], {
+process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder', process.argv[2], '--workspace', 'Work', '--host', '0', '--mode', 'headless', '--task', process.argv[4]], {
   env: {...runtimeEnv, MULTIPROMPT_KEY: 'fixture-key', MULTIPROMPT_READER: process.argv[3]},
   runtime: (args, input) => spawnSync('python3', [process.argv[3], ...args], {input, encoding: 'utf8', timeout: 30000, env: runtimeEnv, maxBuffer: 1048576}),
   fetch: async () => ({status: 200, json: async () => ({revision: 0, layout: {workspaces: [{name: 'Work'}], tabs: []}})}),
@@ -5346,6 +5606,55 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
                 time.sleep(0.2)
             self.assertEqual(started.get('status'), 'already', started)
             self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
+
+    def test_SOFT_3060_host_send_wakes_a_stopped_host_and_delivers_once(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        reader.host_stop(self.provider, self.sid, force=True)
+        time.sleep(0.3)
+        sent = reader.host_send(self.provider, self.sid, 'wake line')
+        self.assertIn(sent['status'], ('queued', 'sent'))
+        self.wait_for(lambda: (self.message(sent['id']) or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text, 'wake line'])
+
+    def test_SOFT_3060_a_stopped_host_starts_again_for_the_next_message(self):
+        self.enable()
+        second = 'host_fixture_message_02'
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        reader.host_stop(self.provider, self.sid, force=True)
+        time.sleep(0.3)
+        self.assertFalse(reader.host_owned(self.provider, self.sid))
+        self.seed(token=second, text='after stop')
+        self.dispatch()
+        self.wait_for(lambda: (self.message(second) or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text, 'after stop'])
+
+    def test_SOFT_3060_a_busy_host_that_misses_a_ping_keeps_its_owner(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        with patch.object(reader, 'host_request', return_value=dict(status='timeout')):
+            reader.host_clear_stale(self.provider, self.sid)
+            self.assertTrue(reader.host_owned(self.provider, self.sid))
+            self.assertEqual(reader.host_dispatch_start(self.provider, self.sid).get('status'), 'owned')
+        self.assertEqual(len(self.host_children), 1)
+        self.assertEqual(self.user_lines(), [self.text])
+
+    def test_SOFT_3060_a_stale_owner_whose_pid_is_gone_is_cleared(self):
+        self.enable()
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['owner'], dict(owner='host', pid=99999999, at=time.time()))
+        self.assertFalse(reader.host_alive(self.provider, self.sid))
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertTrue(reader.host_owned(self.provider, self.sid))
+        self.assertEqual(self.user_lines(), [self.text])
 
     def test_host_delivers_once_with_receipt(self):
         self.enable()
@@ -5714,12 +6023,12 @@ class AgentFeedbackCliTest(unittest.TestCase):
         self.assertFalse(self.log.exists(), 'an empty wish must not reach the log')
         saved = self.cli('a shortcut for browser screenshots', '--why', 'a shot takes three commands')
         self.assertEqual(saved.returncode, 0, saved.stderr)
-        self.assertIn('Feedback saved locally. Board submission not confirmed.', saved.stdout)
+        self.assertIn('queued, will be filed', saved.stdout)
         self.assertEqual(self.log.stat().st_mode & 0o077, 0)
         lines = self.log.read_text(encoding='utf-8').splitlines()
         self.assertEqual(len(lines), 1)
         row = json.loads(lines[0])
-        self.assertEqual(set(row), {'id', 'at', 'want', 'why', 'session', 'provider', 'app_version', 'cwd'})
+        self.assertEqual(set(row), {'id', 'at', 'want', 'why', 'session', 'provider', 'app_version', 'cwd', 'board_pending'})
         self.assertEqual(row['want'], 'a shortcut for browser screenshots')
         self.assertEqual(row['why'], 'a shot takes three commands')
         self.assertEqual(row['session'], 'fixture-chat')
@@ -6211,6 +6520,40 @@ class NightlyChatRestartTest(unittest.TestCase):
         execv.assert_not_called()
         self.assertIsNotNone(session['agent'])
 
+    def test_rotating_an_execd_host_keeps_its_generation_for_every_provider(self):
+        source = base64.b64decode(base64.b64encode(reader.READER_SOURCE.encode())).decode()
+        host = types.ModuleType('agent_host_test')
+        host.READER_SOURCE = source
+        exec(compile(source, '<agent-host>', 'exec'), host.__dict__)
+        self.assertNotIn('__file__', host.__dict__)
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        published = runtime / 'reader.py'
+        published.write_text('pass\n')
+        active = runtime / 'active.json'
+        with patch.object(host, 'HOME', self.home):
+            for generation in (None, reader.RUNTIME_GENERATION + 1):
+                if generation is not None:
+                    active.write_text(json.dumps(dict(protocol=1, generation=generation, sha256='a' * 64)))
+                for provider in host.HOST_PROVIDERS:
+                    with self.subTest(provider=provider, published_generation=generation):
+                        host.host_restart_write(provider, self.sid)
+                        agent = types.SimpleNamespace(pid=4242)
+                        session = dict(pending={}, agent=agent, stop=False)
+                        with patch.object(host.os, 'execv') as execv, \
+                                patch.object(host, 'host_agent_stop') as stop:
+                            self.assertTrue(host.host_rotate(provider, self.sid, session, agent))
+                        stop.assert_called_once_with(agent)
+                        execv.assert_called_once_with(sys.executable,
+                                                      [sys.executable, '-u', str(published), '--agent-host', provider, self.sid])
+                        self.assertIsNone(session['agent'])
+                        self.assertEqual(session['exit_cause'], 'host_update')
+                        self.assertFalse(host.host_restart_requested(provider, self.sid))
+                        self.assertEqual(host.host_session_state(provider, self.sid)['nightly_day'], host.host_nightly_day())
+                        events = [json.loads(line) for line in host.host_paths(provider, self.sid)['log'].read_text().splitlines()]
+                        rotate = [event for event in events if event['event'] == 'rotate'][-1]
+                        self.assertEqual(rotate['detail']['generation'], reader.RUNTIME_GENERATION)
+
     def test_host_generation_reads_active_json_without_runtime_generation_global(self):
         self.need_restart()
         runtime = self.home / '.multiprompt-runtime'
@@ -6223,6 +6566,35 @@ class NightlyChatRestartTest(unittest.TestCase):
         finally:
             if saved is not None:
                 reader.RUNTIME_GENERATION = saved
+
+    def test_rotating_without_a_runtime_generation_global_does_not_raise(self):
+        self.need_restart()
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        (runtime / 'reader.py').write_text('# newest reader\n')
+        reader.host_restart_write('claude', self.sid)
+        agent = types.SimpleNamespace(pid=4242)
+        session = dict(pending={}, agent=agent, stop=False)
+        saved = reader.__dict__.pop('RUNTIME_GENERATION', None)
+        had_engine = 'ENGINE_INFO' in reader.__dict__
+        engine = reader.__dict__.get('ENGINE_INFO')
+        reader.__dict__['ENGINE_INFO'] = None
+        logged = []
+        try:
+            with patch.object(reader.os, 'execv'), \
+                    patch.object(reader, 'host_agent_stop'), \
+                    patch.object(reader, 'host_log', side_effect=lambda *args, **kwargs: logged.append(args)):
+                self.assertTrue(reader.host_rotate('claude', self.sid, session, agent))
+        finally:
+            if saved is not None:
+                reader.RUNTIME_GENERATION = saved
+            if had_engine:
+                reader.__dict__['ENGINE_INFO'] = engine
+            else:
+                reader.__dict__.pop('ENGINE_INFO', None)
+        rotate = [entry for entry in logged if entry[2] == 'rotate']
+        self.assertEqual(len(rotate), 1, logged)
+        self.assertEqual(rotate[0][3]['generation'], 0)
 
 
 class HostPaneMarkTest(unittest.TestCase):
@@ -6681,6 +7053,22 @@ class HostEventStreamFixture:
 
 
 class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
+    def test_soft_2681_config_follows_the_live_claude_session_after_resume(self):
+        self.sid = '11111111-1111-4111-8111-111111111111'
+        resumed = '22222222-2222-4222-8222-222222222222'
+        config = dict(enabled=True, provider=self.provider, sid=self.sid, tmux=self.tmux,
+                      cwd=str(self.home), model='opus')
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['config'], dict(config, native_session=self.sid))
+        for native in (self.sid, resumed):
+            with self.subTest(native=native):
+                self.feed(dict(type='system', subtype='init', session_id=native))
+                saved = json.loads(paths['config'].read_text())
+                self.assertEqual(saved.get('native_session'), native)
+                self.assertEqual({key: saved[key] for key in config}, config)
+                self.assertEqual(reader.host_session_state(self.provider, self.sid)['native_session'], native)
+                self.assertEqual(reader.host_sid_for_tmux(self.provider, self.tmux), self.sid)
+
     def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
@@ -7550,43 +7938,19 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertNotIn('message', decision)
         self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
 
-    def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):
+    def test_a_quiet_host_keeps_its_agent_running_past_the_old_idle_limit(self):
         import socket as module
-        path = self.home / 'loop.sock'
+        path = self.home / 'still-here.sock'
         listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
         listener.bind(str(path))
         listener.listen(1)
         self.addCleanup(listener.close)
         read_end, write_end = os.pipe()
         self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            time.sleep(0.2)
-            session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
-            time.sleep(0.8)
-            self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
-            session['parked'].clear()
-            running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_IGSH_1907_a_host_quiet_for_ten_minutes_keeps_its_bot_warm(self):
-        import socket as module
-        path = self.home / 'warm.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        signals = []
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0),
+                                      wait=lambda timeout=None: signals.append('wait'),
+                                      kill=lambda: signals.append('kill'))
         self.addCleanup(agent.stdout.close)
         session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
@@ -7594,49 +7958,13 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         running.start()
         self.addCleanup(stop_fixture_host_loop, self, running, session)
         self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-        session['idle'] = time.time() - 600
-        time.sleep(1.5)
-        self.assertTrue(running.is_alive(), 'a host quiet for ten minutes stopped its bot, so the next message pays a cold start')
-        self.assertEqual([row for row in self.host_events('idle_stop')], [])
         session['idle'] = time.time() - 7200
-        running.join(timeout=5)
-        self.assertFalse(running.is_alive(), 'a host quiet for two hours must still stop its bot')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-    def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
-        import socket as module
-        path = self.home / 'long-turn.sock'
-        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
-        listener.bind(str(path))
-        listener.listen(1)
-        self.addCleanup(listener.close)
-        read_end, write_end = os.pipe()
-        self.addCleanup(os.close, write_end)
-        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
-        self.addCleanup(agent.stdout.close)
-        session = FixtureHostSession()
-        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
-                                   daemon=True)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
-            running.start()
-            self.addCleanup(stop_fixture_host_loop, self, running, session)
-            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
-            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
-            session['state']['inflight'] = session['inflight']
-            time.sleep(0.5)
-            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
-            for _ in range(6):
-                os.write(write_end, b'x')
-                time.sleep(0.15)
-            self.assertTrue(running.is_alive(), 'an open turn must survive the idle timer while the agent writes output')
-            self.assertEqual([row for row in self.host_events('idle_stop')], [],
-                             'the host must never stop itself while its turn is open')
-            session['turn'], session['inflight'], session['state']['inflight'] = None, None, None
-            running.join(timeout=10)
-        self.assertFalse(running.is_alive(), 'a host quiet after its turn must still stop when it is idle')
-        self.assertTrue([row for row in self.host_events('idle_stop')])
-
-
+        time.sleep(2)
+        self.assertTrue(running.is_alive(), 'a hosted chat with no turn and nothing inflight stopped itself after two quiet hours')
+        self.assertEqual(signals, [], 'the agent process must not be signalled while the chat is quiet')
+        self.assertFalse(agent.stdin.closed, 'the host must keep the agent stdin open while the chat is quiet')
+        self.assertFalse(session['stop'], 'the host must stay up until an explicit stop, fresh start, Switch AI or a crash')
+        self.assertEqual([row for row in self.host_events('idle_stop')], [])
 
 
 class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
@@ -8351,8 +8679,9 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.before = self.transcript(self.host_sid, 'Remember the secret word PINEAPPLE', 'ok')
         self.after = self.transcript(self.native_sid, 'What was the secret word I told you earlier?', 'unknown')
         paths = reader.host_paths('claude', self.host_sid)
-        reader.host_write(paths['config'], dict(enabled=True, tmux=self.tmux, cwd=self.cwd))
-        reader.host_write(paths['state'], dict(provider='claude', sid=self.host_sid, native_session=self.native_sid))
+        reader.host_write(paths['config'], dict(enabled=True, provider='claude', sid=self.host_sid,
+                                                tmux=self.tmux, cwd=self.cwd, native_session=self.native_sid))
+        reader.host_write(paths['state'], dict(provider='claude', sid=self.host_sid))
         self.query = dict(id=7, codex=False, provider='claude', sid=self.host_sid, tmux=self.tmux, cwd=self.cwd,
                           follow=True, cached_sid=self.host_sid, inode=0, offset=0, start=0)
 
@@ -8374,8 +8703,9 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertNotIn('PINEAPPLE', wire)
 
     def test_no_clear_keeps_reading_the_pinned_transcript(self):
-        reader.host_write(reader.host_paths('claude', self.host_sid)['state'],
-                          dict(provider='claude', sid=self.host_sid, native_session=self.host_sid))
+        paths = reader.host_paths('claude', self.host_sid)
+        config = reader.host_read(paths['config'])
+        reader.host_write(paths['config'], dict(config, native_session=self.host_sid))
         wire = self.wire()
         self.assertIn('PINEAPPLE', wire)
         self.assertNotIn('unknown', wire)
@@ -8388,15 +8718,241 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertIn('PINEAPPLE', wire)
         self.assertNotIn('unknown', wire)
 
-    def test_a_missing_native_transcript_keeps_the_pinned_file(self):
+    def test_a_missing_native_transcript_never_reads_the_foreign_pinned_file(self):
         self.after.unlink()
         wire = self.wire()
-        self.assertIn('PINEAPPLE', wire)
-        self.assertNotIn('history\tmissing', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+        self.assertIn('"no_transcript":true', wire)
+
+    def test_soft_2681_read_path_switches_to_the_live_transcript_after_compaction(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        config = reader.host_read(paths['config'])
+        reader.host_write(paths['config'], dict(config, native_session=self.host_sid))
+        self.assertIn('PINEAPPLE', self.wire())
+        reader.host_log('claude', self.host_sid, 'init', dict(session=self.native_sid))
+        reader.host_write(paths['config'], config)
+        wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+
+    def test_soft_2681_config_precedes_a_later_init_and_private_state(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        reader.host_log('claude', self.host_sid, 'init', dict(session=self.host_sid))
+        reader.host_write(paths['state'], dict(native_session=self.host_sid))
+        wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+
+    def test_soft_2681_latest_valid_init_is_used_without_config_native_session(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        config = reader.host_read(paths['config'])
+        config.pop('native_session')
+        reader.host_write(paths['config'], config)
+        reader.host_log('claude', self.host_sid, 'init', dict(session=self.host_sid))
+        reader.host_log('claude', self.host_sid, 'init', dict(session=self.native_sid))
+        for event in (dict(session='../foreign'), [], None):
+            reader.host_log('claude', self.host_sid, 'init', event)
+        with paths['log'].open('ab') as output:
+            output.write(b'{broken\n[]\n' + b' ' * 70000 + b'\n{"event":')
+        wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+
+    def test_soft_2681_invalid_config_native_session_uses_init(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        config = reader.host_read(paths['config'])
+        reader.host_log('claude', self.host_sid, 'init', dict(session=self.native_sid))
+        for native in (None, '', '../foreign', [], 1):
+            with self.subTest(native=native):
+                reader.host_write(paths['config'], dict(config, native_session=native))
+                self.assertIn('unknown', self.wire())
+                self.assertNotIn('PINEAPPLE', self.wire())
+
+    def test_soft_2681_without_public_native_metadata_uses_the_stable_id(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        config = reader.host_read(paths['config'])
+        config.pop('native_session')
+        reader.host_write(paths['config'], config)
+        reader.host_write(paths['state'], dict(native_session=self.native_sid))
+        self.assertIn('PINEAPPLE', self.wire())
+        self.assertNotIn('unknown', self.wire())
+
+    def test_soft_2681_native_transcript_does_not_require_a_stable_id_file(self):
+        self.before.unlink()
+        wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+
+    def test_soft_2681_tab_only_query_loads_the_host_config_before_selecting_history(self):
+        self.query.update(sid='', cwd='/wrong')
+        wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+
+    def test_soft_2681_saved_host_history_still_precedes_the_native_transcript(self):
+        paths = reader.host_paths('claude', self.host_sid)
+        reader.host_write(paths['state'], dict(display_history=True))
+        paths['history'].write_text(json.dumps(dict(type='multiprompt_history', row=dict(
+            role='assistant', text='saved host history', id='saved-2681'))) + '\n')
+        for sid in (self.host_sid, ''):
+            with self.subTest(sid=sid):
+                self.query['sid'] = sid
+                wire = self.wire()
+                self.assertIn('saved host history', wire)
+                self.assertNotIn('PINEAPPLE', wire)
+                self.assertNotIn('unknown', wire)
+
+    def test_soft_2681_native_selection_reads_the_transcript_owners_home(self):
+        owner = self.home / 'secondary'
+        target = owner / '.claude/projects' / reader.claude_project_folder(self.cwd) / self.after.name
+        target.parent.mkdir(parents=True)
+        self.after.rename(target)
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', owner)):
+            wire = self.wire()
+        self.assertIn('unknown', wire)
+        self.assertNotIn('PINEAPPLE', wire)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+
+    def test_soft_2681_delegated_native_history_keeps_the_stable_wire_id(self):
+        expected = '@mp\t7\thistory\tok\t' + self.native_sid + '\t0\n{"role":"assistant","text":"owner reply"}\n@@MP_END@@\n'
+        with patch.object(reader, 'conversation_path', side_effect=PermissionError()), \
+                patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'owner_response', return_value=expected) as delegated:
+            wire = reader.response(dict(self.query), reader.READER_SOURCE)
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+        self.assertIn('owner reply', wire)
+        self.assertEqual(delegated.call_args.args[0]['sid'], self.native_sid)
+        self.assertEqual(delegated.call_args.args[0]['cached_sid'], self.native_sid)
+        self.assertFalse(delegated.call_args.args[0]['follow'])
+
+    def test_soft_2681_delegated_native_search_keeps_the_stable_wire_id(self):
+        expected = '@mp\t7\tsearch\tok\t' + self.native_sid + '\t0\t0\t0\t0\tclaude\tlive-clear\n@@MP_END@@\n'
+        with patch.object(reader, 'conversation_path', side_effect=PermissionError()), \
+                patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'owner_response', return_value=expected):
+            wire = reader.response(dict(self.query, search='owner reply'), reader.READER_SOURCE)
+        self.assertIn('\tsearch\tok\t' + self.host_sid + '\t', wire)
+        self.assertNotIn(self.native_sid, wire)
 
     def test_an_owner_read_never_switches_session(self):
         wire = reader.response(dict(self.query), reader.READER_SOURCE, as_owner=True)
         self.assertIn('PINEAPPLE', wire)
+
+
+class SOFT_3054_FreshHandoverTest(unittest.TestCase):
+    fixture = json.loads((ROOT / 'tools/fixtures/SOFT-3054/scenario.json').read_text(encoding='utf-8'))
+    provider = 'claude'
+    sid = 'a3054000-0000-4000-8000-000000003054'
+    tmux = 'soft-3054-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['config'], dict(enabled=True, tmux=self.tmux, cwd=self.temp.name))
+        self.history = paths['history']
+        self.stream = io.BytesIO()
+        self.session = dict(state=dict(display_history=True, native_session=self.sid))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.stream))
+        self.session['ready'] = True
+        for row in self.fixture['history_rows']:
+            reader.host_history_append(self.provider, self.sid, self.session, dict(row))
+        reader.host_state_write(self.provider, self.sid, self.session['state'])
+
+    def test_handover_usable_rejects_local_command_notices(self):
+        self.assertFalse(reader.host_fresh_handover_usable(self.fixture['handover_noise']))
+        self.assertFalse(reader.host_fresh_handover_usable(self.fixture['limit_notice']))
+        self.assertTrue(reader.host_fresh_handover_usable(self.fixture['handover_real']))
+
+    def test_handover_finish_keeps_the_real_reply_over_command_noise(self):
+        fresh = dict(phase='handover', text={}, started=time.time())
+        self.session['state']['fresh_start'] = fresh
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_noise']))
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_real']))
+        reader.host_fresh_finish(self.provider, self.sid, self.tmux, self.session, 'completed')
+        saved = reader.host_read(reader.host_paths(self.provider, self.sid)['root'] / fresh['file'])
+        self.assertIn('Super MCP', saved['text'])
+        self.assertNotIn('Reloaded skills', saved['text'])
+
+    def test_handover_finish_falls_back_to_recent_history_when_only_noise_arrives(self):
+        fresh = dict(phase='handover', text={}, started=time.time())
+        self.session['state']['fresh_start'] = fresh
+        reader.host_event(self.provider, self.sid, self.tmux, self.session, 'text.done',
+                          dict(text=self.fixture['handover_noise']))
+        reader.host_fresh_finish(self.provider, self.sid, self.tmux, self.session, 'completed')
+        saved = reader.host_read(reader.host_paths(self.provider, self.sid)['root'] / fresh['file'])
+        self.assertIn('MCP adapter audit', saved['text'])
+        self.assertNotIn('Reloaded skills', saved['text'])
+
+    def test_valentin_resume_inlines_handover_instead_of_a_file_path(self):
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['root'] / 'saved.json', dict(text=self.fixture['handover_real']))
+        self.session['state'].update(valentin_mode=True,
+                                     fresh_start=dict(phase='resume', file='saved.json', started=time.time()))
+        reader.host_fresh_resume(self.provider, self.sid, self.tmux, self.session)
+        sent = json.loads(self.stream.getvalue().decode())
+        prompt = sent['message']['content'][0]['text']
+        self.assertIn('Super MCP wiring', prompt)
+        self.assertNotIn('read the handover at', prompt)
+
+    def test_resume_says_when_saved_handover_is_only_command_noise(self):
+        paths = reader.host_paths(self.provider, self.sid)
+        reader.host_write(paths['root'] / 'saved.json', dict(text=self.fixture['handover_noise']))
+        self.session['state']['fresh_start'] = dict(phase='resume', file='saved.json', started=time.time())
+        reader.host_fresh_resume(self.provider, self.sid, self.tmux, self.session)
+        sent = json.loads(self.stream.getvalue().decode())
+        prompt = sent['message']['content'][0]['text']
+        self.assertIn('did not contain usable text', prompt)
+        self.assertIn('MCP adapter audit', prompt)
+        self.assertNotIn('Reloaded skills', prompt)
+
+class MUBO_239_DisplayHistoryReplyIdTest(unittest.TestCase):
+    provider = 'claude'
+    sid = 'mubo-239-history'
+    tmux = 'mubo-239-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.session = dict(state=dict(display_history=True))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=io.BytesIO()))
+
+    def history_rows(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        if not history.exists():
+            return []
+        return [json.loads(line)['row'] for line in history.read_text().splitlines() if line.strip()]
+
+    def test_text_done_reuses_the_live_item_id_in_display_history(self):
+        reader.host_event(self.provider, self.sid, None, self.session, 'text.done',
+                          dict(text='Hello once'), item='msg_X:text:0')
+        rows = self.history_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], 'msg_X:text:0')
+        self.assertEqual(rows[0]['text'], 'Hello once')
+
+    def test_legacy_history_rows_still_decode(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        history.parent.mkdir(parents=True, exist_ok=True)
+        legacy = dict(type='multiprompt_history',
+                      row=dict(role='assistant', id='history-deadbeef', text='Older reply', timestamp='2026-01-01T00:00:00'))
+        history.write_text(json.dumps(legacy, separators=(',', ':')) + '\n')
+        rows = reader.conversation_rows(legacy, self.provider)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], 'history-deadbeef')
+        self.assertEqual(rows[0]['text'], 'Older reply')
 
 
 class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):

@@ -334,9 +334,12 @@ pub fn accountRecordClose(idx: u32) void {
 }
 fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !session_layout.Layout {
     const local = try captureSessionLayout(a, false);
-    const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count);
-    for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed) |c, *t|
+    const archived = @import("archive.zig").loadArchivedEntries();
+    const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count + archived.len);
+    for (app_state.g_account_closed[0..app_state.g_account_closed_count], closed[0..app_state.g_account_closed_count]) |c, *t|
         t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
+    for (archived, closed[app_state.g_account_closed_count..]) |entry, *t|
+        t.* = .{ .name = "", .tmux_session = entry.tmux_session[0..entry.tmux_session_len], .tmux_host = entry.tmux_host, .workspace = "" };
     const kept = try account_layout.keepHeld(a, base, local, closed);
     if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
     return kept;
@@ -446,6 +449,30 @@ pub fn accountPush() void {
     };
     startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
 }
+pub fn accountServerPaletteName(slot: u8) []const u8 {
+    const fallbacks = [_][]const u8{ "Server 1", "Server 2", "Server 3" };
+    if (slot >= fallbacks.len) return "Server";
+    if (app_state.g_account_base) |base| {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const parsed = session_layout.parse(arena.allocator(), base) catch null orelse {
+            if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
+                if (host.name.len > 0) return host.name;
+            }
+            return fallbacks[slot];
+        };
+        defer parsed.deinit();
+        if (account_hosts.isRemoved(parsed.value.removed_hosts orelse &.{}, slot)) return "";
+        if (account_hosts.find(parsed.value.hosts orelse &.{}, slot)) |layout_host| {
+            if (layout_host.name.len > 0) return layout_host.name;
+        }
+    }
+    if (account_hosts.find(g_account_hosts_cache.hosts, slot)) |host| {
+        if (host.name.len > 0) return host.name;
+    }
+    return fallbacks[slot];
+}
+
 pub fn accountRemoveServer(slot: u8) void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_busy or g_account_key_prompt_active) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -1721,12 +1748,27 @@ pub fn applyServerLayout(json: []const u8) !void {
     var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
     desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
+    const listed = try a.alloc(@import("tmux_closed.zig").LayoutTab, server.value.tabs.len);
+    for (server.value.tabs, 0..) |tab, ti| listed[ti] = .{ .host = tab.tmux_host, .session = tab.tmux_session };
+    app_state.g_tmux_closed.reconcile(listed);
     for (desired.tabs) |tab| {
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
     }
     desired.tabs = kept.items;
     app_state.g_account_applying = true;
     defer app_state.g_account_applying = false;
+    const archived = @import("archive.zig").loadArchivedEntries();
+    if (archived.len > 0) {
+        var kept_unarchived: std.ArrayList(session_layout.Tab) = .empty;
+        for (desired.tabs) |tab| {
+            if (@import("archive.zig").archivedListHas(archived, tab.tmux_host, tab.tmux_session)) {
+                app_state.g_tmux_closed.hold(std.heap.page_allocator, tab.tmux_host, tab.tmux_session);
+                continue;
+            }
+            try kept_unarchived.append(a, tab);
+        }
+        desired.tabs = kept_unarchived.items;
+    }
     const old_restoring = app_state.g_restoring;
     app_state.g_restoring = true;
     defer app_state.g_restoring = old_restoring;
@@ -1743,6 +1785,13 @@ pub fn applyServerLayout(json: []const u8) !void {
     var i = app_state.shell_count;
     while (i > 0) {
         i -= 1;
+        const closing = &app_state.shells[i];
+        if (closing.tmux_session_len > 0 and @import("archive.zig").archivedListHas(archived, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
+            debugLog2("account-sync: closing archived tab, session=", closing.tmux_session[0..closing.tmux_session_len]);
+            logSessionAuditAlways("tab-closed:account-sync-archived");
+            closeShellRemember(i, false);
+            continue;
+        }
         if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null) {
             debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
             logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
@@ -2461,7 +2510,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
         }
         var window_pid: DWORD = 0;
         const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
-        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 8000, null) != 0;
+        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG, 250, null) != 0;
         const action = secondLaunchAction(alive, is_app, has_window, responsive);
         var log_buf: [128]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log_buf, "second-launch: {s} pid={d} reason={s}", .{ @tagName(action), pid, if (!alive) "not_alive" else if (!is_app) "not_app" else if (!has_window) "no_window" else if (!responsive) "hung" else "responsive" }) catch "second-launch");
@@ -2481,12 +2530,12 @@ pub fn accountClaim(hwnd: HANDLE) bool {
                 const process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
                 if (process != null) {
                     defer _ = CloseHandle(process);
-                    if (TerminateProcess(process, 1) != 0 and WaitForSingleObject(process, 5000) == 0) {
-                        result = WaitForSingleObject(mutex, 5000);
-                    }
+                    _ = TerminateProcess(process, 1);
+                    _ = WaitForSingleObject(process, 0);
+                    result = WaitForSingleObject(mutex, 0);
                 }
             },
-            .refuse => result = WaitForSingleObject(mutex, 3000),
+            .refuse => result = WaitForSingleObject(mutex, 0),
         }
     }
     if (result != 0 and result != 0x80) {

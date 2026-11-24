@@ -43,8 +43,6 @@ function Wait-For([string]$ConditionName, [scriptblock]$Check) {
     Write-Host "[session-actions] wait: $ConditionName"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
-    # A journey condition that never becomes true is a journey result, not a runner fault:
-    # pr-verifier.cjs treats "timeout" wording as infrastructure and reports BLOCKED.
     throw "Journey condition not met: $ConditionName (checked for 90 seconds)"
 }
 function Check([string]$Name, [bool]$Condition) {
@@ -138,10 +136,6 @@ function Stop-AppJob {
 }
 function Context([int]$Index) {
     Focus
-    # Row geometry must come from the newest paint that carries this row's rect.
-    # [sidebar-avatar] is deduplicated per target, face and colour, so after a tab
-    # count change the app suppresses it and only [photo-proof] still reports the
-    # moved row. Its dedupe key includes the rect itself, so a moved row is logged.
     $pair = Wait-For 'painted sidebar target' {
         $lines = (Log) -split '\r?\n'
         $found = $null; $foundAt = -1
@@ -162,14 +156,17 @@ function Context([int]$Index) {
     $offset = (Log).Length
     Write-Host "[session-actions] right-click: tab $Index"
     [ChatDeliveryDesktop]::RightClickClient($main, [uint32]$app.Id, [int](($pair[0]+$pair[2])/2), [int](($pair[1]+$pair[3])/2))
-    [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7110 7112(?:\s|$)' })
+    [void](Wait-For 'eight ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=8 ids=7113 7174 7104 7195 7198 7196 7110 7112(?:\s|$)' })
+    $script:contextIds=@(7113,7174,7104,7195,7198,7196,7110,7112)
+}
+function Select-Context([int]$Target) {
+    $steps=[array]::IndexOf($script:contextIds, $Target)
+    if ($steps -lt 0) { throw ('Context action ' + $Target + ' is missing from the right-click menu') }
+    Write-Host "[session-actions] context action: $Target after $steps downs"
+    for ($i=0; $i -lt $steps; $i++) { Press @(0x28) }
+    Press @(0x0d)
 }
 function Resume-Archived([string]$Name) {
-    # SOFT-2444 keeps archived chats out of the plain Ctrl+K session list; the 7300 row
-    # block kept its label handler but nothing appends those rows any more. The live
-    # user route is Ctrl+K -> archived sessions (All Sessions, Archived tab) -> Ctrl+F
-    # filter -> Enter, which reinstates the deleted chat through the same archived
-    # resume command this journey already verifies.
     [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
     $archived=@($saved).Count
     $offset=(Log).Length
@@ -291,8 +288,7 @@ try {
     }
     Context 1
     Shot 'right-click-seven-actions'
-    for ($i=0; $i -lt 3; $i++) { Press @(0x28) }
-    Press @(0x0d)
+    Select-Context 7198
     [void](Wait-For 'background rename opens inline editor' { $h=[VerifyNative]::GetFocusedWindow($main); $h -ne [IntPtr]::Zero -and [VerifyNative]::Class($h) -eq 'Edit' -and [VerifyNative]::EditText($h) -ceq 'Beta' })
     Shot 'background-inline-rename'
     Press @(0x0d)
@@ -303,8 +299,7 @@ try {
     Write-Host "[session-actions] scan red pixels: $($menu.Width)x$($menu.Height)"
     try { for ($y=0; $y -lt $menu.Height; $y++) { for ($x=0; $x -lt $menu.Width; $x++) { $pixel=$menu.GetPixel($x,$y); if ($pixel.R -gt 140 -and $pixel.G -lt 110 -and $pixel.B -lt 110) { $red++ } } } } finally { $menu.Dispose() }
     Check 'delete-has-red-pixels' ($red -gt 10)
-    for ($i=0; $i -lt 6; $i++) { Press @(0x28) }
-    Press @(0x0d)
+    Select-Context 7112
     [void](Wait-For 'context Delete stops Beta only' { $servers[1].process.HasExited -and !$servers[0].process.HasExited })
     [void](Wait-For 'context Delete removes captured Beta' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 1 })
     Shot 'context-delete-beta'
