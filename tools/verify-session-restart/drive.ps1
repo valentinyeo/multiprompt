@@ -73,6 +73,16 @@ function Type-Text([string]$Text) {
     $actions.Add(@{ input = 'type'; text = $Text; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
     foreach ($letter in $Text.ToCharArray()) { Doctor; [ChatDeliveryDesktop]::Character($letter); Start-Sleep -Milliseconds 20 }
 }
+function Rename-Text([string]$Text) {
+    $edit = Wait-For 'focused rename field' {
+        $h = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
+        if ([ChatDeliveryDesktop]::Owner($h) -eq $app.Id -and [ChatDeliveryDesktop]::Class($h) -ieq 'Edit') { $h }
+    }
+    Press @(0x11, 0x41) 'Ctrl+A: select rename text'
+    Type-Text $Text
+    [void](Wait-For 'exact rename text' { [ChatDeliveryDesktop]::Text($edit) -ceq $Text })
+    Press @(0x0D) 'Enter: save name'
+}
 function Send-Line([string]$Text) {
     $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
@@ -181,22 +191,20 @@ try {
   [void](Wait-For 'rename workspace' { (Log-Text) -match '\[palette\]' })
     Type-Text 'rename workspace'
     Press @(0x0D) 'Enter: Rename workspace'
-    Type-Text $workspaceName
-    Press @(0x0D) 'Enter: save workspace name'
+    Rename-Text $workspaceName
+    [void](Wait-For 'named workspace saved' { (Read-SavedSession).workspaces[(Read-SavedSession).active_workspace].name -ceq $workspaceName })
     Press @(0x71) 'F2: rename active tab for grouping'
-    Type-Text 'Group anchor'
-    Press @(0x0D) 'Enter: anchor tab title'
+    Rename-Text 'Group anchor'
     Press @(0x11, 0x4B) 'Ctrl+K: Move to Group'
     [void](Wait-For 'move to group menu' { (Log-Text) -match '\[palette\]' })
     Type-Text 'move to group'
     Press @(0x0D) 'Enter: Move to Group'
     Type-Text 'new group'
     Press @(0x0D) 'Enter: New group'
-    Type-Text $groupName
-    Press @(0x0D) 'Enter: save group name'
+    Rename-Text $groupName
     [void](Wait-For 'named group saved' {
         $s = Read-SavedSession
-        @($s.groups).Count -ge 1
+        @($s.groups | Where-Object { $_.name -ceq $groupName }).Count -eq 1
     })
     $layout = Read-SavedSession
     $groupRow = @($layout.groups | Where-Object { $_.name -ceq $groupName })[0]

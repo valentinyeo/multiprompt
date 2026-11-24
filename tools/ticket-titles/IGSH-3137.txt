@@ -1,0 +1,1 @@
+Test that a restarted chat comes back as a chat
