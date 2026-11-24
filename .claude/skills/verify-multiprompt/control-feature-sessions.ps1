@@ -41,7 +41,7 @@
             $commandsFile = Join-Path $scratch 'roaming/ZigShell/commands.json'
             $paletteLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             foreach ($folderHost in @(0, 1)) {
-                Set-Content -LiteralPath (Join-Path $env:MP_VERIFY_STATE ('workspace-server-folders-' + $folderHost + '.txt')) -Value '/home/owner/projects/sample' -Encoding ascii
+                Set-Content -LiteralPath (Join-Path $env:MP_VERIFY_STATE ('workspace-server-folders-' + $folderHost + '.txt')) -Value @('~/projects/sample', '/home/owner/projects/sample') -Encoding ascii
             }
             $script:serverLogStart = 0
             function Open-WorkspaceServerPicker([string]$Query, [string]$Target, [string]$Label) {
@@ -93,7 +93,7 @@
             Press @(0x0D) 'Enter: move the workspace to the second server'
             Wait-Until {
                 $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
-                @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Example' -and $_.PSObject.Properties['folder_host'] -and [string]$_.folder_host -eq '1' -and $_.cwd -eq '/home/owner/projects/sample' }).Count -ge 1
+                @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Example' -and $_.PSObject.Properties['folder_host'] -and [string]$_.folder_host -eq '1' -and $_.cwd -in @('~/projects/sample', '/home/owner/projects/sample') }).Count -ge 1
             } 'workspace folder saved on the second server'
             Save-Json (Read-Session) 'workspace-server-moved-session.json'
             Snapshot 'workspace-server-moved'
