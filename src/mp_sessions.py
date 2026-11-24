@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import socket
 import sys
 import uuid
 from pathlib import Path
@@ -34,14 +35,118 @@ def display_name(name):
     return name
 
 
+SERVER_SLOT_FIELD = "multiprompt_slot"
+SERVERS_FILE = ".local/share/vstack/config/servers.json"
+_SLOT_CACHE = []
+
+
 def host_slot(text=None):
-    text = (text if text is not None else os.environ.get("MULTIPROMPT_HOST") or "0").strip()
+    text = str(text if text is not None else os.environ.get("MULTIPROMPT_HOST") or "").strip()
+    if not text:
+        raise ValueError("set MULTIPROMPT_HOST to this server's account slot: 0, 1 or 2")
     try:
         slot = int(text)
     except ValueError:
         raise ValueError("host must be 0, 1 or 2")
     if slot not in (0, 1, 2):
         raise ValueError("host must be 0, 1 or 2")
+    return slot
+
+
+def servers_path():
+    override = os.environ.get("MULTIPROMPT_SERVERS_FILE") or os.environ.get("MULTIPROMPT_SERVERS")
+    return Path(override) if override else Path.home() / SERVERS_FILE
+
+
+def servers_facts():
+    try:
+        facts = json.loads(servers_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return facts if isinstance(facts, dict) else None
+
+
+def machine_names():
+    names = {socket.gethostname(), socket.getfqdn(), os.environ.get("HOSTNAME"), os.environ.get("COMPUTERNAME")}
+    return {name.strip().casefold() for name in names if isinstance(name, str) and name.strip()}
+
+
+def server_hostnames(server):
+    return [name for name in (server.get("hostname"), server.get("previous_hostname")) if isinstance(name, str) and name]
+
+
+def servers_slot():
+    facts = servers_facts()
+    servers = facts.get("servers") if facts else None
+    if not isinstance(servers, list):
+        return None
+    names = machine_names()
+    matched = [server for server in servers if isinstance(server, dict) and any(name.casefold() in names for name in server_hostnames(server))]
+    if len(matched) > 1:
+        raise ValueError("this machine matches more than one server in " + str(servers_path()) + "; keep one entry or set MULTIPROMPT_HOST")
+    if len(matched) != 1:
+        return None
+    slot = matched[0].get(SERVER_SLOT_FIELD)
+    return None if slot is None else host_slot(slot)
+
+
+def env_slot():
+    text = (os.environ.get("MULTIPROMPT_HOST") or "").strip()
+    return host_slot(text) if text else None
+
+
+def recorded_slots(send, tmux):
+    root = getattr(send, "host_root", None)
+    read = getattr(send, "read_json", None)
+    if not callable(root) or not callable(read):
+        return set()
+    slots = set()
+    for path in root().glob("*.config.json"):
+        config = read(path)
+        if not isinstance(config, dict) or config.get("tmux") != tmux:
+            continue
+        slot = config.get("spawn_host")
+        if isinstance(slot, int) and not isinstance(slot, bool) and slot in (0, 1, 2):
+            slots.add(slot)
+    return slots
+
+
+def caller_slot(send, listing):
+    own_tmux = getattr(send, "own_tmux", None)
+    tmux = own_tmux() if callable(own_tmux) else None
+    if not tmux:
+        return None
+    recorded = recorded_slots(send, tmux)
+    if len(recorded) == 1:
+        return recorded.pop()
+    hosts = listing.get("hosts") if listing.get("ok") is True else None
+    if not isinstance(hosts, list):
+        return None
+    iter_tabs = getattr(send, "iter_tabs", None)
+    if not callable(iter_tabs):
+        return None
+    names = {tab.get("host") for workspace, group, tab in iter_tabs(listing) if tab.get("tmux") == tmux and isinstance(tab.get("host"), str)}
+    slots = {hosts.index(name) for name in names if name in hosts}
+    return slots.pop() if len(slots) == 1 else None
+
+
+def desktop_slot(send, listing):
+    if send is not None and _SLOT_CACHE:
+        return _SLOT_CACHE[0]
+    slot = env_slot()
+    if slot is None:
+        slot = servers_slot()
+    if slot is None and send is not None:
+        slot = caller_slot(send, listing)
+    if send is not None:
+        _SLOT_CACHE.append(slot)
+    return slot
+
+
+def start_slot(send, listing):
+    slot = desktop_slot(send, listing)
+    if slot is None:
+        raise ValueError("set MULTIPROMPT_HOST, or add \"" + SERVER_SLOT_FIELD + "\": 0, 1 or 2 to this machine's entry in " + str(servers_path()))
     return slot
 
 
@@ -90,25 +195,25 @@ def enable_args(provider, sid, folder, tmux):
     return command
 
 
-def desktop_host(listing):
+def desktop_host(listing, send=None):
     hosts = listing.get("hosts") or []
-    slot = host_slot()
-    return hosts[slot] if slot < len(hosts) else None
+    slot = desktop_slot(send, listing)
+    return hosts[slot] if isinstance(slot, int) and slot < len(hosts) else None
 
 
 def desktop_tabs(send, listing):
-    host = desktop_host(listing)
+    host = desktop_host(listing, send)
     for workspace, group, tab in send.iter_tabs(listing):
         if host is None or tab.get("host") == host:
             yield workspace, group, tab
 
 
-def desktop_state(listing, tab=None, tmux=None):
+def desktop_state(listing, tab=None, tmux=None, send=None):
     online = listing.get("ok") is True
     active = listing.get("active_workspace")
     if active is None and online:
         active = next((ws.get("name") for ws in listing.get("workspaces", []) if ws.get("active")), None)
-    archived = online and tab is None and any(entry.get("tmux") == tmux and entry.get("host") == desktop_host(listing)
+    archived = online and tab is None and any(entry.get("tmux") == tmux and entry.get("host") == desktop_host(listing, send)
                                              for entry in listing.get("archived_sessions", []))
     if not online:
         visible, reason = None, "desktop offline"
@@ -144,7 +249,7 @@ def session_catalog(send, listing):
                 group=group,
                 tab_id=tab.get("id"),
                 tab_open=True,
-                **desktop_state(listing, tab, tmux),
+                **desktop_state(listing, tab, tmux, send),
             )
     for path in sorted(send.host_root().glob("*.config.json")):
         config = send.read_json(path)
@@ -158,7 +263,7 @@ def session_catalog(send, listing):
         provider = config.get("provider") or state.get("provider") or "claude"
         sid = state.get("sid") or config.get("sid")
         alive = send.pid_alive(state.get("pid"))
-        row = rows.get(tmux, dict(tmux=tmux, tab_open=False, **desktop_state(listing, tmux=tmux)))
+        row = rows.get(tmux, dict(tmux=tmux, tab_open=False, **desktop_state(listing, tmux=tmux, send=send)))
         row.update(
             provider=provider,
             sid=sid,
@@ -167,6 +272,8 @@ def session_catalog(send, listing):
             host=row.get("host"),
             workspace=row.get("workspace") or config.get("spawn_workspace"),
             group=row.get("group") if "group" in row else config.get("spawn_group"),
+            recorded_host=config.get("spawn_host"),
+            recorded_host_name=config.get("spawn_host_name"),
         )
         row["running"] = config.get("enabled") is True and alive
         row["busy"] = bool(state.get("inflight")) and alive
@@ -229,7 +336,11 @@ def ensure_visible(send, listing, target, display):
     workspace = target.get("workspace")
     if not workspace:
         workspace = default_workspace(listing)
-    host = target.get("host") or host_name(listing, host_slot())
+    host = target.get("host") or target.get("recorded_host_name")
+    if not host and isinstance(target.get("recorded_host"), int):
+        host = host_name(listing, target["recorded_host"])
+    if not host:
+        raise ValueError("this chat has no recorded host; start it again to record the server it runs on")
     present = send.find_tab(listing, target["tmux"])[2]
     if target.get("tab_open") or present:
         return dict(ok=True, tab=(present or {}).get("id") or target.get("tab_id"), existing=True)
@@ -324,7 +435,7 @@ def live_catalog_rows(send, listing):
         workspace, group, tab = tabs.get(chat["tmux"], (None, None, None))
         row = dict(chat, workspace=workspace, group=group,
                    busy=chat.get("state") == "busy", running=chat.get("state") != "stopped",
-                   **desktop_state(listing, tab, chat["tmux"]))
+                   **desktop_state(listing, tab, chat["tmux"], send))
         if tab is not None:
             row["name"] = tab.get("title") or chat.get("name")
             row["link"] = send.link_token(row["name"], chat["tmux"])
@@ -465,7 +576,7 @@ def cmd_start(args):
     if task is not None and (not task.strip() or "\x00" in task):
         raise ValueError("empty task")
     listing = send.zsb("workspace-list")
-    slot = host_slot()
+    slot = start_slot(send, listing)
     host = host_name(listing, slot)
     workspace = (args.workspace or "").strip() or default_workspace(listing)
     group = None if args.group is None else display_name(args.group)
