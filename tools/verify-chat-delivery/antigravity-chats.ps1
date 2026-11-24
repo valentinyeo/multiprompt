@@ -47,6 +47,20 @@ function Tab-Menu-Show([string]$Query, [int]$Target, [string]$Screenshot) {
     Start-Sleep -Milliseconds 500
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }
+function Agent-Configs {
+    @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue | ForEach-Object {
+        $config = Get-Content $_.FullName -Raw | ConvertFrom-Json
+        $config | Add-Member -NotePropertyName path -NotePropertyValue $_.FullName
+        $config
+    })
+}
+function Agent-Configs-Switched-From([string]$Provider) {
+    @((Agent-Configs) | Where-Object {
+        $from = $null
+        if ($_.PSObject.Properties['switched_from']) { $from = $_.switched_from }
+        ($_.provider -ceq 'claude') -and $null -ne $from -and ($from.provider -ceq $Provider)
+    })
+}
 Send-Composer $earlierText
 [void](Wait-For 'claude stand-in answered the earlier message' {
     $files = @(Get-ChildItem "$hostDir/*.history.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains($earlierText) })
@@ -58,10 +72,13 @@ $tabsBefore = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).t
 Shot 'antigravity-chat-before'
 Palette-Choose 'switch ai to antigravity' 7053 'antigravity-switch-palette'
 [void](Wait-For 'antigravity host enabled by the switch' {
-    $configs = @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue)
-    (@($configs | Where-Object { (Read-Shared $_.FullName) -match '"provider":"antigravity"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -eq 1)
+    @((Agent-Configs) | Where-Object {
+        $from = $null
+        if ($_.PSObject.Properties['switched_from']) { $from = $_.switched_from }
+        ($_.provider -ceq 'antigravity') -and $null -ne $from -and ($_.enabled -eq $true)
+    }).Count -eq 1
 } 90)
-$antigravityConfig = @(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"antigravity"' })[0].FullName
+$antigravityConfig = @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' })[0].path
 $savedAfterSwitch = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 if (@($savedAfterSwitch.tabs).Count -ne $tabsBefore.Count) { throw 'The switch changed the number of chat rows' }
 if ($savedAfterSwitch.tabs[0].name -cne $tabsBefore[0].name) { throw 'The switch renamed the chat' }
@@ -93,7 +110,7 @@ $switchRows = @((Read-Shared "$state/antigravity-switch.jsonl") -split "`n" | Wh
 $busy = @($switchRows | Where-Object { $_.status -eq 'busy' })[-1]
 $busyConfig = Get-Content $antigravityConfig -Raw | ConvertFrom-Json
 if ($busyConfig.provider -cne 'antigravity' -or $busyConfig.enabled -ne $true) { throw 'The refused switch disabled the Antigravity chat' }
-if (@(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -ne 0) { throw 'The refused switch still moved the chat to Claude' }
+if (@(Agent-Configs-Switched-From 'antigravity').Count -ne 0) { throw 'The refused switch still moved the chat to Claude' }
 Save @{notice='Switch AI: wait for this reply to finish'; screenshot='antigravity-switch-while-replying.png'; request=@{provider=$busy.provider; sid=$busy.sid; target=$busy.target}; reply=@{status=$busy.status; reason=$busy.reason}; providerAfter=$busyConfig.provider; sidAfter=$busyConfig.sid; stillReplying=$true; heldReply=$heldReply} "$caseDir/switch-while-replying.json"
 Remove-Item -LiteralPath "$state/hold-reply" -Force -ErrorAction SilentlyContinue
 [void]$releaseEvent.Set()
@@ -110,10 +127,9 @@ Shot 'antigravity-switched-chat'
 Shot 'after'
 Palette-Choose 'switch ai to claude' 7050 'antigravity-switch-back-palette'
 [void](Wait-For 'claude host enabled by the switch back' {
-    $configs = @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue)
-    (@($configs | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -eq 1)
+    @(Agent-Configs-Switched-From 'antigravity').Count -eq 1
 } 90)
-$claudeBackConfig = @(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' })[0].FullName
+$claudeBackConfig = @(Agent-Configs-Switched-From 'antigravity')[0].path
 $claudeBackRoot = Split-Path $claudeBackConfig
 $claudeBackHistory = @(Get-ChildItem "$claudeBackRoot/*.history.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('Switched AI: Antigravity to Claude') })
 if ($claudeBackHistory.Count -ne 1) { throw 'The switch back did not write one Claude history' }
