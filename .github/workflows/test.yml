@@ -83,6 +83,10 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the FFmpeg install guard
+        run: node --test tools/check-ffmpeg-install.test.js
+      - name: Require a cached, retried FFmpeg install
+        run: node tools/check-ffmpeg-install.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
       - name: Test the source file-size ratchet
@@ -265,7 +269,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js tools/release-notes-tolerance.test.mjs tools/version-stamp.test.mjs tools/ticket-title-contract.test.js tools/release-unstick.test.js
       - name: Verify responsive startup ordering and original regression controls
         run: |
           node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js

@@ -1,15 +1,20 @@
 import process from 'node:process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseTicketId } from './ticket-id.js';
 
-const leadingTicket = /^[A-Z][A-Z0-9]*-\d+:/;
+const leadingTicket = /^([A-Z][A-Z0-9]*-\d+):/;
 const usage = 'Usage: PR_TITLE="SOFT-123: Fix the release build" node tools/check-pr-title.mjs';
 
 export function checkTitle(title) {
   const value = (title || '').trim();
   if (!value) throw new Error(`Pull request title is empty; start it with the ticket that owns the change, for example "SOFT-123: Fix the release build"\n${usage}`);
-  if (!leadingTicket.test(value)) {
+  const key = leadingTicket.exec(value)?.[1];
+  if (!key) {
     throw new Error(`Pull request title "${value}" lacks a leading ticket ID; start it with the ticket that owns the change, for example "SOFT-123: ${value}"\nA release names its notes after the ticket in every commit subject, so a ticketless pull request title blocks the next release.\n${usage}`);
+  }
+  if (!parseTicketId(key)) {
+    throw new Error(`Pull request title "${value}" names ${key}, which is not a ticket this repository releases from; use IGSH, SOFT, HYCI or MUBO, for example "IGSH-235: ${value.slice(key.length).replace(/^\s*:\s*/, '')}"\nA release names its notes after the ticket in every commit subject, so a ticket that no board resolves blocks the next release.\n${usage}`);
   }
   return value;
 }
