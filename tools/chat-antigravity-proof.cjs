@@ -93,6 +93,13 @@ function verify(root) {
     'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude']) {
     assert.ok(backTexts.some(row => row.includes(text)), `the switch back to Claude lost ${text}`);
   }
+  const copiedBack = read('switch-back-copied.txt').replace(/\r\n/g, '\n');
+  let copiedOffset = 0;
+  for (const text of backTexts.filter(Boolean)) {
+    const position = copiedBack.indexOf(text.replace(/\r\n/g, '\n'), copiedOffset);
+    assert.ok(position >= 0, `the rendered switch back lost or reordered ${text}`);
+    copiedOffset = position + text.replace(/\r\n/g, '\n').length;
+  }
   const back = json('switch-back.json');
   assert.equal(back.provider, 'claude');
   assert.equal(back.switchedFrom, 'antigravity');

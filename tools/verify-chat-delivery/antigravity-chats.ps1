@@ -156,6 +156,22 @@ if ($backRows.Count -lt 5) { throw 'The switch back kept too few readable histor
 Copy-Item $claudeBackConfig "$caseDir/claude-back-config.json"
 Copy-Item $claudeBackHistory[0].FullName "$caseDir/claude-back-history.jsonl"
 Copy-Item "$settings/session.json" "$caseDir/session-after-switch-back.json"
+Bind-Transcript
+$renderOffset = (Read-Shared $paletteLog).Length
+[void](Wait-For 'switched-back history reaches the real renderer' {
+    Press @(0x11, 0x30) 'Ctrl+0: measure switched-back history'
+    $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($renderOffset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+    $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $backRows.Count
+} 15)
+[Windows.Forms.Clipboard]::Clear()
+Palette-Choose 'chat view select all' 6364 'antigravity-switch-back-copy-palette'
+Press @(0x11, 0x43) 'Ctrl+C: copy switched-back rendered history'
+$copiedBack = [Windows.Forms.Clipboard]::GetText()
+[IO.File]::WriteAllText("$caseDir/switch-back-copied.txt", $copiedBack)
+foreach ($kept in @($earlierText, 'Claude stand-in answer', $afterText, $heldReply, 'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude')) {
+    if (-not $copiedBack.Contains($kept)) { throw ('The rendered switch back lost ' + $kept) }
+}
+Press @(0x1B) 'Esc: clear switched-back history selection'
 Shot 'antigravity-switch-back-claude'
 Save @{notice='Chat switched to Claude'; screenshot='antigravity-switch-back-claude.png'; provider=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).provider; switchedFrom=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).switched_from.provider; rows=$backRows.Count; name=$tabsBefore[0].name} "$caseDir/switch-back.json"
 Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'
