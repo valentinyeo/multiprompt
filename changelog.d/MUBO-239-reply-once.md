@@ -1,0 +1,1 @@
+A finished assistant reply no longer appears twice in chat while you wait for the turn to end.
