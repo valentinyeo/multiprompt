@@ -159,6 +159,9 @@ test "IGSH-1924 a fitting cache opens the full conversation at its newest messag
 }
 test "IGSH-1924 holds never leave blank space after content shrinks" {
   openTab(40);
+  app_state.g_chat_scroll_y -= 100;
+  chatScrollStateChanged(600);
+  try std.testing.expect(app_state.g_chat_scrolled_up);
   app_state.next_blocks = 31;
   refreshChatTranscript(false);
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
