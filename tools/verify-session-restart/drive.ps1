@@ -113,7 +113,11 @@ function Server-Snapshot([string]$Name) {
 }
 function Invoke-LinuxMpSessions([string[]]$CliArgs, [string]$Label) {
     $safe = ($CliArgs | ForEach-Object { "'" + ($_ -replace "'", "'\\''") + "'" }) -join ' '
-    $remote = 'export MULTIPROMPT_HOST=0; ~/.multiprompt-runtime/mp-sessions ' + $safe
+    $socket = Wait-For 'owned server relay' {
+        $links = [regex]::Matches((Log-Text), 'alert-link ready host=unix (/tmp/mp-notify-\d+/[A-Za-z0-9_.-]+\.sock)')
+        if ($links.Count) { $links[$links.Count - 1].Groups[1].Value }
+    }
+    $remote = "export MULTIPROMPT_HOST=0 ZSB_SOCKET='$socket'; ~/.multiprompt-runtime/mp-sessions " + $safe
     $out = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', $remote) -Evidence $Evidence -Name $Label
     $out.Trim()
 }
