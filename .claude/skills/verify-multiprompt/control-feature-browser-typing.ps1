@@ -79,10 +79,38 @@ Wait-Until {
     $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus
 } 'owned browser omnibox focused for local page setup' 5
 [VerifyNative]::Text($url)
-Wait-Until {
-    $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
-    $null -ne $omnibox -and $omnibox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ceq $url
-} 'local page URL typed into owned browser omnibox' 5
+$setupTyped = $false
+try {
+    Wait-Until {
+        $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+        $null -ne $omnibox -and $omnibox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ceq $url
+    } 'local page URL typed into owned browser omnibox' 5
+    $setupTyped = $true
+} finally {
+    $setupOmnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+    $setupFocused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    $setupSession = Read-Session
+    Save-Json ([ordered]@{
+        typed = $url
+        accepted = $setupTyped
+        omniboxValue = if ($null -ne $setupOmnibox) { $setupOmnibox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } else { $null }
+        omniboxFocused = $null -ne $setupOmnibox -and $setupOmnibox.Current.HasKeyboardFocus
+        focusedElement = if ($null -ne $setupFocused) { $setupFocused.Current.ClassName } else { $null }
+        foreground = [VerifyNative]::GetForegroundWindow().ToInt64()
+        foregroundClass = [VerifyNative]::Class([VerifyNative]::GetForegroundWindow())
+        pageTitle = [VerifyNative]::Title($browser)
+        browser = $browser.ToInt64()
+        appFocus = [VerifyNative]::GetFocusedWindow($script:window).ToInt64()
+        alt = [VerifyNative]::IsDown(0x12)
+        ctrl = [VerifyNative]::IsDown(0x11)
+        shift = [VerifyNative]::IsDown(0x10)
+        win = [VerifyNative]::IsDown(0x5B) -or [VerifyNative]::IsDown(0x5C)
+        browserEnabled = $setupSession.tabs[0].br
+        browserState = $setupSession.tabs[0].browser_state
+        browserWindowId = $setupSession.tabs[0].browser_window_id
+        browserConnectionId = $setupSession.tabs[0].browser_connection_id
+    }) 'browser-typing-setup.json'
+}
 [VerifyNative]::Chord(@(0x0D))
 Wait-Until { [VerifyNative]::Title($browser).StartsWith('typing-ready', [StringComparison]::Ordinal) } 'local data page loaded in owned browser' 20
 if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Local page browser is not owned and foreground' }

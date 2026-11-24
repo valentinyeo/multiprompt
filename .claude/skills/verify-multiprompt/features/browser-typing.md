@@ -2,6 +2,10 @@
 
 Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-typing.ps1
 
+Verify on: push, pull_request
+
+Typed characters reach whichever browser address surface owns the keyboard after the pane docks.
+
 ## Sub-features
 
 - The Multiprompt address Edit receives ordinary characters after repeated page and address focus changes.
@@ -16,7 +20,7 @@ Open Browser Pane, click its address bar, and type. Use Alt+Q to return to the b
 
 Run `gh workflow run verify.yml --ref <branch> -f feature=browser-typing` on a public GitHub Windows runner. The existing isolated Edge warmup, app launch, Doctor, Open-BrowserPane and owned-process cleanup apply.
 
-The journey serves a synthetic localhost page with a full-viewport text area through a dedicated owned Python HTTP server. It waits for a real GET, opens the short URL, and clicks the owned browser content once before typing. Twenty native-browser cycles type `abc` into the page, check the cumulative page title, use Ctrl+L, require exact `abc` in the native omnibox, and return to the page. It saves the URL through the `browser url` palette action and checks the session value. It searches `browser mode` through Ctrl+K and selects `Browser: Use App Address Bar`, then waits for a new owned pane and the visible owned bar. Twenty more cycles use Alt+Q to leave the pane, then Ctrl+Shift+L to open the app-owned address Edit. Each requires focused Edit text `abc`, dismisses it and returns using Alt+Q. The server job stops in all cases and records its process cleanup receipt.
+The journey serves a synthetic localhost page with a full-viewport text area through a dedicated owned Python HTTP server. It waits for a real GET, opens the short URL, and clicks the owned browser content once before typing. Before that first typing it saves `browser-typing-setup.json` with the foreground and focused windows, the app-side focus, the held modifiers and the omnibox value it read after `Ctrl+L`, so a red setup step names what took the characters. Twenty native-browser cycles type `abc` into the page, check the cumulative page title, use Ctrl+L, require exact `abc` in the native omnibox, and return to the page. It saves the URL through the `browser url` palette action and checks the session value. It searches `browser mode` through Ctrl+K and selects `Browser: Use App Address Bar`, then waits for a new owned pane and the visible owned bar. Twenty more cycles use Alt+Q to leave the pane, then Ctrl+Shift+L to open the app-owned address Edit. Each requires focused Edit text `abc`, dismisses it and returns using Alt+Q. The server job stops in all cases and records its process cleanup receipt.
 
 After the twenty address cycles, the driver keeps its own injected Ctrl pressed while requesting the address Edit through the registered native shortcut. The Edit must gain actual input focus without releasing that held Ctrl. The driver then releases only its fixture-created keys and requires exact `abc` typing in the same Edit. Expiry, mode changes, newer input, ownership loss and replacement-Edit cancellation are additionally exercised through executed production timer code in the portable suite, not live mode-switch journeys.
 
@@ -38,4 +42,4 @@ Earlier window-switch-only candidates occasionally passed, but later failed the 
 - GetAsyncKeyState includes injected input. The evidence does not claim to distinguish a real physical key from an injected key.
 - App-mode page navigation and page content input are not exercised. The extensionless pane may show its placeholder.
 - German AltGr is not exercised. This proof does not establish AltGr preservation.
-- This recipe is manual-only and does not alter workflow definitions. Hosted results above cover only the named revision and actions.
+- Pull requests run this journey when the changed files belong to it, and `feature=all` runs it nightly. Hosted results above cover only the named revision and actions.
