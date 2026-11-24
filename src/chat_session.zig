@@ -2179,9 +2179,10 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     const anchor = if (old_content_h > 0 and (app_state.g_chat_scrolled_up or app_state.g_chat_read_hold)) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y) else null;
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
-    const held_y: ?i32 = if (old_content_h <= viewport_h) null else if (anchor_top) |top| top + anchor.?.offset - (app_state.g_chat_layout_top_pad - old_top_pad) else old_y;
+    const follows_newest = chat_history.followsNewest(old_content_h, viewport_h, app_state.g_chat_scrolled_up);
+    const held_y: ?i32 = if (old_content_h <= viewport_h or follows_newest) null else if (anchor_top) |top| top + anchor.?.offset - (app_state.g_chat_layout_top_pad - old_top_pad) else old_y;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
-    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openingScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y, false);
+    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openingScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y, follows_newest);
     chatScrollStateChanged(viewport_h);
 }
 

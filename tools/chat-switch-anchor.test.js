@@ -164,8 +164,24 @@ test "IGSH-1924 holds never leave blank space after content shrinks" {
   refreshChatTranscript(false);
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
+test "MUBO-280 relayout and header growth keep a reopened bottom reader at the newest message" {
+  openTab(40);
+  app_state.g_chat_scroll_y = app_state.g_chat_content_h - 600;
+  chatScrollStateChanged(600);
+  app_state.tail_h = 62;
+  chatRelayoutPreservingScroll(800, 600);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  app_state.g_chat_top_pad += 28;
+  chatRelayoutPreservingScroll(800, 600);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
+  try std.testing.expect(!app_state.g_chat_scrolled_up);
+  app_state.g_chat_top_pad = 20;
+}
 test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   openTab(31);
+  app_state.g_chat_scroll_y -= 200;
+  chatScrollStateChanged(600);
   const first = app_state.g_chat_scroll_y;
   app_state.tail_h = 900;
   chatRelayoutPreservingScroll(800, 600);
@@ -191,7 +207,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 9 tests passed/);
+  assert.match(result.stderr, /All 10 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {

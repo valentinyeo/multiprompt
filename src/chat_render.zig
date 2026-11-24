@@ -2722,7 +2722,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&client);
-        app_state.g_chat_scroll_y = chat_history.openingScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y, false);
+        app_state.g_chat_scroll_y = chat_history.openingScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y, !chat_history.holdsReadPosition(app_state.g_chat_scrolled_up));
     }
 }
 
