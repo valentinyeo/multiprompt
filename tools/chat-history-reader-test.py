@@ -8448,6 +8448,16 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertIn('multibot-feedback', args[9])
         self.assertIn('zsb --help', args[9])
 
+    def test_a_pi_model_switch_from_the_app_reaches_the_host_with_its_provider_name(self):
+        self.enable()
+        self.send('pi_model_switch_0001')
+        self.wait_for(lambda: self.events('turn.ended'))
+        switched = reader.host_reply(dict(provider=self.provider, sid=self.sid, op='set_model', provider_id='baseten',
+                                          provider_name='baseten', model='deepseek-ai/DeepSeek-V4-Pro-0813'))
+        self.assertEqual(switched, dict(status='ok'))
+        line = dict(type='set_model', provider='baseten', modelId='deepseek-ai/DeepSeek-V4-Pro-0813')
+        self.wait_for(lambda: line in self.sent())
+
     def test_pi_streams_a_turn_cancels_dialogs_and_ends_on_agent_settled(self):
         self.enable(permission_mode='plan')
         token = 'pi_fixture_message_0001'
