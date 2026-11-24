@@ -730,9 +730,9 @@ foreach ($plan in $plans) {
             $pinnedLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x11, 0x4B) 'Ctrl+K: show the unpin row'
             [void](Wait-For 'palette ready for the unpin query' { (Read-Shared "$settings/debug.log").Substring($pinnedLogStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-            $unpinQuery = 'unpin'
+            $unpinQuery = 'unpin the skill'
             foreach ($letter in $unpinQuery.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
-            [void](Wait-For 'unpin row offered once the chat is pinned' { (Read-Shared "$settings/debug.log").Substring($pinnedLogStart) -match ('\[palette\] ready chars=' + $unpinQuery.Length + ' count=\d+ target=7137(?:\s|$)') })
+            [void](Wait-For 'unpin row offered once the chat is pinned' { (Read-Shared "$settings/debug.log").Substring($pinnedLogStart) -match ('\[palette\] ready chars=' + $unpinQuery.Length + ' count=1 target=7137(?:\s|$)') })
             Shot 'tab-palette-unpin-row'
             Press @(0x1B) 'Esc: leave the palette'
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)

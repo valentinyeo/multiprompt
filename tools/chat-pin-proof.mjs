@@ -17,7 +17,7 @@ export function verify(dir) {
   assert.match(text('pin-skill/chat-pins.txt'), /^0:verify-agent\tverify-zebra$/m);
   const log = text('pin-skill/debug.log');
   assert.match(log, /\[palette\] ready chars=11 count=\d+ target=7136(?:\s|$)/);
-  assert.match(log, /\[palette\] ready chars=5 count=\d+ target=7137(?:\s|$)/);
+  assert.match(log, /\[palette\] ready chars=15 count=1 target=7137(?:\s|$)/);
   const raw = text('pin-skill/agent-buffer.jsonl');
   assert.ok(raw.includes('[Pinned skill: verify-zebra'));
   assert.ok(raw.includes(observed.pin.typed));
