@@ -1231,55 +1231,83 @@ def permission_why(mode):
     return "It is waiting for your yes because this chat asks before every step."
 
 
-def open_permission_request(source, size, agent):
-    if agent != "claude" or size <= 0:
+def permission_state(mode=None, answered=(), candidate=None):
+    return {"mode": mode, "answered": set(answered), "candidate": candidate}
+
+
+def permission_note(state, event):
+    if not isinstance(event, dict) or event.get("isSidechain"):
+        return
+    if any(event.get(key) for key in ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")):
+        return
+    if state["mode"] is None and isinstance(event.get("permissionMode"), str):
+        state["mode"] = event["permissionMode"]
+    kind = event.get("type")
+    if kind not in ("assistant", "user"):
+        return
+    message = event.get("message")
+    parts = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(parts, list):
+        return
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "tool_result" and isinstance(part.get("tool_use_id"), str):
+            state["answered"].add(part["tool_use_id"])
+        elif part.get("type") == "tool_use" and isinstance(part.get("id"), str) and state["candidate"] is None:
+            state["candidate"] = (event, part)
+
+
+def permission_settle(state, fresh=None):
+    if fresh is not None:
+        if fresh["candidate"] is not None or state["candidate"] is None:
+            state["candidate"] = fresh["candidate"]
+        state["answered"] |= fresh["answered"]
+        if fresh["mode"] is not None:
+            state["mode"] = fresh["mode"]
+    candidate = state["candidate"]
+    identity = candidate[1]["id"] if candidate is not None else None
+    state["answered"] = {identity} & state["answered"] if identity is not None else set()
+    return state
+
+
+def permission_delta(source, start, end):
+    start = max(start, end - PERMISSION_SCAN_BYTES)
+    if end <= start:
         return None
-    start = max(0, size - PERMISSION_SCAN_BYTES)
     try:
         source.seek(start)
-        data = source.read(size - start)
+        data = source.read(end - start)
     except (OSError, ValueError):
         return None
-    mode = None
-    answered = set()
-    latest = None
+    fresh = permission_state()
+    events = []
     for raw in data.splitlines():
         try:
-            event = json.loads(raw)
+            events.append(json.loads(raw))
         except (ValueError, UnicodeDecodeError):
             continue
-        if not isinstance(event, dict) or event.get("isSidechain"):
-            continue
-        kind = event.get("type")
-        if kind == "permission-mode":
-            if isinstance(event.get("permissionMode"), str):
-                mode = event["permissionMode"]
-            continue
-        if isinstance(event.get("permissionMode"), str):
-            mode = event["permissionMode"]
-        message = event.get("message")
-        parts = message.get("content") if isinstance(message, dict) and kind in ("assistant", "user") else None
-        if not isinstance(parts, list):
-            continue
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") == "tool_result" and isinstance(part.get("tool_use_id"), str):
-                answered.add(part["tool_use_id"])
-            elif kind == "assistant" and part.get("type") == "tool_use" and isinstance(part.get("id"), str):
-                latest = (event, part)
-    if latest is None or mode not in PERMISSION_MODES:
+    for event in reversed(events):
+        permission_note(fresh, event)
+    return fresh
+
+
+def permission_request(state, agent):
+    if agent != "claude" or state is None:
         return None
-    event, part = latest
-    if part["id"] in answered:
+    candidate = state["candidate"]
+    if candidate is None or state["mode"] not in PERMISSION_MODES:
+        return None
+    event, part = candidate
+    if part["id"] in state["answered"]:
         return None
     asked = event.get("timestamp")
     return {
         "tool": str(part.get("name") or "")[:64],
         "toolUseId": part["id"][:128],
         "detail": permission_detail(part.get("input")),
-        "mode": mode,
-        "why": permission_why(mode),
+        "mode": state["mode"],
+        "why": permission_why(state["mode"]),
         "askedAt": asked[:64] if isinstance(asked, str) else "",
     }
 
@@ -1306,6 +1334,10 @@ def status_header(source, size, agent, captured=()):
     lower = previous[0] if previous is not None else 0
     scanned_end = lower
     probe = previous[5] if previous is not None else b""
+    cached_permission = previous[7] if previous is not None and len(previous) > 8 else None
+    permission = (permission_state(cached_permission["mode"], cached_permission["answered"], cached_permission["candidate"])
+                  if cached_permission is not None else permission_state())
+    permission_cursor = previous[8] if previous is not None and len(previous) > 8 else 0
     remaining = min(QUESTION_SCAN_BYTES, size - lower)
     pending = b""
     first = True
@@ -1341,7 +1373,9 @@ def status_header(source, size, agent, captured=()):
             markers = (((b'"model"',) if model is None else ()) +
                        ((b'"usage"', b'token_count') if usage is None else ()) +
                        ((b'TodoWrite', b'update_plan') if todos is None else ()) +
-                       ((b'AskUserQuestion', b'request_user_input', b'tool_result', b'function_call_output') if not question_known else ()))
+                       ((b'AskUserQuestion', b'request_user_input', b'tool_result', b'function_call_output') if not question_known else ()) +
+                       ((b'"permissionMode"',) if permission["mode"] is None else ()) +
+                       ((b'"tool_use"', b'"tool_use_id"') if permission["candidate"] is None else ()))
             if not any(marker in raw for marker in markers):
                 continue
             try:
@@ -1350,6 +1384,7 @@ def status_header(source, size, agent, captured=()):
                 continue
             if not isinstance(event, dict) or event.get("isSidechain"):
                 continue
+            permission_note(permission, event)
             if not question_known:
                 if agent == "claude":
                     message = event.get("message")
@@ -1437,8 +1472,12 @@ def status_header(source, size, agent, captured=()):
             question = previous[6]
             if question is not None and question["id"] in completed_questions:
                 question = None
-    request = previous[7] if previous is not None and len(previous) > 8 and previous[8] == size else open_permission_request(source, size, agent)
-    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question, request, size)
+    if previous is not None and size > permission_cursor:
+        permission_settle(permission, permission_delta(source, permission_cursor, size))
+    else:
+        permission_settle(permission)
+    request = permission_request(permission, agent)
+    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question, permission, size)
     if len(STATUS_CACHE) > 256:
         del STATUS_CACHE[next(iter(STATUS_CACHE))]
     result = {"role": "status"}

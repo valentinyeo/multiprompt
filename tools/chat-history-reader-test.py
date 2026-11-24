@@ -9055,11 +9055,12 @@ class MUBO282_PermissionRequestTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folder = ROOT / 'tools/fixtures/MUBO-282'
 
-    def scan(self, name):
-        path = Path(self.temp.name) / (name + '.jsonl')
-        path.write_bytes((self.folder / (name + '.jsonl')).read_bytes())
-        with path.open('rb') as source:
-            return reader.open_permission_request(source, path.stat().st_size, 'claude')
+    def scan(self, name, agent='claude'):
+        events = [json.loads(line) for line in (self.folder / (name + '.jsonl')).read_text().splitlines() if line.strip()]
+        state = reader.permission_state()
+        for event in reversed(events):
+            reader.permission_note(state, event)
+        return reader.permission_request(reader.permission_settle(state), agent)
 
     def test_open_auto_mode_request_is_reported_with_why_and_detail(self):
         request = self.scan('auto-open-request')
@@ -9078,9 +9079,10 @@ class MUBO282_PermissionRequestTest(unittest.TestCase):
         self.assertIsNone(self.scan('auto-blocked'))
 
     def test_other_providers_never_report_requests(self):
-        path = self.folder / 'auto-open-request.jsonl'
-        with path.open('rb') as source:
-            self.assertIsNone(reader.open_permission_request(source, path.stat().st_size, 'codex'))
+        self.assertIsNone(self.scan('auto-open-request', 'codex'))
+
+    def test_scanning_twice_gives_the_same_request(self):
+        self.assertEqual(self.scan('auto-open-request'), self.scan('auto-open-request'))
 
     def test_status_row_carries_the_open_request(self):
         path = Path(self.temp.name) / 'status.jsonl'
@@ -9091,6 +9093,34 @@ class MUBO282_PermissionRequestTest(unittest.TestCase):
         with path.open('rb') as source:
             again = reader.status_header(source, path.stat().st_size, 'claude')
         self.assertEqual(again['permission_request'], status['permission_request'])
+
+    def test_appended_answer_clears_the_request_without_a_reread(self):
+        path = Path(self.temp.name) / 'warm.jsonl'
+        lines = (self.folder / 'auto-open-request.jsonl').read_bytes().splitlines(keepends=True)
+        path.write_bytes(b''.join(lines))
+        with path.open('rb') as source:
+            self.assertEqual(reader.status_header(source, path.stat().st_size, 'claude')['permission_request']['tool'], 'Bash')
+        answer = (self.folder / 'auto-answered-request.jsonl').read_bytes().splitlines(keepends=True)[-1]
+        with path.open('ab') as target:
+            target.write(answer)
+        with path.open('rb') as source:
+            status = reader.status_header(source, path.stat().st_size, 'claude')
+        self.assertNotIn('permission_request', status or {})
+
+    def test_appended_second_request_replaces_the_first(self):
+        path = Path(self.temp.name) / 'second.jsonl'
+        lines = (self.folder / 'auto-open-request.jsonl').read_bytes().splitlines(keepends=True)
+        path.write_bytes(b''.join(lines))
+        with path.open('rb') as source:
+            reader.status_header(source, path.stat().st_size, 'claude')
+        later = dict(json.loads(lines[-1]), uuid='example-assistant-2', parentUuid='example-answer-1')
+        later['message'] = dict(json.loads(lines[-1])['message'])
+        later['message']['content'] = [dict(type='tool_use', id='toolu_EXAMPLE_AUTO_LATER', name='Read', input=dict(file_path='notes.txt'))]
+        with path.open('ab') as target:
+            target.write((json.dumps(later) + '\n').encode())
+        with path.open('rb') as source:
+            status = reader.status_header(source, path.stat().st_size, 'claude')
+        self.assertEqual(status['permission_request']['toolUseId'], 'toolu_EXAMPLE_AUTO_LATER')
 
 
 def load_tests(loader, tests, pattern):

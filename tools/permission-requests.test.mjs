@@ -1,10 +1,9 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { openRequests, blockedRequests, describeRequest } = require('./permission-requests.mjs');
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { openRequests, blockedRequests, describeRequest } from './permission-requests.mjs';
 
-const fixture = name => fs.readFileSync(path.join(__dirname, 'fixtures', 'MUBO-282', name), 'utf8');
+const fixture = name => readFileSync(new URL(`./fixtures/MUBO-282/${name}`, import.meta.url), 'utf8');
 const chat = { id: 'chat-one', title: 'Migrations', host: 'example-host' };
 
 test('MUBO-282 an auto mode step with no answer is an open request', () => {

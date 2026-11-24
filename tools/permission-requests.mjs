@@ -1,4 +1,4 @@
-const MODES_THAT_ASK = new Set(['auto', 'default', 'acceptEdits']);
+export const MODES_THAT_ASK = new Set(['auto', 'default', 'acceptEdits']);
 
 const TOOL_WORDS = {
   Bash: 'run a command',
@@ -70,7 +70,7 @@ function blockedBy(parsed) {
   return blocked;
 }
 
-function openRequests(chats) {
+export function openRequests(chats) {
   const found = [];
   for (const chat of Array.isArray(chats) ? chats : []) {
     const parsed = rows(chat.transcript);
@@ -101,7 +101,7 @@ function openRequests(chats) {
   return found.sort((a, b) => String(b.askedAt).localeCompare(String(a.askedAt)) || a.chat.localeCompare(b.chat));
 }
 
-function blockedRequests(chats) {
+export function blockedRequests(chats) {
   const found = [];
   for (const chat of Array.isArray(chats) ? chats : []) {
     const parsed = rows(chat.transcript);
@@ -133,10 +133,8 @@ function blockedRequests(chats) {
   return found.sort((a, b) => String(b.askedAt).localeCompare(String(a.askedAt)) || a.chat.localeCompare(b.chat));
 }
 
-function describeRequest(request) {
+export function describeRequest(request) {
   const tool = request && request.tool;
   const words = TOOL_WORDS[tool] || (tool ? `use ${tool}` : 'do a step');
   return `${request.title} wants to ${words}. ${request.why}`;
 }
-
-module.exports = { openRequests, blockedRequests, describeRequest, MODES_THAT_ASK };

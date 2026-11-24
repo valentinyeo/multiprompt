@@ -1,6 +1,6 @@
 # Permission requests
 
-Source files: src/chat_permission_requests.zig, src/palette_text.zig, tools/permission-requests.mjs, tools/fixtures/MUBO-282/*, .claude/skills/verify-multiprompt/control-feature-permission-requests.ps1
+Source files: src/chat_permission_requests.zig, src/chat_transcript.zig, src/chat_session.zig, src/attention_rules.zig, src/sidebar.zig, src/command_palette.zig, src/palette_text.zig, src/main.zig, src/shortcuts.zig, src/app_state.zig, src/chat_history_reader.py, tools/permission-requests.mjs, tools/mb.mjs, tools/fixtures/MUBO-282/*, .claude/skills/verify-multiprompt/control-feature-permission-requests.ps1
 
 ## Sub-features
 
