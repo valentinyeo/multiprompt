@@ -73,7 +73,7 @@ function harness(options = {}) {
     assert.equal(typeof run, 'function');
     const lines = [], errors = [];
     const code = await run(args, {
-      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir },
+      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir, MULTIPROMPT_HOST: '0' },
       out: line => lines.push(line), err: line => errors.push(line), fetch, tmux: tmuxFn,
       runtime: argv => { runtime.push(argv); return { status: 0, stdout: '{"status":"disabled"}' }; },
       ownerPath
@@ -165,7 +165,7 @@ test('open groups a shell once, and a different workspace is refused', async () 
 
 test('groups are refused before tmux when the service does not advertise them', async () => {
   const box = harness({ features: 'favorite,bot_appearance' });
-  const opened = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--workspace', 'Work', '--host', '0', '--group', 'Runners']);
+  const opened = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--workspace', 'Work', '--group', 'Runners']);
   assert.equal(opened.code, 1);
   assert.match(opened.errors[0], /does not support groups/);
   assert.equal(opened.puts.length, 0);

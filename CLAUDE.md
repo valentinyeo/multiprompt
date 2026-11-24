@@ -53,7 +53,6 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Every installed chat tool is executable, and an install leaves no temporary files behind. | `tools/chat-shared-runtime.test.py` (`test_every_installed_chat_tool_runs`, `test_install_removes_leftover_temporary_files`) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
-| A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
 | Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
