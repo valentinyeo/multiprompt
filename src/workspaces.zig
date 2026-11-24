@@ -569,8 +569,35 @@ pub fn workspaceCanDelete(wi: u32) bool {
     if (id.len == 0) return false;
     if (std.mem.eql(u8, id, "default") or std.mem.eql(u8, id, getInstanceName())) return false;
     if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) return app_state.g_lws_count > 1;
-    if (!e.archived) return false;
     return e.host_len == 0;
+}
+
+pub fn workspaceChats(id: []const u8) u32 {
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            var count: u32 = 0;
+            for (app_state.shells[0..app_state.shell_count]) |shell| {
+                if (shell.workspace == slot) count += 1;
+            }
+            return count;
+        }
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = getSessionPathForWorkspace(&path_buf, id) orelse return 0;
+    const h = win32OpenRead(path) orelse return 0;
+    defer _ = CloseHandle(h);
+    const buf = std.heap.page_allocator.alloc(u8, SESSION_JSON_CAPACITY) catch return 0;
+    defer std.heap.page_allocator.free(buf);
+    const n = win32ReadAll(h, buf);
+    if (n == 0) return 0;
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    return if (parseSessionTabs(buf[0..n], &tabs) > 0) 1 else 0;
+}
+
+pub fn workspaceHasChatsByIndex(wi: u32) bool {
+    if (wi >= app_state.g_workspace_count) return false;
+    const e = &app_state.g_workspaces[wi];
+    return workspaceChats(e.id[0..e.id_len]) > 0;
 }
 
 fn workspaceCanOpen(wi: u32) bool {
@@ -1105,7 +1132,6 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
         if (identity.len == 0) return workspaceDeleteFailed("This workspace has no saved identity. Close and reopen the workspace list.");
         if (app_state.g_single_window and findMyWorkspaceSlot(identity) != null and app_state.g_lws_count <= 1) return workspaceDeleteFailed("At least one workspace must stay open.");
         if (entry.host_len != 0) return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
-        if (!entry.archived) return workspaceDeleteFailed("Archive this workspace before deleting it.");
         return workspaceDeleteFailed("The workspace list is still busy. Open Delete workspace again.");
     }
     const e = &app_state.g_workspaces[wi];
@@ -1118,6 +1144,7 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     const name_len = @min(e.name_len, name_copy.len - 1);
     @memcpy(name_copy[0..name_len], e.name[0..name_len]);
     debugLog2("workspace-delete target=", id);
+    if (workspaceChats(id) > 0) return workspaceDeleteFailed("Choose where this workspace's chats go");
 
     var local = false;
     if (app_state.g_single_window) {
@@ -1270,6 +1297,71 @@ pub fn applyAccountWorkspaceArchives(a: std.mem.Allocator, target: @import("sess
         wi += 1;
     }
     writeWorkspaceRegistryFile();
+pub fn deleteWorkspaceMovingChats(wi: u32, dest_wi: u32) bool {
+    if (wi >= app_state.g_workspace_count or dest_wi >= app_state.g_workspace_count) return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    var id_copy: [64]u8 = std.mem.zeroes([64]u8);
+    var name_copy: [64]u8 = std.mem.zeroes([64]u8);
+    var dest_id_copy: [64]u8 = std.mem.zeroes([64]u8);
+    const e = &app_state.g_workspaces[wi];
+    const id_len = @min(e.id_len, id_copy.len - 1);
+    if (id_len == 0) return workspaceDeleteFailed("This workspace has no saved identity.");
+    @memcpy(id_copy[0..id_len], e.id[0..id_len]);
+    const name_len = @min(e.name_len, name_copy.len - 1);
+    @memcpy(name_copy[0..name_len], e.name[0..name_len]);
+    const dest = &app_state.g_workspaces[dest_wi];
+    const dest_len = @min(dest.id_len, dest_id_copy.len - 1);
+    if (dest_len == 0) return workspaceDeleteFailed("Choose an open workspace for the chats.");
+    @memcpy(dest_id_copy[0..dest_len], dest.id[0..dest_len]);
+    const id = id_copy[0..id_len];
+    const dest_id = dest_id_copy[0..dest_len];
+    const dest_slot = if (app_state.g_single_window) findMyWorkspaceSlot(dest_id) else null;
+    const target = dest_slot orelse return workspaceDeleteFailed("Choose an open workspace for the chats.");
+    var source = if (app_state.g_single_window) findMyWorkspaceSlot(id) else null;
+    if (source == null) {
+        if (!absorbWorkspaceIntoSlots(id, name_copy[0..name_len])) return workspaceDeleteFailed("Open this workspace before deleting it.");
+        source = findMyWorkspaceSlot(id);
+    }
+    const from = source orelse return workspaceDeleteFailed("Open this workspace before deleting it.");
+    if (from == target) return workspaceDeleteFailed("Choose a different workspace for the chats.");
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        if (shell.workspace == from) shell.workspace = target;
+    }
+    if (app_state.g_active_workspace == from) app_state.g_active_workspace = target;
+    if (!app_state.g_restoring) saveSession();
+    publishInboxState();
+    const current = findWorkspace(id) orelse return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    return deleteWorkspaceByIndex(current);
+}
+
+var requested_delete_workspace_id: [64]u8 = std.mem.zeroes([64]u8);
+var requested_delete_workspace_id_len: u32 = 0;
+var delete_move_source: ?u32 = null;
+
+pub fn workspaceDeleteMoveSource() ?u32 {
+    return delete_move_source;
+}
+
+pub fn setWorkspaceDeleteMoveSource(wi: u32) void {
+    delete_move_source = wi;
+}
+
+pub fn clearWorkspaceDeleteFlow() void {
+    delete_move_source = null;
+}
+
+pub fn requestWorkspaceDelete(id: []const u8) void {
+    const len = @min(id.len, requested_delete_workspace_id.len - 1);
+    if (len == 0) return;
+    @memcpy(requested_delete_workspace_id[0..len], id[0..len]);
+    requested_delete_workspace_id_len = @intCast(len);
+}
+
+pub fn takeRequestedWorkspaceDelete(buf: *[64]u8) ?[]const u8 {
+    const len = requested_delete_workspace_id_len;
+    requested_delete_workspace_id_len = 0;
+    if (len == 0) return null;
+    @memcpy(buf[0..len], requested_delete_workspace_id[0..len]);
+    return buf[0..len];
 }
 
 pub fn saveWorkspaceRegistry() void {
@@ -3388,6 +3480,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
         _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
     for (@import("workspace_view.zig").builtins) |view| {
         if (ws_in != @intFromEnum(view)) continue;
+        _ = @import("sidebar.zig").thawSidebarOrder();
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
         app_state.g_starred_workspace = false;
@@ -3403,6 +3496,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
     }
     if (!app_state.g_single_window) return;
     const was_view = app_state.g_sidebar_view != null;
+    if (was_view) _ = @import("sidebar.zig").thawSidebarOrder();
     if (ws_in == @import("workspace_view.zig").starred) {
         app_state.g_sidebar_view = null;
         captureWorkspaceFocus();
@@ -4997,7 +5091,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         }
         const slot = slot_map[src_ws];
 
-        const tmux_name: ?[]const u8 = if ((tabs[t].kind == .vps or tabs[t].kind == .vps2 or tabs[t].kind == .tmux) and tabs[t].tmux_session_len > 0)
+        const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
             tabs[t].tmux_session[0..tabs[t].tmux_session_len]
         else
             null;

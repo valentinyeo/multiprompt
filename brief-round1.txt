@@ -1,0 +1,36 @@
+Ticket SOFT-3135 https://app.hypertask.ai/detail/project-2060/3135 (repo valentinyeo/multiprompt, branch soft-3135-closed-tmux, this worktree).
+
+Bug (diagnosed): 14 server chats were moved by an outside reopen from host slot 1 to slot 0; that path closed each slot-1 tab with "remember" (closeShellRemember(.., true)) which put (session, host 1) into the PC's closed_tmux list, and reopening on slot 0 only cleared the slot-0 entry. Later the account layout was repaired back to slot 1; the PC applied it (log: 14 "tab-closed:account-sync-removed-elsewhere", 66 -> 52 tabs) but src/account_desktop.zig:~1749 drops any incoming layout tab that is in closed_tmux, and the server session picker filters the same list (src/vps.zig:~1559). Result: 14 live chats vanish from the sidebar and cannot be reopened from the picker. Ctrl+K "reopen closed tab" only reopens the slot-0 copy.
+
+Fix (architecture, smallest correct change):
+1. When a tab for (session) is (re)opened on ANY host, clear closed_tmux entries for that session on every host, not just the matching host.
+2. When the account layout adds a tab that the layout itself did not previously have (a deliberate re-add from another device or tool), it must not be silently dropped by a stale closed_tmux entry from a host move: decide precedence by recency (store a close time in closed_tmux entries, backward compatible with entries without a time) - a layout add newer than the close wins; an older/unchanged layout entry stays closed. This keeps "closed chats stay closed" (no resurrection) while letting a deliberate move/repair through.
+2b. Existing PCs already hold stale entries: 14 live chats are hidden right now by closed_tmux entries (session, host 1) that have no close time, while the account layout lists those same sessions on host 1. On load (and on every layout apply), treat a closed_tmux entry WITHOUT a close time whose session the current account layout lists on that same host as stale and drop it, so the tab appears after the in-app update with no manual step. Entries with a close time follow rule 2. Archived tabs (archive.json) are a separate list and stay archived.
+3. Tests (also cover 2b: legacy untimed entry + layout lists it -> tab appears) (Zig unit tests next to the code or the repo's existing test style): replay today's case (close-remember on slot 1, reopen on slot 0, layout moves it back to slot 1 -> tab appears, closed_tmux has no entry for it) and the no-resurrection case (user closes a tab; an older layout still lists it -> stays closed).
+4. Never build or run tests on this server: push and let GitHub CI run. ONE PR titled "SOFT-3135: Chats moved between servers no longer vanish", body with root cause, fix, one-line undo; changelog.d/SOFT-3135-moved-chats-stay.md (one plain user sentence). Commit identity 348741585+software-factory-runners[bot]@users.noreply.github.com, no Co-authored-by. No code comments. No Sleep/SetTimer additions.
+5. Report one line: PR URL, or what blocked you.
+
+# Worker brief rules
+
+Faults: Hypertask bug -> hypertask feedback; repo rules or scripts -> the worker repo's board and view; only shared house rules or pstack setup -> board 2060, label Poteto.
+
+Report faults before working around them.
+For Hypertask faults, run this command:
+
+```sh
+hypertask feedback --kind bug|friction|missing --category <c> --tool "<command>" --status <http> --error-code <slug> "<note>"
+```
+
+Choose one kind and the matching category.
+Use the observed status when available.
+Omit status when no HTTP response exists.
+Feedback files on board 15.
+Never include task, board or comment content.
+Report command metadata and a sanitized note.
+
+Our rules, scripts or gates failed?
+File on the worker repo's board and view.
+Only shared house rules or pstack setup faults
+go to board 2060 with label Poteto.
+Keep working after recording the fault.
+These reporting rules override legacy workaround instructions.
