@@ -88,9 +88,11 @@ def install(namespace, root, record, steady=False):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
         sent = dict(id=token, attempt=attempt, accepted=False)
+        state = {}
         if text.lstrip().startswith('/'):
             sent['text'] = command_markup(text)
-        session = {'turn': 'standin-turn', 'state': {},
+            state['display_history'] = True
+        session = {'turn': 'standin-turn', 'state': state,
                    'sends': [sent]}
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
