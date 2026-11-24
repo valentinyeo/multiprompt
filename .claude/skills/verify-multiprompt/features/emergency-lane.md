@@ -1,6 +1,6 @@
 # Emergency lane
 
-Source files: tools/check-emergency-lane.mjs, tools/check-emergency-lane.test.mjs, tools/emergency-release-path.test.mjs, tools/pr-verifier.cjs, tools/pr-verifier-repro.test.js, .github/workflows/emergency-lane.yml, openwiki/operations/build-and-install.md
+Source files: tools/check-emergency-lane.mjs, tools/check-emergency-lane.test.mjs, tools/emergency-release-path.test.mjs, tools/pr-verifier-repro.test.js, .github/workflows/emergency-lane.yml, openwiki/operations/build-and-install.md
 CI workflow: emergency-lane.yml
 
 ## Sub-features
