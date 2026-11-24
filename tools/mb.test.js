@@ -24,6 +24,14 @@ function harness(options = {}) {
   const sessions = new Set();
   const panes = new Map();
   const ownerPath = join(dir, 'owners.json');
+  const zsbPath = options.zsb ? join(dir, 'mp-zsb') : null;
+  const zsbLog = join(dir, 'zsb.log');
+  const zsbStatePath = join(dir, 'zsb-state.json');
+  if (zsbPath) {
+    writeFileSync(zsbPath, options.zsb, { mode: 0o755 });
+    writeFileSync(zsbLog, '');
+    writeFileSync(zsbStatePath, JSON.stringify(options.zsbState));
+  }
   const features = options.features ?? FEATURES;
   const fetch = async (url, init = {}) => {
     const path = new URL(url).pathname;
@@ -72,15 +80,17 @@ function harness(options = {}) {
   const call = async args => {
     assert.equal(typeof run, 'function');
     const lines = [], errors = [];
+    const env = { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir };
+    if (zsbPath) Object.assign(env, { MULTIPROMPT_ZSB: zsbPath, MB_TEST_STATE: zsbStatePath, MB_TEST_LOG: zsbLog });
     const code = await run(args, {
-      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir },
+      env,
       out: line => lines.push(line), err: line => errors.push(line), fetch, tmux: tmuxFn,
       runtime: argv => { runtime.push(argv); return { status: 0, stdout: '{"status":"disabled"}' }; },
       ownerPath
     });
     let owners = null;
     try { owners = JSON.parse(readFileSync(ownerPath, 'utf8')); } catch { owners = null; }
-    return { code, lines, errors, puts, revision: () => revision, layout, tmux, runtime, sessions, panes, owners };
+    return { code, lines, errors, puts, revision: () => revision, layout, tmux, runtime, sessions, panes, owners, zsb: () => zsbPath ? readFileSync(zsbLog, 'utf8').split('\n').filter(line => line && line !== 'workspace-list') : [] };
   };
   return { call, dir, layout, puts, panes, sessions, tmux };
 }
@@ -392,5 +402,81 @@ test('star is refused when the service has no favorite feature', async () => {
   assert.equal(refused.code, 1);
   assert.match(refused.errors[0], /does not support favorite/);
   assert.equal(box.puts.length, 0);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+const DESKTOP = `#!/usr/bin/env python3
+import json, os, sys
+state_path = os.environ['MB_TEST_STATE']
+log_path = os.environ['MB_TEST_LOG']
+state = json.load(open(state_path))
+args = sys.argv[1:]
+with open(log_path, 'a') as log:
+    log.write(' '.join(args) + '\\n')
+def tabs():
+    for workspace in state['workspaces']:
+        for tab in workspace['tabs']:
+            yield tab
+        for group in workspace['groups']:
+            for tab in group['tabs']:
+                yield tab
+if args == ['workspace-list']:
+    print(json.dumps(state))
+    sys.exit(0)
+if args[0] == 'shell-open' and '--attach' in args and '--name' in args:
+    session = args[args.index('--attach') + 1]
+    if any(tab['tmux'] == session for tab in tabs()):
+        print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
+        sys.exit(1)
+    tab = {'id': 70, 'title': args[args.index('--name') + 1], 'tmux': session, 'host': args[args.index('--host') + 1], 'pinned': False}
+    state['workspaces'][0]['tabs'].append(tab)
+    json.dump(state, open(state_path, 'w'), sort_keys=True)
+    print(json.dumps({'ok': True, 'created': True, 'tab': 70}))
+    sys.exit(0)
+if args[0] == 'session-close' and len(args) == 3 and args[1] == '--tab':
+    for workspace in state['workspaces']:
+        for tab in workspace['tabs']:
+            if str(tab['id']) == args[2]:
+                workspace['tabs'].remove(tab)
+                json.dump(state, open(state_path, 'w'), sort_keys=True)
+                print(json.dumps({'ok': True, 'closed': True, 'tab': int(args[2])}))
+                sys.exit(0)
+    print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
+    sys.exit(1)
+print(json.dumps({'ok': False, 'error': 'bad_args', 'message': 'unexpected ' + ' '.join(args)}))
+sys.exit(2)
+`;
+
+const OPEN_CLOSE_LAYOUT = { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [] };
+const OPEN_CLOSE_DESKTOP = {
+  ok: true,
+  hosts: ['remote-1'],
+  workspaces: [{ name: 'Work', groups: [], tabs: [{ id: 41, title: 'Home shell', host: 'remote-1', tmux: 'home-1', pinned: false }] }]
+};
+
+test('open and close reach the desktop once and repeat the same answer', async () => {
+  const box = harness({ layout: OPEN_CLOSE_LAYOUT, zsb: DESKTOP, zsbState: OPEN_CLOSE_DESKTOP });
+  const first = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--title', 'Runner 1', '--workspace', 'Work', '--group', 'Runners', '--host', '0', '--no-tmux']);
+  assert.equal(first.code, 0, text(first));
+  assert.match(first.lines.at(-1), /opened mp-runner-1/);
+  assert.deepEqual(first.zsb(), ['shell-open --workspace Work --host remote-1 --name Runner 1 --attach mp-runner-1 --group Runners']);
+  const openedLayout = JSON.stringify(box.layout.tabs);
+  const openedPuts = box.puts.length;
+  const second = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--title', 'Runner 1', '--workspace', 'Work', '--group', 'Runners', '--host', '0', '--no-tmux']);
+  assert.equal(second.code, 0, text(second));
+  assert.match(second.lines.at(-1), /already open mp-runner-1/);
+  assert.equal(JSON.stringify(box.layout.tabs), openedLayout);
+  assert.equal(box.puts.length, openedPuts);
+  assert.deepEqual(second.zsb(), first.zsb());
+  const closed = await box.call(['close', 'mp-runner-1']);
+  assert.equal(closed.code, 0, text(closed));
+  assert.match(closed.lines.at(-1), /closed mp-runner-1/);
+  assert.deepEqual(closed.zsb(), [...first.zsb(), 'session-close --tab 70']);
+  const closedPuts = box.puts.length;
+  const again = await box.call(['close', 'mp-runner-1']);
+  assert.equal(again.code, 0, text(again));
+  assert.match(again.lines.at(-1), /already closed mp-runner-1/);
+  assert.equal(box.puts.length, closedPuts);
+  assert.deepEqual(again.zsb(), closed.zsb());
   rmSync(box.dir, { recursive: true, force: true });
 });
