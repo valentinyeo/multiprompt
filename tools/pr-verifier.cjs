@@ -39,6 +39,7 @@ function isExemptUnmappedFile(file) {
   if (file.startsWith('openwiki/') || file.startsWith('docs/')) return true;
   if (file.startsWith('changelog.d/')) return true;
   if (file.startsWith('tools/ticket-titles/')) return true;
+  if (file.startsWith('src/testdata/')) return true;
   if (file.startsWith('.github/')) return true;
   if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) return true;
   return false;
