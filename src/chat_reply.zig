@@ -59,14 +59,16 @@ pub fn quote(a: std.mem.Allocator, message: []const u8) ![]u8 {
 
 fn commandLine(message: []const u8) ?[]const u8 {
     if (message.len < 2 or message[0] != '/') return null;
-    var end: usize = 1;
-    while (end < message.len and message[end] != '\r' and message[end] != '\n') : (end += 1) {
-        const c = message[end];
+    var name_end: usize = 1;
+    while (name_end < message.len and message[name_end] != ' ' and message[name_end] != '\t' and message[name_end] != '\r' and message[name_end] != '\n') : (name_end += 1) {
+        const c = message[name_end];
         const named = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == ':' or c == '_' or c == '-';
         if (!named) return null;
     }
-    const line = trimEnd(message[0..end]);
-    return line;
+    if (name_end == 1) return null;
+    var end = name_end;
+    while (end < message.len and message[end] != '\r' and message[end] != '\n') : (end += 1) {}
+    return trimEnd(message[0..end]);
 }
 
 pub fn compose(a: std.mem.Allocator, quoted: ?[]const u8, message: []const u8) ![]u8 {
