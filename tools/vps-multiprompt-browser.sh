@@ -52,7 +52,7 @@ print_help() {
         echo '  Reports connecting, connected after a live tmux attachment, or disconnected with exit_code.'
         echo '  An unknown exit code is 4294967295; an unknown tab returns unknown_tab.'
         ;;
-      session-open) echo 'usage: zsb session-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --tmux <session> --name <tab title>'
+      session-open) echo 'usage: zsb session-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --tmux <session> --name <tab title> [--kind chat|shell]'
         echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
         echo '  --after-tab places the new tab right below tab <id>, in its group.'
         echo '  Replies include state; created:true is not proof of connection. Use session-status --tab <id>.'
@@ -157,7 +157,7 @@ usage: zsb <command> [args] (also: multiprompt-browser)
 
 Commands and flags:
   workspace-list                    List workspaces, groups, tabs and host names as JSON
-  session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE
+  session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE [--kind chat|shell]
                                     Attach a remote tmux tab in the background, idempotently
   shell-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --name TITLE [--attach SESSION] [--run CMD]
                                     Open a server shell tab or attach to tmux
@@ -573,10 +573,12 @@ elif args[0] == "shell-open":
         fail("bad_args", "shell-open argument too long")
 
 elif args[0] == "session-open":
-    flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name"}
+    flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name", "--kind"}
     values = {}
-    if len(args) != 11:
+    if len(args) < 11:
         fail("bad_args", "session-open requires --workspace, --group or --after-tab, --host, --tmux and --name")
+    if len(args) % 2 == 0:
+        fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
     for flag, value in zip(args[1::2], args[2::2]):
         if flag not in flags or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
             fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
@@ -591,6 +593,9 @@ elif args[0] == "session-open":
         fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
     if len(values["--name"].encode("utf-16-le")) // 2 > 63:
         fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
+    kind = values.get("--kind")
+    if kind is not None and kind not in ("chat", "shell"):
+        fail("bad_args", "session-open --kind must be chat or shell")
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
