@@ -108,6 +108,7 @@ test('a local cache load starts even with a remote worker busy and recent input 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-local-priority-'));
   try {
     copyZig(['chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_echo.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_transport.zig'), 'pub fn starting(_: u8) bool { return false; }\n');
     const source = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };

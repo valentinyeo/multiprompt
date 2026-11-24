@@ -41,6 +41,17 @@ const Host = struct {
 };
 
 var hosts: [3]Host = @splat(.{});
+var g_reader_boot: [hosts.len]std.atomic.Value(bool) = @splat(std.atomic.Value(bool).init(false));
+
+pub fn starting(index: u8) bool {
+    if (index >= hosts.len) return false;
+    return g_reader_boot[index].load(.acquire);
+}
+
+fn bootDone(index: u8) void {
+    if (index >= hosts.len) return;
+    g_reader_boot[index].store(false, .release);
+}
 
 fn lock(host: *Host) void {
     while (!host.mutex.tryLock()) w.Sleep(1);
@@ -122,6 +133,7 @@ fn transmit(host: *Host) void {
 
 const Boot = struct {
     host: *Host,
+    index: u8,
     input: w.HANDLE,
     output: w.HANDLE,
     process: w.HANDLE,
@@ -135,6 +147,7 @@ fn closeBoot(b: Boot) void {
 }
 
 fn abortBoot(b: Boot) void {
+    bootDone(b.index);
     closeBoot(b);
     lock(b.host);
     b.host.starting = false;
@@ -166,9 +179,10 @@ fn handshakeWorker(b: Boot) void {
     }
     lock(b.host);
     if (b.host.stopping or !b.host.starting) {
-        const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process };
+        const abort = Boot{ .host = b.host, .index = b.index, .input = b.input, .output = b.output, .process = b.process };
         b.host.starting = false;
         b.host.mutex.unlock();
+        bootDone(b.index);
         closeBoot(abort);
         return;
     }
@@ -178,6 +192,8 @@ fn handshakeWorker(b: Boot) void {
     b.host.running = true;
     b.host.starting = false;
     b.host.mutex.unlock();
+    bootDone(b.index);
+    if (state.g_main_hwnd != null) w.postChatFileReady(state.g_main_hwnd);
     idle_budget.bump(.thread_spawn);
     const thread = std.Thread.spawn(.{}, receive, .{b.host}) catch {
         lock(b.host);
@@ -284,7 +300,8 @@ fn bootHost(host: *Host, index: u8) bool {
         }
     }
     host.starting = true;
-    const job = Boot{ .host = host, .input = input, .output = output, .process = process };
+    g_reader_boot[index].store(true, .release);
+    const job = Boot{ .host = host, .index = index, .input = input, .output = output, .process = process };
     const thread = std.Thread.spawn(.{}, handshakeWorker, .{job}) catch {
         host.starting = false;
         _ = w.TerminateProcess(process, 0);
@@ -413,7 +430,7 @@ pub fn close(channel: *Channel) void {
 }
 
 pub fn shutdown() void {
-    for (&hosts) |*host| {
+    for (&hosts, 0..) |*host, index| {
         lock(host);
         if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
         host.starting = false;
@@ -422,6 +439,7 @@ pub fn shutdown() void {
             notify(channel);
         }
         host.mutex.unlock();
+        bootDone(@intCast(index));
     }
 }
 
@@ -432,6 +450,7 @@ pub fn respawn(index: u8) void {
     defer host.mutex.unlock();
     if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
     host.starting = false;
+    bootDone(index);
 }
 
 fn rejectTerminal(channel: *Channel) bool {

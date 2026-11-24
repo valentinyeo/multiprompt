@@ -23,6 +23,7 @@ const w = struct {
     }
     fn TerminateProcess(_: HANDLE, _: u32) i32 { unreachable; }
     fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
+    fn postChatFileReady(_: HANDLE) void {}
 };
 const state = struct {
     const SpinMutex = struct {
@@ -31,6 +32,7 @@ const state = struct {
         fn unlock(self: *@This()) void { self.held.store(false, .release); }
     };
     var g_chat_history_channels_closing: std.atomic.Value(bool) = .init(false);
+    var g_main_hwnd: ?*anyopaque = null;
 };
 var test_host: ?*Host = null;
 var entered: std.atomic.Value(bool) = .init(false);

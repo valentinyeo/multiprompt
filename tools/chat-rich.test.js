@@ -28,7 +28,7 @@ test('stable session identity gates results, backoff and local console fallback 
   assert.match(body('refreshChatBlockCache'), /captureChatTranscript\(active_shell, &g_chat_screen, false\)/);
   assert.match(body('refreshChatBlockCache'), /chatHistoryEntry\(key\)/);
   assert.match(body('refreshChatBlockCache'), /chatClassifyBlocks/);
-  assert.match(body('chatFileFailed'), /retryDelay/);
+  assert.match(body('chatFileFailed'), /chatRetryWaitMs/);
   assert.match(body('chatFileOnReady'), /refreshChatTranscript\(false\)/);
 });
 test('markdown measurement paint and link hit test share the same layout', () => {

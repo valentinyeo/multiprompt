@@ -38,7 +38,7 @@ test('missing transcript reason crosses the worker handoff and selects the minut
   assert.match(main, /utf8ToUtf16Le\(entry\.result_missing\[0\.\.255\], chat_history\.NOT_AVAILABLE_NOTE\)/);
   assert.match(history, /NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view"/);
   assert.match(main, /entry\.missing_message = entry\.result_missing;\s*chatFileFailed\(entry\)/);
-  assert.match(main, /if \(entry\.missing_message\[0\] != 0\) chat_history\.MISSING_RETRY_MS else chat_history\.retryDelay/);
+  assert.match(main, /if \(missing\) return chat_history\.MISSING_RETRY_MS;/);
   assert.match(main, /if \(e\.missing_message\[0\] != 0\).*?&e\.missing_message/);
   assert.match(main, /entry\.failures = 0;\s*entry\.missing_message = @splat\(0\)/);
 });

@@ -640,6 +640,11 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     }
     if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
+    const reader_booting = @import("chat_transport.zig").starting(key.host);
+    if (!load_disk and entry.stream == null and reader_booting) {
+        entry.next = 0;
+        return;
+    }
     const known = entry.key;
     entry.key = key;
     if (key.sid[0] == 0) entry.key.sid = if (known.sid[0] != 0) known.sid else entry.history.sid;
@@ -691,9 +696,25 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     thread.detach();
 }
 
+pub fn chatRetryWaitMs(failures: u8, missing: bool, reader_starting: bool) u64 {
+    if (reader_starting) return 0;
+    if (missing) return chat_history.MISSING_RETRY_MS;
+    return chat_history.retryDelay(failures);
+}
+
 fn chatFileFailed(entry: *ChatHistoryEntry) void {
-    entry.failures +|= 1;
-    entry.next = GetTickCount64() + (if (entry.missing_message[0] != 0) chat_history.MISSING_RETRY_MS else chat_history.retryDelay(entry.failures));
+    const reader_starting = @import("chat_transport.zig").starting(entry.key.host);
+    if (!reader_starting) entry.failures +|= 1;
+    const wait = chatRetryWaitMs(entry.failures, entry.missing_message[0] != 0, reader_starting);
+    entry.next = if (wait == 0) 0 else GetTickCount64() + wait;
+}
+
+test "MUBO-277 a chat request during reader boot retries at once instead of backing off" {
+    try std.testing.expectEqual(@as(u64, 0), chatRetryWaitMs(1, false, true));
+    try std.testing.expectEqual(@as(u64, 0), chatRetryWaitMs(2, false, true));
+    try std.testing.expectEqual(@as(u64, 1000), chatRetryWaitMs(1, false, false));
+    try std.testing.expectEqual(@as(u64, 2000), chatRetryWaitMs(2, false, false));
+    try std.testing.expectEqual(chat_history.MISSING_RETRY_MS, chatRetryWaitMs(1, true, false));
 }
 
 fn chatFilePollInterval() u64 {
