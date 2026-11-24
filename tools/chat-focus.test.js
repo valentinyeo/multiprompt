@@ -21,7 +21,14 @@ const main = read('src/main.zig');
 const composer = read('src/chat_composer.zig');
 const driver = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
-const recipe = driver.slice(driver.indexOf("        'chat-focus' {"), driver.indexOf("        'appearance' {\n            Select-Theme"));
+
+function journeyRecipe(name) {
+  const start = driver.indexOf(`        '${name}' {`);
+  const end = start < 0 ? -1 : driver.slice(start + 1).search(/\n        '[a-z0-9-]+' \{/);
+  assert.ok(start >= 0 && end > 0, `journey ${name} must sit in the driver switch`);
+  return driver.slice(start, start + 1 + end);
+}
+const recipe = journeyRecipe('chat-focus');
 
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);

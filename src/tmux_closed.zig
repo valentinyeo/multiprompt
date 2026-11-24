@@ -91,6 +91,17 @@ pub const Closed = struct {
         }
     }
 
+    pub fn hold(self: *Closed, a: std.mem.Allocator, host: u8, name: []const u8) void {
+        if (name.len == 0) return;
+        for (self.entries.items) |*entry| {
+            if (!same(entry.host, entry.name[0..entry.len], host, name)) continue;
+            entry.listed = true;
+            if (entry.closed_at == null) entry.closed_at = now();
+            return;
+        }
+        self.close(a, host, name, now()) catch {};
+    }
+
     pub fn reconcile(self: *Closed, layout: []const LayoutTab) void {
         var i: usize = 0;
         while (i < self.entries.items.len) {
