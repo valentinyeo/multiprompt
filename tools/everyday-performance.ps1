@@ -49,8 +49,8 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $edit -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $edit)
         })
     }
-    function Save-Sample([string]$Action, [int]$Index, [long]$Start, [double]$Ms, [long]$Offset, [string]$Proof) {
-        $samples.Add(@{ action=$Action; index=$Index; startQpc=$Start; endQpc=$Start + [long]($Ms * [EverydayPerformance]::Frequency() / 1000); ms=$Ms; logOffset=$Offset; proof=$Proof; success=$true })
+    function Save-Sample([string]$Action, [int]$Index, [long]$Start, [double]$Ms, [long]$Offset, [string]$Proof, [double]$InjectedMs = 0) {
+        $samples.Add(@{ action=$Action; index=$Index; startQpc=$Start; endQpc=$Start + [long]($Ms * [EverydayPerformance]::Frequency() / 1000); ms=$Ms; inputReturnMs=$InjectedMs; acknowledgedMs=[EverydayPerformance]::LastAcknowledgedMs; compositorWaitMs=[EverydayPerformance]::LastCompositorMs; logOffset=$Offset; proof=$Proof; success=$true })
     }
     try {
         & python "$PSScriptRoot/switch-performance-fixture.py" $root "$(Split-Path $Exe)/ssh.exe"
@@ -78,9 +78,10 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
+            $injectedMs = ([EverydayPerformance]::Tick() - $start) * 1000.0 / [EverydayPerformance]::Frequency()
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[switch] chat content shown shell=$shell ", '', $start, 30000)
             [void](Await 'target persisted after confirmed paint' { $saved = Read-State; $null -ne $saved -and $saved.active_tab -eq $target })
-            if ($i -ge 10) { Save-Sample 'switching' ($i - 10) $start $ms $offset "target=$target shell=$shell nonempty paint" }
+            if ($i -ge 10) { Save-Sample 'switching' ($i - 10) $start $ms $offset "target=$target shell=$shell nonempty paint" $injectedMs }
             [EverydayPerformance]::ObserveFor(100)
         }
         Foreground
@@ -98,7 +99,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $expected += $letter
             $start = [EverydayPerformance]::Tick()
             $ms = [EverydayPerformance]::Type($main, $app.Id, $edit, $letter, $expected)
-            if ($i -ge 10) { Save-Sample 'typing' ($i - 10) $start $ms 0 "exact composer length=$($expected.Length)" }
+            if ($i -ge 10) { Save-Sample 'typing' ($i - 10) $start $ms 0 "exact composer length=$($expected.Length)" ([EverydayPerformance]::LastInjectionMs) }
             [EverydayPerformance]::ObserveFor(60)
         }
         [EverydayPerformance]::Screenshot("$directory/typing.png")
@@ -112,9 +113,10 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+            $injectedMs = ([EverydayPerformance]::Tick() - $start) * 1000.0 / [EverydayPerformance]::Frequency()
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, '[chat] position ', '', $start, 30000, $paintBefore)
             Foreground
-            if ($i -ge 10) { Save-Sample 'opening' ($i - 10) $start $ms $offset 'closed console to nonempty Chat View' }
+            if ($i -ge 10) { Save-Sample 'opening' ($i - 10) $start $ms $offset 'closed console to nonempty Chat View' $injectedMs }
             [EverydayPerformance]::ObserveFor(1600)
         }
         $view = [EverydayPerformance]::Transcript($main)
@@ -128,10 +130,11 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, $delta)
+            $injectedMs = ([EverydayPerformance]::Tick() - $start) * 1000.0 / [EverydayPerformance]::Frequency()
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] wheel delta=$delta moved=", '[chat] position ', $start, 30000, $paintBefore)
             $range = [EverydayPerformance]::Tail($log, $offset)
             if ($range -match '\[chat\] wheel delta=-?\d+ moved=0 ') { throw 'No-op scrolling sample' }
-            if ($i -ge 10) { Save-Sample 'scrolling' ($i - 10) $start $ms $offset "delta=$delta nonzero scroll and subsequent paint" }
+            if ($i -ge 10) { Save-Sample 'scrolling' ($i - 10) $start $ms $offset "delta=$delta nonzero scroll and subsequent paint" $injectedMs }
             [EverydayPerformance]::ObserveFor(60)
         }
         [EverydayPerformance]::Screenshot("$directory/scrolling.png")
@@ -152,8 +155,9 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [IO.File]::AppendAllText($streamPath, $json, $encoding)
+            $injectedMs = ([EverydayPerformance]::Tick() - $start) * 1000.0 / [EverydayPerformance]::Frequency()
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] push shell=$longShell ", '[chat] position ', $start, 30000, $paintBefore)
-            if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "incremental part=$i bytes=$($encoding.GetByteCount($json))" }
+            if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "incremental part=$i bytes=$($encoding.GetByteCount($json))" $injectedMs }
             [EverydayPerformance]::ObserveFor(37 + (($i * 53) % 113))
         }
         [EverydayPerformance]::Screenshot("$directory/streaming.png")

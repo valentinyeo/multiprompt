@@ -11,6 +11,7 @@ public static class EverydayPerformance {
     [DllImport("user32.dll", EntryPoint="PostMessageW")] static extern bool PostMessage(IntPtr window, uint message, UIntPtr wp, IntPtr lp);
     static readonly ManualResetEvent pace = new ManualResetEvent(false);
     public static void ObserveFor(int milliseconds) { pace.WaitOne(milliseconds); }
+    public static double LastAcknowledgedMs, LastCompositorMs, LastInjectionMs;
     public static long Tick() { return Stopwatch.GetTimestamp(); }
     public static long Frequency() { return Stopwatch.Frequency; }
     public static double CompositorControl() {
@@ -47,8 +48,12 @@ public static class EverydayPerformance {
                     if (long.Parse(frame.Groups[1].Value) > paintBefore) painted = true;
             }
             if (at >= 0 && painted && (after == "" || text.IndexOf(after, at + first.Length, StringComparison.Ordinal) >= 0)) {
+                long acknowledged = Tick();
+                LastAcknowledgedMs = (acknowledged - started) * 1000.0 / Frequency();
                 if (DwmFlush() < 0) throw new InvalidOperationException("DwmFlush failed");
-                return (Tick() - started) * 1000.0 / Frequency();
+                long presented = Tick();
+                LastCompositorMs = (presented - acknowledged) * 1000.0 / Frequency();
+                return (presented - started) * 1000.0 / Frequency();
             }
             pace.WaitOne(2);
         }
@@ -58,10 +63,15 @@ public static class EverydayPerformance {
         if (ChatDeliveryDesktop.Owner(composer) != pid || ChatDeliveryDesktop.GetForegroundWindow() != main || ChatDeliveryDesktop.Focus(main)[1] != composer.ToInt64()) throw new InvalidOperationException("Typing ownership mismatch");
         long started = Tick();
         ChatDeliveryDesktop.Character(character);
+        LastInjectionMs = (Tick() - started) * 1000.0 / Frequency();
         while ((Tick() - started) * 1000.0 / Frequency() < 10000) {
             if (ChatDeliveryDesktop.Text(composer) == expected) {
+                long acknowledged = Tick();
+                LastAcknowledgedMs = (acknowledged - started) * 1000.0 / Frequency();
                 if (DwmFlush() < 0) throw new InvalidOperationException("DwmFlush failed");
-                return (Tick() - started) * 1000.0 / Frequency();
+                long presented = Tick();
+                LastCompositorMs = (presented - acknowledged) * 1000.0 / Frequency();
+                return (presented - started) * 1000.0 / Frequency();
             }
             pace.WaitOne(2);
         }
