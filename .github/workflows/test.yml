@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test the squash merge helper builds its own title
+        run: node --test tools/automerge-admit-run.test.js
       - name: Test commit identity enforcement
         run: node --test tools/check-commit-identities.test.mjs
       - name: Check every pushed commit identity
@@ -42,12 +44,19 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then BASE=$(git merge-base "$BASE" "$HEAD"); fi
           node tools/check-commit-identities.mjs "$BASE" "$HEAD"
       - name: Test the pull request title names its ticket
-        run: node --test tools/check-pr-title.test.mjs
-      - name: Check the pull request title names its ticket
+        run: node --test tools/check-pr-title.test.mjs tools/merge-title.test.js
+      - name: Check the pull request title names its ticket and its fragments
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node tools/check-pr-title.mjs
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PR_FILES=$(git diff --name-only --diff-filter=AM "$(git merge-base "origin/$BASE" "$HEAD")" "$HEAD") node tools/check-pr-title.mjs
+      - name: Test the deploy proof keeps its secrets masked
+        run: node --test tools/check-deploy-proof-secrets.test.mjs
+      - name: Test the sign-in page base comparison scope
+        run: node --test tools/signin-page-base-check.test.mjs
       - name: Test touched-journey selection and workflow cancellation
         run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/pr-verifier-ci.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
       - name: Test automatic crash report triage
@@ -83,6 +92,14 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the FFmpeg install guard
+        run: node --test tools/check-ffmpeg-install.test.js
+      - name: Require a cached, retried FFmpeg install
+        run: node tools/check-ffmpeg-install.mjs
+      - name: Test the servers slot guard
+        run: node --test tools/check-servers-slots.test.js
+      - name: Require a slot per server in every servers file
+        run: node tools/check-servers-slots.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
       - name: Test the source file-size ratchet
@@ -97,6 +114,8 @@ jobs:
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup
         run: python3 tools/chat-shared-runtime.test.py -v
+      - name: Prove a second user's hosted chat reaches its own browser pane
+        run: python3 tools/owner-chat-browser.test.py -v
       - name: Track each message by its id
         run: python3 -W error::DeprecationWarning tools/message-id-delivery-test.py -v
       - name: Restart a stopped chat AI from the reader
@@ -265,7 +284,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js tools/release-notes-tolerance.test.mjs tools/release-never-stops-on-keys.test.mjs tools/version-stamp.test.mjs tools/ticket-title-contract.test.js tools/release-unstick.test.js
       - name: Verify responsive startup ordering and original regression controls
         run: |
           node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
@@ -589,7 +608,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -642,31 +661,6 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Read the pre-change chat row source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .chat-row-base
-          sparse-checkout: src
-          persist-credentials: false
-      - name: Prove hosted row regressions fail on the identity-only source
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request' && matrix.arch == 'x64'
-        env:
-          CHAT_REGRESSION_SOURCE_ROOT: ${{ github.workspace }}/.chat-row-base
-        run: |
-          if ! grep -qE '^[[:space:]]+client_id: u64' .chat-row-base/src/chat_echo.zig; then
-            echo 'Base no longer uses identity-only matching'
-            exit 0
-          fi
-          set +e
-          timeout 180 node --test tools/chat-row-identity.test.js > "$RUNNER_TEMP/chat-row-before.log" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/chat-row-before.log"
-          test "$status" = 1
-          grep -q '^# fail 2$' "$RUNNER_TEMP/chat-row-before.log"
-          grep -q 'TestExpectedEqual' "$RUNNER_TEMP/chat-row-before.log"
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js

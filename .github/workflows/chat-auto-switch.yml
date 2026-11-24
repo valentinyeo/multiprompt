@@ -1,0 +1,53 @@
+name: chat-auto-switch
+
+on:
+  push:
+    paths:
+      - 'src/chat_auto_switch.zig'
+      - 'src/chat_history_reader.py'
+      - 'tools/chat-auto-switch-journey.py'
+      - 'tools/fixtures/SOFT-2469/**'
+      - '.claude/skills/verify-multiprompt/features/chat-auto-switch.md'
+      - '.github/workflows/chat-auto-switch.yml'
+  pull_request:
+    paths:
+      - 'src/chat_auto_switch.zig'
+      - 'src/chat_history_reader.py'
+      - 'tools/chat-auto-switch-journey.py'
+      - 'tools/fixtures/SOFT-2469/**'
+      - '.claude/skills/verify-multiprompt/features/chat-auto-switch.md'
+      - '.github/workflows/chat-auto-switch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chat-auto-switch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Replay the recorded usage-limit fixtures
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/revision.txt
+          set -o pipefail
+          python3 tools/chat-auto-switch-journey.py --evidence evidence 2>&1 | tee evidence/journey.log
+      - name: Upload the switch evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-auto-switch
+          path: evidence/
+          if-no-files-found: error

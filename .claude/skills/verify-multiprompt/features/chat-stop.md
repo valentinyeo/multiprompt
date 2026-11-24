@@ -14,7 +14,7 @@ Open a working chat with an empty message box. Click Stop inside the box, press 
 
 Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
-1. On a healthy Part B host, send a request that stays busy long enough to stop. Capture the working state.
+1. On the real `server-chat` host, send a request that stays busy long enough to stop. Capture the working state. The deterministic provider finishes immediately, so this step needs a cancellable provider first.
 2. Click the square Stop button with real mouse input. Require the host's current turn to end and the working dots to disappear.
 3. Repeat with Escape and the palette action. Send a follow-up after each stop and require one reply.
 4. Preserve the prior messages and unsent draft. Observe host cancellation independently; disappearance of the button alone is not proof.
@@ -29,7 +29,7 @@ Follow the priority Stop recipe above with button, Escape and palette independen
 
 Observable proof: Real current turn ends; a subsequent message receives one reply.
 
-UNREACHABLE for live interruption until Part B exposes a busy cancellable host and the native button/key/palette sequence. chat-view stop-in-box proves placement only.
+UNREACHABLE for live interruption: the merged `server-chat` host replies at once through a deterministic provider, so nothing stays busy. A cancellable provider plus the native button/key/palette sequence is the missing prerequisite. `chat-view` stop-in-box proves placement only.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
@@ -38,6 +38,6 @@ UNREACHABLE for live interruption until Part B exposes a busy cancellable host a
 
 ## Gotchas
 
-UNREACHABLE for real interruption until Part B supplies a busy, cancellable real host and the desktop driver covers button, Escape and palette cancellation. Track SOFT-2566 for busy-send/Stop product behavior; do not change product code in this map PR.
+UNREACHABLE for real interruption until a cancellable provider stays busy long enough to stop and the desktop driver covers button, Escape and palette cancellation. The merged `server-chat` host does not supply that. Track SOFT-2566 for busy-send/Stop product behavior; do not change product code in this map PR.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A ([PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070), `seed-profile.py`, `seed-profile.ps1`, the `chat-real-size` journey) was closed unmerged, so master still has no real-size seeded profile. Part B ([PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072)) merged on 2026-11-18 as the runner-owned SSH/tmux [server chat](server-chat.md) journey, which runs as `feature=server-chat`; use it rather than adding another server fixture. Do not add replacement real-size fixtures here until a Part A equivalent lands.

@@ -878,12 +878,7 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
         return;
     }
     if (app_state.active_shell >= app_state.shell_count) return;
-    var shell_hwnd = app_state.shells[app_state.active_shell].hwnd;
-    if (shell_hwnd == null and app_state.shells[app_state.active_shell].native_terminal) {
-        _ = @import("native_session.zig").ensureWindow(app_state.shells[app_state.active_shell].shell_id);
-        shell_hwnd = app_state.shells[app_state.active_shell].hwnd;
-    }
-    if (shell_hwnd == null) return;
+    if (app_state.shells[app_state.active_shell].hwnd == null) return;
     if (!foregroundIsOurs()) return;
 
     if (use_alt_trick) {
@@ -916,7 +911,7 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
         }
     }
 
-    const target_hwnd = shell_hwnd;
+    const target_hwnd = app_state.shells[app_state.active_shell].hwnd;
 
     const fg = GetForegroundWindow();
     var fg_is_ours = (fg == app_state.g_main_hwnd or fg == target_hwnd);

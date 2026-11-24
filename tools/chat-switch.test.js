@@ -15,9 +15,13 @@ function paintFirst(text) {
   const chat = switching.slice(chatStart, switching.indexOf('} else if (', chatStart + 1));
   assert.match(chat, /chatDeferTranscriptLoad\(\);[\s\S]*layoutChatControls\(\);/);
   assert.doesNotMatch(chat, /positionActiveBrowser|parkInactiveBrowserPanes|updateBrowserVisibility|refreshChatTranscript/);
-  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript', 'chatFileOnReady']) {
+  for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript']) {
     assert.match(body(fn, text), /if \(g_chat_browser_swap\.shell_id != 0\) return;/);
   }
+  const ready = body('chatFileOnReady', text);
+  assert.match(ready, /if \(g_chat_browser_swap\.shell_id != 0\) \{/);
+  assert.match(ready, /g_chat_browser_swap\.shell_id != on_screen[^]*?g_chat_browser_swap\.cancel\(\)/);
+  assert.match(ready, /held\(GetTickCount64\(\)\)[^]*?g_chat_browser_swap\.cancel\(\)[^]*?\} else return;/);
   const paint = body('chatTranscriptWndProc', text);
   assert.match(paint, /EndPaint\(hwnd, &ps\);\s*if \(painted\) chatSwitchDidPaint\(\);/);
   assert.match(paint, /painted = BitBlt\([^]*\) != 0;/);
@@ -421,4 +425,147 @@ test('IGSH-1197 switch traces attribute persistence, draft and history stalls be
   for (const step of ['read_marker', 'draft_bind', 'save_session', 'chat_history']) {
     assert.ok(switching.includes(`switch_timing.record(.${step}, timing_started)`), step);
   }
+});
+
+test('SOFT-3089 a restored chat is never held blank by a switch paint that never lands', () => {
+  const os = require('node:os'), path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-held-'));
+  const prelude = `
+const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+fn consumePinnedBrowserEntry(_: u32) void {}
+const chat_switch = @import("chat_switch.zig");
+var g_chat_browser_swap: chat_switch.Pending = .{};
+var g_chat_active = true;
+var active_shell: u32 = 0;
+var shell_count: u32 = 1;
+var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0, browser_enabled: bool = false }{.{}};
+var g_main_hwnd: ?usize = 1;
+var g_chat_transcript_hwnd: ?usize = 2;
+var g_chat_composer_hwnd: ?usize = 3;
+var g_chat_switch_preparing = false;
+var g_edit_hwnd: ?usize = null;
+var g_popup_menu_active = false;
+var g_search_active = false;
+var g_inbox_active = false;
+var g_shortcuts_active = false;
+var g_changelog_active = false;
+var g_url_picker_active = false;
+var g_all_sessions_active = false;
+var g_snippet_create_active = false;
+var g_chat_switch_started: u64 = 1000;
+var g_chat_switch_painted_ms: u64 = 0;
+var g_chat_switch_browser_sid: u32 = 0;
+var g_restoring = false;
+const TIMER_CHAT_BROWSER_SWAP = 9;
+const SW_SHOWNOACTIVATE = 4;
+var test_now: u64 = 1000;
+var timer_ms: u32 = 0;
+var reveals: usize = 0;
+var exchanges: usize = 0;
+var ready: usize = 0;
+var refreshes: usize = 0;
+var invalidates: usize = 0;
+var held_logs: usize = 0;
+fn GetTickCount64() u64 { return test_now; }
+fn SetTimer(_: ?usize, _: usize, ms: u32, _: ?*anyopaque) usize { timer_ms = ms; return 1; }
+fn KillTimer(_: ?usize, _: usize) bool { timer_ms = 0; return true; }
+fn layoutChatControls() void {}
+fn ShowWindow(_: ?usize, mode: i32) bool { std.debug.assert(mode == SW_SHOWNOACTIVATE); reveals += 1; return true; }
+fn InvalidateRect(_: ?usize, _: ?*anyopaque, _: i32) bool { invalidates += 1; return true; }
+fn debugLog(line: []const u8) void { if (std.mem.startsWith(u8, line, "[switch] paint held")) held_logs += 1; }
+fn parkInactiveBrowserPanes() void {}
+fn ecoqosReevaluateAll() void {}
+fn wakeBrowserPaneFromFreeze(_: u32) void {}
+fn updateBrowserVisibility() void { exchanges += 1; }
+fn browserPaneActive() bool { return false; }
+fn armBrowserVisibilitySettle(_: u32) void {}
+var saves: usize = 0;
+fn saveSession() void { saves += 1; }
+fn writePaneSessionFileForShell(_: u32) void {}
+fn chatSwitchLogBrowserShown() void {}
+fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0); ready += 1; }
+fn refreshChatTranscript(_: bool) void { std.debug.assert(g_chat_browser_swap.shell_id == 0); refreshes += 1; }
+`;
+  const cases = `
+test "a switch paint held by an overlay past the hold deadline releases the restored chat" {
+    g_all_sessions_active = true;
+    g_chat_browser_swap.request(7, 1000);
+    test_now = 3000;
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(u32, 7), g_chat_browser_swap.shell_id);
+    try std.testing.expectEqual(@as(usize, 0), ready);
+    try std.testing.expectEqual(@as(u32, 300), timer_ms);
+    test_now = 4000;
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(u32, 0), g_chat_browser_swap.shell_id);
+    try std.testing.expectEqual(@as(usize, 1), ready);
+    try std.testing.expectEqual(@as(usize, 1), held_logs);
+    try std.testing.expectEqual(@as(usize, 1), invalidates);
+    try std.testing.expectEqual(@as(usize, 0), reveals);
+    try std.testing.expectEqual(@as(usize, 0), exchanges);
+    try std.testing.expectEqual(@as(u32, 0), timer_ms);
+    g_all_sessions_active = false;
+}
+test "a held inline editor releases the restored chat the same way" {
+    ready = 0; held_logs = 0; invalidates = 0;
+    g_edit_hwnd = 4;
+    g_chat_browser_swap.request(7, 1000);
+    test_now = 4000;
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(u32, 0), g_chat_browser_swap.shell_id);
+    try std.testing.expectEqual(@as(usize, 1), ready);
+    g_edit_hwnd = null;
+}
+test "a switch paint that already landed still completes its browser exchange" {
+    ready = 0; held_logs = 0; invalidates = 0; exchanges = 0; refreshes = 0; reveals = 0;
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    test_now = 9000;
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 0), reveals);
+    try std.testing.expectEqual(@as(usize, 1), exchanges);
+    try std.testing.expectEqual(@as(usize, 1), ready);
+    try std.testing.expectEqual(@as(usize, 1), refreshes);
+    try std.testing.expectEqual(@as(usize, 0), held_logs);
+}
+`;
+  const check = tick => {
+    fs.writeFileSync(path.join(dir, 'held.zig'), (prelude + body('chatViewOwnsInput') + '\n' + tick + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("browser_pane.zig").consumePinnedBrowserEntry', 'consumePinnedBrowserEntry').replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'true'));
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'held.zig')], { encoding: 'utf8', timeout: 120_000 });
+  };
+  try {
+    copyZig(['chat_switch.zig', 'switch_step.zig'], dir);
+    const current = check(body('chatSwitchBrowserTick'));
+    assert.equal(current.status, 0, current.stdout + current.stderr);
+    const master = `fn chatSwitchBrowserTick() void {
+    _ = KillTimer(g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
+    if (!g_chat_active or active_shell >= shell_count) return;
+    const shell_id = shells[active_shell].shell_id;
+    if (g_chat_browser_swap.shell_id == 0 or g_chat_browser_swap.shell_id != shell_id) return;
+    if (g_chat_switch_preparing or !chatViewOwnsInput() or g_edit_hwnd != null or g_popup_menu_active) {
+        _ = SetTimer(g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, chat_switch.paint_deadline_ms, null);
+        return;
+    }
+    const now = GetTickCount64();
+    if (!g_chat_browser_swap.painted) {
+        if (!g_chat_browser_swap.overdue(shell_id, now)) {
+            _ = SetTimer(g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, @intCast(chat_switch.paint_deadline_ms -| (now -| g_chat_browser_swap.requested_at)), null);
+            return;
+        }
+    }
+    if (!g_chat_browser_swap.take(shells[active_shell].shell_id)) return;
+    chatFileOnReady();
+    refreshChatTranscript(false);
+}`;
+    const baseline = check(body('chatSwitchBrowserTick', master));
+    assert.notEqual(baseline.status, 0);
+    assert.match(baseline.stderr, /a switch paint held by an overlay past the hold deadline releases the restored chat[^]*FAIL/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

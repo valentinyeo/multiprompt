@@ -1,6 +1,6 @@
 # Server shell input
 
-Source files: src/clipboard.zig, src/native_session.zig, src/main.zig, src/terminal_window.c, tools/verify-chat-delivery/boundary.py, tools/server-shell-input.test.js, .claude/skills/verify-multiprompt/server-shell-input.ps1, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/control-native.cs
+Source files: src/clipboard.zig, src/native_session.zig, src/main.zig, src/terminal_window.c, tools/verify-chat-delivery/boundary.py, tools/server-shell-input.test.js, .claude/skills/verify-multiprompt/server-shell-input.ps1, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/control-library.ps1, .claude/skills/verify-multiprompt/control-native.cs
 
 Verify on: pull_request
 

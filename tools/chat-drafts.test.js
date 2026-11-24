@@ -207,9 +207,8 @@ test('ISSUE-498 restart recreates sessions using the production saved chat ident
   const save = body('saveSessionTo');
   assert.match(save, /const chat_id_pre = ",\\"chat_id\\":";/);
   assert.match(save, /writeUintTo\(json_buf\[pos\.\.\], shells\[i\]\.chat_id\)/);
-  const restoreLine = body('applySavedTabFields').match(/^    shells\[idx\]\.chat_id = tab\.chat_id;$/m);
-  assert.ok(restoreLine, 'real restart identity restoration');
-  const restore = [restoreLine[0].replaceAll('tab.chat_id', 'tabs[t].chat_id')];
+  const restore = body('spawnSavedTab').match(/^    shells\[idx\]\.chat_id = tabs\[t\]\.chat_id;$/m);
+  assert.ok(restore, 'real restart identity restoration');
   const reader = fs.readFileSync('src/json_reader.zig', 'utf8');
   assert.match(reader, /tab\.chat_id = uint\(obj, "chat_id"\);/);
   execute(production() + `

@@ -1,0 +1,100 @@
+name: Multi Bot session verbs and server slots
+
+on:
+  pull_request:
+    paths:
+      - 'src/mp_sessions.py'
+      - 'src/mp_layout.mjs'
+      - 'tools/mp-sessions'
+      - 'tools/mp-sessions-test.py'
+      - 'tools/mp-layout.mjs'
+      - 'tools/mp-layout-host.test.js'
+      - 'tools/mb.mjs'
+      - 'tools/check-servers-slots.mjs'
+      - 'tools/check-servers-slots.test.js'
+      - 'tools/fixtures/**/servers.json'
+      - '.claude/skills/verify-multiprompt/features/mp-sessions-slots.md'
+      - '.github/workflows/mp-sessions-slots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mp-sessions-slots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  receipt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run the layout, slot and session tests on head
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/input"
+          set +e
+          node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js > "$RUNNER_TEMP/input/layout.log" 2>&1
+          echo "head_layout=$?" >> "$GITHUB_ENV"
+          python3 tools/mp-sessions-test.py -v > "$RUNNER_TEMP/input/sessions.log" 2>&1
+          echo "head_sessions=$?" >> "$GITHUB_ENV"
+          true
+      - name: Run the same tests against the base source
+        shell: bash
+        run: |
+          set +e
+          if [ -z "$BASE_SHA" ]; then
+            exit 0
+          fi
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          cp tools/mp-layout-host.test.js tools/mp-sessions-test.py "$RUNNER_TEMP/base/tools/"
+          cp tools/check-servers-slots.test.js tools/check-servers-slots.mjs "$RUNNER_TEMP/base/tools/"
+          mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294"
+          cp tools/fixtures/MUBO-294/servers.json "$RUNNER_TEMP/base/tools/fixtures/MUBO-294/"
+          (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js) > "$RUNNER_TEMP/input/layout-base.log" 2>&1
+          echo "base_layout=$?" >> "$GITHUB_ENV"
+          (cd "$RUNNER_TEMP/base" && python3 tools/mp-sessions-test.py -v) > "$RUNNER_TEMP/input/sessions-base.log" 2>&1
+          echo "base_sessions=$?" >> "$GITHUB_ENV"
+          true
+      - name: Write the receipt
+        shell: bash
+        run: |
+          set +e
+          if [ -n "$BASE_SHA" ]; then
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" layout "$RUNNER_TEMP/input/layout.log" "$head_layout" '^(?:not )?ok [0-9]+ - MUBO-294 |^# (?:pass|fail) ' "$RUNNER_TEMP/input/layout-base.log" "$base_layout"
+            echo "receipt_layout=$?" >> "$GITHUB_ENV"
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" sessions "$RUNNER_TEMP/input/sessions.log" "$head_sessions" '^test_MUBO_294_|^(?:OK|FAILED)' "$RUNNER_TEMP/input/sessions-base.log" "$base_sessions"
+            echo "receipt_sessions=$?" >> "$GITHUB_ENV"
+          else
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" layout "$RUNNER_TEMP/input/layout.log" "$head_layout" '^(?:not )?ok [0-9]+ - MUBO-294 |^# (?:pass|fail) '
+            echo "receipt_layout=$?" >> "$GITHUB_ENV"
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" sessions "$RUNNER_TEMP/input/sessions.log" "$head_sessions" '^test_MUBO_294_|^(?:OK|FAILED)'
+            echo "receipt_sessions=$?" >> "$GITHUB_ENV"
+          fi
+          true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mp-sessions-slots
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error
+      - name: Fail when the head tests or the receipt failed
+        run: |
+          test "$head_layout" = 0
+          test "$head_sessions" = 0
+          test "$receipt_layout" = 0
+          test "$receipt_sessions" = 0
