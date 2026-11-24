@@ -63,11 +63,15 @@ SOFT-3054 merges master into the fresh-start handover branch. The handover now p
 
 SOFT-2378 deletes the sidebar freeze field from `Shell` in `src/app_state.zig`. `ChatOutboxEntry` and every covered decision, bound and mutation probe are unchanged, so only that file's hash moved and the sync commit now names the product fix.
 
+SOFT-3086 reviewed the pill range at `e11386929a20a51d87f0d91c429a097324c5571b` and, after merging master `f64e17a9f`, removes the leading-position gates so a known skill keeps its pill at the start, middle or end of a message. The covered user-message flow, `chatRelayout`, `chatEchoNotSent`, `ChatOutboxEntry` and every modeled decision are unchanged; only the render file's whole-file hash and the sync commit move. Slash-pill painting, agent-input rewriting and whether a skill runs stay outside the delivery model. Bounds, probes and mutation checks remain unchanged.
+
 SOFT-2604 saves one handover reply when a fresh start's agent answers twice. That rule now lives in SOFT-3054's `host_fresh_handover_pick` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
 
@@ -80,6 +84,8 @@ MUBO-246 adds failing-first cases for a prompt a UserPromptSubmit hook blocked b
 SOFT-2469 adds automatic AI fallback when a provider reports a usage limit: one new scoring constant in `src/app_state.zig` and, in the reader, a usage-limit predicate in the agent event path, a reason carried into the end of a turn and into `host_switch_ai`, and a detached auto-switch runner. `message_store_transaction`, `message_poll`, the connector apply path and every covered delivery decision are unchanged; `--model-only` reproduces the recorded decisions. Only the reader and that file's hashes moved.
 
 MUBO-247 updates `deliverMentions` in `src/chat_send.zig` to read classified mention deliveries and format read-along copies for FYI/CC mentions. All nine covered send functions, the extracted timeout branch, the restore guard, native probes and `decisions.json` are unchanged, so only `src/chat_send.zig`'s whole-file hash and the sync commit move.
+
+MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns; a hosted hax chat still answers from the host history only. `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged, so only the reader and reader-test hashes move, on top of master 158ebc74.
 
 | Source | Covered behavior |
 | --- | --- |

@@ -224,3 +224,8 @@ void vterm_keyboard_end_paste(VTerm *vt)
   if(vt->state->mode.bracketpaste)
     vterm_push_output_sprintf_ctrl(vt, C1_CSI, "201~");
 }
+
+int vterm_get_bracketpaste(VTerm *vt)
+{
+  return vt->state->mode.bracketpaste;
+}
