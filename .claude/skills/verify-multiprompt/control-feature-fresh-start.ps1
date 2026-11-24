@@ -5,11 +5,12 @@ $result.checks += $case
 function Read-HostIdentity([string]$Sid) {
     if (-not (Test-Path $hostRoot)) { return $null }
     foreach ($configPath in Get-ChildItem $hostRoot -Filter '*.config.json') {
-        $config = Get-Content $configPath.FullName -Raw | ConvertFrom-Json
+        if (-not (Test-Path $configPath.FullName)) { continue }
+        $config = Read-SharedText $configPath.FullName | ConvertFrom-Json
         if ($config.sid -cne $Sid) { continue }
         $statePath = $configPath.FullName -replace '\.config\.json$', '.state.json'
         if (-not (Test-Path $statePath)) { return $null }
-        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        $state = Read-SharedText $statePath | ConvertFrom-Json
         $native = ''
         if ($state.PSObject.Properties.Name -contains 'native_session' -and $state.native_session) {
             $native = [string]$state.native_session
@@ -88,7 +89,8 @@ try {
         $identity = Read-HostIdentity $before.csid
         if ($null -eq $identity) { return $false }
         $statePath = Join-Path $hostRoot ($identity.configFile -replace '\.config\.json$', '.state.json')
-        $hostState = Get-Content $statePath -Raw | ConvertFrom-Json
+        if (-not (Test-Path $statePath)) { return $false }
+        $hostState = Read-SharedText $statePath | ConvertFrom-Json
         $hostReady = -not ($hostState.PSObject.Properties.Name -contains 'fresh_start')
         $rotated = $identity.native_session -and $identity.native_session -cne $before.native_session
         $raw = if (Test-Path $log) { (Get-Content $log -Raw) -join '' } else { '' }

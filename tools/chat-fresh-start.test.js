@@ -323,6 +323,14 @@ test('fresh start journey is wired in journey-commands and the verify feature ma
   assert.match(feature, /palette-fresh-start/);
 });
 
+test('fresh start polls the agent-host state through the shared reader so a host replace cannot fail', () => {
+  const control = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-fresh-start.ps1'), 'utf8');
+  const library = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-library.ps1'), 'utf8');
+  assert.equal(control.split('Read-SharedText $statePath').length - 1, 2);
+  assert.doesNotMatch(control, /Get-Content \$statePath -Raw/);
+  assert.match(library, /\[IO\.FileShare\]::ReadWrite -bor \[IO\.FileShare\]::Delete/);
+});
+
 test('a handover turn the agent answers twice still saves one handover and keeps the chat going', () => {
   python(String.raw`
 import io, json, tempfile

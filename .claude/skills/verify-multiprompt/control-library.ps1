@@ -1029,7 +1029,7 @@ function Restart-ChatView([int]$ShellCount) {
 }
 
 function Read-SharedText([string]$Path) {
-    $file = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $file = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     $reader = New-Object IO.StreamReader($file)
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
