@@ -9,7 +9,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/desktop.cs", "$PSScriptRoot/everyday-performance.cs" -ReferencedAssemblies System, System.Core, System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/job.cs"
-$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-CimInstance Win32_Process | Select-Object Name, ProcessId, KernelModeTime, UserModeTime); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to nonempty content paint log plus DwmFlush'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append cumulative assistant update to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
+$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-CimInstance Win32_Process | Select-Object Name, ProcessId, KernelModeTime, UserModeTime); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; sampleCounts=@{ typing=$Count; switching=$Count; opening=[Math]::Min($Count,20); scrolling=$Count; streaming=$Count }; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to increased nonempty transcript paint count plus DwmFlush; existing 1500ms toggle guard honored outside timed region'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append cumulative assistant update to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
 $machine | ConvertTo-Json -Depth 8 | Set-Content "$Evidence/machine.json"
 for ($trial = 1; $trial -le $Trials; $trial++) {
     $directory = "$Evidence/trial-$trial"
@@ -102,11 +102,11 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             [EverydayPerformance]::ObserveFor(60)
         }
         [EverydayPerformance]::Screenshot("$directory/typing.png")
-        for ($i = 0; $i -lt ($Count + 10); $i++) {
+        for ($i = 0; $i -lt ([Math]::Min($Count,20) + 10); $i++) {
             Foreground
             [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
             [void](Await 'Chat View closed' { [ChatDeliveryDesktop]::Composer($main) -eq [IntPtr]::Zero })
-            [EverydayPerformance]::ObserveFor(400)
+            [EverydayPerformance]::ObserveFor(1600)
             [void](Await 'owned main window foreground before opening' { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main); [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
             $paintBefore = [EverydayPerformance]::PaintCount($log)
             $offset = [EverydayPerformance]::Length($log)
@@ -115,7 +115,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, '[chat] position ', '', $start, 30000, $paintBefore)
             Foreground
             if ($i -ge 10) { Save-Sample 'opening' ($i - 10) $start $ms $offset 'closed console to nonempty Chat View' }
-            [EverydayPerformance]::ObserveFor(400)
+            [EverydayPerformance]::ObserveFor(1600)
         }
         $view = [EverydayPerformance]::Transcript($main)
         [void](Await 'transcript focus before scrolling' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view) })

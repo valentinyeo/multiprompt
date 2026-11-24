@@ -43,7 +43,7 @@ for file in trials:
         raise ValueError('Latest streamed output not confirmed')
     for action in ACTIONS:
         batch = [s for s in trial['samples'] if s['action'] == action]
-        if len(batch) != machine['sampleCount'] or any(not s['success'] or not math.isfinite(s['ms']) or s['ms'] < 0 or not s['proof'] for s in batch):
+        if len(batch) != machine.get('sampleCounts', {}).get(action, machine['sampleCount']) or any(not s['success'] or not math.isfinite(s['ms']) or s['ms'] < 0 or not s['proof'] for s in batch):
             raise ValueError(f'Invalid {action} samples: {file}')
         values = [s['ms'] for s in batch]
         samples[action].extend(values)

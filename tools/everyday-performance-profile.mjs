@@ -19,7 +19,10 @@ for (const [file, functions] of Object.entries(targets)) {
   for (const name of functions) {
     const signature = new RegExp(`(fn ${name}\\([^\\n]+\\{)`);
     if (!signature.test(source)) throw new Error(`Unknown profile boundary ${file}:${name}`);
-    source = source.replace(signature, `$1\n    const everyday_span = @import("everyday_profile.zig").start();\n    defer @import("everyday_profile.zig").end("${file}:${name}", everyday_span);`);
+    const ending = file === 'main.zig'
+      ? `defer {\n        var everyday_label: [100]u8 = undefined;\n        @import("everyday_profile.zig").end(std.fmt.bufPrint(&everyday_label, "main.zig:wndProc:msg_{X}:wp_{X}", .{ msg, wp }) catch "main.zig:wndProc", everyday_span);\n    }`
+      : `defer @import("everyday_profile.zig").end("${file}:${name}", everyday_span);`;
+    source = source.replace(signature, `$1\n    const everyday_span = @import("everyday_profile.zig").start();\n    ${ending}`);
   }
   fs.writeFileSync(filename, source);
 }
@@ -32,7 +35,7 @@ pub fn start() i64 {
     _ = win.QueryPerformanceCounter(&tick);
     return tick;
 }
-pub fn end(comptime name: []const u8, before: i64) void {
+pub fn end(name: []const u8, before: i64) void {
     if (emitting) return;
     emitting = true;
     defer emitting = false;

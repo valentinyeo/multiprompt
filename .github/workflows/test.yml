@@ -9,6 +9,9 @@ on:
       trials:
         type: number
         default: 5
+      baseline:
+        type: boolean
+        default: true
       profile:
         type: boolean
         default: true
@@ -20,6 +23,7 @@ permissions:
   actions: read
 jobs:
   speed-baseline:
+    if: inputs.baseline
     runs-on: windows-latest
     timeout-minutes: 50
     env:
@@ -85,6 +89,7 @@ jobs:
           if ($env:BINARY_RUN -notmatch '^\d+$') { throw 'Expected numeric binary workflow run ID' }
           $origin = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/actions/runs/$env:BINARY_RUN"
           $builtRevision = $origin.head_sha
+          if (Test-Path zig-out/bin/measurement-build.json) { exit 0 }
           @{ builtRevision=$builtRevision; originatingRun=$origin.html_url; sourceTree=(git rev-parse "${builtRevision}:src").Trim(); build=(git rev-parse "${builtRevision}:build.zig").Trim(); sha256=(Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content zig-out/bin/measurement-build.json
       - name: Build exact requested revision in production configuration
         if: inputs.binary_run == ''
