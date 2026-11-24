@@ -187,6 +187,20 @@ function groupOfSource(text) {
   return text.slice(start, text.indexOf('\n}\n', start));
 }
 
+test('MUBO-35 Ctrl+K still offers Sidebar: hide and Sidebar: collapse', () => {
+  const rows = topLevelSearchRows(palette);
+  assert.ok(rows.has('SEARCH_HIDESIDEBAR_OFFSET'), 'Sidebar: expand row is emitted');
+  assert.ok(rows.has('SEARCH_SIDEBAR_COLLAPSE_OFFSET'), 'Sidebar: collapse row is emitted');
+  assert.ok(rows.has('SEARCH_SIDEBAR_HIDE_OFFSET'), 'Sidebar: hide row is emitted');
+  assert.match(palette, /SEARCH_SIDEBAR_COLLAPSE_OFFSET => "sidebar collapse"/);
+  assert.match(palette, /SEARCH_SIDEBAR_HIDE_OFFSET => "sidebar hide"/);
+  assert.match(palette, /\.\{ \.show = show_collapse, \.target = SEARCH_SIDEBAR_COLLAPSE_OFFSET \}/);
+  assert.match(palette, /\.\{ \.show = show_hide_sb, \.target = SEARCH_SIDEBAR_HIDE_OFFSET \}/);
+  const labels = palette.slice(palette.indexOf('fn palettePrimaryLabel'), palette.indexOf('\n}\n', palette.indexOf('fn palettePrimaryLabel')));
+  assert.match(labels, /SEARCH_SIDEBAR_COLLAPSE_OFFSET => "sidebar collapse"/);
+  assert.match(labels, /SEARCH_SIDEBAR_HIDE_OFFSET => "sidebar hide"/);
+});
+
 test('IGSH-612 every top-level Ctrl+K row belongs to a palette group', () => {
   const sessionRows = palette.match(/fn paletteRowIsSession\(target: usize\) bool \{[^}]*\}/);
   assert.ok(sessionRows, 'paletteRowIsSession');

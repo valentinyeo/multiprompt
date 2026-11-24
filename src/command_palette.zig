@@ -4912,27 +4912,18 @@ pub fn updateSearchResults() void {
             const expand_labels = [_][]const u8{ "sidebar", "sidebar expand", "expand", "show sidebar", "open sidebar" };
             const collapse_labels = [_][]const u8{ "sidebar", "sidebar collapse", "collapse", "narrow" };
             const hide_labels = [_][]const u8{ "sidebar", "sidebar hide", "hide sidebar", "focus", "zen", "hide" };
-            for (expand_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_expand = true;
-                    break;
-                }
-            }
-            for (collapse_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_collapse = true;
-                    break;
-                }
-            }
-            for (hide_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_hide_sb = true;
-                    break;
-                }
-            }
+            show_expand = anyLabelMatches(&expand_labels, q);
+            show_collapse = anyLabelMatches(&collapse_labels, q);
+            show_hide_sb = anyLabelMatches(&hide_labels, q);
         }
-        if (show_expand and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIDESIDEBAR_OFFSET;
+        const sidebar_rows = [_]struct { show: bool, target: usize }{
+            .{ .show = show_expand, .target = SEARCH_HIDESIDEBAR_OFFSET },
+            .{ .show = show_collapse, .target = SEARCH_SIDEBAR_COLLAPSE_OFFSET },
+            .{ .show = show_hide_sb, .target = SEARCH_SIDEBAR_HIDE_OFFSET },
+        };
+        for (sidebar_rows) |row| {
+            if (!row.show or app_state.g_search_result_count >= app_state.g_search_results.len) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row.target;
             app_state.g_search_result_count += 1;
         }
     }
@@ -6083,6 +6074,13 @@ pub fn asciiContainsQueryInsensitive(haystack: []const u8, needle: []const u16) 
             }
         }
         if (match) return true;
+    }
+    return false;
+}
+
+fn anyLabelMatches(labels: []const []const u8, query: []const u16) bool {
+    for (labels) |label| {
+        if (asciiContainsQueryInsensitive(label, query)) return true;
     }
     return false;
 }
