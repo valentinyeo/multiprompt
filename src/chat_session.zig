@@ -1235,6 +1235,7 @@ fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_histor
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
         .settlement = true,
+        .blocked_settlement = true,
         .message_protocol = 1,
         .source_offsets = true,
         .live = true,

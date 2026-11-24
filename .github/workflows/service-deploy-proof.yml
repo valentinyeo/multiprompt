@@ -1,0 +1,262 @@
+name: Service deploy proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-deploy-proof
+  cancel-in-progress: true
+
+env:
+  PROOF_WORKER: multibot-cloud-proof
+  PROOF_DATABASE: multibot-cloud-proof
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: service-proof
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+      - name: Write the Wrangler JSON reader
+        run: |
+          cat > "$RUNNER_TEMP/wrangler-json.mjs" <<'READER'
+          import { readFileSync } from 'node:fs';
+
+          function parse(text) {
+            const trimmed = text.trim();
+            if (!trimmed) return null;
+            try {
+              return JSON.parse(trimmed);
+            } catch {}
+            for (let start = 0; start < trimmed.length; start += 1) {
+              const closer = trimmed[start] === '[' ? ']' : trimmed[start] === '{' ? '}' : null;
+              if (!closer) continue;
+              let from = trimmed.length;
+              while (from > start) {
+                const end = trimmed.lastIndexOf(closer, from - 1);
+                if (end <= start) break;
+                try {
+                  return JSON.parse(trimmed.slice(start, end + 1));
+                } catch {}
+                from = end;
+              }
+            }
+            return null;
+          }
+
+          const mode = process.argv[2];
+          const data = parse(readFileSync(0, 'utf8'));
+          if (data === null) {
+            console.error('wrangler printed no readable JSON');
+            process.exit(1);
+          }
+
+          if (mode === 'database-id') {
+            const rows = Array.isArray(data) ? data : (data.result ?? data.results ?? []);
+            const row = rows.find((entry) => entry && entry.name === process.argv[3]);
+            if (row) process.stdout.write(String(row.uuid ?? row.id ?? ''));
+          } else if (mode === 'table-count') {
+            const rows = Array.isArray(data) ? data : [data];
+            const result = rows.find((entry) => entry && Array.isArray(entry.results));
+            const value = result?.results?.[0]?.tables;
+            if (typeof value !== 'number') {
+              console.error('no table count in the query result');
+              process.exit(1);
+            }
+            process.stdout.write(String(value));
+          } else if (mode === 'revision') {
+            const value = data.revision;
+            if (!Number.isSafeInteger(value)) {
+              console.error('no layout revision in the response');
+              process.exit(1);
+            }
+            process.stdout.write(String(value));
+          } else {
+            console.error(`unknown mode ${mode}`);
+            process.exit(1);
+          }
+          READER
+      - name: Install the service dependencies
+        working-directory: service
+        run: npm ci --no-audit --no-fund --prefer-offline
+      - name: Find or create the proof D1 database
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          list_id() {
+            npx wrangler d1 list --json | node "$RUNNER_TEMP/wrangler-json.mjs" database-id "$PROOF_DATABASE"
+          }
+          id="$(list_id)"
+          if [ -z "$id" ]; then
+            npx wrangler d1 create "$PROOF_DATABASE" > "$RUNNER_TEMP/d1-create.log"
+            id="$(list_id)"
+          fi
+          if [ -z "$id" ]; then
+            id="$(grep -v 'preview_database_id' "$RUNNER_TEMP/d1-create.log" | sed -n 's/.*database_id[[:space:]]*=[[:space:]]*"\([0-9a-f-]\{36\}\)".*/\1/p' | head -1)"
+          fi
+          test -n "$id"
+          echo "PROOF_DATABASE_ID=$id" >> "$GITHUB_ENV"
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          printf '%s' "$secret" > "$RUNNER_TEMP/proof-auth-secret"
+          echo "proof database $PROOF_DATABASE is $id" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build the proof config from wrangler.jsonc
+        working-directory: service
+        run: |
+          set -euo pipefail
+          node -e 'const fs=require("node:fs");const config=JSON.parse(fs.readFileSync("wrangler.jsonc","utf8"));config.name=process.env.PROOF_WORKER;const db=config.d1_databases[0];db.database_name=process.env.PROOF_DATABASE;db.database_id=process.env.PROOF_DATABASE_ID;delete config.vars.BETTER_AUTH_SECRET;fs.writeFileSync("wrangler.proof.jsonc",JSON.stringify(config,null,2))'
+      - name: Apply the migrations and deploy the Worker
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply DB --remote --config wrangler.proof.jsonc
+          npx wrangler deploy --config wrangler.proof.jsonc | tee "$RUNNER_TEMP/deploy.log"
+      - name: Read the deployed URL
+        id: url
+        run: |
+          set -euo pipefail
+          url="$(grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1)"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url"
+      - name: Store the auth secret on the proof Worker
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret put BETTER_AUTH_SECRET --config wrangler.proof.jsonc < "$RUNNER_TEMP/proof-auth-secret"
+      - name: Smoke-check the deployment
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          set -uo pipefail
+          failed=0
+          check() {
+            if [ "$2" = 1 ]; then
+              echo "PASS $1"
+              echo "- PASS $1" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "FAIL $1"
+              echo "- FAIL $1" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          }
+          code=""
+          for attempt in $(seq 1 24); do
+            code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$URL/health" || true)"
+            if [ "$code" = 200 ]; then break; fi
+            sleep 5
+          done
+          ok=0
+          if [ "$code" = 200 ] && grep -q 'multiprompt-account' "$RUNNER_TEMP/health.json"; then ok=1; fi
+          check "health $URL/health answered ${code}" "$ok"
+          page="$(curl -sS -o "$RUNNER_TEMP/signin.html" -w '%{http_code}' "$URL/signin" || true)"
+          ok=0
+          if [ "$page" = 200 ] && grep -q 'data-page="signin"' "$RUNNER_TEMP/signin.html"; then ok=1; fi
+          check "sign-in page $URL/signin answered ${page}" "$ok"
+          key="mpk_a_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+          echo "::add-mask::$key"
+          key_hash="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(process.argv[1]).digest("base64").replaceAll("+","-").replaceAll("/","_").replaceAll("=",""))' "$key")"
+          seeded=0
+          if npx wrangler d1 execute DB --remote --config wrangler.proof.jsonc --command "INSERT INTO service_keys (hash,account,kind,label,created) VALUES ('$key_hash','proof@example.com','admin','deploy-proof',$(date +%s))" > "$RUNNER_TEMP/key-seed.log" 2>&1; then seeded=1; fi
+          check "sync key seeded in the proof database" "$seeded"
+          read_code="$(curl -sS -o "$RUNNER_TEMP/layout.json" -w '%{http_code}' -H "Authorization: Bearer $key" "$URL/v1/layout" || true)"
+          read_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout.json" 2>/dev/null || true)"
+          ok=0
+          if [ "$read_code" = 200 ] && [ -n "$read_revision" ]; then ok=1; fi
+          check "sync read $URL/v1/layout answered ${read_code} at revision ${read_revision:-none}" "$ok"
+          write_code=""
+          written_revision=""
+          if [ -n "$read_revision" ]; then
+            node -e 'const fs=require("node:fs");const snap=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));fs.writeFileSync(process.argv[2],JSON.stringify({base_revision:snap.revision,layout:snap.layout}))' "$RUNNER_TEMP/layout.json" "$RUNNER_TEMP/layout-put.json"
+            write_code="$(curl -sS -o "$RUNNER_TEMP/layout-write.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $key" -H 'Content-Type: application/json' --data-binary "@$RUNNER_TEMP/layout-put.json" "$URL/v1/layout" || true)"
+            written_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-write.json" 2>/dev/null || true)"
+          fi
+          ok=0
+          if [ "$write_code" = 200 ] && [ -n "$written_revision" ] && [ "$written_revision" != "$read_revision" ]; then ok=1; fi
+          check "sync write $URL/v1/layout answered ${write_code:-none} at revision ${written_revision:-none}" "$ok"
+          again_code="$(curl -sS -o "$RUNNER_TEMP/layout-again.json" -w '%{http_code}' -H "Authorization: Bearer $key" "$URL/v1/layout" || true)"
+          again_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
+          ok=0
+          if [ "$again_code" = 200 ] && [ -n "$written_revision" ] && [ "$again_revision" = "$written_revision" ]; then ok=1; fi
+          check "sync read back $URL/v1/layout answered ${again_code} at revision ${again_revision:-none}" "$ok"
+          exit "$failed"
+      - name: Confirm the schema landed in the proof database
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          tables="$(npx wrangler d1 execute DB --remote --json --config wrangler.proof.jsonc --command "SELECT count(*) AS tables FROM sqlite_master WHERE type='table' AND name IN ('devices','layouts','bot_photos')" | node "$RUNNER_TEMP/wrangler-json.mjs" table-count)"
+          echo "schema tables: $tables" >> "$GITHUB_STEP_SUMMARY"
+          test "$tables" = 3
+      - name: Delete the proof Worker and its database
+        if: always()
+        working-directory: service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          set -uo pipefail
+          if [ -f wrangler.proof.jsonc ]; then
+            npx wrangler delete --config wrangler.proof.jsonc --force || echo "worker $PROOF_WORKER was not deployed"
+          else
+            npx wrangler delete "$PROOF_WORKER" --force || echo "worker $PROOF_WORKER was not deployed"
+          fi
+          npx wrangler d1 delete "$PROOF_DATABASE" -y || echo "database $PROOF_DATABASE was not created"
+          rm -f wrangler.proof.jsonc
+          left=0
+          if [ -f "$RUNNER_TEMP/wrangler-json.mjs" ]; then
+            if ! listing="$(npx wrangler d1 list --json)"; then
+              echo "FAIL teardown: could not list D1 databases"
+              exit 1
+            fi
+            remaining="$(printf '%s' "$listing" | node "$RUNNER_TEMP/wrangler-json.mjs" database-id "$PROOF_DATABASE" || true)"
+            if [ -n "$remaining" ]; then
+              echo "proof database $PROOF_DATABASE still exists"
+              left=1
+            fi
+          fi
+          if [ -n "${URL:-}" ]; then
+            for attempt in $(seq 1 6); do
+              answered="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/health" || true)"
+              if [ "$answered" != 200 ]; then break; fi
+              sleep 5
+            done
+            if [ "${answered:-}" = 200 ]; then
+              echo "proof worker still answers at $URL"
+              left=1
+            fi
+          fi
+          if [ "$left" = 0 ]; then
+            echo "- PASS teardown: proof worker and database deleted" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- FAIL teardown: proof resources remain live" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$left"

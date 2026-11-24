@@ -599,15 +599,37 @@ pub fn archiveHasNewContentSnapshot(shell: *const Shell, content: *const archive
     return shell.archive_content_valid and archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, content) != .none;
 }
 
-pub fn archiveHasNewContent(i: usize) bool {
-    const content = readArchiveContent(i) orelse return false;
-    if (!app_state.shells[i].archive_content_valid) {
-        app_state.shells[i].archive_content = content;
-        app_state.shells[i].archive_content_valid = true;
-        saveSession();
-        return false;
+fn shellUsesHostedArchive(shell: *const Shell) bool {
+    return shell.pid == 0 or shell.hook_capable or shell.claude_sid_len > 0;
+}
+
+fn hostedArchiveHasNewContent(shell: *const Shell) bool {
+    if (shell.archive_time == 0) return false;
+    if (shell.archive_active > shell.archive_time and shell.archive_active > shell.archive_done) return true;
+    if (shell.last_done_time > shell.archive_done and shell.last_done_time > shell.archive_time) return true;
+    if (shell.last_done_content_valid) {
+        if (shell.archive_content_valid) {
+            return archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, &shell.last_done_content) != .none;
+        }
+        return shell.last_done_time > shell.archive_done;
     }
-    return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    return false;
+}
+
+pub fn archiveHasNewContent(i: usize) bool {
+    if (i >= app_state.shell_count) return false;
+    if (readArchiveContent(i)) |content| {
+        if (!app_state.shells[i].archive_content_valid) {
+            app_state.shells[i].archive_content = content;
+            app_state.shells[i].archive_content_valid = true;
+            saveSession();
+            return false;
+        }
+        return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    }
+    const shell = &app_state.shells[i];
+    if (shellUsesHostedArchive(shell)) return hostedArchiveHasNewContent(shell);
+    return false;
 }
 
 pub fn logUnarchive(i: usize, reason: []const u8) void {
@@ -1276,17 +1298,26 @@ fn frozenPlaceBefore(_: void, a: FrozenPlace, b: FrozenPlace) bool {
 }
 
 pub fn freezeSidebarOrder() void {
-    if (app_state.g_sidebar_order_frozen) return;
+    if (app_state.g_sidebar_order_frozen) {
+        if (app_state.g_sidebar_view == null) return;
+        _ = thawSidebarOrder();
+    }
     const row_count = layoutRows(&g_freeze_rows);
     g_frozen_places_len = 0;
     for (g_freeze_rows[0..row_count]) |row| {
-        if (row.kind != .tab or row.shell_idx >= app_state.shell_count) continue;
-        if (g_frozen_places_len >= MAX_SHELLS) break;
-        g_frozen_places[g_frozen_places_len] = .{
-            .shell_id = app_state.shells[row.shell_idx].shell_id,
-            .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+        const sid: ?u32 = switch (row.kind) {
+            .tab => if (row.shell_idx < app_state.shell_count) app_state.shells[row.shell_idx].shell_id else null,
+            .inbox => if (row.shell_idx < app_state.g_inbox_row_count) app_state.g_inbox_rows[row.shell_idx].sid else null,
+            else => null,
         };
-        g_frozen_places_len += 1;
+        if (sid) |shell_id| {
+            if (g_frozen_places_len >= MAX_SHELLS) break;
+            g_frozen_places[g_frozen_places_len] = .{
+                .shell_id = shell_id,
+                .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+            };
+            g_frozen_places_len += 1;
+        }
     }
     std.mem.sort(FrozenPlace, g_frozen_places[0..g_frozen_places_len], {}, frozenPlaceBefore);
     app_state.g_sidebar_order_frozen = true;
@@ -1523,15 +1554,25 @@ fn layoutViewRows(out: *[MAX_ROWS]Row, view: @import("workspace_view.zig").Built
         indices[count] = @intCast(i);
         count += 1;
     }
+    const split = view.split();
     const Order = struct {
         split: u32,
         now_ms: u64,
 
         fn less(ctx: @This(), a: u32, b: u32) bool {
+            if (app_state.g_sidebar_order_frozen and g_frozen_places_len > 0) {
+                const pa = frozenPlaceOf(app_state.g_inbox_rows[a].sid);
+                const pb = frozenPlaceOf(app_state.g_inbox_rows[b].sid);
+                if (pa != pb) {
+                    if (pa == 0) return false;
+                    if (pb == 0) return true;
+                    return pa > pb;
+                }
+            }
             return @import("inbox.zig").rowLessForSplit(ctx.split, ctx.now_ms, app_state.g_inbox_rows[a], app_state.g_inbox_rows[b]);
         }
     };
-    std.mem.sort(u32, indices[0..count], Order{ .split = view.split(), .now_ms = now_ms }, Order.less);
+    std.mem.sort(u32, indices[0..count], Order{ .split = split, .now_ms = now_ms }, Order.less);
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     var n: u32 = 0;
     for (indices[0..count]) |ri| {
@@ -5467,6 +5508,37 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
+test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_ws = app_state.g_active_workspace;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_ws;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 2;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].workspace = 2;
+    app_state.shells[0].pid = 0;
+    app_state.shells[0].hook_capable = true;
+    app_state.shells[0].inbox_archived = true;
+    app_state.shells[0].archive_time = 1000;
+    app_state.shells[0].archive_done = 1000;
+    app_state.shells[0].last_done_time = 1000;
+    try std.testing.expect(isTabHidden(0));
+    try std.testing.expect(!archiveHasNewContent(0));
+    app_state.shells[0].last_done_time = 2000;
+    try std.testing.expect(archiveHasNewContent(0));
+}
+
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
     const saved_shells = app_state.shells[0..4].*;
     const saved_count = app_state.shell_count;
@@ -5859,6 +5931,62 @@ test "SOFT-2378 a clicked chat that is rebuilt keeps its row under the pointer" 
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
     try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
+}
+
+test "SOFT-3124 a workspace view keeps the selected row in place until another row is selected" {
+    const saved_view = app_state.g_sidebar_view;
+    const saved_single = app_state.g_single_window;
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_shell_count = app_state.shell_count;
+    const saved_inbox_count = app_state.g_inbox_row_count;
+    const saved_inbox_ws_count = app_state.g_inbox_ws_count;
+    const saved_inbox_ws = app_state.g_inbox_ws[0];
+    const saved_inbox_rows = app_state.g_inbox_rows[0..3].*;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        _ = thawSidebarOrder();
+        app_state.g_sidebar_view = saved_view;
+        app_state.g_single_window = saved_single;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_shell_count;
+        app_state.g_inbox_row_count = saved_inbox_count;
+        app_state.g_inbox_ws_count = saved_inbox_ws_count;
+        app_state.g_inbox_ws[0] = saved_inbox_ws;
+        app_state.g_inbox_rows[0..3].* = saved_inbox_rows;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_single_window = true;
+    app_state.g_sidebar_view = .all;
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 3;
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0].hwnd = @intFromPtr(app_state.g_main_hwnd);
+    app_state.g_inbox_row_count = 3;
+    for ([_]struct { sid: u32, la: u64 }{
+        .{ .sid = 11, .la = 100 },
+        .{ .sid = 12, .la = 200 },
+        .{ .sid = 13, .la = 50 },
+    }, 0..) |entry, i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = entry.sid;
+        app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = entry.sid, .la = entry.la };
+    }
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 12), app_state.shells[rows[0].shell_idx].shell_id);
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    app_state.g_inbox_rows[2].lv = 9_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[0].shell_idx].shell_id);
+    app_state.g_inbox_rows[1].lv = 8_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 11), app_state.shells[rows[2].shell_idx].shell_id);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

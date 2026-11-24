@@ -316,3 +316,54 @@ test('SOFT-2890 the test CLI selects its own workflow, not a desktop journey', (
   }
   assert.deepEqual(touchedJourneys(['tools/mbv.mjs', 'src/themes.zig'], real), { features: ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card'], unmapped: [], ciWorkflows: ['verify-cli.yml'] });
 });
+
+const CHAT_SOURCE_FILES = [
+  'src/chat_echo.zig',
+  'src/chat_history.zig',
+  'src/chat_history_reader.py',
+  'src/chat_render.zig',
+  'src/chat_send.zig',
+  'src/chat_session.zig',
+];
+
+test('SOFT-3100 every chat source file selects a stillness and a send-and-read journey', () => {
+  const real = path.join(__dirname, '../.claude/skills/verify-multiprompt/features');
+  for (const file of CHAT_SOURCE_FILES) {
+    const result = touchedJourneys([file], real);
+    assert.deepEqual(result.chatFiles, [file], file);
+    for (const journey of ['chat-still', 'server-chat']) {
+      assert.ok(result.features.includes(journey), `${file} must select ${journey}, got ${result.features.join(', ')}`);
+    }
+    assert.ok(result.features.length <= 8, `${file} selected ${result.features.length} journeys`);
+  }
+  assert.deepEqual(touchedJourneys(['src/chat_echo.zig', 'src/chat_send.zig'], real).chatFiles, ['src/chat_echo.zig', 'src/chat_send.zig']);
+  assert.equal(touchedJourneys(['src/themes.zig'], real).chatFiles, undefined);
+});
+
+test('SOFT-3100 the chat journeys survive the eight-journey cap', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'touched-journeys-chat-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const map = (name, sources) => fs.writeFileSync(path.join(directory, `${name}.md`), `# ${name}\nSource files: ${sources}\nVerify on: push, pull_request\n## Driving it with control.ps1\n`);
+  map('chat-still', 'src/chat_echo.zig, src/renderer.zig');
+  map('server-chat', 'src/chat_echo.zig, src/server.zig');
+  const exact = ['exact-a', 'exact-b', 'exact-c', 'exact-d', 'exact-e', 'exact-f', 'exact-g', 'exact-h', 'exact-i'];
+  for (const name of exact) map(name, `src/${name}.zig`);
+  const result = touchedJourneys(['src/chat_echo.zig', ...exact.map(name => `src/${name}.zig`)], directory);
+  assert.ok(result.features.includes('chat-still'));
+  assert.ok(result.features.includes('server-chat'));
+  assert.equal(result.features.length, 8);
+  assert.deepEqual(result.chatFiles, ['src/chat_echo.zig']);
+});
+
+test('SOFT-3100 the selection plan carries the chat files to the verdict', t => {
+  const directory = maps(t);
+  const out = path.join(directory, 'out');
+  fs.mkdirSync(out);
+  fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Chat order', body: '', labels: [] }));
+  fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: ['chat-still', 'server-chat'], unmapped: [], chatFiles: ['src/chat_echo.zig'] }));
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: '{"features":[]}' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8')).chatFiles, ['src/chat_echo.zig']);
+});
