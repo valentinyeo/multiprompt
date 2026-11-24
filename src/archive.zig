@@ -425,6 +425,19 @@ pub fn loadArchiveIfNeeded() void {
     loadArchiveFromDisk(false);
 }
 
+pub fn loadArchivedEntries() []const ArchivedEntry {
+    loadArchiveIfNeeded();
+    return app_state.g_archived.items[0..app_state.g_archived_count];
+}
+
+pub fn archivedListHas(entries: []const ArchivedEntry, host: u8, session: []const u8) bool {
+    if (session.len == 0) return false;
+    for (entries) |*entry| {
+        if (archivedEntryMatches(entry, host, session)) return true;
+    }
+    return false;
+}
+
 fn saveArchive() bool {
     var path_buf: [512]u8 = undefined;
     const path = getArchivePath(&path_buf) orelse return false;
