@@ -18,13 +18,11 @@ pub const Entry = struct {
 };
 
 pub const Pins = struct {
-    entries: [MAX_ENTRIES]Entry = @splat(Entry{}),
+    entries: [MAX_ENTRIES]Entry = @splat(.{}),
     count: u16 = 0,
 };
 
 pub const Capture = struct { name_len: usize = 0, note_len: usize = 0 };
-
-pub const Wire = struct { name: []const u8 = "", instructions: []const u8 = "" };
 
 pub var g_pins: Pins = .{};
 pub var g_pins_loaded: bool = false;
@@ -51,7 +49,7 @@ pub fn validSkill(name: []const u8) bool {
 }
 
 pub fn find(pins: *const Pins, chat: []const u8) ?[]const u8 {
-    for (pins.entries[0..pins.count]) |*entry| {
+    for (pins.entries[0..pins.count]) |entry| {
         if (std.mem.eql(u8, entry.chat[0..entry.chat_len], chat)) return entry.skill[0..entry.skill_len];
     }
     return null;
@@ -94,7 +92,7 @@ pub fn serialize(pins: *const Pins, out: []u8) []const u8 {
     if (out.len < HEADER.len) return out[0..0];
     @memcpy(out[0..HEADER.len], HEADER);
     var pos: usize = HEADER.len;
-    for (pins.entries[0..pins.count]) |*entry| {
+    for (pins.entries[0..pins.count]) |entry| {
         const chat = entry.chat[0..entry.chat_len];
         const skill = entry.skill[0..entry.skill_len];
         if (pos + chat.len + skill.len + 2 > out.len) break;
@@ -197,20 +195,17 @@ pub fn captureInto(idx: u32, name_buf: []u8, note_buf: []u8) Capture {
     return .{ .name_len = len, .note_len = note.len };
 }
 
-pub fn wireFor(idx: u32, name_buf: *[MAX_NAME]u8, note_buf: *[NOTE_CAP]u8) Wire {
-    const capture = captureInto(idx, name_buf, note_buf);
-    return .{ .name = name_buf[0..capture.name_len], .instructions = note_buf[0..capture.note_len] };
-}
-
-fn asciiContains(query: []const u16, word: []const u8) bool {
-    if (word.len == 0 or query.len < word.len) return false;
-    const limit = query.len - word.len + 1;
+fn labelContains(label: []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    if (query.len > label.len) return false;
+    const limit = label.len - query.len + 1;
     for (0..limit) |start| {
         var ok = true;
-        for (word, 0..) |wc, j| {
-            const raw: u8 = if (query[start + j] < 128) @intCast(query[start + j]) else 0;
+        for (query, 0..) |qc, i| {
+            const raw: u8 = if (qc < 128) @intCast(qc) else 0;
             const a: u8 = if (raw >= 'A' and raw <= 'Z') raw + 32 else raw;
-            const b: u8 = if (wc >= 'A' and wc <= 'Z') wc + 32 else wc;
+            const c = label[start + i];
+            const b: u8 = if (c >= 'A' and c <= 'Z') c + 32 else c;
             if (a != b) {
                 ok = false;
                 break;
@@ -219,16 +214,6 @@ fn asciiContains(query: []const u16, word: []const u8) bool {
         if (ok) return true;
     }
     return false;
-}
-
-fn keywordsMatch(keywords: []const u8, query: []const u16) bool {
-    if (query.len == 0) return true;
-    var it = std.mem.tokenizeScalar(u8, keywords, ' ');
-    while (it.next()) |word| {
-        if (asciiContains(query, word)) continue;
-        return false;
-    }
-    return true;
 }
 
 const Row = struct { target: usize, label: []const u8 };
@@ -262,7 +247,7 @@ var g_pins_refresh_tick: u64 = 0;
 
 fn refreshPinsOnce() void {
     const now = win32.GetTickCount64();
-    if (now >= g_pins_refresh_tick and now - g_pins_refresh_tick < 1000) return;
+    if (g_pins_refresh_tick != 0 and now > g_pins_refresh_tick and now - g_pins_refresh_tick < 1000) return;
     g_pins_refresh_tick = now;
     _ = reloadPins();
 }
@@ -275,7 +260,7 @@ pub fn appendTabContextRows(tc_idx: ?u32) void {
     for (rows, 0..) |row, i| {
         if (i == 1 and !is_pinned) continue;
         if (app_state.g_search_result_count >= app_state.g_search_results.len) return;
-        if (!keywordsMatch(row.label, query)) continue;
+        if (!labelContains(row.label, query)) continue;
         app_state.g_search_results[app_state.g_search_result_count] = row.target;
         app_state.g_search_result_count += 1;
     }
@@ -365,7 +350,6 @@ test "MUBO-245 chat keys are host scoped and lowercase" {
 }
 
 test "MUBO-245 pin palette rows follow the pinned state" {
-    _ = app_state;
     var pins: Pins = .{};
     _ = setPin(&pins, "0:live-a", "pospeak");
     try std.testing.expect(find(&pins, "0:live-a") != null);

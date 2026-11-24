@@ -8893,6 +8893,13 @@ class MUBO_245_PinnedSkillTest(unittest.TestCase):
         after = self.submit('claude', 'mubo245-unpinned-message', 'second plain prompt', pinned=None)
         self.assertEqual(after['text'], 'second plain prompt')
 
+    def test_a_marked_transcript_row_reads_back_exactly_as_typed(self):
+        marked = self.submit('pi', 'mubo245-transcript-message', 'transcript prompt')['text']
+        event = dict(type='message', id='transcript-1', timestamp='2026-11-24T00:00:00Z',
+                     message=dict(type='message', id='transcript-1', role='user', content=[dict(type='text', text=marked)]))
+        rows = reader.conversation_rows(event, 'pi')
+        self.assertEqual([row['text'] for row in rows], ['transcript prompt'])
+
     def test_marker_never_renders_in_the_users_own_message(self):
         marked = self.submit('claude', 'mubo245-render-message', 'render this prompt')['text']
         rows = reader.conversation_rows(dict(type='multiprompt_history', row=dict(role='user', text=marked, id='row-1')), 'claude')
