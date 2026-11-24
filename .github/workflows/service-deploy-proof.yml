@@ -189,24 +189,40 @@ jobs:
           if npx wrangler d1 execute DB --remote --config wrangler.proof.jsonc --command "INSERT INTO service_keys (hash,account,kind,label,created) VALUES ('$key_hash','proof@example.com','admin','deploy-proof',$(date +%s))" > "$RUNNER_TEMP/key-seed.log" 2>&1; then seeded=1; fi
           check "sync key seeded in the proof database" "$seeded"
           features='favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,workspace_color,bot_appearance'
-          read_code="$(curl -sS -o "$RUNNER_TEMP/layout.json" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$URL/v1/layout" || true)"
+          layout_call() {
+            local out="$1" attempt=1 code
+            shift
+            while :; do
+              code="$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$@" || true)"
+              case "$code" in
+                404|000|5??)
+                  [ "$attempt" -lt 12 ] || break
+                  attempt=$((attempt + 1))
+                  sleep 5
+                  ;;
+                *) break ;;
+              esac
+            done
+            printf '%s' "$code"
+          }
+          read_code="$(layout_call "$RUNNER_TEMP/layout.json" "$URL/v1/layout")"
           read_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout.json" 2>/dev/null || true)"
           ok=0
           if [ "$read_code" = 200 ] && [ -n "$read_revision" ]; then ok=1; fi
-          check "sync read $URL/v1/layout answered ${read_code} at revision ${read_revision:-none}" "$ok"
+          check "sync read $URL/v1/layout answered ${read_code:-none} at revision ${read_revision:-none}" "$ok"
           write_code=""
           written_revision=""
           write_error=""
           if [ -n "$read_revision" ]; then
             node -e 'const fs=require("node:fs");const snap=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));fs.writeFileSync(process.argv[2],JSON.stringify({base_revision:snap.revision,layout:snap.layout}))' "$RUNNER_TEMP/layout.json" "$RUNNER_TEMP/layout-put.json"
-            write_code="$(curl -sS -o "$RUNNER_TEMP/layout-write.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $key" -H 'Accept: application/json' -H 'Content-Type: application/json' -H "X-Layout-Features: $features" --data-binary "@$RUNNER_TEMP/layout-put.json" "$URL/v1/layout" || true)"
+            write_code="$(layout_call "$RUNNER_TEMP/layout-write.json" -X PUT -H 'Content-Type: application/json' --data-binary "@$RUNNER_TEMP/layout-put.json" "$URL/v1/layout")"
             written_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-write.json" 2>/dev/null || true)"
             write_error="$(node "$RUNNER_TEMP/wrangler-json.mjs" error < "$RUNNER_TEMP/layout-write.json" 2>/dev/null || true)"
           fi
           ok=0
           if [ "$write_code" = 200 ] && [ -n "$written_revision" ] && [ "$written_revision" != "$read_revision" ]; then ok=1; fi
           check "sync write $URL/v1/layout answered ${write_code:-none} at revision ${written_revision:-none}${write_error:+ ($write_error)}" "$ok"
-          again_code="$(curl -sS -o "$RUNNER_TEMP/layout-again.json" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$URL/v1/layout" || true)"
+          again_code="$(layout_call "$RUNNER_TEMP/layout-again.json" "$URL/v1/layout")"
           again_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
           again_error="$(node "$RUNNER_TEMP/wrangler-json.mjs" error < "$RUNNER_TEMP/layout-again.json" 2>/dev/null || true)"
           ok=0
