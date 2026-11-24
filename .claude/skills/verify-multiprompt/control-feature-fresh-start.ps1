@@ -116,6 +116,25 @@ try {
     $case.detail = $_.Exception.Message
     throw
 } finally {
+    $hostSid = if ($null -ne $remoteSids) { [string]$remoteSids['verify-fresh-start'] } else { '' }
+    if ($hostSid) {
+        try {
+            $bootstrapped = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+                $_.CommandLine -and $_.CommandLine.Contains($hostSid) -and
+                    ($_.CommandLine.Contains('--agent-host') -or $_.CommandLine.Contains('--message-worker'))
+            })
+        } catch {
+            $bootstrapped = @()
+        }
+        foreach ($candidate in $bootstrapped) {
+            try {
+                Stop-Process -Id $candidate.ProcessId -Force -ErrorAction Stop
+                Record "Cleanup: stopped bootstrapped fresh-start agent process $($candidate.ProcessId)"
+            } catch {
+                Record "Cleanup: bootstrapped fresh-start agent process $($candidate.ProcessId) already gone"
+            }
+        }
+    }
     if (Test-Path $log) { Copy-Item $log (Join-Path $Evidence 'fresh-start-debug.log') }
     $boundary = Join-Path $remoteState 'fresh-start-host.jsonl'
     if (Test-Path $boundary) { Copy-Item $boundary (Join-Path $Evidence 'fresh-start-host.jsonl') }
