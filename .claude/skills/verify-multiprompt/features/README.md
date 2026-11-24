@@ -115,6 +115,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
 - [Chat options](chat-options.md): only structured provider questions become cards, with multiple selection and Other; ordinary reply lists stay text.
 - [Permission rows](permission-rows.md): hosted console-boundary clicks, shortcuts, receipts and screenshots; visual review remains required.
+- [Permission requests](permission-requests.md): the Ctrl+K entry and list for auto mode chats that wait for a yes; populated rows come from the reader fixtures.
 - [Live chat commands](chat-slash.md): Plan and permission modes through the composer and Ctrl+K; unsupported commands never enter the outbox.
 - [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.
 - [Chat code font](chat-code-font.md): a real console fenced code block draws Nordwand Mono cells 2 pt smaller than before, the app logs the selected code face, and the branch painter proves overflowing diff rows stay smooth on DirectWrite.

@@ -184,3 +184,60 @@ test "MUBO-282 an unnamed tool still says what the chat wants" {
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("this chat wants to use TodoWrite. It is waiting for your yes because this chat asks before every step.");
     try std.testing.expectEqualSlices(u16, expected, out[0].text());
 }
+
+pub fn shellIndexFor(shell_id: u32) ?usize {
+    for (0..app_state.shell_count) |index| {
+        if (app_state.shells[index].shell_id == shell_id) return index;
+    }
+    return null;
+}
+
+pub fn requestTextForShell(index: usize) ?[]const u16 {
+    if (index >= app_state.shell_count) return null;
+    const request = requestFor(app_state.shells[index].shell_id) orelse return null;
+    if (!request.open) return null;
+    refresh();
+    for (rows[0..count]) |*row| {
+        if (row.shell_id == app_state.shells[index].shell_id) return row.text();
+    }
+    return null;
+}
+
+fn foldWide(c: u16) u16 {
+    return if (c >= 'A' and c <= 'Z') c + 32 else c;
+}
+
+pub fn matchesQuery(text: []const u16, query: []const u16) bool {
+    if (query.len == 0) return true;
+    if (text.len < query.len) return false;
+    for (0..text.len - query.len + 1) |start| {
+        var hit = true;
+        for (query, 0..) |qc, i| {
+            if (foldWide(text[start + i]) != foldWide(qc)) {
+                hit = false;
+                break;
+            }
+        }
+        if (hit) return true;
+    }
+    return false;
+}
+
+pub fn appendPaletteRows(results: []usize, count_ptr: *u32, query: []const u16) void {
+    refresh();
+    var i: usize = 0;
+    while (i < count and count_ptr.* < results.len) : (i += 1) {
+        const text = rows[i].text();
+        if (!matchesQuery(text, query)) continue;
+        const index = shellIndexFor(rows[i].shell_id) orelse continue;
+        results[count_ptr.*] = index;
+        count_ptr.* += 1;
+    }
+}
+
+pub fn enterPalette() void {
+    app_state.g_search_permission_requests_mode = true;
+    app_state.g_search_len = 0;
+    app_state.g_search_sel = 1;
+    app_state.g_search_scroll = 0;
+}

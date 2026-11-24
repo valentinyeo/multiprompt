@@ -25,6 +25,7 @@ export const verbs = {
   "SEARCH_NEW_PI_CHAT_OFFSET": "open",
   "SEARCH_NEW_CURSOR_CHAT_OFFSET": "open",
   "SEARCH_NEW_TERMINAL_OFFSET": "open",
+  "SEARCH_PERMISSION_REQUESTS_MENU_OFFSET": "permission-requests",
   "SEARCH_RENAMEWIN_OFFSET": "workspace",
   "SEARCH_SHOW_ALL_OFFSET": "settings",
   "SEARCH_SHOW_FAVORITES_OFFSET": "settings",

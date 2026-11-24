@@ -54,6 +54,16 @@ fixture README names the source version and the record shapes.
 
 ## Reading them
 
+The status row the Chat View already polls now carries `permission_request` when a chat has
+one open, so the desktop reads it without a second file walk. `src/chat_transcript.zig`
+parses it into the chat status, and `src/chat_permission_requests.zig` turns open requests
+into palette rows in plain words, newest first.
+
+The tab shows the Waiting mark (`needs_attention`, source `permission`) while a request is
+open. The mark clears when the answer closes the step, or when the request disappears from
+the transcript. `Ctrl+K → Permission requests` lists the same rows across every chat and
+Enter opens that chat. There is no new element around the messages.
+
 - `tools/permission-requests.mjs`: `openRequests(chats)` and `blockedRequests(chats)`,
   each row shaped as above; `describeRequest(row)` for the one-line wording.
 - `mb permission-requests [--dir ~/.claude/projects] [--json]`: lists open requests from

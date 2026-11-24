@@ -118,10 +118,5 @@
     "name": "pi_models",
     "base": "SEARCH_PI_MODEL_ROW_OFFSET",
     "size": "MAX_PI_MODELS"
-  },
-  {
-    "name": "permission_requests",
-    "base": "SEARCH_PERMISSION_REQUEST_ROW_OFFSET",
-    "size": "MAX_PERMISSION_REQUEST_ROWS"
   }
 ]

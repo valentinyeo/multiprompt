@@ -3026,9 +3026,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_RECONNECT => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.active_shell < app_state.shell_count) {
-                @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
-            }
+            if (app_state.active_shell < app_state.shell_count) @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
             return 0;
         },
         WM_APP_HIDE_TAB_UNTIL_ATTENTION => {
@@ -3806,9 +3804,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_MOVE_TAB => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const dir: i32 = if (wp == 1) 1 else -1;
-            if (app_state.g_tab_sort_auto) {
-                return 0;
-            }
+            if (app_state.g_tab_sort_auto) return 0;
             if (moveActiveTabStep(dir)) {
                 ensureActiveVisible();
                 _ = InvalidateRect(hwnd, null, 0);
@@ -3838,9 +3834,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CLOSE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.shell_count > 0) {
-                closeShell(app_state.active_shell);
-            }
+            if (app_state.shell_count > 0) closeShell(app_state.active_shell);
             return 0;
         },
         WM_APP_CLOSE_SESSION => {
@@ -4134,9 +4128,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_voice_tts_mutex.unlock();
             if (!@import("room_frontend.zig").privateActionsAllowed() or !valid or (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) or
                 (!app_state.g_voice_replay_only and !app_state.g_voice_mode_active) or app_state.g_voice_state != .speaking or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != fallback_shell) return 0;
-            if (!app_state.g_voice_tts_fallback_shown.swap(true, .acq_rel)) {
-                debugLog("Deepgram voice unavailable, using Windows voice");
-            }
+            if (!app_state.g_voice_tts_fallback_shown.swap(true, .acq_rel)) debugLog("Deepgram voice unavailable, using Windows voice");
             if (!voiceSapiStart()) {
                 app_state.g_voice_state = .idle;
                 debugLog("Voice Mode: text-to-speech unavailable");
@@ -4287,6 +4279,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
+            app_state.g_search_permission_requests_mode = false;
             list_input.palette.keyboard();
             if (wp == 1 and foregroundIsOurs()) {
                 app_state.g_focus_authorized_hwnd = hwnd;
@@ -5674,6 +5667,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openAllSessions(hwnd);
                     return 0;
                 }
+                if (target == app_state.SEARCH_PERMISSION_REQUESTS_MENU_OFFSET) {
+                    @import("chat_permission_requests.zig").enterPalette();
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target >= SEARCH_SESSION_OVERVIEW_ROW_OFFSET and target < SEARCH_SESSION_OVERVIEW_ROW_OFFSET + MAX_SESSION_OVERVIEW_SEARCH_ROWS) {
                     const row_idx = target - SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
                     _ = activateSessionOverviewRow(@intCast(row_idx), hwnd);
@@ -5804,6 +5803,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_WORKSPACE_BACK_OFFSET) {
+                    app_state.g_search_permission_requests_mode = false;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;
                     app_state.g_search_ws_sort_mode = false;

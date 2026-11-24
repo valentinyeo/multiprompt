@@ -293,6 +293,7 @@ const SEARCH_ARCHIVED_OFFSET = @import("app_state.zig").SEARCH_ARCHIVED_OFFSET;
 const SEARCH_REMINDER_ROW_OFFSET = @import("app_state.zig").SEARCH_REMINDER_ROW_OFFSET;
 const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OVERVIEW_SEARCH_ROWS;
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
+const SEARCH_PERMISSION_REQUESTS_MENU_OFFSET = @import("app_state.zig").SEARCH_PERMISSION_REQUESTS_MENU_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
@@ -1070,6 +1071,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SNIPPET_CREATE_OFFSET => "create snippet",
         SEARCH_SNIPPET_BACK_OFFSET => "back",
         SEARCH_SESSION_OVERVIEW_MENU_OFFSET => "show all sessions",
+        SEARCH_PERMISSION_REQUESTS_MENU_OFFSET => "permission requests blocked chat waiting for your yes auto mode",
         SEARCH_ARCHIVED_VIEW_OFFSET => "archived sessions",
         SEARCH_BROWSER_SHOTURL_OFFSET => "browser screenshot tab link in shell",
         SEARCH_PIN_TOP_OFFSET => "pin tab to top",
@@ -1084,83 +1086,15 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     };
 }
 
-fn asciiStartsWithCI(text: []const u8, prefix: []const u8) bool {
-    if (prefix.len > text.len) return false;
-    for (prefix, 0..) |c, i| {
-        if (std.ascii.toLower(text[i]) != std.ascii.toLower(c)) return false;
-    }
-    return true;
-}
 
-fn paletteTextMatchRank(text: []const u8, query: []const u16) u8 {
-    if (query.len == 0) return 0;
-    var query_ascii: [64]u8 = undefined;
-    if (query.len > query_ascii.len) return 0;
-    for (query, 0..) |c, i| {
-        if (c > 0x7F) return 0;
-        query_ascii[i] = @intCast(c);
-    }
-    const q = query_ascii[0..query.len];
-    if (asciiEqualsCI(text, q)) return 4;
-    if (asciiStartsWithCI(text, q)) return 3;
-    var word_start: usize = 0;
-    while (word_start < text.len) {
-        while (word_start < text.len and !std.ascii.isAlphanumeric(text[word_start])) : (word_start += 1) {}
-        if (word_start >= text.len) break;
-        if (asciiStartsWithCI(text[word_start..], q)) return 2;
-        while (word_start < text.len and std.ascii.isAlphanumeric(text[word_start])) : (word_start += 1) {}
-    }
-    return if (asciiContainsQueryInsensitive(text, query)) 1 else 0;
-}
-
-fn paletteFoldU16(c: u16) u16 {
-    return if (c >= 'A' and c <= 'Z') c + 32 else c;
-}
-
-fn paletteU16IsWord(c: u16) bool {
-    return c > 0x7F or std.ascii.isAlphanumeric(@intCast(c));
-}
-
-pub fn paletteWideTextMatchRank(text: []const u16, query: []const u16) u8 {
-    if (query.len == 0) return 0;
-    if (text.len == query.len) {
-        var exact = true;
-        for (text, query) |tc, qc| {
-            if (paletteFoldU16(tc) != paletteFoldU16(qc)) {
-                exact = false;
-                break;
-            }
-        }
-        if (exact) return 4;
-    }
-    if (text.len >= query.len) {
-        var prefix = true;
-        for (query, 0..) |qc, i| {
-            if (paletteFoldU16(text[i]) != paletteFoldU16(qc)) {
-                prefix = false;
-                break;
-            }
-        }
-        if (prefix) return 3;
-    }
-    var word_start: usize = 0;
-    while (word_start < text.len) {
-        while (word_start < text.len and !paletteU16IsWord(text[word_start])) : (word_start += 1) {}
-        if (word_start >= text.len) break;
-        if (text.len - word_start >= query.len) {
-            var word_prefix = true;
-            for (query, 0..) |qc, i| {
-                if (paletteFoldU16(text[word_start + i]) != paletteFoldU16(qc)) {
-                    word_prefix = false;
-                    break;
-                }
-            }
-            if (word_prefix) return 2;
-        }
-        while (word_start < text.len and paletteU16IsWord(text[word_start])) : (word_start += 1) {}
-    }
-    return if (u16ContainsInsensitive(text, query)) 1 else 0;
-}
+const palette_text = @import("palette_text.zig");
+pub const u16ToLower = palette_text.u16ToLower;
+pub const u16ContainsInsensitive = palette_text.u16ContainsInsensitive;
+pub const asciiContainsQueryInsensitive = palette_text.asciiContainsQueryInsensitive;
+pub const asciiEqualsCI = palette_text.asciiEqualsCI;
+pub const paletteWideTextMatchRank = palette_text.paletteWideTextMatchRank;
+const asciiStartsWithCI = palette_text.asciiStartsWithCI;
+const paletteTextMatchRank = palette_text.paletteTextMatchRank;
 
 fn paletteQueryRank(target: usize) u8 {
     if (app_state.g_search_len == 0) return 0;
@@ -1523,6 +1457,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
+    if (target == SEARCH_PERMISSION_REQUESTS_MENU_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
@@ -1834,13 +1769,6 @@ test "Ctrl K previous-session promotion preserves every other result" {
     try std.testing.expectEqualSlices(usize, &[_]usize{ 8, 7000, 3, 7001 }, results[0..]);
 }
 
-pub fn asciiEqualsCI(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
-    for (a, 0..) |c, i| {
-        if (u16ToLower(c) != u16ToLower(b[i])) return false;
-    }
-    return true;
-}
 
 fn customCmdVisibleInWorkspace(idx: usize, ws: u8) bool {
     const c = &app_state.g_custom_cmds[idx];
@@ -3879,6 +3807,17 @@ pub fn updateSearchResults() void {
         return;
     }
 
+    if (app_state.g_search_permission_requests_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[0] = SEARCH_WORKSPACE_BACK_OFFSET;
+        app_state.g_search_result_count = 1;
+        const requests = @import("chat_permission_requests.zig");
+        requests.appendPaletteRows(&app_state.g_search_results, &app_state.g_search_result_count, app_state.g_search_buf[0..app_state.g_search_len]);
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
     if (app_state.g_search_session_overview_mode) {
         buildSessionOverviewRows();
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_BACK_OFFSET;
@@ -3896,6 +3835,11 @@ pub fn updateSearchResults() void {
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or sessionOverviewCommandMatches(app_state.g_search_buf[0..app_state.g_search_len]))) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "permission requests", "permission request", "permissions", "blocked chat waiting for your yes", "auto mode permission" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PERMISSION_REQUESTS_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
@@ -6045,46 +5989,6 @@ fn appendChatActions(index: usize) void {
         app_state.g_search_results[app_state.g_search_result_count] = action.target;
         app_state.g_search_result_count += 1;
     }
-}
-
-pub fn u16ToLower(c: u16) u16 {
-    if (c >= 'A' and c <= 'Z') return c + 32;
-    return c;
-}
-
-pub fn u16ContainsInsensitive(haystack: []const u16, needle: []const u16) bool {
-    if (needle.len == 0) return true;
-    if (haystack.len < needle.len) return false;
-    const limit = haystack.len - needle.len + 1;
-    for (0..limit) |start| {
-        var match = true;
-        for (0..needle.len) |j| {
-            if (u16ToLower(haystack[start + j]) != u16ToLower(needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-    return false;
-}
-
-pub fn asciiContainsQueryInsensitive(haystack: []const u8, needle: []const u16) bool {
-    if (needle.len == 0) return true;
-    if (haystack.len < needle.len) return false;
-    const limit = haystack.len - needle.len + 1;
-    for (0..limit) |start| {
-        var match = true;
-        for (0..needle.len) |j| {
-            const hc: u16 = if (haystack[start + j] >= 'A' and haystack[start + j] <= 'Z') haystack[start + j] + 32 else haystack[start + j];
-            if (hc != u16ToLower(needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-    return false;
 }
 
 pub fn reductionSearchChar(vk: u32, shift: bool) u16 {
