@@ -29,6 +29,7 @@ pub var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 pub var g_inbox_tab: u32 = 1;
 pub var g_unread_only = false;
 pub var g_sidebar_view: ?@import("workspace_view.zig").Builtin = null;
+pub var g_sidebar_order_frozen: bool = false;
 pub var g_inbox_ws_count: u32 = 3;
 pub var g_inbox_row_count: u32 = 3;
 pub var g_inbox_ws = [_]struct { hwnd: usize }{ .{.hwnd=1}, .{.hwnd=2}, .{.hwnd=1} };
@@ -59,6 +60,8 @@ const LOOK_UNIFIED = false;
 const Row = struct { kind: enum { tab, inbox }, gidx: u32, shell_idx: u32, y: i32 };
 fn wsStripHeight() i32 { return 0; }
 fn tabRowH() i32 { return 50; }
+var g_frozen_places_len: usize = 0;
+inline fn frozenPlaceOf(shell_id: u32) u64 { _ = shell_id; return 0; }
 ${body('src/sidebar.zig', 'layoutViewRows')}
 fn sid(row: Row) u32 { return if (row.kind == .tab) app_state.shells[row.shell_idx].shell_id else app_state.g_inbox_rows[row.shell_idx].sid; }
 fn setup() void {
