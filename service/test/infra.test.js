@@ -54,3 +54,12 @@ test('infra: legacy identity references occur only in explicit negative tests an
     }
   }
 });
+
+const sqlStatements = source => source.replace(/--[^\n]*/g, '').split(';').map(statement => statement.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
+test('infra: the bundled D1 migration matches schema.sql', () => {
+  const migration = sqlStatements(readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
+  const schema = sqlStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+  assert.ok(schema.length);
+  assert.deepEqual(migration, schema);
+});
