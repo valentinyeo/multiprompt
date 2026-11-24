@@ -2600,8 +2600,7 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
 fn zsbTabPin(argv: []const []const u8, out: []u8, comptime ops: type, comptime pinned: bool) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = if (pinned) "session-pin" else "session-unpin", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
-    app_state.shells[idx].pinned_top = pinned;
-    app_state.shells[idx].starred_pinned_top = pinned;
+    @import("sidebar.zig").setPinnedTop(@intCast(idx), pinned);
     ops.persist();
     return zsbTabReply(out, if (pinned) "pinned" else "unpinned", args.tab, null);
 }
@@ -3362,25 +3361,55 @@ test "session-close removes a background tab and refuses the active, pinned and 
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
 }
 
-test "session-pin and session-unpin set and clear both pin marks and refuse unknown tabs" {
+test "session-pin and session-unpin touch only the current view's pin and refuse unknown tabs" {
     const saved = try ZsbWorkspaceTest.init();
     defer saved.deinit();
+    const old_starred = app_state.g_starred_workspace;
+    defer app_state.g_starred_workspace = old_starred;
+    app_state.g_starred_workspace = false;
     ZsbTabTestOps.reset();
     var out: [4096]u8 = undefined;
     try zsbTabTestOpen("runner-7", &out);
     const active = app_state.active_shell;
     try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
     try std.testing.expect(app_state.shells[1].pinned_top);
-    try std.testing.expect(app_state.shells[1].starred_pinned_top);
+    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
     try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
     try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
+    try std.testing.expect(app_state.shells[1].pinned_top);
     try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.persisted);
     try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
     try std.testing.expect(!app_state.shells[1].pinned_top);
-    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "99" }, &out));
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42", "--name", "x" }, &out));
     try std.testing.expectEqual(active, app_state.active_shell);
+}
+
+test "session-unpin of a starred tab keeps the ordinary pin, exactly as the sidebar unpin does" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    const old_starred = app_state.g_starred_workspace;
+    defer app_state.g_starred_workspace = old_starred;
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    app_state.g_starred_workspace = true;
+    app_state.shells[1].pinned_top = true;
+    app_state.shells[1].starred_pinned_top = true;
+    @import("sidebar.zig").setPinnedTop(1, false);
+    const sidebar_starred = app_state.shells[1].starred_pinned_top;
+    const sidebar_plain = app_state.shells[1].pinned_top;
+    try std.testing.expect(!sidebar_starred);
+    try std.testing.expect(sidebar_plain);
+    app_state.shells[1].pinned_top = true;
+    app_state.shells[1].starred_pinned_top = true;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
+    try std.testing.expectEqual(sidebar_starred, app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqual(sidebar_plain, app_state.shells[1].pinned_top);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
+    try std.testing.expectEqual(sidebar_starred, app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqual(sidebar_plain, app_state.shells[1].pinned_top);
 }
 
 test "session-rename sets a manual title with Unicode and keeps the active tab" {

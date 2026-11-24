@@ -82,10 +82,10 @@ print_help() {
         echo '  The active tab is refused with active_tab; a snoozed workspace is refused with workspace_snoozed.'
         ;;
       session-pin) echo 'usage: zsb session-pin --tab <id>'
-        echo '  Pins a background tab to the top of the sidebar in every view. An unknown tab returns unknown_tab.'
+        echo '  Pins a background tab to the top of the sidebar in the view the app is showing, like the sidebar menu. An unknown tab returns unknown_tab.'
         ;;
       session-unpin) echo 'usage: zsb session-unpin --tab <id>'
-        echo '  Clears the pin from a background tab. An unknown tab returns unknown_tab.'
+        echo '  Clears that pin in the view the app is showing and leaves the tab pinned in the other view. An unknown tab returns unknown_tab.'
         ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
