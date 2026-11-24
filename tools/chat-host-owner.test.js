@@ -68,6 +68,7 @@ r = {}
 exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
 with tempfile.TemporaryDirectory() as directory:
     r['HOME'] = Path(directory)
+    r['HOST_START_RETRY_STEPS'] = ()
     owner_home = Path('/home/synthetic_owner')
     cwd = str(owner_home / 'workspace')
     r['pwd'] = SimpleNamespace(getpwnam=lambda name: SimpleNamespace(pw_name=name, pw_uid=1001, pw_dir=str(owner_home)))

@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert failure and failure['reason'] == 'agent_not_found' and failure['config'] == config, failure
     lines = [entry['event'] for entry in r['message_events_page'](provider, sid, 0)['events']
              if entry['event'].get('kind') == 'text.done']
-    assert len(lines) == 1 and 'agent not found' in lines[0]['event']['text'], lines
+    assert len(lines) == 1 and 'agent not found' in lines[0]['text'], lines
     r['host_paths'](provider, sid)['state'].unlink()
     attempts.clear()
     def unavailable(*args, **kwargs):
