@@ -22,9 +22,9 @@ jobs:
       matrix:
         include:
           - side: parent
-            sha: 407338e086259e8bf198071335a77f6eb81b566b
+            sha: aff644fa33f6266949c4eba520e3314e218d9114
           - side: head
-            sha: ddcad34d7f248980f351aa568134d470352c0043
+            sha: 10de2a2be983bbe0483c07bec9c433ee302d0c55
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
