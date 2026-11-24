@@ -9,6 +9,12 @@ The launch job allows five minutes.
 A screenshot and process details record proof.
 Signed assets publish after these gates pass.
 
+Measured release timeouts: prepare about five minutes, build
+fifteen, launch five, release three, updater poll five.
+The release path no longer waits on resource observation, which
+runs in its own nightly workflow, so a merge reaches the
+in-app updater inside about thirty-three minutes.
+
 ## Permanent update origin
 
 Installed releases through v0.28.1660 require exact asset URLs under
