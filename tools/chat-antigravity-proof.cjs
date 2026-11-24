@@ -2,26 +2,30 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const pngMagic = '89504e470d0a1a0a';
+
 function verify(root) {
   const dir = path.join(root, 'antigravity-chats');
   const read = name => fs.readFileSync(path.join(dir, name), 'utf8');
   const json = name => JSON.parse(read(name));
+  const rootJson = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
+  const lines = name => read(name).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const png = name => fs.readFileSync(path.join(root, `${name}.png`)).subarray(0, 8).toString('hex');
+  const shot = name => assert.equal(png(name), pngMagic, `missing screenshot ${name}`);
   assert.equal(json('observation.json').error, null);
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
   assert.equal(cleanup.evidence_preserved, true);
-  for (const shot of ['antigravity-chat-before', 'antigravity-switch-palette', 'antigravity-switched-chat',
-    'antigravity-new-session-palette', 'antigravity-new-session']) {
-    assert.equal(png(shot), '89504e470d0a1a0a', `missing screenshot ${shot}`);
-  }
+  for (const name of ['antigravity-chat-before', 'antigravity-switch-palette', 'antigravity-switched-chat',
+    'antigravity-new-session-palette', 'antigravity-new-session', 'antigravity-tab-menu-switch',
+    'antigravity-switch-while-replying', 'antigravity-switch-back-claude']) shot(name);
   const config = json('antigravity-config.json');
   assert.equal(config.provider, 'antigravity');
   assert.equal(config.enabled, true);
   assert.equal(config.tmux, 'verify-agent');
   assert.equal(config.switched_from.provider, 'claude');
-  const history = read('antigravity-history.jsonl').trim().split('\n').map(line => JSON.parse(line));
+  const history = lines('antigravity-history.jsonl');
   const texts = history.map(row => (row.row ? row.row.text : '') || '');
   assert.ok(texts.some(text => text.includes('earlier claude question')), 'earlier message missing after the switch');
   assert.ok(texts.some(text => text.includes('Switched AI: Claude to Antigravity')), 'switch divider missing');
@@ -30,11 +34,11 @@ function verify(root) {
   const afterSwitch = json('session-after-switch.json');
   assert.equal(afterSwitch.tabs.length, seed.tabs.length, 'the switch changed the chat rows');
   assert.equal(afterSwitch.tabs[0].name, seed.tabs[0].name, 'the switch renamed the chat');
-  const received = read('stand-in/antigravity-deliver.jsonl').trim().split('\n').filter(Boolean);
-  assert.ok(received.some(line => line.includes('after the switch')), 'the Antigravity host never received the new message');
+  const received = lines('stand-in/antigravity-deliver.jsonl');
+  assert.ok(received.some(row => String(row.text).includes('after the switch')), 'the Antigravity host never received the new message');
   assert.ok(read('claude-history.jsonl').includes('Claude stand-in answer'), 'the earlier message was not answered before the switch');
-  const agent = read('stand-in/agy-agent.jsonl').trim().split('\n').map(line => JSON.parse(line));
-  assert.ok(agent.some(line => line.argv.some(part => part.includes('stream-json'))), 'the fixture was not started through the Antigravity argv');
+  const agent = lines('stand-in/agy-agent.jsonl');
+  assert.ok(agent.some(row => row.argv.some(part => part.includes('stream-json'))), 'the fixture was not started through the Antigravity argv');
   assert.ok(read('stand-in/invocations.jsonl').includes('antigravity'), 'the new session did not route an Antigravity launch');
   const after = json('session-new-session.json');
   assert.equal(after.tabs.length, seed.tabs.length + 1, 'the new Antigravity session did not add one row');
@@ -45,15 +49,72 @@ function verify(root) {
   const doctor = json('doctor.json');
   assert.ok(Number.isSafeInteger(doctor.pid) && doctor.pid > 0, 'doctor identity missing');
   assert.equal(doctor.hwnd > 0, true);
+
+  const menu = json('tab-menu.json');
+  assert.equal(menu.source, 'chat tab right-click menu');
+  assert.equal(menu.selected, 7176, 'the tab right-click menu did not select Switch AI to Claude');
+  assert.match(menu.rows, /\b7176\b/, 'the tab right-click menu never listed Switch AI to Claude');
+  const refused = json('switch-while-replying.json');
+  const held = lines('stand-in/antigravity-hold.jsonl');
+  assert.ok(held.some(row => row.stage === 'replying'), 'the stand-in never held a reply open');
+  assert.ok(held.some(row => row.stage === 'released'), 'the held reply was never released');
+  const switches = lines('stand-in/antigravity-switch.jsonl');
+  const busy = switches.find(row => row.status === 'busy');
+  assert.ok(busy, 'the host never refused a switch while the chat was replying');
+  assert.equal(busy.target, 'claude');
+  assert.equal(busy.reason, 'chat_busy');
+  assert.equal(refused.request.target, 'claude');
+  assert.equal(refused.reply.status, 'busy');
+  assert.equal(refused.providerAfter, 'antigravity', 'the refused switch moved the chat off Antigravity');
+  assert.equal(refused.sidAfter, config.sid, 'the refused switch changed the chat session');
+  assert.ok(switches.some(row => row.status === 'switched' && row.target === 'claude'), 'the later switch to Claude never happened');
+  const backConfig = json('claude-back-config.json');
+  assert.equal(backConfig.provider, 'claude');
+  assert.equal(backConfig.enabled, true);
+  assert.equal(backConfig.switched_from.provider, 'antigravity');
+  const backRows = lines('claude-back-history.jsonl');
+  const backTexts = backRows.map(row => (row.row ? row.row.text : '') || '');
+  for (const text of ['earlier claude question', 'after the switch', 'Antigravity stand-in reply',
+    'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude']) {
+    assert.ok(backTexts.some(row => row.includes(text)), `the switch back to Claude lost ${text}`);
+  }
+  const back = json('switch-back.json');
+  assert.equal(back.provider, 'claude');
+  assert.equal(back.switchedFrom, 'antigravity');
+  const backSession = json('session-after-switch-back.json');
+  assert.equal(backSession.tabs.length, seed.tabs.length, 'the switch back changed the chat rows');
+  assert.equal(backSession.tabs[0].name, seed.tabs[0].name, 'the switch back renamed the chat');
+  assert.equal(backSession.tabs[0].ai_agent, 1, 'the app did not adopt Claude for the chat');
+  assert.equal(back.rows, backRows.length);
+
+  const totals = rootJson('cleanup.json');
   return {
     feature: 'antigravity-chats',
     status: 'passed',
-    boundary: 'Antigravity is a repository stand-in that speaks the production stream-json protocol; SSH and the remote shell are stand-ins, the app, keyboard input and the production reader host are real.',
-    cases: [{
-      name: 'antigravity-chats',
-      passed: true,
-      detail: { switched: config.switched_from.provider + ' to ' + config.provider, historyRows: history.length, newSession: fresh.tmux_session },
-    }],
+    boundary: 'Antigravity is a repository stand-in that speaks the production stream-json protocol; SSH and the remote shell are stand-ins, the app, keyboard input and the production reader host are real. The Claude side of a switch is served by the same fixture host store, with no live Claude process.',
+    cleanup: `The owned Windows job stopped the app and its children (${totals.remaining_owned_processes} left running); each case's isolated profile, its agent-host home and the socket temp folder were removed (scratchRemoved=${totals.scratch_removed}); the evidence copy was kept (evidencePreserved=${totals.evidence_preserved}).`,
+    cases: [
+      {
+        name: 'antigravity-chats',
+        passed: true,
+        detail: { switched: config.switched_from.provider + ' to ' + config.provider, historyRows: history.length, newSession: fresh.tmux_session },
+      },
+      {
+        name: 'switch-back-to-claude',
+        passed: true,
+        detail: { switched: 'antigravity to claude', historyRows: backRows.length, kept: 'same row, same name, earlier messages and both Switch AI dividers', adoptedAgent: backSession.tabs[0].ai_agent, screenshot: 'antigravity-switch-back-claude.png' },
+      },
+      {
+        name: 'tab-menu-switch-ai',
+        passed: true,
+        detail: { entry: 'Switch AI to Claude', target: menu.selected, source: menu.source, rows: menu.rows, screenshot: menu.screenshot },
+      },
+      {
+        name: 'switch-while-replying',
+        passed: true,
+        detail: { refused: 'busy', reason: busy.reason, notice: refused.notice, providerAfter: refused.providerAfter, screenshot: refused.screenshot },
+      },
+    ],
   };
 }
 

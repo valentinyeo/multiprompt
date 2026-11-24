@@ -1629,12 +1629,18 @@ def install_antigravity_host(namespace):
     previous_deliver = namespace["host_deliver"]
     previous_event = namespace["host_event"]
     previous_accept = namespace["host_accept"]
+    previous_start = namespace["host_start"]
+    previous_switch_ai = namespace["host_switch_ai"]
 
     def mine(provider, candidate):
         moved = namespace["host_switch_follow"](candidate)
         if moved is not None:
             provider, candidate = moved
-        return provider, candidate, candidate == sid or provider == "antigravity"
+        if candidate == sid or provider == "antigravity":
+            return provider, candidate, True
+        switched = namespace["host_read"](namespace["host_switched_path"]()) or {}
+        targets = [value for value in switched.values() if isinstance(value, list) and len(value) == 2]
+        return provider, candidate, [provider, candidate] in targets
 
     def dispatch_switch(provider, candidate):
         return mine(provider, candidate)[2] or previous_switch(provider, candidate)
@@ -1655,6 +1661,18 @@ def install_antigravity_host(namespace):
                        sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
         previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token))
         previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
+        if provider == "antigravity" and (ROOT / "hold-reply").exists():
+            held = dict(namespace["host_read"](paths["state"]) or {})
+            held["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, accepted=True, at=time.time())
+            namespace["host_state_write"](provider, candidate, held)
+            record("antigravity-hold.jsonl", stage="replying", provider=provider, sid=candidate, text=text)
+            deadline = time.time() + 120
+            while not (ROOT / "release-reply").exists() and time.time() < deadline:
+                time.sleep(0.1)
+            released = dict(namespace["host_read"](paths["state"]) or {})
+            released.pop("inflight", None)
+            namespace["host_state_write"](provider, candidate, released)
+            record("antigravity-hold.jsonl", stage="released", provider=provider, sid=candidate, released=(ROOT / "release-reply").exists())
         block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
         reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
         namespace["host_delta"](session, block, reply)
@@ -1664,9 +1682,23 @@ def install_antigravity_host(namespace):
             session["db"].close()
         return dict(status="sent")
 
+    def start(provider, candidate, source=None):
+        if provider != "claude":
+            return previous_start(provider, candidate, source)
+        record("antigravity-claude-start.jsonl", provider=provider, sid=candidate, standin="no live Claude process; the fixture serves the production host store")
+        return dict(status="started", pid=os.getpid())
+
+    def switch_ai(provider, candidate, target, reason=None):
+        reply = previous_switch_ai(provider, candidate, target, reason)
+        record("antigravity-switch.jsonl", provider=provider, sid=candidate, target=target, status=reply.get("status"),
+               reason=reply.get("reason"), switched_to=(reply.get("sid") if reply.get("status") == "switched" else None))
+        return reply
+
     namespace["host_dispatch_switch"] = dispatch_switch
     namespace["host_owned"] = owned
     namespace["host_deliver"] = deliver
+    namespace["host_start"] = start
+    namespace["host_switch_ai"] = switch_ai
     install_antigravity_worker(namespace)
 
 

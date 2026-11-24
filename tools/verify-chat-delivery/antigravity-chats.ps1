@@ -18,6 +18,35 @@ function Send-Composer([string]$Text) {
     Press @(0x0D) "Enter: send $Text" $true
     [void](Wait-For 'composer cleared after send' { [ChatDeliveryDesktop]::Text($composer) -ceq '' } 10)
 }
+function Tab-Menu-Show([string]$Query, [int]$Target, [string]$Screenshot) {
+    $rows = @([regex]::Matches((Read-Shared $paletteLog), '\[photo-proof\] expanded target=0 rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'))
+    if ($rows.Count -eq 0) { throw 'The app reported no sidebar row geometry for the chat tab' }
+    $shape = $rows[$rows.Count - 1].Groups
+    $x = [int](([int]$shape[1].Value + [int]$shape[3].Value) / 2)
+    $y = [int](([int]$shape[2].Value + [int]$shape[4].Value) / 2)
+    $offset = (Read-Shared $paletteLog).Length
+    Doctor
+    [void](Wait-For 'owned app foreground for the tab row' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main); [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='right-click the chat tab row'; x=$x; y=$y})
+    [ChatDeliveryDesktop]::RightClickClient($main, $app.Id, $x, $y)
+    [void](Wait-For 'tab actions palette opened from the tab row' { (Read-Shared $paletteLog).Substring($offset) -match '\[palette\] rows chars=0 count=\d+ ids=\d+' } 15)
+    foreach ($letter in $Query.ToCharArray()) { Doctor; [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For "tab actions filtered by $Query" { (Read-Shared $paletteLog).Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=\d+ target=\d+') } 15)
+    $chosen = $false
+    for ($row = 0; $row -lt 8; $row++) {
+        if ((Read-Shared $paletteLog).Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=\d+ target=' + $Target + '\b')) { $chosen = $true; break }
+        Press @(0x28) 'Down: next tab action'
+        Start-Sleep -Milliseconds 300
+    }
+    if (-not $chosen) { throw ("The tab actions menu never selected " + $Query) }
+    $listed = @([regex]::Matches((Read-Shared $paletteLog).Substring($offset), '\[palette\] rows chars=\d+ count=\d+ ids=[^\r\n]+'))
+    if ($listed.Count -eq 0) { throw 'The tab actions palette listed no rows' }
+    Shot $Screenshot
+    Save @{source='chat tab right-click menu'; query=$Query; selected=$Target; rows=$listed[$listed.Count - 1].Value; screenshot=($Screenshot + '.png'); tabRow=@($x, $y)} "$caseDir/tab-menu.json"
+    Press @(0x1B) 'Esc: close the tab actions menu'
+    Start-Sleep -Milliseconds 500
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+}
 Send-Composer $earlierText
 [void](Wait-For 'claude stand-in answered the earlier message' {
     $files = @(Get-ChildItem "$hostDir/*.history.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains($earlierText) })
@@ -42,8 +71,24 @@ $antigravityRoot = Split-Path $antigravityConfig
 $antigravityHistory = @(Get-ChildItem "$antigravityRoot/*.history.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('Switched AI: Claude to Antigravity') })
 if ($antigravityHistory.Count -ne 1) { throw 'The switch did not write one handed-over antigravity history' }
 if (-not (Read-Shared $antigravityHistory[0].FullName).Contains($earlierText)) { throw 'The switched chat lost the earlier message' }
+Tab-Menu-Show 'switch ai to claude' 7176 'antigravity-tab-menu-switch'
+[IO.File]::WriteAllText("$state/hold-reply", '')
 Bind-Transcript
 Send-Composer $afterText
+[void](Wait-For 'antigravity stand-in is still writing the reply' { (Test-Path "$state/antigravity-hold.jsonl") -and (Read-Shared "$state/antigravity-hold.jsonl").Contains('"stage": "replying"') } 30)
+if ((Read-Shared $antigravityHistory[0].FullName).Contains('Antigravity stand-in reply')) { throw 'The reply finished before the switch could be tried' }
+Palette-Choose 'switch ai to claude' 7050 'antigravity-busy-switch-palette'
+[void](Wait-For 'the host refused the switch while the chat was replying' { (Test-Path "$state/antigravity-switch.jsonl") -and (Read-Shared "$state/antigravity-switch.jsonl").Contains('"status": "busy"') } 30)
+Start-Sleep -Milliseconds 800
+Shot 'antigravity-switch-while-replying'
+$switchRows = @((Read-Shared "$state/antigravity-switch.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$busy = @($switchRows | Where-Object { $_.status -eq 'busy' })[-1]
+$busyConfig = Get-Content $antigravityConfig -Raw | ConvertFrom-Json
+if ($busyConfig.provider -cne 'antigravity' -or $busyConfig.enabled -ne $true) { throw 'The refused switch disabled the Antigravity chat' }
+if (@(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -ne 0) { throw 'The refused switch still moved the chat to Claude' }
+Save @{notice='Switch AI: wait for this reply to finish'; screenshot='antigravity-switch-while-replying.png'; request=@{provider=$busy.provider; sid=$busy.sid; target=$busy.target}; reply=@{status=$busy.status; reason=$busy.reason}; providerAfter=$busyConfig.provider; sidAfter=$busyConfig.sid; stillReplying=$true} "$caseDir/switch-while-replying.json"
+[IO.File]::WriteAllText("$state/release-reply", '')
+Remove-Item -LiteralPath "$state/hold-reply" -Force -ErrorAction SilentlyContinue
 [void](Wait-For 'antigravity stand-in received the new message' {
     (Test-Path "$state/antigravity-deliver.jsonl") -and (Read-Shared "$state/antigravity-deliver.jsonl").Contains($afterText)
 } 60)
@@ -53,6 +98,34 @@ Send-Composer $afterText
 Copy-Item $antigravityHistory[0].FullName "$caseDir/antigravity-history.jsonl"
 Shot 'antigravity-switched-chat'
 Shot 'after'
+Palette-Choose 'switch ai to claude' 7050 'antigravity-switch-back-palette'
+[void](Wait-For 'claude host enabled by the switch back' {
+    $configs = @(Get-ChildItem "$hostDir/*.config.json" -ErrorAction SilentlyContinue)
+    (@($configs | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' }).Count -eq 1)
+} 90)
+$claudeBackConfig = @(Get-ChildItem "$hostDir/*.config.json" | Where-Object { (Read-Shared $_.FullName) -match '"provider":"claude"' -and (Read-Shared $_.FullName) -match '"switched_from"' })[0].FullName
+$claudeBackRoot = Split-Path $claudeBackConfig
+$claudeBackHistory = @(Get-ChildItem "$claudeBackRoot/*.history.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('Switched AI: Antigravity to Claude') })
+if ($claudeBackHistory.Count -ne 1) { throw 'The switch back did not write one Claude history' }
+foreach ($kept in @($earlierText, $afterText, 'Antigravity stand-in reply', 'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude')) {
+    if (-not (Read-Shared $claudeBackHistory[0].FullName).Contains($kept)) { throw ('The switch back lost ' + $kept) }
+}
+$backSid = (Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).sid
+[void](Wait-For 'the chat stays on Claude with the same row' {
+    if (-not (Test-Path "$settings/session.json")) { return $false }
+    $savedBack = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $row = $savedBack.tabs[0]
+    $hasAgent = [bool]($row.PSObject.Properties['ai_agent'])
+    $hasSid = [bool]($row.PSObject.Properties['csid'])
+    (@($savedBack.tabs).Count -eq $tabsBefore.Count) -and ($row.name -ceq $tabsBefore[0].name) -and $hasAgent -and ([int]$row.ai_agent -eq 1) -and $hasSid -and ($row.csid -ceq $backSid)
+} 60)
+$backRows = @((Read-Shared $claudeBackHistory[0].FullName) -split "`n" | Where-Object { $_.Trim() })
+if ($backRows.Count -lt 5) { throw 'The switch back kept too few readable history rows' }
+Copy-Item $claudeBackConfig "$caseDir/claude-back-config.json"
+Copy-Item $claudeBackHistory[0].FullName "$caseDir/claude-back-history.jsonl"
+Copy-Item "$settings/session.json" "$caseDir/session-after-switch-back.json"
+Shot 'antigravity-switch-back-claude'
+Save @{notice='Chat switched to Claude'; screenshot='antigravity-switch-back-claude.png'; provider=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).provider; switchedFrom=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).switched_from.provider; rows=$backRows.Count; name=$tabsBefore[0].name} "$caseDir/switch-back.json"
 Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'
 [void](Wait-For 'new Antigravity session tab in Chat View' {
     if (-not (Test-Path "$settings/session.json")) { return $false }

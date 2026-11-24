@@ -1565,7 +1565,7 @@ foreach ($plan in $plans) {
         Save $observation "$caseDir/observation.json"
         Save $cleanup "$caseDir/cleanup.json"
         ($results | Where-Object { $_.name -eq $plan.name }).detail = $(if ($observation.error) { $observation.error } else { 'Awaiting independent buffer evaluation' })
-        Save @{feature=$Feature; status='failed'; agentBoundary='stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'; cases=$results} "$Evidence/result.json"
+        Save @{feature=$Feature; status='failed'; agentBoundary='stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'; cleanup=('Case ' + $plan.name + ' stopped the owned job with ' + $cleanup.remaining_owned_processes + ' processes left; the isolated profile, its process table and socket temp folder were removed (scratchRemoved=' + $cleanup.scratch_removed + '); the evidence copy was kept (evidencePreserved=' + $cleanup.evidence_preserved + ')'); cases=$results} "$Evidence/result.json"
     }
 }
 Save $actions.ToArray() "$Evidence/actions.json"
