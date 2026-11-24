@@ -82,8 +82,11 @@ test('loadFixTimings reads paginated workflow objects and declares only used Gra
     assert.ok(args.includes('--paginate'));
     assert.ok(args.includes('--slurp'));
     const route = args[1];
+    assert.match(route, /created=%3E%3D/);
     const isTests = route.includes('/test.yml/');
     const isVerifier = route.includes('/pr-verifier.yml/');
+    if (route.includes('/release.yml/')) return { status: 0, stdout: '[{"workflow_runs":[]}]' };
+    if (!isTests && !isVerifier) assert.match(route, /\/auto-release.yml\//);
     const run = { conclusion: 'success', head_sha: isTests || isVerifier ? headSha : mergeSha,
       updated_at: at(isTests ? 270 : isVerifier ? 240 : 0) };
     return { status: 0, stdout: JSON.stringify([{ workflow_runs: [] }, { workflow_runs: [run] }], null, 2) };

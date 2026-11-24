@@ -25,7 +25,7 @@ export function bugFixPullRequest(pr) {
 export function pickReleaseRun(runs, mergeSha) {
   const released = (Array.isArray(runs) ? runs : [])
     .filter(run => run?.conclusion === 'success' && String(run.head_sha || '') === String(mergeSha || ''))
-    .sort((left, right) => Date.parse(right.updated_at || right.created_at) - Date.parse(left.updated_at || left.created_at));
+    .sort((left, right) => Date.parse(left.updated_at || left.created_at) - Date.parse(right.updated_at || right.created_at));
   return released[0] || null;
 }
 
@@ -126,21 +126,22 @@ export function loadFixTimings(io, repo, { days = 7, limit = 40 } = {}) {
       labels: (node.labels?.nodes || []).map(label => label.name),
     }))
     .filter(pr => pr.mergedAt && Date.parse(pr.mergedAt) >= Date.parse(since) && bugFixPullRequest(pr));
-  const verifierRuns = ghRest(io, `repos/${repo}/actions/workflows/pr-verifier.yml/runs?per_page=100&created=${since.slice(0, 10)}..`).map(run => ({
+  const verifierRuns = ghRest(io, `repos/${repo}/actions/workflows/pr-verifier.yml/runs?per_page=100&created=%3E%3D${since.slice(0, 10)}`).map(run => ({
     name: 'PR verifier',
     conclusion: run.conclusion,
     head_sha: run.head_sha,
     created_at: run.created_at,
     updated_at: run.updated_at,
   }));
-  const testRuns = ghRest(io, `repos/${repo}/actions/workflows/test.yml/runs?per_page=100&created=${since.slice(0, 10)}..`).map(run => ({
+  const testRuns = ghRest(io, `repos/${repo}/actions/workflows/test.yml/runs?per_page=100&created=%3E%3D${since.slice(0, 10)}`).map(run => ({
     name: 'Tests',
     conclusion: run.conclusion,
     head_sha: run.head_sha,
     created_at: run.created_at,
     updated_at: run.updated_at,
   }));
-  const releaseRuns = ghRest(io, `repos/${repo}/actions/workflows/release.yml/runs?per_page=100&created=${since.slice(0, 10)}..`);
+  const releaseRuns = ['auto-release.yml', 'release.yml'].flatMap(workflow =>
+    ghRest(io, `repos/${repo}/actions/workflows/${workflow}/runs?per_page=100&created=%3E%3D${since.slice(0, 10)}`));
   const runs = [...verifierRuns, ...testRuns];
   return pulls.map(pr => analyzePullRequest(pr, runs, releaseRuns)).filter(Boolean);
 }
