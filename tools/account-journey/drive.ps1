@@ -331,7 +331,7 @@ try {
 
     $scoped = Invoke-Layout $secrets.workspace_key @('list')
     if ($scoped.code -ne 0 -or $scoped.text -match 'runner-' -or $scoped.text -notmatch 'notes-a') { throw "workspace key list is wrong: $($scoped.text)" }
-    $own = Invoke-Layout $secrets.workspace_key @('open', 'notes-new', '--host', '0', '--no-tmux')
+    $own = Invoke-Layout $secrets.workspace_key @('open', 'notes-new', '--no-tmux')
     if ($own.code -ne 0) { throw "workspace key could not open in its own workspace: $($own.text)" }
     $refused = Invoke-Layout $secrets.workspace_key @('move', '--to', 'Work', 'notes-a')
     if ($refused.code -eq 0 -or $refused.text -notmatch 'refused|not found') { throw "workspace key was not refused: $($refused.text)" }
@@ -345,7 +345,7 @@ try {
     $tabsBeforeOpen = Tab-Count (Read-Log)
     $offset = (Read-Log).Length
     $start = [DateTime]::UtcNow
-    $opened = Invoke-Layout $secrets.admin_key @('open', 'fresh-session', '--workspace', 'Runners', '--title', 'Fresh session', '--host', '0', '--no-tmux')
+    $opened = Invoke-Layout $secrets.admin_key @('open', 'fresh-session', '--workspace', 'Runners', '--title', 'Fresh session', '--no-tmux')
     if ($opened.code -ne 0) { throw "open failed: $($opened.text)" }
     [void](Wait-For 'desktop shows the opened session' { (Tab-Count (Read-Log).Substring($offset)) -eq ($tabsBeforeOpen + 1) } 30)
     $openSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
@@ -358,7 +358,7 @@ try {
     $liveSession = 'live-0123456789ab8def81230123456789ab'
     $liveSid = '01234567-89ab-8def-8123-0123456789ab'
     $start = [DateTime]::UtcNow
-    $liveOpened = Invoke-Layout $secrets.admin_key @('open', $liveSession, '--workspace', 'Runners', '--title', 'Named live chat', '--host', '0', '--no-tmux')
+    $liveOpened = Invoke-Layout $secrets.admin_key @('open', $liveSession, '--workspace', 'Runners', '--title', 'Named live chat', '--no-tmux')
     if ($liveOpened.code -ne 0) { throw 'Could not publish the live account tab' }
     $groupHeaders = @{ Authorization = "Bearer $($secrets.admin_key)"; 'X-Layout-Features' = 'groups' }
     $groupSnapshot = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $groupHeaders

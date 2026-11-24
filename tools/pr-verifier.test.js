@@ -711,3 +711,17 @@ test('SOFT-3136 uncovered extension files force FAIL', () => {
   });
   assert.equal(final, 'FAIL');
 });
+
+test('MUBO-247 an unmapped Zig test fixture under src/testdata is not a user-facing file', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
+  const { final, body } = verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: ['appearance shows the row'] },
+    headSha: head,
+    summary,
+    selection: selection(['appearance'], { unmapped: ['src/testdata/mubo-247-cases.json'] }),
+    runUrl: 'u',
+  });
+  assert.equal(final, 'PASS');
+  assert.doesNotMatch(body, /Changed user-facing files have no journey/);
+  assert.deepEqual(verifier.userFacingUnmapped(['src/testdata/mubo-247-cases.json', 'src/chat_mention.zig']), ['src/chat_mention.zig']);
+});

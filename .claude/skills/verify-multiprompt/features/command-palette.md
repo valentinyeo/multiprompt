@@ -1,7 +1,7 @@
 # Command palette
 
 Covers: palette:SEARCH_UI_BIGGER_OFFSET, palette:SEARCH_UI_RESET_OFFSET
-Source files: src/command_palette.zig, src/shortcuts.zig, src/search*, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-command-palette.ps1
+Source files: src/command_palette.zig, src/shortcuts.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-command-palette.ps1
 
 Find real actions in Ctrl+K, execute an app-size change and reset it while checking the saved setting.
 

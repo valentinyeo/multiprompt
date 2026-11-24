@@ -49,7 +49,7 @@ test('real flock and reader config/message storage converge without forwarding t
       marker = args.at(-1); parked = true; return { status: 0 };
     }
   };
-  const args = ['spawn', '--name', 'Adapter chat', '--folder', home, '--workspace', 'Work', '--host', '0', '--task', 'one durable task'];
+  const args = ['spawn', '--name', 'Adapter chat', '--folder', home, '--workspace', 'Work', '--task', 'one durable task'];
   assert.deepEqual(await Promise.all([run(args, opts), run(args, opts)]), [0, 0], errors.join('\n'));
   assert.equal(layout.tabs.length, 1);
   assert.equal(revision, 1);
@@ -91,7 +91,7 @@ test('real tmux has no parking session after repeated visible spawn', { skip: !u
     tmux,
     runtime: args => ({ status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) })
   };
-  const args = ['spawn', '--name', 'Real parking', '--folder', home, '--workspace', 'Work', '--host', '0'];
+  const args = ['spawn', '--name', 'Real parking', '--folder', home, '--workspace', 'Work'];
   assert.equal(await run(args, opts), 0, errors.join('\n'));
   assert.equal(await run(args, opts), 0, errors.join('\n'));
   assert.equal(output[0].sid, output[1].sid);
