@@ -8,7 +8,7 @@ const read = name => fs.readFileSync(path.join(evidence, name), 'utf8');
 const json = name => JSON.parse(read(name).replace(/^\uFEFF/, ''));
 const text = name => read(name);
 const manifest = name => fs.existsSync(path.join(evidence, name));
-const journal = text('fresh-start-live/working-host.jsonl')
+const journal = text('fresh-start-live/stand-in/working-host.jsonl')
   .split('\n')
   .filter(line => line.trim())
   .map(line => JSON.parse(line));
