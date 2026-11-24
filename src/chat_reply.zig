@@ -93,6 +93,31 @@ test "Android ReplyQuote fixture" {
     }
 }
 
+test "MUBO-457 a skill typed in a quote reply sends the command line first" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "/pstack:poteto-help why did this arrive as plain text?\nand a following line");
+    defer a.free(sent);
+    try std.testing.expect(std.mem.startsWith(u8, sent, "/pstack:poteto-help why did this arrive as plain text?\n> the earlier answer"));
+    try std.testing.expectEqualStrings("/pstack:poteto-help why did this arrive as plain text?\n> the earlier answer\n\nand a following line", sent);
+}
+
+test "MUBO-457 a skill reply with no other text keeps its quote after the command" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "/pstack:poteto-help");
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("/pstack:poteto-help\n> the earlier answer", sent);
+}
+
+test "MUBO-457 an ordinary quote reply keeps the quote first" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "my answer");
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("> the earlier answer\n\nmy answer", sent);
+    const path = try compose(a, "the earlier answer", "/tmp/notes.txt says hello");
+    defer a.free(path);
+    try std.testing.expectEqualStrings("> the earlier answer\n\n/tmp/notes.txt says hello", path);
+}
+
 test "Android previews and Unicode whitespace with CR line endings" {
     const a = std.testing.allocator;
     for ([_][2][]const u8{
