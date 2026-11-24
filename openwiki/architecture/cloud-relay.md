@@ -21,6 +21,9 @@ This page plans the second path: a server helper dials out to the Multibot cloud
 desktop connects to the same cloud, and the two carry the frames SSH carries today.
 Nothing shipped yet. The switch described here belongs to the build slices below.
 
+The same path carries the onboarding the ticket opens with: adding a server becomes one
+command run on that machine, not four fields, a pasted key and a hand-run installer.
+
 ## The frames do not change
 
 The relay moves bytes. It does not read them.
@@ -55,6 +58,36 @@ The relay moves bytes. It does not read them.
   Revoking a device in the account dashboard closes its room sockets on the next
   upgrade, with no new revocation path.
 - No new secret, no new key type and no new sign-in screen.
+
+## Getting a server in without hand-edited files
+
+The transport alone does not fix onboarding. Today a server arrives through four fields
+and a pasted key line: Settings > Servers takes a name, address, user and port, hands the
+user an `authorized_keys` line to run on that machine, and Test connects once over SSH.
+That machine also needs the reader installed before a chat can open, and a machine behind
+NAT never gets that far. A new user cannot do this alone.
+
+The cloud path replaces that sequence with one command, run on the server:
+
+- Settings > Servers keeps its add row and its copy button. The line it copies is
+  `multibot.sh login <code>` instead of an `authorized_keys` line.
+- The desktop mints the code through the account service and shows it beside the line:
+  one use, ten minutes, for the account the desktop is signed in to.
+- On the server the command installs the reader and the relay helper from the release,
+  exchanges the code for the account key, writes that key where the helper reads it, and
+  dials out. The user handles no key file and no environment variable.
+- The server adds itself to the sidebar when its helper appears in the room. The user types
+  no address, user name, port or key.
+- The four SSH fields stay on the same panel, unchanged, for anyone who wants that path.
+  For a slot whose helper is already connected, the panel fills the address from the
+  helper's own report, so both paths describe the same machine.
+
+The code is the only new state: the account service keeps a hash of it until it is used or
+it expires, and a use is an ordinary key issue that the dashboard revokes like a device.
+
+Self-host moves the hub origin, not the command. `multibot.sh login --hub <origin> <code>`
+is the same line with one flag, so what a user learns does not change when their hub is
+their own Cloudflare deployment.
 
 ## The room is a pipe, not a store
 
@@ -108,7 +141,7 @@ slice 1, then link both directions:
 - Title: Multibot Android: keep reading a chat the desktop reaches through the cloud
 - Body: the desktop adds a cloud path for the same protocol 1 frames. Android's current build
   keeps working, because the account layout, tab identity and frames do not change. Android
-  gains the cloud path after slice 3, and must be checked on a real phone against a relayed
+  gains the cloud path after slice 4, and must be checked on a real phone against a relayed
   desktop before this work is Done.
 - Old and new client compatibility: an old Android build reads a relayed chat through the
   existing layout and reader path with no change, and a new build must not require a server
@@ -120,13 +153,15 @@ slice 1, then link both directions:
    against a room running locally.
 2. Room in the account service: the upgrade route, the Durable Object, slot routing and
    the device-key check, with its own service tests.
-3. Desktop: the `Cloud` transport beside the SSH channel, then the Settings switch and
-   its three surfaces.
-4. Self-host: another hub origin in Settings, so a user can point a server at their own
-   Cloudflare deployment. Not this ticket.
+3. `multibot.sh login`: the one-time code, the install step and the helper dialing out, so
+   a fresh server arrives with one command and no SSH fields.
+4. Desktop: the `Cloud` transport beside the SSH channel, then the Settings switch, the
+   login line and its three surfaces.
+5. Self-host: another hub origin in Settings and `--hub` on the login line, so a user can
+   point a server at their own Cloudflare deployment. Not this ticket.
 
-Slices 1 to 3 are the ticket's Done: a desktop chat over the cloud, and SSH again when
-switched back.
+Slices 1 to 4 are the ticket's Done: a server added with one command, a desktop chat over
+the cloud, and SSH again when switched back.
 
 ## Not this ticket
 
