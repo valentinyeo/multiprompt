@@ -223,6 +223,24 @@ for (const [field, type, extra, verdict] of [
   assert.ok(f.calls()[1].some(arg => arg.includes(`... on ${type}`)));
 });
 
+test('merge preflight checks the combined tree without building or rerunning journeys', () => {
+  const preflight = fs.readFileSync(path.join(root, '.github/workflows/merge-preflight.yml'), 'utf8');
+  assert.match(preflight, /runs-on: ubuntu-latest/);
+  assert.match(preflight, /timeout-minutes: 3/);
+  assert.match(preflight, /git checkout --detach "\$BASE"\n\s+git merge --no-commit --no-ff "\$HEAD"/);
+  for (const command of [
+    'node tools/check-file-size.mjs', 'node tools/check-routing-ids.mjs',
+    'node --test tools/palette-rows.test.js tools/shortcuts-doc.test.js',
+    'node tools/strip-comments.mjs --check', 'node tools/check-timer-ratchet.mjs',
+    'node tools/check-extension-version.mjs "$BASE" "$HEAD"',
+    'node tools/check-commit-identities.mjs "$BASE" "$HEAD"',
+    'node tools/check-journey-evidence.mjs',
+  ]) {
+    assert.ok(preflight.indexOf(command) > preflight.indexOf('git merge --no-commit --no-ff'), command);
+  }
+  assert.doesNotMatch(preflight, /zig build|verify\.yml|control\.ps1|git commit/);
+});
+
 test('MUBO-446 refuses a red combined-code preflight without merging or starting master checks', t => {
   const merged = { data: { mergePullRequest: { pullRequest: { number: 42, merged: true, mergeCommit: { oid: master } } } } };
   const f = fixture(t, snapshot(), event(), { DRY_RUN: 'false', MERGE_RESPONSE: JSON.stringify(merged), PREFLIGHT_CONCLUSION: 'failure' });
