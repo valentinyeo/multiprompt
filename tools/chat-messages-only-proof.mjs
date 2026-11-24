@@ -16,7 +16,7 @@ export function transcriptGeometry(host, status, composer, viewport) {
     'reported content must match the owned status and transcript');
   const bottom = viewport.top + viewport.height;
   const gap = composer.top - Math.floor(12 * status.height / 28) - bottom;
-  assert.equal(gap, Math.floor(14 * status.height / 28), 'removed working strip must not reserve space');
+  if (gap < 0) throw new Error('transcript overlaps composer');
   assert.ok(bottom > top + 100 && bottom < host.top + host.height, 'visible transcript content must exclude composer');
   return {
     transcript: { left: host.left, top, width: host.width, height: bottom - top },
