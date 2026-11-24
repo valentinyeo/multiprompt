@@ -169,19 +169,6 @@ jobs:
               failed=1
             fi
           }
-          code=""
-          for attempt in $(seq 1 24); do
-            code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$URL/health" || true)"
-            if [ "$code" = 200 ]; then break; fi
-            sleep 5
-          done
-          ok=0
-          if [ "$code" = 200 ] && grep -q 'multiprompt-account' "$RUNNER_TEMP/health.json"; then ok=1; fi
-          check "health $URL/health answered ${code}" "$ok"
-          page="$(curl -sS -o "$RUNNER_TEMP/signin.html" -w '%{http_code}' "$URL/signin" || true)"
-          ok=0
-          if [ "$page" = 200 ] && grep -q 'data-page="signin"' "$RUNNER_TEMP/signin.html"; then ok=1; fi
-          check "sign-in page $URL/signin answered ${page}" "$ok"
           key="mpk_a_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
           echo "::add-mask::$key"
           key_hash="$(node -e 'const c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(process.argv[1]).digest("base64").replaceAll("+","-").replaceAll("/","_").replaceAll("=",""))' "$key")"
@@ -189,13 +176,33 @@ jobs:
           if npx wrangler d1 execute DB --remote --config wrangler.proof.jsonc --command "INSERT INTO service_keys (hash,account,kind,label,created) VALUES ('$key_hash','proof@example.com','admin','deploy-proof',$(date +%s))" > "$RUNNER_TEMP/key-seed.log" 2>&1; then seeded=1; fi
           check "sync key seeded in the proof database" "$seeded"
           features='favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,workspace_color,bot_appearance'
+          layout_get() {
+            curl -sS -o "$1" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$URL/v1/layout" || true
+          }
+          code=""
+          read_code=""
+          settle_deadline=$((SECONDS + 60))
+          while :; do
+            code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$URL/health" || true)"
+            read_code="$(layout_get "$RUNNER_TEMP/layout.json")"
+            if [ "$code" = 200 ] && [ "$read_code" = 200 ]; then break; fi
+            [ "$SECONDS" -lt "$settle_deadline" ] || break
+            sleep 5
+          done
+          ok=0
+          if [ "$code" = 200 ] && grep -q 'multiprompt-account' "$RUNNER_TEMP/health.json"; then ok=1; fi
+          check "health $URL/health answered ${code:-none}" "$ok"
+          page="$(curl -sS -o "$RUNNER_TEMP/signin.html" -w '%{http_code}' "$URL/signin" || true)"
+          ok=0
+          if [ "$page" = 200 ] && grep -q 'data-page="signin"' "$RUNNER_TEMP/signin.html"; then ok=1; fi
+          check "sign-in page $URL/signin answered ${page:-none}" "$ok"
           layout_call() {
             local out="$1" attempt=1 code
             shift
             while :; do
               code="$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer $key" -H 'Accept: application/json' -H "X-Layout-Features: $features" "$@" || true)"
               case "$code" in
-                404|000|5??)
+                000|5??)
                   [ "$attempt" -lt 12 ] || break
                   attempt=$((attempt + 1))
                   sleep 5
@@ -205,7 +212,6 @@ jobs:
             done
             printf '%s' "$code"
           }
-          read_code="$(layout_call "$RUNNER_TEMP/layout.json" "$URL/v1/layout")"
           read_revision="$(node "$RUNNER_TEMP/wrangler-json.mjs" revision < "$RUNNER_TEMP/layout.json" 2>/dev/null || true)"
           ok=0
           if [ "$read_code" = 200 ] && [ -n "$read_revision" ]; then ok=1; fi
