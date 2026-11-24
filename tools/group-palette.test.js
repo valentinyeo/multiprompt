@@ -34,7 +34,7 @@ function decl(name) {
   assert.ok(match, name);
   return match[0];
 }
-const inlinedModules = ['account_desktop.zig', 'rename.zig', 'sidebar.zig', 'tab_state_desktop.zig'];
+const inlinedModules = ['account_desktop.zig', 'rename.zig', 'sidebar.zig'];
 function dropTest(file, prefix) {
   const text = fs.readFileSync(file, 'utf8');
   const start = text.indexOf(`test "${prefix}`);
@@ -98,7 +98,6 @@ const Shell = struct {
     selected: bool = false, chat_id: u64 = 0, group_id: u32 = 1, starred_group_id: u32 = 0, favorite: bool = false, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
     tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
-    tab_key: [64]u8 = @splat(0), tab_key_len: u32 = 0,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
     face: ?u8 = null, color: ?u8 = null, avatar_local_id: [16]u8 = @splat(0),
 };
@@ -108,7 +107,6 @@ var g_closed_history: [10]ClosedShell = undefined;
 var g_pending_tmux_host: u8 = 0;
 var g_pending_tmux_identity: ?[]const u8 = null;
 var g_pending_chat_id: u64 = 0;
-fn restoreByKey(_: u8, _: []const u8) ?bool { return null; }
 fn GetTickCount64() u64 { return 1; }
 fn spawnShellWithSession(_: ShellKind, _: ?[]const u8, _: ?[]const u8, _: ?usize) bool {
     shells[shell_count] = .{};

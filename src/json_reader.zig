@@ -194,8 +194,6 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
     var count: u32 = 0;
     for (array(field(root, "tabs"))) |obj| {
         if (count == tabs.len) break;
-        const tab_state = field(obj, "tab_state");
-        if (boolTrue(tab_state, "closed") or boolTrue(tab_state, "archived")) continue;
         const kind = string(field(obj, "kind")) orelse continue;
         if (string(field(obj, "name")) == null) continue;
         const tab = &tabs[count];
@@ -229,14 +227,6 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         if (std.mem.eql(u8, mode, "everywhere")) tab.cv = !tab.cso;
         if (std.mem.eql(u8, mode, "nowhere")) tab.cv = false;
         tab.inbox_archived = boolTrue(obj, "iah");
-        if (tab_state == .object) {
-            const key = string(field(tab_state, "tmux")) orelse "";
-            if (std.mem.startsWith(u8, key, "@shell-")) tab.tab_key_len = copyString(tab_state, "tmux", &tab.tab_key);
-            tab.pinned_top = boolTrue(tab_state, "pinned");
-            tab.inbox_archived = boolTrue(tab_state, "waiting");
-            tab.cv = std.mem.eql(u8, string(field(tab_state, "kind")) orelse "shell", "chat");
-            tab.claude_sid_len = copyString(tab_state, "sid", &tab.claude_sid);
-        }
         tab.needs_attention = boolTrue(obj, "att");
         tab.bnat = !boolFalse(obj, "bnat");
         tab.shell_id = @intCast(@min(uint(obj, "shell_id"), std.math.maxInt(u32)));
@@ -251,30 +241,6 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.tmux_host = @truncate(uint(obj, "tmux_host"));
         const workspace = uint(obj, "workspace");
         tab.workspace = if (workspace < max_workspaces) @intCast(workspace) else 0;
-        if (tab_state == .object) {
-            if (string(field(tab_state, "name")) != null) tab.name_len = copyWide(tab_state, "name", &tab.name);
-            if (string(field(tab_state, "shell"))) |shell| tab.kind = std.meta.stringToEnum(@TypeOf(tab.kind), shell) orelse tab.kind;
-            if (tab_state.object.contains("chat_id")) tab.chat_id = uint(tab_state, "chat_id");
-            const saved_agent = uintDefault(tab_state, "agent", tab.ai_agent);
-            if (saved_agent <= 7) tab.ai_agent = @intCast(saved_agent);
-            if (string(field(tab_state, "cwd")) != null) {
-                tab.cwd_len = copyString(tab_state, "cwd", &tab.cwd);
-                tab.claude_cwd_len = copyString(tab_state, "cwd", &tab.claude_cwd);
-            }
-            if (string(field(tab_state, "workspace"))) |name| {
-                for (array(field(root, "workspaces")), 0..) |ws, wi| {
-                    if (wi < max_workspaces and std.mem.eql(u8, name, string(field(ws, "name")) orelse "")) tab.workspace = @intCast(wi);
-                }
-            }
-            if (tab_state.object.contains("group")) {
-                if (string(field(tab_state, "group"))) |name| {
-                    for (array(field(root, "groups"))) |group| {
-                        if (std.mem.eql(u8, name, string(field(group, "name")) orelse "")) tab.group_id = @truncate(uint(group, "id"));
-                    }
-                }
-            }
-        }
-
         tab.last_used = uint(obj, "used");
         tab.input = uint(obj, "input");
         tab.visits = visits(obj);
@@ -391,16 +357,6 @@ test "visits cache distinguishes unknown and empty and rejects invalid arrays" {
     const empty = try parse(std.testing.allocator, "{\"visits\":[]}");
     defer empty.deinit();
     try std.testing.expectEqual(@as(u8, 1), visits(empty.value).known);
-}
-
-test "SOFT-3141 unnamed retained groups keep local ids until normalization" {
-    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Retained\",\"group_id\":17,\"tab_state\":{\"group\":null}},{\"kind\":\"cmd\",\"name\":\"Ungrouped\",\"group_id\":0,\"tab_state\":{\"group\":null}},{\"kind\":\"cmd\",\"name\":\"Named\",\"group_id\":17,\"tab_state\":{\"group\":\"Research\"}}],\"groups\":[{\"id\":29,\"name\":\"Research\"}]}");
-    defer parsed.deinit();
-    var tabs: [3]@import("app_state.zig").SavedTab = undefined;
-    try std.testing.expectEqual(@as(u32, 3), sessionTabs(parsed.value, &tabs, 9));
-    try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
-    try std.testing.expectEqual(@as(u32, 0), tabs[1].group_id);
-    try std.testing.expectEqual(@as(u32, 29), tabs[2].group_id);
 }
 
 test "IGSH-1533 saved colors distinguish white missing and invalid" {

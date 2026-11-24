@@ -145,30 +145,62 @@ test('style and workspace color publish once and then match', async () => {
   rmSync(box.dir, { recursive: true, force: true });
 });
 
-test('tab actions forward exact arguments and do not edit the account layout', async () => {
-  for (const verb of ['open', 'close']) {
-    const lines = [], errors = [];
-    const args = [verb, 'Fixture', '--host', '1', '--json'];
-    assert.equal(await run(args, {
-      env: {}, out: line => lines.push(line), err: line => errors.push(line),
-      fetch() { assert.fail('tab action reached the account service'); },
-      sessions(actual) {
-        assert.deepEqual(actual, args);
-        return { status: 0, stdout: '{"ok":true}\n', stderr: '' };
-      }
-    }), 0);
-    assert.deepEqual(lines, ['{"ok":true}']);
-    assert.deepEqual(errors, []);
-  }
+test('open groups a shell once, and a different workspace is refused', async () => {
+  const box = harness();
+  const opened = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--title', 'Runner 1', '--workspace', 'Work', '--group', 'MP Runners', '--host', '1', '--no-tmux']);
+  assert.equal(opened.code, 0, text(opened));
+  assert.equal(box.layout.tabs.length, 1);
+  assert.equal(box.layout.tabs[0].group, 'MP Runners');
+  assert.equal(box.sessions.size, 0);
+  const openedPuts = box.puts.length;
+  const repeat = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--workspace', 'Work', '--group', 'MP Runners', '--host', '1', '--no-tmux']);
+  assert.match(repeat.lines[0], /already open mp-runner-1/);
+  assert.equal(box.puts.length, openedPuts);
+  const moved = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--workspace', 'Other', '--host', '1', '--no-tmux']);
+  assert.equal(moved.code, 1);
+  assert.match(moved.errors[0], /already open in Work/);
+  assert.equal(box.puts.length, openedPuts);
+  rmSync(box.dir, { recursive: true, force: true });
 });
 
-test('a desktop refusal stays nonzero through mb', async () => {
-  const errors = [];
-  assert.equal(await run(['close', 'Fixture'], {
-    env: {}, out() {}, err: line => errors.push(line),
-    sessions: () => ({ status: 2, stdout: '', stderr: 'desktop refused close\n' })
-  }), 2);
-  assert.deepEqual(errors, ['desktop refused close']);
+test('groups are refused before tmux when the service does not advertise them', async () => {
+  const box = harness({ features: 'favorite,bot_appearance' });
+  const opened = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--workspace', 'Work', '--host', '0', '--group', 'Runners']);
+  assert.equal(opened.code, 1);
+  assert.match(opened.errors[0], /does not support groups/);
+  assert.equal(opened.puts.length, 0);
+  assert.equal(opened.tmux.length, 0);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('close removes a tab, kills only an owned empty session, and leaves a busy one', async () => {
+  const box = harness({ layout: { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [
+    { kind: 'tmux', name: 'Foreign', tmux_session: 'foreign', tmux_host: 0, workspace: 'Work' },
+    { kind: 'tmux', name: 'Owned', tmux_session: 'owned', tmux_host: 0, workspace: 'Work' },
+    { kind: 'tmux', name: 'Busy', tmux_session: 'busy', tmux_host: 0, workspace: 'Work' }
+  ] } });
+  box.sessions.add('owned'); box.sessions.add('busy'); box.sessions.add('foreign');
+  box.panes.set('owned', 'sleep'); box.panes.set('busy', 'node'); box.panes.set('foreign', 'sleep');
+  writeFileSync(join(box.dir, 'owners.json'), JSON.stringify({ sessions: {
+    '0:owned': { owner: 'mb', name: 'Owned', session: 'owned', host: 0, command: 'sleep infinity', provider: 'hax', sid: 'sid-1' },
+    '0:busy': { owner: 'mb', name: 'Busy', session: 'busy', host: 0, command: 'sleep infinity', provider: 'hax', sid: 'sid-2' }
+  }, workspaces: {}, groups: {} }));
+  const foreign = await box.call(['close', 'foreign']);
+  assert.match(foreign.lines.at(-1), /closed foreign/);
+  assert.equal(box.layout.tabs.some(tab => tab.tmux_session === 'foreign'), false);
+  assert.equal(foreign.tmux.some(args => args[0] === 'kill-session'), false);
+  const owned = await box.call(['close', 'owned']);
+  assert.match(text(owned), /closed owned/);
+  assert.ok(owned.runtime.some(args => args.join(' ') === 'host disable hax sid-1'));
+  assert.ok(owned.tmux.some(args => args[0] === 'kill-session' && args.at(-1) === '=owned'));
+  const busy = await box.call(['close', 'busy']);
+  assert.match(text(busy), /left busy/);
+  assert.match(text(busy), /closed busy/);
+  assert.equal(busy.tmux.some(args => args[0] === 'kill-session' && args.at(-1) === '=busy'), false);
+  assert.equal(busy.owners.sessions['0:busy'].owner, 'mb');
+  const repeat = await box.call(['close', 'owned']);
+  assert.match(repeat.lines.at(-1), /already closed owned/);
+  rmSync(box.dir, { recursive: true, force: true });
 });
 
 test('workspace and group verbs are idempotent and delete only owned names', async () => {

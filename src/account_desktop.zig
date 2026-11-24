@@ -187,20 +187,13 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
         if (name.len > 32) return error.InvalidLayout;
         try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
     }
-    for (app_state.shells[0..app_state.shell_count], 0..) |shell, shell_index| {
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
         const remote = shell.tmux_session_len > 0;
         if (!include_local and !remote) continue;
         const ws: usize = if (app_state.g_single_window) shell.workspace else 0;
         if (ws >= workspaces.items.len) return error.InvalidLayout;
         const name = try std.unicode.utf16LeToUtf8Alloc(a, shell.name[0..shell.name_len]);
-        var state = try @import("tab_state_desktop.zig").capture(a, shell_index);
-        if (!include_local) {
-            state.chat_id = 0;
-            state.visible = false;
-            state.hidden_reason = null;
-        }
         try tabs.append(a, .{
-            .tab_state = state,
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
@@ -218,20 +211,6 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .workspace = workspaces.items[ws].name,
         });
     }
-    if (!include_local) for (app_state.g_tmux_closed.entries.items) |entry| {
-        const state = entry.tab_state orelse continue;
-        if (entry.host > 2 or std.mem.startsWith(u8, state.tmux, "@shell-")) continue;
-        var known_workspace = false;
-        for (workspaces.items) |workspace| if (std.mem.eql(u8, workspace.name, state.workspace)) {
-            known_workspace = true;
-        };
-        if (!known_workspace) continue;
-        var portable = try state.dupe(a);
-        portable.chat_id = 0;
-        portable.visible = false;
-        portable.hidden_reason = null;
-        try tabs.append(a, .{ .tab_state = portable, .name = try a.dupe(u8, state.name), .manual = true, .group = if (state.group) |group| try a.dupe(u8, group) else "", .tmux_session = try a.dupe(u8, state.tmux), .tmux_host = entry.host, .workspace = try a.dupe(u8, state.workspace) });
-    };
     const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
     return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
@@ -365,8 +344,6 @@ fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !sessio
     if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
     return kept;
 }
-var g_tab_state_supported = false;
-
 pub fn publishSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -385,11 +362,6 @@ pub fn publishSessionLayout() void {
     var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
     var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
     var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
-    if (!g_tab_state_supported) {
-        plain_local = account_layout.withoutTabState(arena.allocator(), plain_local) catch return;
-        plain_base = account_layout.withoutTabState(arena.allocator(), plain_base) catch return;
-        plain_synced = account_layout.withoutTabState(arena.allocator(), plain_synced) catch return;
-    }
     if (!app_state.g_account_groups_supported) {
         plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
@@ -1447,7 +1419,6 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
-    reply.tab_state_supported = remote.tab_state_supported;
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
@@ -1521,7 +1492,6 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
-        if (!remote.tab_state_supported) rebased = try account_layout.withoutTabState(alloc, rebased);
         if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
         if (!remote.group_order_supported) rebased = account_layout.withoutGroupOrder(rebased);
         if (!remote.starred_groups_supported) rebased = try account_layout.withoutStarredGroups(alloc, rebased);
@@ -1555,7 +1525,6 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
-    reply.tab_state_supported = remote.tab_state_supported;
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
@@ -1779,28 +1748,10 @@ pub fn applyServerLayout(json: []const u8) !void {
     var removed_storage: [@import("workspaces.zig").MAX_REMOVED_WORKSPACES][]const u8 = undefined;
     desired = try account_layout.withoutRemovedWorkspaces(a, desired, removedWorkspaceNames(&removed_storage));
     var kept: std.ArrayList(session_layout.Tab) = .empty;
-    var listed: std.ArrayList(@import("tmux_closed.zig").LayoutTab) = .empty;
-    for (server.value.tabs) |tab| {
-        if (tab.tab_state) |state| if (state.closed or state.archived) continue;
-        try listed.append(a, .{ .host = tab.tmux_host, .session = tab.tmux_session });
-    }
-    app_state.g_tmux_closed.reconcile(listed.items);
+    const listed = try a.alloc(@import("tmux_closed.zig").LayoutTab, server.value.tabs.len);
+    for (server.value.tabs, 0..) |tab, ti| listed[ti] = .{ .host = tab.tmux_host, .session = tab.tmux_session };
+    app_state.g_tmux_closed.reconcile(listed);
     for (desired.tabs) |tab| {
-        if (tab.tab_state) |state| if (state.closed or state.archived) {
-            try app_state.g_tmux_closed.close(std.heap.page_allocator, tab.tmux_host, tab.tmux_session, @import("tmux_closed.zig").now());
-            for (app_state.g_tmux_closed.entries.items) |*entry| {
-                if (!tmux_identity.same(entry.host, entry.name[0..entry.len], tab.tmux_host, tab.tmux_session)) continue;
-                if (entry.tab_state == null) {
-                    var saved = try state.dupe(std.heap.page_allocator);
-                    for (app_state.shells[0..app_state.shell_count]) |shell| {
-                        if (!tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], tab.tmux_host, tab.tmux_session)) continue;
-                        saved.chat_id = shell.chat_id;
-                        break;
-                    }
-                    entry.tab_state = saved;
-                }
-            }
-        };
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
     }
     desired.tabs = kept.items;
@@ -1934,16 +1885,6 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
-            if (tab.tab_state) |state| {
-                shell.pinned_top = state.pinned;
-                shell.inbox_archived = state.waiting;
-                shell.chat_view_on = state.kind == .chat;
-                if (state.sid) |sid| {
-                    @memcpy(shell.claude_sid[0..sid.len], sid);
-                    shell.claude_sid_len = @intCast(sid.len);
-                }
-            }
-
             if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false, desired.tabs);
             if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true, desired.tabs);
             shell.face = tab.face;
@@ -2189,7 +2130,6 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer server.deinit();
     g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
-    g_tab_state_supported = reply.tab_state_supported;
     app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_group_order_supported = reply.group_order_supported;
     app_state.g_account_starred_groups_supported = reply.starred_groups_supported;

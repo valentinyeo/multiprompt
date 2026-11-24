@@ -37,7 +37,6 @@ extern "ws2_32" fn closesocket(usize) callconv(.winapi) i32;
 pub const Response = struct {
     status: u32,
     bytes: []u8,
-    tab_state_supported: bool = false,
     hosts_supported: bool = false,
     removal_supported: bool = false,
     colors_supported: bool = false,
@@ -96,7 +95,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,tab_state" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);
@@ -104,7 +103,6 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     var status: u32 = 0;
     var size: u32 = @sizeOf(u32);
     if (WinHttpQueryHeaders(req, 19 | 0x20000000, null, &status, &size, null) == 0) return error.Network;
-    var tab_state_supported = false;
     var hosts_supported = false;
     var removal_supported = false;
     var colors_supported = false;
@@ -119,7 +117,6 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
         const raw = try std.unicode.utf16LeToUtf8Alloc(a, std.mem.trim(u16, header_buf[0 .. size / 2], &.{0}));
         defer a.free(raw);
-        tab_state_supported = layoutSupports(raw, "tab_state");
         hosts_supported = layoutSupportsHosts(raw);
         removal_supported = layoutSupportsRemoval(raw);
         colors_supported = layoutSupportsColors(raw);
@@ -137,7 +134,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .tab_state_supported = tab_state_supported, .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported, .photos_supported = photos_supported, .palette8_supported = palette8_supported, .groups_supported = groups_supported, .group_order_supported = group_order_supported, .starred_groups_supported = starred_groups_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported, .photos_supported = photos_supported, .palette8_supported = palette8_supported, .groups_supported = groups_supported, .group_order_supported = group_order_supported, .starred_groups_supported = starred_groups_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }
