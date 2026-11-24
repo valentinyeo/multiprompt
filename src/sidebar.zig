@@ -5986,3 +5986,7 @@ test "SOFT-3124 a workspace view keeps the selected row in place until another r
     try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
     try std.testing.expectEqual(@as(u32, 11), app_state.shells[rows[2].shell_idx].shell_id);
 }
+
+test {
+    _ = @import("sidebar_group_tests.zig");
+}
