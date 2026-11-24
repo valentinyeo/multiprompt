@@ -182,7 +182,7 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   assert.equal(typeof transcriptGeometry, 'function', 'owned viewport measurement is available');
   const host = { left: 30, top: 40, width: 960, height: 800 };
   const status = { left: 30, top: 80, width: 960, height: 28 };
-  const composer = { left: 80, top: 750, width: 800, height: 60 };
+  const composer = { left: 80, top: 766, width: 800, height: 60 };
   const viewport = { left: 30, top: 80, width: 960, height: 644 };
   assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
     transcript: { left: 30, top: 108, width: 960, height: 616 },
@@ -191,8 +191,9 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   });
   assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
-  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /working strip/);
-  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /working strip/);
+  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /new-message band/);
+  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /new-message band/);
+  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 750 }, viewport), /new-message band/);
   const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
   assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),
     Object.fromEntries(Object.entries(transcriptGeometry(host, status, composer, viewport)).map(([key, value]) => [key, scale(value)])));
