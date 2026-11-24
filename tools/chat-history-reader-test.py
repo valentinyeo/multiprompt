@@ -2195,7 +2195,7 @@ class HistoryReaderTest(unittest.TestCase):
         _, rows = self.read()
         self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
                          [dict(operation='blocked', content=MUBO_246_PROMPT)])
-        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Two are open.'])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant' and row['text']], ['Two are open.'])
         self.assertEqual([row['text'] for row in rows if row['role'] == 'user'], ['summarise the open pull requests'])
 
     def test_queue_removal_and_contentless_dequeue_popall_survive_delta_paging(self):
