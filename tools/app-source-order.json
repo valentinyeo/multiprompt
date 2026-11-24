@@ -399,5 +399,6 @@
   ["shell_poll.zig", "fn shouldAdvanceHiddenIdleWatchdog"],
   ["workspace_view_ui.zig", "fn appendSearchResults"],
   ["main.zig", "fn wndProc"],
-  ["account_desktop.zig", "test \"account lock prevents restore and every shell spawn entry point\""]
+  ["account_desktop.zig", "test \"account lock prevents restore and every shell spawn entry point\""],
+  ["palette_text.zig", "fn keycap"]
 ]

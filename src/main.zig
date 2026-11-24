@@ -3834,7 +3834,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CLOSE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.shell_count > 0) closeShell(app_state.active_shell);
+            if (app_state.shell_count > 0) {
+                closeShell(app_state.active_shell);
+            }
             return 0;
         },
         WM_APP_CLOSE_SESSION => {
@@ -4278,8 +4280,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
-            app_state.g_search_active = true;
             app_state.g_search_permission_requests_mode = false;
+            app_state.g_search_active = true;
             list_input.palette.keyboard();
             if (wp == 1 and foregroundIsOurs()) {
                 app_state.g_focus_authorized_hwnd = hwnd;

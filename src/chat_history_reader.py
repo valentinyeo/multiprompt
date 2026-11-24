@@ -41,7 +41,6 @@ SCAN_BYTES = 512 * 1024
 TAIL_BYTES = 512 * 1024
 TAIL_VISIBLE_BYTES = 4 * TAIL_BYTES
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
-PERMISSION_SCAN_BYTES = TAIL_BYTES
 PERMISSION_MODES = ("auto", "default", "acceptEdits")
 STATUS_CACHE = {}
 QUEUE_CACHE = {}
@@ -1258,6 +1257,14 @@ def permission_note(state, event):
             state["candidate"] = (event, part)
 
 
+def permission_scan_needed(cached, fresh):
+    mode = fresh["mode"] or cached["mode"]
+    candidate = fresh["candidate"] or cached["candidate"]
+    if mode is None or candidate is None:
+        return True
+    return candidate[1]["id"] not in cached["answered"] | fresh["answered"]
+
+
 def permission_settle(state, fresh=None):
     if fresh is not None:
         if fresh["candidate"] is not None or state["candidate"] is None:
@@ -1269,27 +1276,6 @@ def permission_settle(state, fresh=None):
     identity = candidate[1]["id"] if candidate is not None else None
     state["answered"] = {identity} & state["answered"] if identity is not None else set()
     return state
-
-
-def permission_delta(source, start, end):
-    start = max(start, end - PERMISSION_SCAN_BYTES)
-    if end <= start:
-        return None
-    try:
-        source.seek(start)
-        data = source.read(end - start)
-    except (OSError, ValueError):
-        return None
-    fresh = permission_state()
-    events = []
-    for raw in data.splitlines():
-        try:
-            events.append(json.loads(raw))
-        except (ValueError, UnicodeDecodeError):
-            continue
-    for event in reversed(events):
-        permission_note(fresh, event)
-    return fresh
 
 
 def permission_request(state, agent):
@@ -1334,15 +1320,16 @@ def status_header(source, size, agent, captured=()):
     lower = previous[0] if previous is not None else 0
     scanned_end = lower
     probe = previous[5] if previous is not None else b""
-    cached_permission = previous[7] if previous is not None and len(previous) > 8 else None
+    cached_permission = previous[7] if previous is not None and len(previous) > 7 else None
     permission = (permission_state(cached_permission["mode"], cached_permission["answered"], cached_permission["candidate"])
                   if cached_permission is not None else permission_state())
-    permission_cursor = previous[8] if previous is not None and len(previous) > 8 else 0
+    fresh_permission = permission_state()
     remaining = min(QUESTION_SCAN_BYTES, size - lower)
     pending = b""
     first = True
     extra_budget = max(0, QUESTION_SCAN_BYTES - probe_bytes - sum(len(data) for _, data in captured))
-    while end > lower and remaining and (model is None or usage is None or todos is None or not question_known):
+    while end > lower and remaining and (model is None or usage is None or todos is None or not question_known
+                                         or permission_scan_needed(permission, fresh_permission)):
         count = min(TAIL_BYTES, end - lower, remaining)
         cached = next(((start, data) for start, data in captured if start < end <= start + len(data)), None)
         if cached is not None:
@@ -1374,8 +1361,7 @@ def status_header(source, size, agent, captured=()):
                        ((b'"usage"', b'token_count') if usage is None else ()) +
                        ((b'TodoWrite', b'update_plan') if todos is None else ()) +
                        ((b'AskUserQuestion', b'request_user_input', b'tool_result', b'function_call_output') if not question_known else ()) +
-                       ((b'"permissionMode"',) if permission["mode"] is None else ()) +
-                       ((b'"tool_use"', b'"tool_use_id"') if permission["candidate"] is None else ()))
+                       (b'"permissionMode"', b'"tool_use"', b'"tool_result"'))
             if not any(marker in raw for marker in markers):
                 continue
             try:
@@ -1384,7 +1370,7 @@ def status_header(source, size, agent, captured=()):
                 continue
             if not isinstance(event, dict) or event.get("isSidechain"):
                 continue
-            permission_note(permission, event)
+            permission_note(fresh_permission, event)
             if not question_known:
                 if agent == "claude":
                     message = event.get("message")
@@ -1461,7 +1447,8 @@ def status_header(source, size, agent, captured=()):
                         continue
                     if isinstance(value, dict) and isinstance(value.get("plan"), list):
                         todos = value["plan"]
-            if model is not None and usage is not None and todos is not None and question_known:
+            if (model is not None and usage is not None and todos is not None and question_known
+                    and not permission_scan_needed(permission, fresh_permission)):
                 break
     if previous is not None:
         model = previous[1] if model is None else model
@@ -1472,12 +1459,9 @@ def status_header(source, size, agent, captured=()):
             question = previous[6]
             if question is not None and question["id"] in completed_questions:
                 question = None
-    if previous is not None and size > permission_cursor:
-        permission_settle(permission, permission_delta(source, permission_cursor, size))
-    else:
-        permission_settle(permission)
+    permission_settle(permission, fresh_permission)
     request = permission_request(permission, agent)
-    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question, permission, size)
+    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question, permission)
     if len(STATUS_CACHE) > 256:
         del STATUS_CACHE[next(iter(STATUS_CACHE))]
     result = {"role": "status"}

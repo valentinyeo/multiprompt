@@ -3,8 +3,6 @@ const w = @import("win32.zig");
 const app_state = @import("app_state.zig");
 const drawing = @import("drawing.zig");
 const smooth = @import("smooth.zig");
-const L = std.unicode.utf8ToUtf16LeStringLiteral;
-
 pub fn keycap(dc: w.HANDLE, text: [*:0]const u16, rc: *w.RECT) void {
     const light = app_state.g_light_theme;
     smooth.fillRoundRect(dc, rc.*, drawing.uiScaled(4), if (light) 0xdddddd else 0x2e2e2e);
@@ -17,6 +15,8 @@ pub fn keycap(dc: w.HANDLE, text: [*:0]const u16, rc: *w.RECT) void {
     _ = w.SetTextColor(dc, if (light) 0x606060 else 0x8a8a8a);
     _ = w.DrawTextW(dc, text, -1, rc, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
 }
+
+const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
 fn titleCased(text: []const u16) bool {
     var word_start = true;
