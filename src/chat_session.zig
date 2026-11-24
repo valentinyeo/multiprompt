@@ -2798,3 +2798,83 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     chatRelayout(800);
     try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
 }
+
+test "SOFT-3163 unchanged history refresh keeps its measured layout" {
+    const a = std.heap.page_allocator;
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("layout regression"), 0, 0, 0, 800, 600, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const saved = .{
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .main = app_state.g_main_hwnd,
+        .transcript = app_state.g_chat_transcript_hwnd,
+        .histories = app_state.g_chat_histories,
+        .font = app_state.g_chat_font_pt,
+        .zoom = app_state.g_ui_scale,
+    };
+    app_state.g_chat_histories = .empty;
+    defer {
+        chatHistoryForget(316301);
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_transcript_hwnd = saved.transcript;
+        app_state.g_chat_font_pt = saved.font;
+        app_state.g_ui_scale = saved.zoom;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = 316301;
+    @memcpy(app_state.shells[0].tmux_session[0..9], "term-3163");
+    app_state.shells[0].tmux_session_len = 9;
+    const key = chatFileIdentity();
+    const entry = chatHistoryEntry(key) orelse return error.TestUnexpectedResult;
+    var wire = try perfWire(a, "term-3163", 8 * 1024, 1, 0);
+    defer wire.deinit(a);
+    try entry.history.apply(a, wire.items, 1, key);
+    chatDeferTranscriptLoad();
+    chatRelayout(800);
+    const layouts = app_state.g_chat_layout_count;
+    const height = app_state.g_chat_content_h;
+    const scroll = app_state.g_chat_scroll_y;
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(layouts, app_state.g_chat_layout_count);
+    try std.testing.expectEqual(height, app_state.g_chat_content_h);
+    try std.testing.expectEqual(scroll, app_state.g_chat_scroll_y);
+    try std.testing.expectEqual(entry.history.revision, app_state.g_chat_last_hash);
+    entry.history.text.items[0] = 'X';
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expect(app_state.g_chat_layout_count > layouts);
+    try std.testing.expectEqual(@as(u16, 'X'), app_state.g_chat_capture[0]);
+    const content_layouts = app_state.g_chat_layout_count;
+    chatRelayoutPreservingScroll(600, 600);
+    try std.testing.expect(app_state.g_chat_layout_count > content_layouts);
+    try std.testing.expectEqual(@as(i32, 600), app_state.g_chat_layout_width);
+    const width_layouts = app_state.g_chat_layout_count;
+    app_state.g_chat_font_pt += 1;
+    chatRefreshAfterFontChange();
+    try std.testing.expect(app_state.g_chat_layout_count > width_layouts);
+    try std.testing.expectEqual(app_state.g_chat_font_pt, app_state.g_chat_layout_font_pt);
+    const font_layouts = app_state.g_chat_layout_count;
+    app_state.g_ui_scale += 10;
+    chatRefreshAfterFontChange();
+    try std.testing.expect(app_state.g_chat_layout_count > font_layouts);
+    try std.testing.expectEqual(@import("drawing.zig").uiScaled(1024), app_state.g_chat_layout_scale);
+}
