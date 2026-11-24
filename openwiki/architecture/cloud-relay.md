@@ -19,7 +19,8 @@ installed on that machine.
 
 This page plans the second path: a server helper dials out to the Multibot cloud, the
 desktop connects to the same cloud, and the two carry the frames SSH carries today.
-Nothing shipped yet. The switch described here belongs to the build slices below.
+The account service now holds the room and the route that reaches it; the desktop, the
+helper and the servable deployment are still to come, so nothing switches transport yet.
 
 ## The frames do not change
 
@@ -45,6 +46,34 @@ The relay moves bytes. It does not read them.
   that slot go over that socket. Other slots stay separate, as they do over SSH today.
 - Server to cloud is outbound only. A server behind NAT works, and a server that stops
   its helper is simply absent, which is what the sidebar already shows.
+
+## The room the account service runs
+
+The room is `RelayRoom`, a Durable Object in the account Worker, declared in
+`service/wrangler.jsonc` as the `RELAY_ROOMS` binding. The Worker picks one object per
+account, `idFromName(account)`, so one account never sees another's slots.
+
+- `GET /v1/relay?slot=N` with `Upgrade: websocket` joins that slot. The same path without
+  the upgrade header answers presence.
+- A device Bearer token joins as a desktop. An `mpk_a_` admin service key joins as a
+  server helper, which is the key a server already carries in `MULTIPROMPT_KEY`. A
+  workspace key and a browser session are refused with `403 key_scope`, because a room
+  belongs to the whole account, never to one workspace.
+- The slot comes from the query string and must be 0, 1 or 2, matching the host slots the
+  layout already carries. Any other value is `400 invalid_relay_slot`, and a desktop that
+  omits it is refused the same way.
+- One helper holds a slot. A helper that connects again replaces the old one, which is
+  closed with code 4000, so a reconnecting server never fights the room for its slot.
+- Every message the client sends is forwarded to the other side unchanged, text or binary.
+  The room reads no field, keeps no frame and replays nothing; a frame with no peer is
+  dropped, and the sender learns that from the same retry the message worker already runs.
+- A desktop frame larger than 16 MiB, or a ninth desktop on one slot, ends that connection:
+  `1009 frame_too_large` and `429 relay_busy`. A room never buffers to cover either.
+- Presence answers `{ "slots": [{ "slot": 0, "server": false, "desktops": 0 }] }`, which
+  is how the Settings switch learns that a slot has no helper and must name SSH as the way
+  back instead of dialling out.
+- Auth is checked once, on the upgrade, as the plan says: revoking a device closes its next
+  connection rather than an open one.
 
 ## Auth
 
@@ -119,7 +148,7 @@ slice 1, then link both directions:
 1. Relay on the server: a helper mode that dials out and bridges to the reader, proven
    against a room running locally.
 2. Room in the account service: the upgrade route, the Durable Object, slot routing and
-   the device-key check, with its own service tests.
+   the device-key check, with its own service tests. Landed as code; not deployed.
 3. Desktop: the `Cloud` transport beside the SSH channel, then the Settings switch and
    its three surfaces.
 4. Self-host: another hub origin in Settings, so a user can point a server at their own

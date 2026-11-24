@@ -1,6 +1,9 @@
 import { makeAuth, allowed, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
 import { appPage, confirmPage } from './pages.js';
 import { remotePhotoKey, validPhotoPng } from './bot-photo.js';
+import { RelayRoom, relaySlot } from './relay.js';
+
+export { RelayRoom };
 
 const now = () => Math.floor(Date.now() / 1000);
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -115,7 +118,7 @@ async function authenticateKey(db, key, pathname) {
   const keyHash = await hash(key);
   const row = await db.prepare('SELECT hash,account,kind,workspace FROM service_keys WHERE hash=? AND revoked=0').bind(keyHash).first();
   if (!row || row.kind !== (key[4] === 'a' ? 'admin' : 'workspace')) fail(401, 'device_required');
-  if (pathname !== '/v1/layout' && !/^\/v1\/bot-photos\/[0-9a-f]{64}$/.test(pathname)) fail(403, 'key_scope');
+  if (pathname !== '/v1/layout' && pathname !== '/v1/relay' && !/^\/v1\/bot-photos\/[0-9a-f]{64}$/.test(pathname)) fail(403, 'key_scope');
   await db.prepare('UPDATE service_keys SET last_used=? WHERE hash=?').bind(now(), keyHash).run();
   return { id: null, account: row.account, keyHash, kind: row.kind, workspace: row.workspace };
 }
@@ -281,6 +284,20 @@ export default {
         if (request.headers.get('X-Multiprompt') !== 'dash' || !(url.pathname.startsWith('/v1/devices/') && request.method === 'DELETE')) fail(403, 'cross_origin');
       }
       if (url.pathname === '/v1/me' && request.method === 'GET') return json({ account: device.account, device_id: device.id });
+      if (url.pathname === '/v1/relay' && request.method === 'GET') {
+        if (!device.id && device.kind !== 'admin') fail(403, 'key_scope');
+        const role = device.id ? 'desktop' : 'server';
+        const requested = url.searchParams.has('slot') ? relaySlot(url.searchParams.get('slot')) : null;
+        if (url.searchParams.has('slot') && requested === null) fail(400, 'invalid_relay_slot');
+        const room = env.RELAY_ROOMS ? env.RELAY_ROOMS.get(env.RELAY_ROOMS.idFromName(device.account)) : null;
+        if (!room) fail(503, 'relay_unavailable');
+        if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
+          const presence = await room.fetch('https://relay/presence');
+          return json(await presence.json());
+        }
+        if (requested === null) fail(400, 'invalid_relay_slot');
+        return room.fetch('https://relay/connect?' + new URLSearchParams({ role, slot: String(requested) }), request);
+      }
       if (url.pathname === '/v1/usage' && request.method === 'GET') {
         const row = await db.prepare('SELECT updated,status FROM usage WHERE account=?').bind(device.account).first();
         return row ? json({ updated: row.updated, status: JSON.parse(row.status) }) : json({ error: 'no_usage' }, 404);
