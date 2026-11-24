@@ -34,8 +34,8 @@ Press @(0x11, 0x4B) 'Ctrl+K: open the command palette'
 foreach ($letter in $freshQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
 [void](Wait-For 'fresh start offered by the real palette' { (Read-Shared "$settings/debug.log").Substring($freshOffset) -match ('\[palette\] ready chars=' + $freshQuery.Length + ' count=[1-9]\d* target=6498(?:\s|$)') })
 Press @(0x0D) 'Enter: press Fresh start'
-[void](Wait-For 'fresh start requested from the real menu' { (Working-Stage 'fresh-start-requested').Count -ge 1 } 20)
-[void](Wait-For 'fresh start reload is pending' { (Working-Stage 'fresh-start-pending').Count -ge 1 } 20)
+[void](Wait-For 'fresh start requested from the real menu' { @(Working-Stage 'fresh-start-requested').Count -ge 1 } 20)
+[void](Wait-For 'fresh start reload is pending' { @(Working-Stage 'fresh-start-pending').Count -ge 1 } 20)
 $observation.dots = $null
 for ($i = 0; $i -lt 20 -and -not $observation.dots; $i++) {
     $name = 'fresh-busy-{0:D2}' -f $i
@@ -50,12 +50,12 @@ if (-not $observation.dots) { throw 'Fresh start never showed the reloading dots
 [void](Scroll-Transcript -12000)
 $liveCopy = Copy-Rendered 'fresh-live'
 if (-not $liveCopy.Contains('The handover is reloaded')) { throw 'The reloading reply was not painted live' }
-if ((Working-Stage 'fresh-start-finished').Count -gt 0) { throw 'The reloading reply only appeared after the reload finished' }
+if (@(Working-Stage 'fresh-start-finished').Count -gt 0) { throw 'The reloading reply only appeared after the reload finished' }
 $observation.liveReply = $true
 Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer text mismatch during the reload' }
 Press @(0x0D) 'Enter: send during the reload' $true
-[void](Wait-For 'the chat held the message instead of refusing it' { (Working-Stage 'deliver-held' | Where-Object { $_.text -ceq $plan.text }).Count -ge 1 } 20)
+[void](Wait-For 'the chat held the message instead of refusing it' { @(Working-Stage 'deliver-held' | Where-Object { $_.text -ceq $plan.text }).Count -ge 1 } 20)
 [void](Wait-For 'the message is waiting, not failed' {
     if (-not (Test-Path "$settings/chat-outbox.json")) { return $false }
     $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
@@ -66,7 +66,7 @@ Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-held.json"
 Shot 'fresh-message-waiting'
 $observation.held = $true
 [IO.File]::WriteAllText("$state/working-resume-done", '')
-[void](Wait-For 'the reload finished' { (Working-Stage 'fresh-start-finished').Count -ge 1 } 60)
+[void](Wait-For 'the reload finished' { @(Working-Stage 'fresh-start-finished').Count -ge 1 } 60)
 [void](Wait-For 'the waiting message reached the chat exactly once' {
     $delivered = @(Working-Stage 'deliver' | Where-Object { $_.text -ceq $plan.text })
     return $delivered.Count -eq 1
