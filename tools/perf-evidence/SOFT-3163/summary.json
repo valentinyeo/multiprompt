@@ -1,0 +1,509 @@
+{
+  "productBase": "f64e17a9f",
+  "productSourceTree": "a801c635a796437fbae0d70719e6b5ca9a54d15f",
+  "baselineExecutable": {
+    "builtRevision": "5bb00504a35b7421db4656d4ee97e52e6f65f498",
+    "sourceTree": "a801c635a796437fbae0d70719e6b5ca9a54d15f",
+    "build": "c31450035d2011b72782366f4a5c2cac1ef06013",
+    "originatingRun": "https://github.com/valentinyeo/multiprompt/actions/runs/45468256815",
+    "sha256": "638E463F4E4A3C18272272847348924CFA24D089D66C70F6381D857C50F27885"
+  },
+  "baseline": {
+    "run": "https://github.com/valentinyeo/multiprompt/actions/runs/45479124542",
+    "artifact": "speed-baseline-45479124542",
+    "artifactUrl": "https://github.com/valentinyeo/multiprompt/actions/runs/45479124542/artifacts/14961714000",
+    "trials": 5,
+    "errors": 0,
+    "actions": {
+      "typing": {
+        "n": 500,
+        "p50": 32.49865,
+        "p95": 48.9787,
+        "p99": 49.8888,
+        "max": 64.8538,
+        "trials": [
+          {
+            "n": 100,
+            "p50": 32.95525,
+            "p95": 49.0234,
+            "p99": 49.8706,
+            "max": 64.8538
+          },
+          {
+            "n": 100,
+            "p50": 32.15345,
+            "p95": 48.0293,
+            "p99": 49.3329,
+            "max": 49.5629
+          },
+          {
+            "n": 100,
+            "p50": 32.692750000000004,
+            "p95": 48.8282,
+            "p99": 50.0952,
+            "max": 50.3161
+          },
+          {
+            "n": 100,
+            "p50": 32.601600000000005,
+            "p95": 49.0019,
+            "p99": 49.4102,
+            "max": 49.7649
+          },
+          {
+            "n": 100,
+            "p50": 32.32185,
+            "p95": 49.2855,
+            "p99": 49.8888,
+            "max": 63.3576
+          }
+        ],
+        "trialMedianRangeMs": [
+          32.15345,
+          32.95525
+        ]
+      },
+      "switching": {
+        "n": 500,
+        "p50": 42.4562,
+        "p95": 60.3556,
+        "p99": 154.9929,
+        "max": 267.7548,
+        "trials": [
+          {
+            "n": 100,
+            "p50": 42.92595,
+            "p95": 59.7315,
+            "p99": 152.8955,
+            "max": 267.7548
+          },
+          {
+            "n": 100,
+            "p50": 42.9323,
+            "p95": 70.4282,
+            "p99": 162.1286,
+            "max": 166.4798
+          },
+          {
+            "n": 100,
+            "p50": 43.02955,
+            "p95": 62.1541,
+            "p99": 154.9929,
+            "max": 155.0811
+          },
+          {
+            "n": 100,
+            "p50": 41.798100000000005,
+            "p95": 59.8873,
+            "p99": 74.0274,
+            "max": 150.923
+          },
+          {
+            "n": 100,
+            "p50": 37.7864,
+            "p95": 59.2309,
+            "p99": 153.4136,
+            "max": 170.2493
+          }
+        ],
+        "trialMedianRangeMs": [
+          37.7864,
+          43.02955
+        ]
+      },
+      "opening": {
+        "n": 100,
+        "p50": 42.6525,
+        "p95": 58.5136,
+        "p99": 59.6702,
+        "max": 60.9447,
+        "trials": [
+          {
+            "n": 20,
+            "p50": 42.70415,
+            "p95": 57.8421,
+            "p99": 57.9347,
+            "max": 57.9347
+          },
+          {
+            "n": 20,
+            "p50": 42.7669,
+            "p95": 59.4379,
+            "p99": 59.6702,
+            "max": 59.6702
+          },
+          {
+            "n": 20,
+            "p50": 42.90545,
+            "p95": 58.114,
+            "p99": 58.5136,
+            "max": 58.5136
+          },
+          {
+            "n": 20,
+            "p50": 42.5081,
+            "p95": 58.82,
+            "p99": 60.9447,
+            "max": 60.9447
+          },
+          {
+            "n": 20,
+            "p50": 41.254850000000005,
+            "p95": 57.037,
+            "p99": 57.9125,
+            "max": 57.9125
+          }
+        ],
+        "trialMedianRangeMs": [
+          41.254850000000005,
+          42.90545
+        ]
+      },
+      "scrolling": {
+        "n": 500,
+        "p50": 43.60445,
+        "p95": 60.0552,
+        "p99": 61.5526,
+        "max": 76.2336,
+        "trials": [
+          {
+            "n": 100,
+            "p50": 43.604749999999996,
+            "p95": 59.9163,
+            "p99": 61.2575,
+            "max": 76.1961
+          },
+          {
+            "n": 100,
+            "p50": 31.55035,
+            "p95": 52.831,
+            "p99": 59.9574,
+            "max": 63.3627
+          },
+          {
+            "n": 100,
+            "p50": 44.55875,
+            "p95": 61.1291,
+            "p99": 75.3267,
+            "max": 76.0974
+          },
+          {
+            "n": 100,
+            "p50": 31.40455,
+            "p95": 48.7281,
+            "p99": 60.7473,
+            "max": 76.2336
+          },
+          {
+            "n": 100,
+            "p50": 44.34545,
+            "p95": 59.7436,
+            "p99": 61.0115,
+            "max": 61.1333
+          }
+        ],
+        "trialMedianRangeMs": [
+          31.40455,
+          44.55875
+        ]
+      },
+      "streaming": {
+        "n": 500,
+        "p50": 60.640100000000004,
+        "p95": 78.3816,
+        "p99": 83.5199,
+        "max": 95.5954,
+        "trials": [
+          {
+            "n": 100,
+            "p50": 57.614900000000006,
+            "p95": 78.4543,
+            "p99": 78.9394,
+            "max": 95.5954
+          },
+          {
+            "n": 100,
+            "p50": 58.67045,
+            "p95": 78.7653,
+            "p99": 89.5043,
+            "max": 94.0026
+          },
+          {
+            "n": 100,
+            "p50": 61.09215,
+            "p95": 77.9721,
+            "p99": 78.9561,
+            "max": 87.136
+          },
+          {
+            "n": 100,
+            "p50": 61.068200000000004,
+            "p95": 78.4347,
+            "p99": 79.5879,
+            "max": 87.2962
+          },
+          {
+            "n": 100,
+            "p50": 60.82535,
+            "p95": 76.9369,
+            "p99": 78.782,
+            "max": 78.9919
+          }
+        ],
+        "trialMedianRangeMs": [
+          57.614900000000006,
+          61.09215
+        ]
+      }
+    },
+    "compositorControlMs": {
+      "n": 500,
+      "p50": 16.0412,
+      "p95": 31.515,
+      "p99": 31.7888,
+      "max": 47.1229
+    },
+    "cpu": {
+      "Name": "AMD EPYC 9V45 96-Core Processor                ",
+      "NumberOfCores": 2,
+      "NumberOfLogicalProcessors": 4,
+      "LoadPercentage": 6
+    }
+  },
+  "causes": {
+    "lateLayout": {
+      "matchingCpuExampleMs": 95.957,
+      "unchangedPositionBeforeAfter": {
+        "message": "8723364636245400118",
+        "scroll": 38648,
+        "height": 39244,
+        "layoutsBefore": 285,
+        "layoutsAfter": 286
+      },
+      "slowerReplayInputStalls": 59,
+      "stallsOverlappingLayout": 59,
+      "inputStallMs": {
+        "n": 59,
+        "p50": 229.992,
+        "p95": 265.1123,
+        "p99": 268.5842,
+        "max": 268.5842
+      },
+      "layoutOverlapMs": {
+        "n": 59,
+        "p50": 193.458,
+        "p95": 222.5177,
+        "p99": 228.7788,
+        "max": 228.7788
+      },
+      "example": {
+        "index": 24,
+        "inputMs": 268.5842,
+        "layoutOverlapMs": 228.7788,
+        "layouts": [
+          {
+            "name": "chat_render.zig:chatRelayout",
+            "start": 7445474869,
+            "end": 7447762657,
+            "ms": 228.778,
+            "tid": 4048
+          }
+        ]
+      }
+    },
+    "draftBinding": {
+      "allMeasuredSwitchesMs": {
+        "n": 500,
+        "p50": 1.9745,
+        "p95": 2.949,
+        "p99": 32.55,
+        "max": 236.124
+      },
+      "worst": {
+        "trial": "trial-1",
+        "sample": {
+          "endQpc": 2098286122,
+          "startQpc": 2095608574,
+          "action": "switching",
+          "index": 45,
+          "logOffset": 154008,
+          "ms": 267.7548,
+          "success": true,
+          "proof": "target=6 shell=17 nonempty paint"
+        },
+        "dispatchStagesMs": {
+          "total": 243.58,
+          "read_marker": 0.0,
+          "draft_bind": 236.124,
+          "save_session": 0.471,
+          "chat_history": 0.617,
+          "console_shown": 0.0,
+          "hide_prev_browser": 0.0,
+          "park": 0.0,
+          "browser_visible": 0.0,
+          "arm_settle": 0.0,
+          "position": 0.0,
+          "focus": 0.0,
+          "reposition": 0.0,
+          "browser_swp": 0.0,
+          "browser_show": 0.0,
+          "browser_launch": 0.0,
+          "browser_wake": 0.0
+        },
+        "logStartLine": 1437
+      },
+      "limitation": "The exact internal operation behind the rare 236ms draft-binding stall was not isolated; this is a timed region, not proof of disk I/O."
+    },
+    "sidebarPainting": {
+      "matchingCpuTypingCallsMs": {
+        "n": 101,
+        "p50": 4.823,
+        "p95": 5.243,
+        "p99": 6.635,
+        "max": 7.359
+      },
+      "typingSamples": 100
+    }
+  },
+  "profileComponents": {
+    "switching": {
+      "inputReturnMs": {
+        "n": 100,
+        "p50": 215.96375,
+        "p95": 256.9417,
+        "p99": 266.0955,
+        "max": 268.5842
+      },
+      "acknowledgedMs": {
+        "n": 100,
+        "p50": 216.17735,
+        "p95": 257.1523,
+        "p99": 266.3212,
+        "max": 268.7886
+      },
+      "compositorWaitMs": {
+        "n": 100,
+        "p50": 19.38935,
+        "p95": 37.3826,
+        "p99": 40.3781,
+        "max": 42.7234
+      }
+    },
+    "typing": {
+      "inputReturnMs": {
+        "n": 100,
+        "p50": 0.50635,
+        "p95": 0.6316,
+        "p99": 0.6592,
+        "max": 0.7866
+      },
+      "acknowledgedMs": {
+        "n": 100,
+        "p50": 18.86475,
+        "p95": 22.651,
+        "p99": 23.5756,
+        "max": 26.3453
+      },
+      "compositorWaitMs": {
+        "n": 100,
+        "p50": 15.7214,
+        "p95": 39.8361,
+        "p99": 43.1559,
+        "max": 43.5343
+      }
+    },
+    "opening": {
+      "inputReturnMs": {
+        "n": 20,
+        "p50": 5.60505,
+        "p95": 5.9855,
+        "p99": 6.4952,
+        "max": 6.4952
+      },
+      "acknowledgedMs": {
+        "n": 20,
+        "p50": 42.394800000000004,
+        "p95": 44.4819,
+        "p99": 44.7893,
+        "max": 44.7893
+      },
+      "compositorWaitMs": {
+        "n": 20,
+        "p50": 16.299349999999997,
+        "p95": 31.8337,
+        "p99": 31.9369,
+        "max": 31.9369
+      }
+    },
+    "scrolling": {
+      "inputReturnMs": {
+        "n": 100,
+        "p50": 0.6324000000000001,
+        "p95": 0.8163,
+        "p99": 0.9275,
+        "max": 1.0305
+      },
+      "acknowledgedMs": {
+        "n": 100,
+        "p50": 27.646099999999997,
+        "p95": 43.2808,
+        "p99": 48.9859,
+        "max": 49.7708
+      },
+      "compositorWaitMs": {
+        "n": 100,
+        "p50": 16.33865,
+        "p95": 31.6685,
+        "p99": 32.1503,
+        "max": 32.317
+      }
+    },
+    "streaming": {
+      "inputReturnMs": {
+        "n": 100,
+        "p50": 0.1528,
+        "p95": 0.2053,
+        "p99": 0.2352,
+        "max": 0.2367
+      },
+      "acknowledgedMs": {
+        "n": 100,
+        "p50": 46.7996,
+        "p95": 67.3272,
+        "p99": 70.7671,
+        "max": 71.4337
+      },
+      "compositorWaitMs": {
+        "n": 100,
+        "p50": 16.2987,
+        "p95": 31.7517,
+        "p99": 32.2158,
+        "max": 32.4104
+      }
+    }
+  },
+  "profiles": [
+    {
+      "run": "https://github.com/valentinyeo/multiprompt/actions/runs/45479124542",
+      "artifact": "speed-candidate-45479124542",
+      "artifactUrl": "https://github.com/valentinyeo/multiprompt/actions/runs/45479124542/artifacts/14962250575",
+      "cpu": {
+        "Name": "AMD EPYC 9V45 96-Core Processor                ",
+        "NumberOfCores": 2,
+        "NumberOfLogicalProcessors": 4,
+        "LoadPercentage": 4
+      }
+    },
+    {
+      "run": "https://github.com/valentinyeo/multiprompt/actions/runs/45479549214",
+      "artifact": "speed-candidate-45479549214",
+      "artifactUrl": "https://github.com/valentinyeo/multiprompt/actions/runs/45479549214/artifacts/14963915448",
+      "cpu": {
+        "Name": "AMD EPYC 7763 64-Core Processor                ",
+        "NumberOfCores": 2,
+        "NumberOfLogicalProcessors": 4,
+        "LoadPercentage": 2
+      }
+    }
+  ]
+}

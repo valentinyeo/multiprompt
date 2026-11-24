@@ -1,0 +1,17 @@
+Matching-CPU profile artifact speed-candidate-45479124542
+trial-1/debug.log lines 4584-4597; typing index 72
+
+2026-11-24 20:26:23.529 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=4639054785 end=4639095115 us=4033 tid=4908
+2026-11-24 20:26:23.635 PERFSPAN name=sidebar.zig:paintSidebar start=4640106561 end=4640154516 us=4795 tid=4908
+2026-11-24 20:26:23.635 PERFSPAN name=main.zig:wndProc:msg_F:wp_0 start=4640104969 end=4640160537 us=5556 tid=4908
+2026-11-24 20:26:23.639 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=4640160706 end=4640201216 us=4051 tid=4908
+2026-11-24 20:26:23.728 PERFSPAN name=sidebar.zig:paintSidebar start=4641029060 end=4641077596 us=4853 tid=4908
+2026-11-24 20:26:23.728 PERFSPAN name=main.zig:wndProc:msg_F:wp_0 start=4641027732 end=4641083538 us=5580 tid=4908
+2026-11-24 20:26:23.732 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=4641083701 end=4641125058 us=4135 tid=4908
+2026-11-24 20:26:23.771 chat-status-snapshot: sid=12 rows=30 chars=3600
+2026-11-24 20:26:23.840 PERFSPAN name=sidebar.zig:paintSidebar start=4642148892 end=4642195919 us=4702 tid=4908
+2026-11-24 20:26:23.840 PERFSPAN name=main.zig:wndProc:msg_F:wp_0 start=4642147368 end=4642201925 us=5455 tid=4908
+2026-11-24 20:26:23.844 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=4642202087 end=4642243822 us=4173 tid=4908
+2026-11-24 20:26:23.932 PERFSPAN name=sidebar.zig:paintSidebar start=4643073424 end=4643121790 us=4836 tid=4908
+2026-11-24 20:26:23.933 PERFSPAN name=main.zig:wndProc:msg_F:wp_0 start=4643072040 end=4643127600 us=5556 tid=4908
+2026-11-24 20:26:23.936 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=4643127764 end=4643170816 us=4305 tid=4908

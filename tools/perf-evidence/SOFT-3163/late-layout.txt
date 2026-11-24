@@ -1,0 +1,26 @@
+Matching-CPU profile artifact speed-candidate-45479124542
+trial-1/debug.log lines 5705-5727
+
+2026-11-24 20:27:35.288 PERFSPAN name=main.zig:wndProc:msg_8082:wp_0 start=5356666227 end=5356694857 us=2863 tid=4908
+2026-11-24 20:27:35.295 PERFSPAN name=sidebar.zig:paintSidebar start=5356708394 end=5356757978 us=4958 tid=4908
+2026-11-24 20:27:35.296 PERFSPAN name=main.zig:wndProc:msg_F:wp_0 start=5356701263 end=5356763952 us=6268 tid=4908
+2026-11-24 20:27:35.301 [chat] unread divider count=0 marker=8723364636245400118 index=0 unknown=0 y=0 message_y=0 scroll=38648 message=0 offset=0 line_y=14
+2026-11-24 20:27:35.301 PERFSPAN name=chat_render.zig:chatPaintTranscriptContent start=5356764757 end=5356816365 us=5160 tid=4908
+2026-11-24 20:27:35.301 [switch] chat painted in 16 ms, browser pending (shell 12)
+2026-11-24 20:27:35.301 [switch] chat content shown shell=12 blocks=404 ms=16 layout_w=752 client_w=752
+2026-11-24 20:27:35.301 [chat] position ms=16 shell=12 first=397 message=8723364636245400118 offset=208907 y=-38 scroll=38648 height=39244 pad=52 opening=535640 paints=328 layouts=285 tick=535656
+2026-11-24 20:27:35.301 [switch] chat painted in 16 ms, browser shown in 16 ms (shell 12)
+2026-11-24 20:27:35.301 chat-status-snapshot: sid=12 rows=40 chars=3640
+2026-11-24 20:27:35.398 PERFSPAN name=chat_render.zig:chatRelayout start=5356826241 end=5357785816 us=95957 tid=4908
+2026-11-24 20:27:35.398 PERFSPAN name=chat_session.zig:refreshChatTranscript start=5356819311 end=5357786276 us=96696 tid=4908
+2026-11-24 20:27:35.398 PERFSPAN name=main.zig:wndProc:msg_113:wp_29 start=5356818273 end=5357786482 us=96820 tid=4908
+2026-11-24 20:27:35.404 PERFSPAN name=chat_render.zig:chatPaintTranscriptContent start=5357801838 end=5357857686 us=5584 tid=4908
+2026-11-24 20:27:35.414 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=5357861408 end=5357945017 us=8360 tid=4908
+2026-11-24 20:27:35.420 PERFSPAN name=chat_composer.zig:chatComposerSubclassProc start=5357951041 end=5358006258 us=5521 tid=4908
+2026-11-24 20:27:35.626 [chat] transcript request shell=12 offset=213933 before=0 why=view quiet=0
+2026-11-24 20:27:35.627 [chat] transcript load shell=12 ok bytes=297 ms=0
+2026-11-24 20:27:35.627 [chat] push shell=12 read_us=9362 apply_us=91 bytes=297
+2026-11-24 20:27:35.791 PERFSPAN name=main.zig:wndProc:msg_113:wp_502 start=5361712098 end=5361723349 us=1125 tid=4908
+2026-11-24 20:27:36.034 chat-status-snapshot: sid=12 rows=40 chars=3640
+2026-11-24 20:27:36.791 chat-status-snapshot: sid=12 rows=40 chars=3640
+2026-11-24 20:27:36.791 [chat] position ms=1500 shell=12 first=397 message=8723364636245400118 offset=208907 y=-38 scroll=38648 height=39244 pad=52 opening=535640 paints=329 layouts=286 tick=537140

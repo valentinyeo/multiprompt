@@ -1,0 +1,25 @@
+Baseline artifact speed-baseline-45479124542
+trial-1/debug.log; measured switch index 45
+
+2026-11-24 20:22:12.798 hook: Ctrl+Tab shift=0 -> NEXT_TAB
+2026-11-24 20:22:12.798 hook:   LSHIFT(0xA0)=0
+2026-11-24 20:22:12.798 hook:   RSHIFT(0xA1)=0
+2026-11-24 20:22:12.798 wnd: WM_APP_NEXT_TAB
+2026-11-24 20:22:12.798 switchToShell: 5 -> 6 restoring=false sync=false caller=0x7ff746ce98b3
+2026-11-24 20:22:12.798 [altq] pending_cancel sid=0 retries=0 attempts=0 mode=false
+2026-11-24 20:22:12.916 [chat-live] page shell=16 n=120 f=1
+[focus-trace] 2026-11-24 20:22:13.035 event=allowed caller=exe+0x10D578 target=0x4006E class="ZigShell" pid=620 ours=true focus=0x30116 foreground=0x4006E foreground_class="ZigShell" repeats=1
+[focus-trace] 2026-11-24 20:22:13.035 event=allowed caller=exe+0x10D591 target=0x30116 class="Edit" pid=620 ours=true focus=0x30116 foreground=0x4006E foreground_class="ZigShell" repeats=1
+[focus-trace] 2026-11-24 20:22:13.035 event=setfocus_returned caller=exe+0x10D591 target=0x30116 class="Edit" pid=620 ours=true focus=0x30116 foreground=0x4006E foreground_class="ZigShell" repeats=1
+2026-11-24 20:22:13.035 [view] switch tab=17 chat_active=true tab_wants_chat=true chat_visible=true chat_rect=254,18,752,684 console_visible=false
+2026-11-24 20:22:13.041 [chat] unread divider count=0 marker=6727437721417605529 index=0 unknown=0 y=0 message_y=0 scroll=38634 message=0 offset=0 line_y=14
+2026-11-24 20:22:13.042 [switch] chat painted in 235 ms, browser pending (shell 17)
+2026-11-24 20:22:13.042 [switch] chat content shown shell=17 blocks=404 ms=235 layout_w=752 client_w=752
+2026-11-24 20:22:13.042 [chat] position ms=235 shell=17 first=397 message=6727437721417605529 offset=208907 y=-24 scroll=38634 height=39244 pad=52 opening=209546 paints=141 layouts=124 tick=209781
+2026-11-24 20:22:13.042 switch-timing: to=6 total_us=243580 read_marker_us=0 draft_bind_us=236124 save_session_us=471 chat_history_us=617 console_shown_us=0 hide_prev_browser_us=0 park_us=0 browser_visible_us=0 arm_settle_us=0 position_us=0 focus_us=0 reposition_us=0 browser_swp_us=0 browser_show_us=0 browser_launch_us=0 browser_wake_us=0
+[focus-trace] 2026-11-24 20:22:13.042 event=allowed caller=exe+0x87742 target=0x20188 class="ConsoleWindowClass" pid=2936 ours=false focus=0x30116 foreground=0x4006E foreground_class="ZigShell" repeats=0
+2026-11-24 20:22:13.042 [switch] chat painted in 235 ms, browser shown in 235 ms (shell 17)
+2026-11-24 20:22:13.042 [chat-live] start shell=17 n=0 f=1
+2026-11-24 20:22:13.046 [bots] face=4 color=0 rect=504,26,532,54
+2026-11-24 20:22:13.048 [chat-live] read-ended shell=16 n=0 f=0
+2026-11-24 20:22:13.310 chat-status-snapshot: sid=17 rows=30 chars=3600

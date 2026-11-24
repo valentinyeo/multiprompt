@@ -63,11 +63,19 @@ if args.profile:
     profile_machine = read(args.profile / 'machine.json')
     if not profile_machine['profile']:
         raise ValueError('Expected separate profiling replay')
+    baseline_build = read(args.baseline / 'build.json')
+    profile_build = read(args.profile / 'build.json')
+    if any(baseline_build[k] != profile_build[k] for k in ('sourceTree', 'build')):
+        raise ValueError('Profile and baseline use different product sources')
     spans_by_name = defaultdict(list)
     by_action = defaultdict(lambda: defaultdict(list))
     slow_windows = []
+    components = defaultdict(lambda: defaultdict(list))
+    blocked_inputs = []
     for file in sorted(args.profile.glob('trial-*/samples.json')):
         trial = read(file)
+        if trial['failure'] or trial['errors'] or not read(file.with_name('stream-receipt.json'))['exactLatestFound']:
+            raise ValueError(f'Profile replay failed: {file}')
         spans = []
         for match in re.finditer(r'PERFSPAN name=(\S+) start=(\d+) end=(\d+) us=(\d+) tid=(\d+)', file.with_name('debug.log').read_text(encoding='utf-8-sig')):
             name, start, end, us, tid = match.groups()
@@ -75,12 +83,24 @@ if args.profile:
             spans.append(span)
             spans_by_name[name].append(span['ms'])
         for sample in trial['samples']:
+            for field in ('inputReturnMs', 'acknowledgedMs', 'compositorWaitMs'):
+                if field in sample:
+                    components[sample['action']][field].append(sample[field])
+            if 'acknowledgedMs' in sample and abs(sample['acknowledgedMs'] + sample['compositorWaitMs'] - sample['ms']) > .5:
+                raise ValueError('Timing components do not sum to elapsed time')
             selected = [s for s in spans if s['end'] >= sample['startQpc'] and s['start'] <= sample['endQpc']]
+            if sample['action'] == 'switching' and sample.get('inputReturnMs', 0) > 100:
+                input_end = sample['startQpc'] + sample['inputReturnMs'] * profile_machine['qpcFrequency'] / 1000
+                layouts = [s for s in selected if s['name'] == 'chat_render.zig:chatRelayout' and s['start'] < input_end]
+                overlap_ms = sum(max(0, min(s['end'], input_end) - max(s['start'], sample['startQpc'])) * 1000 / profile_machine['qpcFrequency'] for s in layouts)
+                blocked_inputs.append(dict(index=sample['index'], inputMs=sample['inputReturnMs'], layoutOverlapMs=overlap_ms, layouts=layouts))
             for span in selected:
                 by_action[sample['action']][span['name']].append(span['ms'])
             slow_windows.append(dict(action=sample['action'], index=sample['index'], ms=sample['ms'], startQpc=sample['startQpc'], spans=sorted(selected, key=lambda s: s['ms'], reverse=True)[:8]))
     report['profile'] = dict(
         warning='Separate instrumented replay; inclusive spans >=1ms, nested times must not be added; not baseline latency. Overlap is association, not proof of critical path.',
+        blockedInputs=blocked_inputs,
+        components={action: {name: stats(v) for name, v in fields.items()} for action, fields in components.items()},
         stages={name: stats(v) | {'sumMs': sum(v)} for name, v in spans_by_name.items()},
         actions={action: {name: stats(v) | {'sumMs': sum(v)} for name, v in groups.items()} for action, groups in by_action.items()},
         slowWindows=sorted(slow_windows, key=lambda s: s['ms'], reverse=True)[:30])
