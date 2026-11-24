@@ -80,8 +80,32 @@ test('a ticket that still resolves keeps its link', t => {
   assert.equal(notes.changes.length, 1);
 });
 
-const tasks = task => async () => ({ ok: true, json: async () => ({ success: true, tasks: [task] }) });
+test('every skipped ticket key gets one log line and the release still publishes', t => {
+  const r = fixture(t);
+  for (const subject of [
+    "VSTA-162: Block heavy local builds and tests in this repo's chats",
+    'IGSH-9999: Switch AI when a plan runs out',
+    'IGSH-240: Choose project folders across every server',
+  ]) {
+    r.write({ 'tools/note.txt': `${subject}\n` });
+    r.commit(subject);
+  }
+  const build = r.run('build', 'v0.28.1914', publishedTags);
+  assert.equal(build.status, 0, build.stderr);
+  const lines = build.stderr.split(/\r?\n/).filter(line => line.startsWith('Release notes skip '));
+  assert.deepEqual(lines, [
+    'Release notes skip VSTA-162: unknown-prefix',
+    'Release notes skip IGSH-9999: no-token',
+  ]);
+  const notes = releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.28.1914').releases[0];
+  assert.equal(notes.tickets.length, notes.changes.length);
+  assert.equal(notes.tickets.filter(link => link === null).length, 2);
+  assert.equal(notes.tickets.filter(link => link).length, 1);
+  assert.ok(notes.changes.includes("Block heavy local builds and tests in this repo's chats"));
+  assert.ok(notes.changes.includes('Switch AI when a plan runs out'));
+});
 
+const tasks = task => async () => ({ ok: true, json: async () => ({ success: true, tasks: [task] }) });
 test('a ticket moved to another board publishes without a link', async () => {
   const moved = await resolveReleaseTitles(['IGSH-9999'], { 'IGSH-240': 'Kept title' }, 'token', tasks({ boardId: 11514, ticketNumber: 'HYCI-1', title: 'Other board' }));
   assert.deepEqual(moved.titles, { 'IGSH-240': 'Kept title' });

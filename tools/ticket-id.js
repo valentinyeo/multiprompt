@@ -14,6 +14,10 @@ function canonicalTicketId(value) {
   return ticket.id;
 }
 
+function ticketKeyKind(value) {
+  return typeof value === 'string' && /^[A-Z][A-Z0-9]*-[1-9]\d*$/.test(value) ? 'unknown-prefix' : 'malformed-key';
+}
+
 function fragmentTicketId(file) {
   const match = /^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-[^/]+\.md$/.exec(file);
   if (!match) throw new Error(`Bad fragment filename: ${file}`);
@@ -24,4 +28,4 @@ function ticketIds(text) {
   return [...new Set([...text.matchAll(/(?:^|[^A-Za-z0-9-])([A-Z][A-Z0-9]*-\d+)(?![A-Za-z0-9-])/g)].map(match => parseTicketId(match[1])?.id).filter(Boolean))];
 }
 
-module.exports = { parseTicketId, canonicalTicketId, fragmentTicketId, ticketIds, multipromptMovedBoardId, unlinkedTicketId };
+module.exports = { parseTicketId, canonicalTicketId, fragmentTicketId, ticketIds, ticketKeyKind, multipromptMovedBoardId, unlinkedTicketId };

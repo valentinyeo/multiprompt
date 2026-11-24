@@ -4,7 +4,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
 import { ticketRecord, ticketLine, resolveReleaseTitles, loadTicketTitles } from './ticket-titles.mjs';
-import { canonicalTicketId, fragmentTicketId, parseTicketId, unlinkedTicketId } from './ticket-id.js';
+import { canonicalTicketId, fragmentTicketId, parseTicketId, ticketKeyKind, unlinkedTicketId } from './ticket-id.js';
 const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
@@ -188,13 +188,15 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
   const version = tag.slice(1);
   if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) {
     if (compareTags(tag, 'v0.28.1027') >= 0) throw new Error(`Release ${tag} already exists in source; generate from the previous release`);
-    return { changelog: files[changelogPath], fallbacks: {} };
+    return { changelog: files[changelogPath], fallbacks: {}, skipped: new Map() };
   }
   let result = { ...files };
   const fallbacks = {};
+  const skipped = new Map();
   const releaseNote = (value, fallback, unlinked) => {
     const id = parseTicketId(value)?.id;
     if (!id) {
+      if (value) skipped.set(value, ticketKeyKind(value));
       if (fallback) unlinked.add(fallback);
       return null;
     }
@@ -254,7 +256,7 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     previous = fragmentFiles(step.files);
   }
   stamp(tag, addedSince(fragmentFiles(files), previous), commits, undefined, true);
-  return { changelog: result[changelogPath], fallbacks };
+  return { changelog: result[changelogPath], fallbacks, skipped };
 }
 
 
@@ -446,7 +448,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
       const built = buildUnresolvedChangelog(files, base, history, commits);
       const resolved = await resolveReleaseTitles(changelogTicketIds(built.changelog), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
-      for (const [id, reason] of resolved.unresolved) console.error(`Release notes leave ${id} unlinked: ${reason}`);
+      for (const [key, kind] of new Map([...built.skipped, ...resolved.unresolved])) console.error(`Release notes skip ${key}: ${kind}`);
       fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks));
     } else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json]');
   } catch (error) {
