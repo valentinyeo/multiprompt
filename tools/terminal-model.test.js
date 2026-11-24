@@ -54,10 +54,14 @@ int main(void) {
     assert(!strcmp(output, "\033[A"));
     used = 0;
     feed(t, "\033[?2004h");
-    mp_terminal_paste(t, 1);
-    mp_terminal_char(t, 0x96ea, 0);
-    mp_terminal_paste(t, 0);
-    assert(!strcmp(output, "\033[200~\xe9\x9b\xaa\033[201~"));
+    assert(mp_terminal_bracketed_paste(t));
+    mp_terminal_paste_text(t, "\033[200~\xe9\x9b\xaa\033[201~", 12);
+    assert(used == 12 && !memcmp(output, "\033[200~\xe9\x9b\xaa\033[201~", 12));
+    used = 0;
+    feed(t, "\033[?2004l");
+    assert(!mp_terminal_bracketed_paste(t));
+    mp_terminal_paste_text(t, "plain", 5);
+    assert(used == 5 && !strcmp(output, "plain"));
     used = 0;
     mp_terminal_char(t, 3, VTERM_MOD_CTRL);
     assert(used == 1 && output[0] == 3);
@@ -76,10 +80,16 @@ int main(void) {
     feed(t, "\033[8;40HY");
     assert(mp_terminal_cell(t, 7, 39, 0, &cell) && cell.chars[0] == 'Y');
     mp_terminal_free(t);
-    t = mp_terminal_new(3, 20, capture, NULL);
+    MPTerminal *t = mp_terminal_new(3, 20, capture, NULL);
     feed(t, "one\r\ntwo\r\nthree\r\nfour");
     assert(mp_terminal_history(t) >= 1);
     assert(mp_terminal_cell(t, 0, 0, 1, &cell) && cell.chars[0] == 'o');
+    mp_terminal_free(t);
+    t = mp_terminal_new(4, 20, capture, NULL);
+    feed(t, "\033[?1049h");
+    for(int line = 1; line <= 20; line++) feed(t, "alt-scroll-line\r\n");
+    assert(mp_terminal_history(t) >= 1);
+    assert(mp_terminal_cell(t, 0, 0, 1, &cell) && cell.chars[0] == 'a');
     mp_terminal_free(t);
     MPTerminal *sessions[30];
     for (int i = 0; i < 30; i++) {
