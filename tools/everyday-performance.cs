@@ -13,6 +13,11 @@ public static class EverydayPerformance {
     public static void ObserveFor(int milliseconds) { pace.WaitOne(milliseconds); }
     public static long Tick() { return Stopwatch.GetTimestamp(); }
     public static long Frequency() { return Stopwatch.Frequency; }
+    public static double CompositorControl() {
+        long started = Tick();
+        if (DwmFlush() < 0) throw new InvalidOperationException("DwmFlush failed");
+        return (Tick() - started) * 1000.0 / Frequency();
+    }
     public static IntPtr Transcript(IntPtr main) { return FindWindowEx(main, IntPtr.Zero, "ZigShellChatTranscript", null); }
     public static long Length(string path) { return File.Exists(path) ? new FileInfo(path).Length : 0; }
     public static string Tail(string path, long offset) {

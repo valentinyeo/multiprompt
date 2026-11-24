@@ -5,10 +5,11 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Me
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
+@{ revision=$Revision; startedUtc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content "$Evidence/setup.json"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/desktop.cs", "$PSScriptRoot/everyday-performance.cs" -ReferencedAssemblies System, System.Core, System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/verify-chat-delivery/job.cs"
-$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-Process | Sort-Object CPU -Descending | Select-Object -First 12 Name, CPU); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to nonempty content paint log plus DwmFlush'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append cumulative assistant update to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
+$machine = @{ cores=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString; cpu=(Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, LoadPercentage); processes=(Get-CimInstance Win32_Process | Select-Object Name, ProcessId, KernelModeTime, UserModeTime); revision=$Revision; exeSha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; profile=[bool]$Profile; sampleCount=$Count; trials=$Trials; qpcFrequency=[EverydayPerformance]::Frequency(); imageOS=$env:ImageOS; imageVersion=$env:ImageVersion; optimization='ReleaseSmall; -Drelease=true; x86_64-windows-gnu'; observer='2ms event wait between incremental log reads; DwmFlush after acknowledgement; no forced repaint'; endpoints=@{ typing='SendInput to exact WM_GETTEXT value plus DwmFlush, not first-pixel latency'; switching='SendInput to target nonempty content paint log plus DwmFlush'; opening='Alt+C to nonempty content paint log plus DwmFlush'; scrolling='SendInput wheel to nonzero move log and subsequent position paint plus DwmFlush'; streaming='append cumulative assistant update to reader push and subsequent position paint plus DwmFlush; synthetic local transport, excludes provider/network' } }
 $machine | ConvertTo-Json -Depth 8 | Set-Content "$Evidence/machine.json"
 for ($trial = 1; $trial -le $Trials; $trial++) {
     $directory = "$Evidence/trial-$trial"
@@ -49,7 +50,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         })
     }
     function Save-Sample([string]$Action, [int]$Index, [long]$Start, [double]$Ms, [long]$Offset, [string]$Proof) {
-        $samples.Add(@{ action=$Action; index=$Index; startQpc=$Start; endQpc=[EverydayPerformance]::Tick(); ms=$Ms; logOffset=$Offset; proof=$Proof; success=$true })
+        $samples.Add(@{ action=$Action; index=$Index; startQpc=$Start; endQpc=$Start + [long]($Ms * [EverydayPerformance]::Frequency() / 1000); ms=$Ms; logOffset=$Offset; proof=$Proof; success=$true })
     }
     try {
         & python "$PSScriptRoot/switch-performance-fixture.py" $root "$(Split-Path $Exe)/ssh.exe"
@@ -63,6 +64,8 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $null -ne $state -and @($state.tabs).Count -eq 10 -and ([EverydayPerformance]::Tail($log, 0)).Contains('[switch] chat content shown shell=')
         })
         Foreground
+        $control = @(1..100 | ForEach-Object { [EverydayPerformance]::CompositorControl() })
+        @{ compositorControlMs=$control; load=(Get-CimInstance Win32_Processor | Select-Object Name, LoadPercentage); activeProcesses=$job.ReadAccounting().ActiveProcesses } | ConvertTo-Json -Depth 6 | Set-Content "$directory/control.json"
         $observer = [Diagnostics.Process]::GetCurrentProcess()
         $observer.Refresh(); $observerBefore = $observer.TotalProcessorTime.TotalMilliseconds
         $app.Refresh(); $appBefore = $app.TotalProcessorTime.TotalMilliseconds
