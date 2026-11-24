@@ -78,7 +78,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
-    for (a.tabs, b.tabs) |x, y| if (!sameTabState(x.tab_state, y.tab_state) or !layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -91,7 +91,6 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     try tabs.appendSlice(a, remote.tabs);
     for (tabs.items) |*tab| {
         if (find(local.tabs, tab.*)) |i| {
-            if (tab.tab_state == null) tab.tab_state = local.tabs[i].tab_state;
             if (tab.group == null) tab.group = local.tabs[i].group;
             if (tab.starred_group == null) tab.starred_group = local.tabs[i].starred_group;
             if (tab.favorite == null) tab.favorite = local.tabs[i].favorite;
@@ -206,24 +205,6 @@ pub fn appearanceFrom(a: Allocator, target: Layout, source: Layout) !Layout {
     return result;
 }
 
-pub fn withoutTabState(a: Allocator, target: Layout) !Layout {
-    var result = target;
-    var tabs: std.ArrayList(Tab) = .empty;
-    for (target.tabs) |tab| {
-        if (tab.tab_state) |state| if (state.closed or state.archived) continue;
-        var projected = tab;
-        projected.tab_state = null;
-        try tabs.append(a, projected);
-    }
-    result.tabs = try tabs.toOwnedSlice(a);
-    return result;
-}
-
-fn sameTabState(left: ?@import("tab_state.zig").State, right: ?@import("tab_state.zig").State) bool {
-    if ((left == null) != (right == null)) return false;
-    return if (left) |state| @import("tab_state.zig").equal(state, right.?) else true;
-}
-
 pub fn withoutGroups(a: Allocator, target: Layout) !Layout {
     var result = target;
     const tabs = try a.dupe(Tab, target.tabs);
@@ -263,7 +244,6 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
     try tabs.appendSlice(a, edited.tabs);
     for (tabs.items) |*tab| {
         if (find(base.tabs, tab.*)) |i| {
-            if (tab.tab_state == null) tab.tab_state = base.tabs[i].tab_state;
             if (tab.group == null) tab.group = base.tabs[i].group;
             if (tab.starred_group == null) tab.starred_group = base.tabs[i].starred_group;
             if (tab.favorite == null) tab.favorite = base.tabs[i].favorite;
@@ -347,7 +327,6 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         }
         if (find(base.tabs, r)) |bi| {
             const ei = find(edited.tabs, r) orelse continue;
-            if (!sameTabState(edited.tabs[ei].tab_state, base.tabs[bi].tab_state)) t.tab_state = edited.tabs[ei].tab_state;
             t.used = layout.maxUsed(t.used, base.tabs[bi].used);
             t.input = layout.maxUsed(t.input, base.tabs[bi].input);
             t.visits = try layout.mergeVisits(a, t.visits, base.tabs[bi].visits);

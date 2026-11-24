@@ -22,7 +22,6 @@ pub fn workspaceColor(order: usize, override: ?u8) u8 {
     return override orelse @as(u8, @intCast(order % color_count));
 }
 pub const Tab = struct {
-    tab_state: ?@import("tab_state.zig").State = null,
     kind: []const u8 = "tmux",
     name: []const u8,
     manual: bool = false,
@@ -111,7 +110,6 @@ pub fn validate(layout: Layout) !void {
         for (layout.workspaces[0..i]) |old| if (std.mem.eql(u8, old.name, ws.name)) return error.InvalidLayout;
     }
     for (layout.tabs, 0..) |tab, i| {
-        if (tab.tab_state) |state| try @import("tab_state.zig").validate(state);
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
         if (tab.group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;

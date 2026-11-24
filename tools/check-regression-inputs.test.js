@@ -121,11 +121,3 @@ test('synthetic source strings and regular expressions are not executed history 
     assert.deepEqual(findHistoryInputs(`tools/${file}`, text, new Set(text.split('\n').map((_, i) => i + 1))), [], file);
   }
 });
-
-
-test('tab verb registries are not Git archive commands', async () => {
-  const { findHistoryInputs } = await api;
-  for (const source of ["const verbs = ['archive', 'unarchive'];", 'VERBS = ("archive", "unarchive")']) {
-    assert.deepEqual(findHistoryInputs('tools/tab-verbs.test.py', source, new Set([1])), []);
-  }
-});

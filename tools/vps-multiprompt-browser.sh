@@ -47,14 +47,12 @@ print_help() {
         printf '  Without --tab, read the target:true tab from zsb tabs (which may not be active).\n'
         ;;
       navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)' ;;
-      pc-state) echo 'usage: zsb pc-state (desktop-owned tab state, including closed tabs)' ;;
-      tab-action) echo 'usage: zsb tab-action <JSON request with verb, expected and state>' ;;
       workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)' ;;
       session-status) echo 'usage: zsb session-status --tab <id>'
         echo '  Reports connecting, connected after a live tmux attachment, or disconnected with exit_code.'
         echo '  An unknown exit code is 4294967295; an unknown tab returns unknown_tab.'
         ;;
-      session-open) echo 'usage: zsb session-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --tmux <session> --name <tab title> [--kind chat|shell]'
+      session-open) echo 'usage: zsb session-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --tmux <session> --name <tab title>'
         echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
         echo '  --after-tab places the new tab right below tab <id>, in its group.'
         echo '  Replies include state; created:true is not proof of connection. Use session-status --tab <id>.'
@@ -82,6 +80,12 @@ print_help() {
       session-move) echo 'usage: zsb session-move --tab <id> [--workspace <name>] [--group <name> | --ungrouped]'
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
         echo '  The active tab is refused with active_tab; a snoozed workspace is refused with workspace_snoozed.'
+        ;;
+      session-pin) echo 'usage: zsb session-pin --tab <id>'
+        echo '  Pins a background tab to the top of the sidebar in every view. An unknown tab returns unknown_tab.'
+        ;;
+      session-unpin) echo 'usage: zsb session-unpin --tab <id>'
+        echo '  Clears the pin from a background tab. An unknown tab returns unknown_tab.'
         ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
@@ -153,7 +157,7 @@ usage: zsb <command> [args] (also: multiprompt-browser)
 
 Commands and flags:
   workspace-list                    List workspaces, groups, tabs and host names as JSON
-  session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE [--kind chat|shell]
+  session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE
                                     Attach a remote tmux tab in the background, idempotently
   shell-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --name TITLE [--attach SESSION] [--run CMD]
                                     Open a server shell tab or attach to tmux
@@ -165,6 +169,8 @@ Commands and flags:
                                     Set a tab's manual title
   session-move --tab ID [--workspace NAME] [--group NAME | --ungrouped]
                                     Move a background tab to another workspace or group
+  session-pin --tab ID              Pin one background tab to the top of the sidebar
+  session-unpin --tab ID            Clear that pin
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -230,7 +236,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "pc-state" ] || [ "$1" = "tab-action" ] || [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -527,12 +533,9 @@ except ValueError:
     fail("bad_args", "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400")
 
 
-if args[0] in {"workspace-list", "pc-state"}:
+if args[0] == "workspace-list":
     if len(args) != 1:
         fail("bad_args", "usage: zsb workspace-list")
-elif args[0] == "tab-action":
-    if len(args) != 2 or len(args[1].encode()) > 4096:
-        fail("bad_args", "tab-action needs one bounded JSON request")
 elif args[0] == "session-status":
     try:
         if len(args) != 3 or args[1] != "--tab" or not args[2].isascii() or not args[2].isdigit() or not 0 < int(args[2]) <= 0xffffffff:
@@ -570,12 +573,10 @@ elif args[0] == "shell-open":
         fail("bad_args", "shell-open argument too long")
 
 elif args[0] == "session-open":
-    flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name", "--kind"}
+    flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name"}
     values = {}
-    if len(args) < 11:
+    if len(args) != 11:
         fail("bad_args", "session-open requires --workspace, --group or --after-tab, --host, --tmux and --name")
-    if len(args) % 2 == 0:
-        fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
     for flag, value in zip(args[1::2], args[2::2]):
         if flag not in flags or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
             fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
@@ -590,18 +591,17 @@ elif args[0] == "session-open":
         fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
     if len(values["--name"].encode("utf-16-le")) // 2 > 63:
         fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
-    kind = values.get("--kind")
-    if kind is not None and kind not in ("chat", "shell"):
-        fail("bad_args", "session-open --kind must be chat or shell")
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-elif args[0] in {"session-close", "session-rebind", "session-rename", "session-move"}:
+elif args[0] in {"session-close", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin"}:
     edit_specs = {
         "session-close": ({"--tab"}, {"--tab"}),
         "session-rename": ({"--tab", "--name"}, {"--tab", "--name"}),
         "session-rebind": ({"--tab", "--host", "--tmux"}, {"--tab", "--tmux"}),
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
+        "session-pin": ({"--tab"}, {"--tab"}),
+        "session-unpin": ({"--tab"}, {"--tab"}),
     }
     allowed, required = edit_specs[args[0]]
     values = {}
@@ -676,17 +676,122 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
             raise ValueError()
     except ValueError:
         fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
-endpoint = os.environ.get("ZSB_SOCKET")
-if not endpoint:
+def pane_port():
+    try:
+        return int(port)
+    except (TypeError, ValueError):
+        return 0
+
+
+def pane_holders():
+    target = pane_port()
+    if not target:
+        return []
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            rows = pathlib.Path(table).read_text(errors="replace").splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if len(fields) < 10 or fields[3] != "0A":
+                continue
+            try:
+                if int(fields[1].rsplit(":", 1)[1], 16) == target:
+                    inodes.add(fields[9])
+            except (IndexError, ValueError):
+                continue
+    if not inodes:
+        return []
+    holders = []
+    try:
+        entries = list(pathlib.Path("/proc").iterdir())
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            for handle in entry.joinpath("fd").iterdir():
+                try:
+                    link = os.readlink(handle)
+                    if not link.startswith("socket:["):
+                        continue
+                    if link[8:-1] not in inodes:
+                        continue
+                except OSError:
+                    continue
+                try:
+                    command = " ".join(entry.joinpath("cmdline").read_bytes().decode(errors="replace").split("\x00")).strip()
+                except OSError:
+                    command = ""
+                holders.append((int(entry.name), command))
+                break
+        except OSError:
+            continue
+    return holders
+
+
+TUNNEL_PROCESSES = {"sshd", "sshd-session", "ssh", "ssh.exe", "sshd.exe"}
+
+
+def tunnel_holds_port(holders):
+    return all(any(os.path.basename(word).split(":")[0] in TUNNEL_PROCESSES for word in command.split())
+               for _, command in holders)
+
+
+def fail_port_conflict(holders):
+    pid, command = holders[0]
+    label = command or "unknown process"
+    message = (f"multiprompt app not reachable: pane port {port} is held by pid {pid} ({label}), not by the "
+               f"Multiprompt SSH tunnel, so this request went nowhere. Stop that process, then reconnect this SSH session from multiprompt.")
+    fail("port_conflict", message,
+         {"ok": False, "error": "port_conflict", "message": message, "session": session, "port": pane_port(),
+          "holder": {"pid": pid, "command": command},
+          "hint": "Stop the stale process holding the pane port (kill " + str(pid) + "), then reconnect this SSH/tmux session from multiprompt."})
+
+
+def unix_endpoint(path):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(min(5, timeout))
+        sock.connect(path)
+        return sock
+    except OSError:
+        sock.close()
+        return None
+
+explicit = os.environ.get("ZSB_SOCKET")
+configured = ""
+if not explicit:
     config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "multiprompt/browser-socket"
     try:
-        endpoint = config.read_text().strip()
+        configured = config.read_text().strip()
     except FileNotFoundError:
         pass
     except OSError:
         fail("tunnel_down", "Cannot read this user's browser socket configuration")
+endpoint = explicit or configured
+sock = unix_endpoint(endpoint) if endpoint else None
+if sock is None and explicit:
+    holders = pane_holders()
+    message = (f"the owner browser relay socket {explicit} is not reachable. Install or restart the owner browser relay "
+               "(bash tools/install-owner-browser.sh <desktop-ssh-host>) on this server, then reconnect this SSH session from multiprompt.")
+    if holders:
+        message += f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'})."
+    fail("relay_unavailable", message, hint="Install or restart the owner browser relay, then reconnect this SSH/tmux session.")
+if sock is None:
+    endpoint = None
+    if configured:
+        holders = pane_holders()
+        message = (f"the browser relay socket {configured} is not reachable. Install or restart the owner browser relay "
+                   "(bash tools/install-owner-browser.sh <desktop-ssh-host>), then reconnect this SSH session from multiprompt.")
+        if holders:
+            message += f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'})."
+        fail("relay_unavailable", message, hint="Install or restart the browser relay, then reconnect this SSH/tmux session.")
 token = None
-if not endpoint:
+if sock is None:
     try:
         token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
         if not token:
@@ -694,22 +799,26 @@ if not endpoint:
         if not token:
             raise ValueError()
     except (OSError, subprocess.SubprocessError, ValueError):
-        fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
+        holders = pane_holders()
+        detail = ""
+        if holders and not tunnel_holds_port(holders):
+            detail = (f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'}), "
+                      "not by the Multiprompt SSH tunnel.")
+        fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents." + detail)
 
 started = time.monotonic()
 deadline = started + timeout
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
     fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
-try:
-    if endpoint:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(min(5, timeout))
-        sock.connect(endpoint)
-    else:
+if sock is None:
+    try:
         sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
-except OSError:
-    fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
+    except (OSError, ValueError):
+        holders = pane_holders()
+        if holders and not tunnel_holds_port(holders):
+            fail_port_conflict(holders)
+        fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
@@ -736,6 +845,9 @@ except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
+    holders = pane_holders() if not endpoint else []
+    if holders and not tunnel_holds_port(holders):
+        fail_port_conflict(holders)
     fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed). " + fix)
 # The app's pane handoff and WebView2 actions use a literal acknowledgement.
 if raw.strip() == "ok" and args[0] in {"open", "sidebar", "navigate", "back", "forward", "reload"}:
@@ -768,7 +880,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

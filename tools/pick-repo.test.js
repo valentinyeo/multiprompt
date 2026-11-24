@@ -134,12 +134,11 @@ test('IGSH-1266 a pick that starts nothing says which step refused it', () => {
   const main = read('src/main.zig');
   assert.doesNotMatch(main, /Pick repo: nothing chosen/, 'the catch-all message hid the real reason');
   assert.match(main, /if \(!picked\) showPickRepoFailure\(saving_folder\);/, 'every refusal must go through the reason helper');
-  const failure = read('src/pick_repo_notice.zig');
-  assert.match(failure, /\.capacity => \{\},/, 'a capacity refusal already shows its own notice and must not be overwritten');
-  assert.match(failure, /Pick repo: that row is gone; open the list again/);
-  assert.match(failure, /Pick repo: that folder path cannot start a session/);
-  assert.match(failure, /Pick repo: the new tab did not start/);
-  assert.match(failure, /Set workspace folder: could not save/);
+  assert.match(main, /\.capacity => \{\},/, 'a capacity refusal already shows its own notice and must not be overwritten');
+  assert.match(main, /Pick repo: that row is gone; open the list again/);
+  assert.match(main, /Pick repo: that folder path cannot start a session/);
+  assert.match(main, /Pick repo: the new tab did not start/);
+  assert.match(main, /Set workspace folder: could not save/);
 
   const chosen = palette.slice(palette.indexOf('pub fn pickRepoChoose(target: usize) bool {'), palette.indexOf('fn customCmdMatchesQuery('));
   assert.match(chosen, /g_pick_row_gone = true;/, 'a row that is gone must be named');

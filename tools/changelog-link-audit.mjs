@@ -34,6 +34,10 @@ for (const release of manifest.releases) {
   assert.ok(release.changes.every(change => typeof change === 'string' && change.trim()), `Blank change in ${release.version}`);
   assert.ok(Array.isArray(release.tickets) && release.tickets.length === release.changes.length, `Ticket count mismatch in ${release.version}`);
   for (const [index, line] of release.changes.entries()) {
+    if (release.tickets[index] === null) {
+      assert.ok(typeof line === 'string' && line.trim() && line.length <= 512, `Unreadable unlinked change in ${release.version}`);
+      continue;
+    }
     const match = /^(\S+) (.+)$/.exec(line);
     assert.ok(match, `Missing ticket title in ${release.version}`);
     assert.equal(ticketLine(ticketRecord(match[1], match[2])), line);

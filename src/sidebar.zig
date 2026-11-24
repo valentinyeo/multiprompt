@@ -341,7 +341,6 @@ const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_AL
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
-const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_IN_PLACE;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
@@ -599,15 +598,37 @@ pub fn archiveHasNewContentSnapshot(shell: *const Shell, content: *const archive
     return shell.archive_content_valid and archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, content) != .none;
 }
 
-pub fn archiveHasNewContent(i: usize) bool {
-    const content = readArchiveContent(i) orelse return false;
-    if (!app_state.shells[i].archive_content_valid) {
-        app_state.shells[i].archive_content = content;
-        app_state.shells[i].archive_content_valid = true;
-        saveSession();
-        return false;
+fn shellUsesHostedArchive(shell: *const Shell) bool {
+    return shell.pid == 0 or shell.hook_capable or shell.claude_sid_len > 0;
+}
+
+fn hostedArchiveHasNewContent(shell: *const Shell) bool {
+    if (shell.archive_time == 0) return false;
+    if (shell.archive_active > shell.archive_time and shell.archive_active > shell.archive_done) return true;
+    if (shell.last_done_time > shell.archive_done and shell.last_done_time > shell.archive_time) return true;
+    if (shell.last_done_content_valid) {
+        if (shell.archive_content_valid) {
+            return archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, &shell.last_done_content) != .none;
+        }
+        return shell.last_done_time > shell.archive_done;
     }
-    return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    return false;
+}
+
+pub fn archiveHasNewContent(i: usize) bool {
+    if (i >= app_state.shell_count) return false;
+    if (readArchiveContent(i)) |content| {
+        if (!app_state.shells[i].archive_content_valid) {
+            app_state.shells[i].archive_content = content;
+            app_state.shells[i].archive_content_valid = true;
+            saveSession();
+            return false;
+        }
+        return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
+    }
+    const shell = &app_state.shells[i];
+    if (shellUsesHostedArchive(shell)) return hostedArchiveHasNewContent(shell);
+    return false;
 }
 
 pub fn logUnarchive(i: usize, reason: []const u8) void {
@@ -1276,17 +1297,26 @@ fn frozenPlaceBefore(_: void, a: FrozenPlace, b: FrozenPlace) bool {
 }
 
 pub fn freezeSidebarOrder() void {
-    if (app_state.g_sidebar_order_frozen) return;
+    if (app_state.g_sidebar_order_frozen) {
+        if (app_state.g_sidebar_view == null) return;
+        _ = thawSidebarOrder();
+    }
     const row_count = layoutRows(&g_freeze_rows);
     g_frozen_places_len = 0;
     for (g_freeze_rows[0..row_count]) |row| {
-        if (row.kind != .tab or row.shell_idx >= app_state.shell_count) continue;
-        if (g_frozen_places_len >= MAX_SHELLS) break;
-        g_frozen_places[g_frozen_places_len] = .{
-            .shell_id = app_state.shells[row.shell_idx].shell_id,
-            .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+        const sid: ?u32 = switch (row.kind) {
+            .tab => if (row.shell_idx < app_state.shell_count) app_state.shells[row.shell_idx].shell_id else null,
+            .inbox => if (row.shell_idx < app_state.g_inbox_row_count) app_state.g_inbox_rows[row.shell_idx].sid else null,
+            else => null,
         };
-        g_frozen_places_len += 1;
+        if (sid) |shell_id| {
+            if (g_frozen_places_len >= MAX_SHELLS) break;
+            g_frozen_places[g_frozen_places_len] = .{
+                .shell_id = shell_id,
+                .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+            };
+            g_frozen_places_len += 1;
+        }
     }
     std.mem.sort(FrozenPlace, g_frozen_places[0..g_frozen_places_len], {}, frozenPlaceBefore);
     app_state.g_sidebar_order_frozen = true;
@@ -1523,15 +1553,25 @@ fn layoutViewRows(out: *[MAX_ROWS]Row, view: @import("workspace_view.zig").Built
         indices[count] = @intCast(i);
         count += 1;
     }
+    const split = view.split();
     const Order = struct {
         split: u32,
         now_ms: u64,
 
         fn less(ctx: @This(), a: u32, b: u32) bool {
+            if (app_state.g_sidebar_order_frozen and g_frozen_places_len > 0) {
+                const pa = frozenPlaceOf(app_state.g_inbox_rows[a].sid);
+                const pb = frozenPlaceOf(app_state.g_inbox_rows[b].sid);
+                if (pa != pb) {
+                    if (pa == 0) return false;
+                    if (pb == 0) return true;
+                    return pa > pb;
+                }
+            }
             return @import("inbox.zig").rowLessForSplit(ctx.split, ctx.now_ms, app_state.g_inbox_rows[a], app_state.g_inbox_rows[b]);
         }
     };
-    std.mem.sort(u32, indices[0..count], Order{ .split = view.split(), .now_ms = now_ms }, Order.less);
+    std.mem.sort(u32, indices[0..count], Order{ .split = split, .now_ms = now_ms }, Order.less);
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     var n: u32 = 0;
     for (indices[0..count]) |ri| {
@@ -2868,7 +2908,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_theme_mode)
                 L("Search themes...")
             else if (app_state.g_search_workspace_delete_mode)
-                L("Search workspaces to delete...")
+                if (@import("workspaces.zig").workspaceDeleteMoveSource() != null) L("Where should the chats go?") else L("Search workspaces to delete...")
             else if (app_state.g_search_workspace_mode)
                 switch (app_state.g_search_workspace_action) {
                     .open => L("Search workspaces to open..."),
@@ -4594,7 +4634,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var ws_buf: [112]u16 = undefined;
                             var wsl: usize = 0;
                             const confirming = if (app_state.g_search_workspace_delete_confirm) |c| c == @as(u32, @intCast(workspace_idx)) else false;
-                            const prefix = if (confirming) "Press Enter Again: " else "Delete Workspace: ";
+                            const moving = @import("workspaces.zig").workspaceDeleteMoveSource() != null;
+                            const prefix = if (moving) "Move Chats To: " else if (confirming) "Press Enter Again: " else "Delete Workspace: ";
                             for (prefix) |c| {
                                 ws_buf[wsl] = c;
                                 wsl += 1;
@@ -4609,7 +4650,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                             var ws_hint: [64]u16 = undefined;
-                            const hint: []const u8 = if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
+                            const hint: []const u8 = if (moving) "move" else if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
                             const id_len = @min(hint.len, ws_hint.len);
                             for (0..id_len) |ii| ws_hint[ii] = @intCast(hint[ii]);
                             var ws_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4849,7 +4890,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_computer_on = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("computer_pane.zig").chosenFor(ti) else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_AI) L(ui_words.tab_context_chat_restart_ai) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_IN_PLACE) L(ui_words.tab_context_chat_restart_in_place) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == app_state.SEARCH_TABCTX_FRESH_START) L("Fresh start") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) L("Switch AI to Claude") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_CODEX) L("Switch AI to Codex") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_PI) L("Switch AI to Pi") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
+                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_AI) L(ui_words.tab_context_chat_restart_ai) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == app_state.SEARCH_TABCTX_FRESH_START) L("Fresh start") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) L("Switch AI to Claude") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_CODEX) L("Switch AI to Codex") else if (result_idx == app_state.SEARCH_TABCTX_SWITCH_PI) L("Switch AI to Pi") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             if (result_idx == SEARCH_TABCTX_WSMOVE) {
                                 _ = SelectObject(hdc, palette_hint_font);
@@ -5465,6 +5506,37 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
+test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_ws = app_state.g_active_workspace;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_ws;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 2;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].workspace = 2;
+    app_state.shells[0].pid = 0;
+    app_state.shells[0].hook_capable = true;
+    app_state.shells[0].inbox_archived = true;
+    app_state.shells[0].archive_time = 1000;
+    app_state.shells[0].archive_done = 1000;
+    app_state.shells[0].last_done_time = 1000;
+    try std.testing.expect(isTabHidden(0));
+    try std.testing.expect(!archiveHasNewContent(0));
+    app_state.shells[0].last_done_time = 2000;
+    try std.testing.expect(archiveHasNewContent(0));
+}
+
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
     const saved_shells = app_state.shells[0..4].*;
     const saved_count = app_state.shell_count;
@@ -5857,6 +5929,62 @@ test "SOFT-2378 a clicked chat that is rebuilt keeps its row under the pointer" 
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
     try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
+}
+
+test "SOFT-3124 a workspace view keeps the selected row in place until another row is selected" {
+    const saved_view = app_state.g_sidebar_view;
+    const saved_single = app_state.g_single_window;
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_shell_count = app_state.shell_count;
+    const saved_inbox_count = app_state.g_inbox_row_count;
+    const saved_inbox_ws_count = app_state.g_inbox_ws_count;
+    const saved_inbox_ws = app_state.g_inbox_ws[0];
+    const saved_inbox_rows = app_state.g_inbox_rows[0..3].*;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        _ = thawSidebarOrder();
+        app_state.g_sidebar_view = saved_view;
+        app_state.g_single_window = saved_single;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_shell_count;
+        app_state.g_inbox_row_count = saved_inbox_count;
+        app_state.g_inbox_ws_count = saved_inbox_ws_count;
+        app_state.g_inbox_ws[0] = saved_inbox_ws;
+        app_state.g_inbox_rows[0..3].* = saved_inbox_rows;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_single_window = true;
+    app_state.g_sidebar_view = .all;
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 3;
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0].hwnd = @intFromPtr(app_state.g_main_hwnd);
+    app_state.g_inbox_row_count = 3;
+    for ([_]struct { sid: u32, la: u64 }{
+        .{ .sid = 11, .la = 100 },
+        .{ .sid = 12, .la = 200 },
+        .{ .sid = 13, .la = 50 },
+    }, 0..) |entry, i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = entry.sid;
+        app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = entry.sid, .la = entry.la };
+    }
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 12), app_state.shells[rows[0].shell_idx].shell_id);
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    app_state.g_inbox_rows[2].lv = 9_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[0].shell_idx].shell_id);
+    app_state.g_inbox_rows[1].lv = 8_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 11), app_state.shells[rows[2].shell_idx].shell_id);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

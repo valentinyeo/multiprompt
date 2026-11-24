@@ -332,6 +332,43 @@ test "archive JSON grows beyond the former entry and file-size limits" {
     try std.testing.expectEqualStrings("archive-test-159", last.tmux_session[0..last.tmux_session_len]);
 }
 
+test "MUBO-234 an archived chat stays hidden after a layout sync lists it again" {
+    const allocator = std.testing.allocator;
+    const tmux_closed = @import("tmux_closed.zig");
+    const session: []const u8 = "pi-chat";
+    var entries: std.ArrayList(ArchivedEntry) = .empty;
+    defer entries.deinit(allocator);
+    var entry = ArchivedEntry{};
+    const label: []const u8 = "Pi";
+    @memcpy(entry.name[0..label.len], label);
+    entry.name_len = @intCast(label.len);
+    @memcpy(entry.tmux_session[0..session.len], session);
+    entry.tmux_session_len = @intCast(session.len);
+    entry.tmux_host = TMUX_HOST_UK;
+    try entries.append(allocator, entry);
+
+    var out: [2048]u8 = undefined;
+    const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
+    var restarted: std.ArrayList(ArchivedEntry) = .empty;
+    defer restarted.deinit(allocator);
+    try std.testing.expect(parseArchiveJson(allocator, out[0..len], &restarted));
+
+    const elsewhere = [_]tmux_closed.LayoutTab{.{ .host = TMUX_HOST_UK, .session = "other-chat" }};
+    const listed = [_]tmux_closed.LayoutTab{.{ .host = TMUX_HOST_UK, .session = session }};
+    var closed = tmux_closed.Closed{};
+    defer closed.entries.deinit(allocator);
+    try closed.close(allocator, TMUX_HOST_UK, session, tmux_closed.now());
+    closed.reconcile(elsewhere[0..]);
+    closed.reconcile(listed[0..]);
+    closed.hold(allocator, TMUX_HOST_UK, session);
+    closed.reconcile(listed[0..]);
+
+    try std.testing.expect(closed.contains(TMUX_HOST_UK, session));
+    try std.testing.expect(archivedListHas(restarted.items, TMUX_HOST_UK, session));
+    try std.testing.expect(!archivedListHas(restarted.items, TMUX_HOST_UK, "other-chat"));
+    try std.testing.expect(!archivedListHas(restarted.items, TMUX_HOST_INNE, session));
+}
+
 pub fn loadArchiveFromDisk(force: bool) void {
     var path_buf: [512]u8 = undefined;
     const path = getArchivePath(&path_buf) orelse return;
@@ -386,6 +423,19 @@ pub fn loadArchiveFromDisk(force: bool) void {
 
 pub fn loadArchiveIfNeeded() void {
     loadArchiveFromDisk(false);
+}
+
+pub fn loadArchivedEntries() []const ArchivedEntry {
+    loadArchiveIfNeeded();
+    return app_state.g_archived.items[0..app_state.g_archived_count];
+}
+
+pub fn archivedListHas(entries: []const ArchivedEntry, host: u8, session: []const u8) bool {
+    if (session.len == 0) return false;
+    for (entries) |*entry| {
+        if (archivedEntryMatches(entry, host, session)) return true;
+    }
+    return false;
 }
 
 fn saveArchive() bool {
@@ -515,11 +565,6 @@ fn buildArchiveResurrectCommand(entry: *const ArchivedEntry, out: []u8) ?[]const
 
 pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool {
     loadArchiveFromDisk(true);
-    if (@import("tab_state_desktop.zig").restoreByKey(host, session)) |restored| {
-        if (restored and removeArchivedEntry(host, session)) _ = saveArchive();
-        return restored;
-    }
-
     const ar_idx = findArchivedEntry(host, session) orelse return false;
     const ar_copy = app_state.g_archived.items[ar_idx];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
@@ -1135,7 +1180,6 @@ pub fn archiveTabAt(i: usize) void {
         return;
     }
     closeShell(@intCast(i));
-    @import("tab_state_desktop.zig").markArchived(entry.tmux_host, entry.tmux_session[0..entry.tmux_session_len]);
     publishInboxState();
     saveSession();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -1383,15 +1427,6 @@ fn workspaceSlotForTmuxFamily(host: u8, session: []const u8) ?u8 {
 }
 
 fn archivedEntryWorkspaceSlot(entry: *const ArchivedEntry) u8 {
-    for (app_state.g_tmux_closed.entries.items) |closed| {
-        if (!@import("tmux_identity.zig").same(closed.host, closed.name[0..closed.len], entry.tmux_host, entry.tmux_session[0..entry.tmux_session_len])) continue;
-        const state = closed.tab_state orelse continue;
-        for (0..app_state.g_lws_count) |wi| {
-            var buf: [32]u8 = undefined;
-            if (std.mem.eql(u8, state.workspace, workspaceDisplayName(@intCast(wi), &buf))) return @intCast(wi);
-        }
-    }
-
     const session = entry.tmux_session[0..entry.tmux_session_len];
     if (workspaceSlotForTmuxFamily(entry.tmux_host, session)) |ws| return ws;
     const root = if (entry.claude_cwd_len > 0) remoteRepoRoot(entry.claude_cwd[0..entry.claude_cwd_len]) else "";
@@ -1548,7 +1583,6 @@ pub fn buildSessionOverviewRows() void {
     while (ai < app_state.g_archived_count) : (ai += 1) {
         const e = &app_state.g_archived.items[ai];
         if (e.tmux_session_len == 0) continue;
-        if (findLocalTmuxTab(e.tmux_host, e.tmux_session[0..e.tmux_session_len]) != null) continue;
         const sess = e.tmux_session[0..e.tmux_session_len];
         const name = if (e.name_len > 0) e.name[0..e.name_len] else sess;
         var root: []const u8 = "";
@@ -1564,17 +1598,6 @@ pub fn buildSessionOverviewRows() void {
         }
         const aws = archivedEntryWorkspaceSlot(e);
         _ = sessionOverviewAdd(.archived, 0, 0, e.tmux_host, name, sess, ctx_slice, 0, 0, false, aws);
-    }
-
-    for (app_state.g_tmux_closed.entries.items) |entry| {
-        const state = entry.tab_state orelse continue;
-        if (!state.archived or state.closed or findArchivedEntry(entry.host, state.tmux) != null) continue;
-        var workspace: u8 = AS_ROW_OTHER;
-        for (0..app_state.g_lws_count) |wi| {
-            var buf: [32]u8 = undefined;
-            if (std.mem.eql(u8, state.workspace, workspaceDisplayName(@intCast(wi), &buf))) workspace = @intCast(wi);
-        }
-        _ = sessionOverviewAdd(.archived, 0, 0, entry.host, state.name, state.tmux, "", 0, 0, false, workspace);
     }
 
     if (verboseLoggingEnabled()) {
@@ -1609,7 +1632,7 @@ pub fn buildSessionOverviewRows() void {
 }
 
 fn sessionOverviewHostLabel(host: u8) []const u8 {
-    return if (host == 3) "Local" else tmuxHostLongLabel(host);
+    return tmuxHostLongLabel(host);
 }
 
 fn allSessionsRowTab(row: *const SessionOverviewRow) u32 {

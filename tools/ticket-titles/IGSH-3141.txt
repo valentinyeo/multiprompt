@@ -1,1 +1,0 @@
-Every tab action from the command line

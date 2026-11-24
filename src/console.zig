@@ -1931,13 +1931,13 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
     const old_resurrect_len = app_state.g_pending_resurrect_len;
     app_state.g_pending_tmux_cmd_len = 0;
     app_state.g_pending_resurrect_len = 0;
-    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session, null);
+    const ok = spawnBackgroundRemoteShell(host, workspace, .tmux, session);
     app_state.g_pending_tmux_cmd_len = old_cmd_len;
     app_state.g_pending_resurrect_len = old_resurrect_len;
     return ok;
 }
 
-pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8) bool {
+pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux_session: ?[]const u8) bool {
     const old_host = app_state.g_pending_tmux_host;
     const old_workspace = app_state.g_pending_background_workspace;
     defer {
@@ -1956,7 +1956,7 @@ pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux
         app_state.g_pending_tmux_cmd_len = 0;
         app_state.g_pending_resurrect_len = 0;
     }
-    return spawnShellWithSession(kind, tmux_session, cwd, null);
+    return spawnShellWithSession(kind, tmux_session, null, null);
 }
 
 fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
@@ -2033,7 +2033,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2283,7 +2283,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
             @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
-            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
@@ -2745,7 +2745,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (remember_closed) {
         if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
-        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len], @import("tmux_closed.zig").now()) catch debugLog("Could not remember closed tmux session");
         for (app_state.g_tmux_closed.entries.items) |*entry| {
             if (@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
                 entry.face = closing.face;
@@ -2754,7 +2754,6 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
             }
         }
     }
-    if (remember_closed) @import("tab_state_desktop.zig").rememberClose(idx);
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
@@ -2791,8 +2790,6 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.tmux_host = app_state.shells[idx].tmux_host;
         entry.name = app_state.shells[idx].name;
         entry.name_len = app_state.shells[idx].name_len;
-        entry.tab_key = app_state.shells[idx].tab_key;
-        entry.tab_key_len = app_state.shells[idx].tab_key_len;
         entry.tmux_session = app_state.shells[idx].tmux_session;
         entry.tmux_identity = app_state.shells[idx].tmux_identity;
         entry.tmux_identity_len = app_state.shells[idx].tmux_identity_len;
@@ -2980,6 +2977,8 @@ pub fn paneGuardKeepUser(requested: u32) void {
 }
 
 pub fn switchToShellByUser(idx: u32) void {
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and idx != app_state.active_shell)
+        @import("sidebar.zig").freezeSidebarOrder();
     const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
     if (idx < app_state.shell_count) {
         @import("room_frontend.zig").cancelRestoreForUser();
@@ -2997,7 +2996,10 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
-    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) app_state.g_sidebar_view = null;
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) {
+        _ = @import("sidebar.zig").thawSidebarOrder();
+        app_state.g_sidebar_view = null;
+    }
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;

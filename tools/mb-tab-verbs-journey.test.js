@@ -63,7 +63,7 @@ test('SOFT-3142 every mb tab stem is registered and mapped', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   const drive = fs.readFileSync(path.join(root, skill, 'drive.ps1'), 'utf8');
   assert.match(workflow, /Install browser toggle recorder[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
-  assert.match(workflow, /choco install ffmpeg[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
+  assert.match(workflow, /startsWith\(env\.FEATURE, 'mb-tab-'\)[^\n]*\n\s+uses: \.\/\.github\/actions\/install-ffmpeg/);
   assert.match(workflow, /uses: actions\/setup-node[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
   assert.match(workflow, /name: Build the test account service[\s\S]*startsWith\(env\.FEATURE, 'mb-tab-'\)/);
   assert.match(drive, /Resolve-DriveRecorder 'ffmpeg\.exe'/);

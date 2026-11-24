@@ -320,8 +320,6 @@ pub const Shell = struct {
     inbox_archived: bool = false,
     last_title: [256]u16,
     last_title_len: i32,
-    tab_key: [64]u8 = @splat(0),
-    tab_key_len: u32 = 0,
     tmux_session: [64]u8,
     tmux_session_len: u32,
     tmux_identity: [64]u8 = @splat(0),
@@ -806,8 +804,6 @@ pub const ClosedShell = struct {
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
-    tab_key: [64]u8 = @splat(0),
-    tab_key_len: u32 = 0,
     tmux_session: [64]u8,
     tmux_session_len: u32,
     tmux_identity: [64]u8 = @splat(0),
@@ -1740,7 +1736,6 @@ pub const SEARCH_TABCTX_BOT_COLOR: usize = 7188;
 pub const SEARCH_TABCTX_PIN_PAGE: usize = 7189;
 pub const SEARCH_TABCTX_UNPIN_PAGE: usize = 7190;
 pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = 7191;
-pub const SEARCH_TABCTX_CHAT_RESTART_IN_PLACE: usize = 7179;
 pub const SEARCH_BOT_PHOTO_UPLOAD: usize = 7193;
 pub const SEARCH_BOT_PHOTO_RESET: usize = 7194;
 pub const SEARCH_TABCTX_UNREAD: usize = 7195;
@@ -2396,7 +2391,7 @@ pub const AppearanceEdit = @import("appearance_intent.zig").Edit;
 pub const AppearanceIntent = @import("appearance_intent.zig").Intent;
 pub const AppearanceTouch = @import("appearance_intent.zig").Touch;
 pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null, appearance: ?[]AppearanceIntent = null };
-pub const LayoutReply = struct { tab_state_supported: bool = false, palette8_supported: bool = false, groups_supported: bool = false, group_order_supported: bool = false, starred_groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, group_order_supported: bool = false, starred_groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
@@ -2412,8 +2407,6 @@ pub const SavedTab = struct {
     name_len: u32,
     manual: bool,
     sem: bool,
-    tab_key: [64]u8 = @splat(0),
-    tab_key_len: u32 = 0,
     tmux_session: [64]u8,
     tmux_session_len: u32,
     tmux_identity: [64]u8 = @splat(0),
@@ -3031,6 +3024,7 @@ pub const ChatHistoryEntry = struct {
     cache_dirty: bool = false,
     unchanged: bool = false,
     quiet: u16 = 0,
+    hidden_wait: bool = false,
     incremental: bool = false,
     failures: u8 = 0,
     missing_message: [256]u16 = @splat(0),
@@ -3888,7 +3882,7 @@ pub const ZsbWorkerCtx = struct {
 pub var g_zsb_workspace_mutex: SpinMutex = .{};
 pub var g_zsb_workspace_pending = false;
 pub var g_zsb_workspace_done = false;
-pub var g_zsb_workspace_args: [16][4096]u8 = undefined;
+pub var g_zsb_workspace_args: [16][256]u8 = undefined;
 pub var g_zsb_workspace_arg_lens: [16]usize = undefined;
 pub var g_zsb_workspace_argc: usize = 0;
 pub var g_zsb_workspace_response: [256 * 1024]u8 = undefined;

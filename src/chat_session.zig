@@ -634,6 +634,10 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
         entry.quiet = 0;
         entry.next = @min(entry.next, now);
     }
+    if (key.shell_id == live_shell_id and entry.hidden_wait) {
+        entry.hidden_wait = false;
+        entry.next = @min(entry.next, now);
+    }
     if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
     const known = entry.key;
@@ -700,7 +704,8 @@ fn chatQuietBackoff(quiet: u16) u64 {
     if (quiet < 1) return 4000;
     if (quiet < 2) return 8000;
     if (quiet < 3) return 16000;
-    return 30000;
+    if (quiet < 4) return 30000;
+    return 60000;
 }
 
 fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool, quiet: u16) u64 {
@@ -708,6 +713,7 @@ fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, de
     if (more) return 1000;
     if (delivery and !unchanged) return 250;
     if (streaming) return 0;
+    if (background and !delivery and !unchanged) return 4000;
     if (unchanged and background) return if (delivery) 4000 else chatQuietBackoff(quiet);
     return chatFilePollInterval();
 }
@@ -723,10 +729,11 @@ test "an unchanged background chat waits four seconds and a live chat stays fast
     try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true, 0));
     try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 0));
     try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false, 0));
-    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, false, true, 0));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, false, true, 0));
     try std.testing.expectEqual(@as(u64, 8000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 1));
     try std.testing.expectEqual(@as(u64, 16000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 2));
-    try std.testing.expectEqual(@as(u64, 30000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 60000));
+    try std.testing.expectEqual(@as(u64, 30000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 3));
+    try std.testing.expectEqual(@as(u64, 60000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 60000));
     try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true, 9));
 }
 
@@ -1095,7 +1102,7 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const feedback = @embedFile("multibot_feedback.py");
     const helper = @embedFile("mp_helper.py");
     const shell = @embedFile("mp_shell.py");
-    const sessions = @embedFile("mp_tab_state.py") ++ "\n" ++ @embedFile("mp_sessions.py");
+    const sessions = @embedFile("mp_sessions.py");
     const layout = @embedFile("mp_layout.mjs");
     const mp_fresh = @embedFile("mp_fresh.py");
     const zsb = @embedFile("mp_zsb.sh");
@@ -1228,6 +1235,7 @@ fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_histor
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
         .settlement = true,
+        .blocked_settlement = true,
         .message_protocol = 1,
         .source_offsets = true,
         .live = true,
@@ -1579,9 +1587,11 @@ pub fn chatFileOnReady() void {
             const live_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
             const background = entry.key.shell_id != live_id;
             entry.quiet = if (entry.unchanged and background and !disk) entry.quiet +| 1 else 0;
-            entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
+            const next_delay = chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
+            entry.next = GetTickCount64() + next_delay;
+            entry.hidden_wait = background and !disk and next_delay > 1000;
             if (belongs_to_active) {
-                active_changed = active_changed or !entry.unchanged or history.revision != (app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15));
+                active_changed = active_changed or !entry.unchanged or history.revision +% (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15) != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
                 app_state.g_chat_switch_loading = history.more and entry.history.blocks.items.len == 0;
                 const idx = findShellById(key.shell_id) orelse continue;
@@ -1718,10 +1728,10 @@ fn refreshChatBlockCache(force: bool) bool {
     var live_blocks: [16]ChatBlock = undefined;
     if (!chatEnsureTranscriptCapacity(len + CHAT_LIVE_TEXT_ROOM, count + live_blocks.len)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
-    const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) ^ (live_revision *% 0x9E3779B97F4A7C15);
+    const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) +% (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
     const seen: []const @import("chat_markdown.zig").Block = if (from_file) entry.?.history.blocks.items else &.{};
-    const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen);
+    const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks, seen, source);
     if (live_revision != g_chat_live_drawn_revision) {
         g_chat_live_drawn_revision = live_revision;
         chatLiveLog("draw", shell_id, live_tail.text_len, @intCast(@min(live_tail.blocks, 255)));
@@ -2331,6 +2341,91 @@ test "IGSH-1593 startup failure reaches an empty cached transcript after the hos
     _ = refreshChatBlockCache(true);
     try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_block_count);
     try std.testing.expectEqualSlices(u16, expected, app_state.g_chat_capture[0..app_state.g_chat_last_len]);
+}
+
+test "MUBO-249 a refresh that appends rows keeps the saved layout while live chat state exists" {
+    const a = std.heap.page_allocator;
+    const live = @import("chat_live.zig");
+    const shell_id: u32 = 24901;
+    const saved = .{
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .hwnd = app_state.g_main_hwnd,
+        .histories = app_state.g_chat_histories,
+        .cache_shell = app_state.g_chat_cache_shell_id,
+        .cache_generation = app_state.g_chat_cache_generation,
+        .from_file = app_state.g_chat_blocks_from_file,
+        .file_valid = app_state.g_chat_file_valid,
+        .drawn = g_chat_live_drawn_revision,
+        .working = app_state.g_chat_screen_working,
+    };
+    app_state.g_chat_histories = .empty;
+    defer {
+        chatHistoryForget(shell_id);
+        live.release(shell_id);
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.hwnd;
+        app_state.g_chat_cache_shell_id = saved.cache_shell;
+        app_state.g_chat_cache_generation = saved.cache_generation;
+        app_state.g_chat_blocks_from_file = saved.from_file;
+        app_state.g_chat_file_valid = saved.file_valid;
+        g_chat_live_drawn_revision = saved.drawn;
+        app_state.g_chat_screen_working = saved.working;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_last_hash = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = shell_id;
+    app_state.shells[0].ai_agent = 1;
+    @memcpy(app_state.shells[0].tmux_session[0..8], "term-249");
+    app_state.shells[0].tmux_session_len = 8;
+    @memcpy(app_state.shells[0].claude_sid[0..3], "sid");
+    app_state.shells[0].claude_sid_len = 3;
+    const key = chatFileIdentity();
+    const entry = chatHistoryEntry(key) orelse return error.TestUnexpectedResult;
+    var wire = try perfWire(a, "term-249", 256 * 1024, 1, 0);
+    defer wire.deinit(a);
+    try entry.history.apply(a, wire.items, 1, key);
+    const base = entry.history.blocks.items.len;
+    try std.testing.expect(base > 100);
+    try std.testing.expect(live.starting(shell_id, 0, "sid"));
+    try std.testing.expect(live.revision(shell_id) != 0);
+    app_state.g_chat_cache_shell_id = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_last_hash = 0;
+    g_chat_live_drawn_revision = 0;
+    try std.testing.expect(refreshChatBlockCache(true));
+    try std.testing.expectEqual(base, app_state.g_chat_block_count);
+    var round: u32 = 0;
+    while (round < 4) : (round += 1) {
+        app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
+        const before = entry.history.blocks.items.len;
+        const revision = entry.history.revision;
+        var more = try perfWire(a, "term-249", 2 * 1024, 2 + round, entry.history.offset);
+        defer more.deinit(a);
+        try entry.history.apply(a, more.items, 2 + round, key);
+        try std.testing.expect(entry.history.blocks.items.len > before);
+        entry.history.changed_from = before;
+        entry.history.revision = revision +% 1;
+        try std.testing.expect(refreshChatBlockCache(false));
+        try std.testing.expectEqual(entry.history.blocks.items.len, app_state.g_chat_block_count);
+        try std.testing.expectEqual(before, app_state.g_chat_layout_reuse);
+    }
 }
 
 test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polling" {

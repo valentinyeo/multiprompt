@@ -34,6 +34,16 @@ test('a new palette row with no verb fails the check', async () => {
   assert.deepEqual(result.missing, ['SEARCH_NOT_A_REAL_OFFSET']);
 });
 
+test('pin is a command-line verb, not a screen-only mark', async () => {
+  const { verbs, screen, screenOnly } = await map();
+  assert.equal(verbs.SEARCH_TABCTX_PIN_TOP, 'pin');
+  assert.equal(screen.SEARCH_TABCTX_PIN_TOP, undefined);
+  assert.doesNotMatch(screenOnly.local, /\bpin\b/);
+  assert.match(usage, /^  pin /m);
+  assert.match(usage, /^  unpin /m);
+  assert.ok(claude.split('\n').length < 80);
+});
+
 test('each verb is an mb command', async () => {
   const { verbs } = await map();
   for (const name of new Set(Object.values(verbs))) assert.match(usage, new RegExp('^  ' + name + ' ', 'm'));
@@ -45,16 +55,4 @@ test('the screen-only list is written next to the three-part rule', async () => 
     assert.ok(claude.includes(line), line);
     assert.ok(doc.includes(line), line);
   }
-});
-
-
-test('tab state actions are command-line verbs, not screen-only marks', async () => {
-  const { verbs, screen, screenOnly } = await map();
-  for (const [row, verb] of Object.entries({ SEARCH_TABCTX_PIN_TOP: 'pin', SEARCH_TABCTX_ARCHIVE: 'archive', SEARCH_TABCTX_HIDE: 'wait', SEARCH_REOPEN_OFFSET: 'restore', SEARCH_UNARCHIVE_HIDDEN_OFFSET: 'restore' })) {
-    assert.equal(verbs[row], verb);
-    assert.equal(screen[row], undefined);
-  }
-  assert.doesNotMatch(screenOnly.local, /\b(pin|archive|waiting)\b/);
-  for (const verb of ['open', 'close', 'move', 'pin', 'unpin', 'archive', 'unarchive', 'wait', 'restore']) assert.match(usage, new RegExp('^  ' + verb + ' ', 'm'));
-  assert.ok(claude.split('\n').length < 80);
 });

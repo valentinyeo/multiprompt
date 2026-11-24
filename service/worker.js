@@ -1,7 +1,6 @@
-import { makeAuth, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
+import { makeAuth, allowed, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
 import { appPage, confirmPage } from './pages.js';
 import { remotePhotoKey, validPhotoPng } from './bot-photo.js';
-import { validTabState, projectTabState } from './tab-state.js';
 
 const now = () => Math.floor(Date.now() / 1000);
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -11,7 +10,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 const fail = (status, error) => { throw Object.assign(new Error(error), { status }); };
 const layoutFeature = (request, token) => (request.headers.get('X-Layout-Features') || '').split(',').some(feature => feature.trim() === token);
 function layoutResponse(request, value, status = 200) {
-  if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.filter(tab => layoutFeature(request, 'tab_state') || !(tab.tab_state?.closed || tab.tab_state?.archived)).map(tab => {
+  if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
     if (!layoutFeature(request, 'groups')) delete visible.group;
     if (!layoutFeature(request, 'starred_groups')) delete visible.starred_group;
@@ -27,7 +26,6 @@ function layoutResponse(request, value, status = 200) {
     }
     if (!layoutFeature(request, 'bot_palette8') && visible.color === 7) delete visible.color;
     if (!layoutFeature(request, 'csid')) delete visible.csid;
-    if (!layoutFeature(request, 'tab_state')) delete visible.tab_state;
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'workspace_color')) value.layout.workspaces = value.layout.workspaces.map(({ color, ...workspace }) => workspace);
@@ -41,7 +39,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   if (value.layout && !layoutFeature(request, 'group_order')) delete value.layout.group_order;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups,csid,tab_state' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups,csid' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
   return response;
 }
 export function validateLayout(x) {
@@ -72,8 +70,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group', 'starred_group', 'csid', 'tab_state'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'tab_state' ? !validTabState(t[key], t) : key === 'group' || key === 'starred_group' ? t[key] !== '' && !text(t[key], 64) : key === 'csid' ? !/^[0-9a-fA-F-]{8,39}$/.test(t.csid) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group', 'starred_group', 'csid'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' || key === 'starred_group' ? t[key] !== '' && !text(t[key], 64) : key === 'csid' ? !/^[0-9a-fA-F-]{8,39}$/.test(t.csid) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -148,9 +146,19 @@ async function sessionAccount(request, env, auth) {
   const email = session?.user?.email?.toLowerCase();
   return email && isAllowed(env, email) ? email : null;
 }
+const emptyLayout = JSON.stringify({ schema: 1, revision: 1, workspaces: [], tabs: [] });
+async function loadLayout(db, account) {
+  let row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(account).first();
+  if (!row) {
+    await db.prepare('INSERT OR IGNORE INTO layouts (account,revision,layout) VALUES (?,1,?)').bind(account, emptyLayout).run();
+    row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(account).first();
+  }
+  return row;
+}
 function sameOrigin(request, env) {
   const origin = request.headers.get('Origin');
-  if (!origin || !origins(env).includes(origin) || origin !== new URL(request.url).origin) fail(403, 'cross_origin');
+  const requestOrigin = new URL(request.url).origin;
+  if (!origin || !origins(env, requestOrigin).includes(origin) || origin !== requestOrigin) fail(403, 'cross_origin');
 }
 async function tokens(db, device, refresh) {
   const access = random();
@@ -183,7 +191,7 @@ async function issue(db, email, { redirect, state, challenge, name }, status = 3
 const redirectTo = (location, status = 302) => new Response(null, { status, headers: { Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 const html = (text, status = 200) => new Response(text, { status, headers: {
   'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; form-action 'self' http://127.0.0.1:* dev.multiprompt.companion: dev.multiprompt.companion.debug: dev.multiprompt.companion.m3:; frame-ancestors 'none'; base-uri 'none'"
+  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src https://deploy.workers.cloudflare.com; connect-src 'self'; form-action 'self' http://127.0.0.1:* dev.multiprompt.companion: dev.multiprompt.companion.debug: dev.multiprompt.companion.m3:; frame-ancestors 'none'; base-uri 'none'"
 } });
 export function safeNext(next) {
   return next === '/?passkey=add' || typeof next === 'string' && /^\/(login|authorize)\?[^\\#]*$/.test(next) && !next.startsWith('//') ? next : null;
@@ -234,7 +242,7 @@ export default {
         const supplied = request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{32,128})$/)?.[1];
         if (!env.USAGE_PUSH_TOKEN || !supplied || await hash(supplied) !== await hash(env.USAGE_PUSH_TOKEN)) fail(401, 'service_token_required');
         const status = validateUsage(await body(request, 256 * 1024));
-        await db.prepare('INSERT INTO usage (account,updated,status) VALUES (?,?,?) ON CONFLICT(account) DO UPDATE SET updated=excluded.updated,status=excluded.status').bind(env.USAGE_ACCOUNT || env.ACCOUNT_EMAIL, now(), JSON.stringify(status)).run();
+        await db.prepare('INSERT INTO usage (account,updated,status) VALUES (?,?,?) ON CONFLICT(account) DO UPDATE SET updated=excluded.updated,status=excluded.status').bind(env.USAGE_ACCOUNT || env.ACCOUNT_EMAIL || allowed(env)[0], now(), JSON.stringify(status)).run();
         return json({ stored: true });
       }
       if (url.pathname === '/oauth/token' && request.method === 'POST') {
@@ -355,7 +363,7 @@ export default {
           png = b.png;
         }
         for (let attempt = 0; attempt < 20; attempt++) {
-          const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+          const row = await loadLayout(db, device.account);
           if (!row) fail(503, 'layout_not_seeded');
           const layout = JSON.parse(row.layout);
           const tabs = scoped(device, layout).tabs;
@@ -391,7 +399,7 @@ export default {
         fail(409, 'revision_conflict');
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
-        const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+        const row = await loadLayout(db, device.account);
         if (!row) fail(503, 'layout_not_seeded');
         return reply({ revision: row.revision, layout: scoped(device, JSON.parse(row.layout)) });
       }
@@ -399,7 +407,7 @@ export default {
         const b = await body(request);
         let layout = validateLayout(b.layout);
         if (!Number.isSafeInteger(b.base_revision) || b.base_revision < 0) fail(400, 'invalid_revision');
-        const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+        const row = await loadLayout(db, device.account);
         const previousLayout = row ? JSON.parse(row.layout) : null;
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);
@@ -443,23 +451,10 @@ export default {
         if (removed.length) layout.removed_hosts = removed;
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
-        if (!layoutFeature(req, 'tab_state')) {
-          for (const tab of previousLayout?.tabs || []) {
-            if (!(tab.tab_state?.closed || tab.tab_state?.archived) || device.kind === 'workspace' && tab.workspace !== device.workspace) continue;
-            if (!layout.tabs.some(other => other.tmux_host === tab.tmux_host && other.tmux_session.toLowerCase() === tab.tmux_session.toLowerCase())) {
-              if (!layout.workspaces.some(workspace => workspace.name === tab.workspace)) layout.workspaces.push(previousLayout.workspaces.find(workspace => workspace.name === tab.workspace));
-              layout.tabs.push(tab);
-            }
-          }
-        }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
-          if (!layoutFeature(req, 'tab_state')) {
-            if (previous?.tab_state) tab.tab_state = previous.tab_state;
-            else delete tab.tab_state;
-          }
           if (!layoutFeature(req, 'groups')) {
             if (previous?.group !== undefined) tab.group = previous.group;
             else delete tab.group;
@@ -500,9 +495,7 @@ export default {
           } else if (previous?.visits !== undefined || tab.visits !== undefined) {
             tab.visits = [...new Set([...(previous?.visits ?? []), ...(tab.visits ?? [])])].sort((a, b) => a - b).slice(-8);
           }
-          projectTabState(tab, layout.tabs.filter(other => other.workspace === tab.workspace && !(other.tab_state?.closed || other.tab_state?.archived)).indexOf(tab));
         }
-        validateLayout(layout);
         layout.revision = b.base_revision + 1;
         const alive = device.keyHash ? ['EXISTS (SELECT 1 FROM service_keys WHERE hash=? AND revoked=0)', [device.keyHash]] : ['EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)', [device.id, device.account]];
         const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND ' + alive[0]).bind(JSON.stringify(layout), device.account, b.base_revision, ...alive[1]).run();

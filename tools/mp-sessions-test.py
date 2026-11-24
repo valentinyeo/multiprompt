@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MP_SESSIONS = ROOT / "tools" / "mp-sessions"
 
 FAKE_READER = r'''
-import json, os, sys, time
+import json, os, sys
 from pathlib import Path
 LOG = Path(os.environ["MP_SESSIONS_TEST_LOG"])
 
@@ -22,25 +23,40 @@ def note(kind, value):
 
 if __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     note("host", sys.argv[2:])
-    command = sys.argv[2]
-    if command == "restart":
-        key = sys.argv[3:5]
-        root = Path(os.environ["HOME"]) / ".local/state/multiprompt/agent-host"
-        digest = __import__("hashlib").sha256((key[0] + ":" + key[1]).encode()).hexdigest()[:32]
-        marker = root / (digest + ".restart.json")
-        if marker.is_file():
-            print(json.dumps(dict(status="already", reason="restart_pending")))
-        else:
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(json.dumps(dict(at=time.time())), encoding="utf-8")
-            print(json.dumps(dict(status="restarted", sid=key[1])))
-    else:
-        status = dict(enable="enabled", start="started", stop="stopped").get(command, "error")
-        print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
+    status = dict(enable="enabled", start="started", stop="stopped").get(sys.argv[2], "error")
+    print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
 '''
 
-FAKE_ZSB = (ROOT / "tools/fixtures/SOFT-3141/sessions-desktop.py").read_text()
-
+FAKE_ZSB = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+with open(os.environ["MP_SESSIONS_TEST_LOG"], "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(["zsb", sys.argv[1:]]) + "\n")
+state_file = os.environ.get("MP_SESSIONS_TEST_STATE_FILE")
+state = {}
+if state_file and os.path.exists(state_file):
+    state = json.loads(open(state_file, encoding="utf-8").read())
+if sys.argv[1] == "workspace-list":
+    listing = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}"))
+    if state.get("tabs"):
+        listing["workspaces"][0]["tabs"] = state["tabs"]
+    print(json.dumps(listing))
+elif sys.argv[1] == "session-open":
+    tmux = sys.argv[sys.argv.index("--tmux") + 1]
+    state.setdefault("tabs", [])
+    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
+    Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
+    print(json.dumps(dict(ok=True, created=True, tab=55)))
+elif sys.argv[1] == "session-rename":
+    tab_id = int(sys.argv[sys.argv.index("--tab") + 1])
+    for tab in state.get("tabs", []):
+        if tab["id"] == tab_id:
+            tab["title"] = sys.argv[sys.argv.index("--name") + 1]
+    Path(state_file).write_text(json.dumps(state), encoding="utf-8")
+    print(json.dumps(dict(ok=True)))
+else:
+    print(json.dumps(dict(ok=True)))
+'''
 
 LEGACY_SEND = '''
 import os
@@ -89,14 +105,25 @@ class MpSessionsTest(unittest.TestCase):
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
                     MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
-        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID"):
+        for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER", "MULTIBOT_SID", "MULTIPROMPT_HOST"):
             base.pop(name, None)
+        base["MULTIPROMPT_HOST"] = "0"
         base.update(extra)
         return {key: value for key, value in base.items() if value is not None}
 
     def run_sessions(self, *args, **extra):
         return subprocess.run([sys.executable, str(MP_SESSIONS), *args], capture_output=True, text=True,
                               env=self.env(**extra), cwd=str(self.work), timeout=60)
+
+    def servers_file(self, slot=None, hostname=None):
+        facts = json.loads((ROOT / "tools/fixtures/MUBO-294/servers.json").read_text(encoding="utf-8"))
+        if hostname is not None:
+            facts["servers"][0]["hostname"] = hostname
+        if slot is not None:
+            facts["servers"][0]["multiprompt_slot"] = slot
+        path = self.home / "servers.json"
+        path.write_text(json.dumps(facts), encoding="utf-8")
+        return path
 
     def parsed(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -278,45 +305,29 @@ class MpSessionsTest(unittest.TestCase):
         enables = [call for call in hosts if call[:2] == ["enable", "claude"]]
         self.assertGreaterEqual(len(enables), 1)
         self.assertGreaterEqual(len([call for call in hosts if call[:2] == ["start", "claude"]]), 1)
-        opened = [call for call in self.events("zsb") if call[0] == "tab-action"]
+        opened = [call for call in self.events("zsb") if call[0] == "session-open"]
         self.assertEqual(len(opened), 1)
 
     def test_SOFT_3055_restart_reuses_sid_for_a_stopped_chat(self):
         started = self.parsed(self.run_sessions("start", "--name", "Ops"))
-        closed = self.parsed(self.run_sessions("close", "Ops", "--json"))
+        closed = self.parsed(self.run_sessions("close", "Ops"))
         self.assertTrue(closed["ok"])
         restarted = self.parsed(self.run_sessions("restart", "Ops"))
         self.assertEqual(restarted["sid"], started["sid"])
         self.assertEqual(restarted["status"], "restarted")
         self.assertIn(["start", "claude", started["sid"]], self.events("host"))
 
-    def test_SOFT_3130_restart_running_chat_keeps_sid_and_tab(self):
-        fixture = ROOT / "tools" / "fixtures" / "SOFT-3130" / "listing.json"
-        listing = json.loads(fixture.read_text(encoding="utf-8"))
-        self.identity_chat(name="Pinned chat", tmux="live-caller")
-        self.mark_running(dict(sid="caller-session"))
-        tabs_before = json.loads(self.state_file.read_text(encoding="utf-8"))["tabs"]
-        first = self.parsed(self.run_sessions("restart", "Pinned chat", MP_SESSIONS_TEST_LIST=json.dumps(listing)))
-        self.assertEqual(first["sid"], "caller-session")
-        self.assertEqual(first["status"], "resumed")
-        self.assertEqual([call for call in self.events("host") if call[:2] == ["restart", "claude"]], [["restart", "claude", "caller-session"]])
-        opened = [call for call in self.events("zsb") if call and call[0] == "session-open"]
-        self.assertEqual(opened, [])
-        tabs_after = json.loads(self.state_file.read_text(encoding="utf-8"))["tabs"]
-        self.assertEqual(tabs_before, tabs_after)
-        second = self.parsed(self.run_sessions("restart", "Pinned chat", MP_SESSIONS_TEST_LIST=json.dumps(listing)))
-        self.assertEqual(second["sid"], first["sid"])
-        self.assertEqual(second["status"], "already")
-        self.assertEqual(len([call for call in self.events("host") if call[:2] == ["restart", "claude"]]), 1)
-
-    def test_SOFT_3141_close_changes_desktop_only_and_preserves_reader_configuration(self):
+    def test_SOFT_3055_close_refuses_a_busy_chat(self):
         started = self.parsed(self.run_sessions("start", "--name", "Busy"))
-        self.mark_running(started)
-        configs = {path: path.read_text() for path in self.host.glob("*.config.json")}
-        closed = self.parsed(self.run_sessions("close", "Busy", "--json"))
-        self.assertTrue(closed["state"]["closed"])
-        self.assertEqual(configs, {path: path.read_text() for path in self.host.glob("*.config.json")})
-        self.assertFalse(any(call[0] == "stop" for call in self.events("host")))
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        config["enabled"] = True
+        (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude",
+                                                                       pid=os.getpid(), inflight=dict(id="x"))), encoding="utf-8")
+        refused = self.run_sessions("close", "Busy")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("busy", refused.stderr)
 
     def test_SOFT_3055_unknown_name_reports_clearly(self):
         missing = self.run_sessions("restart", "No such chat")
@@ -330,7 +341,7 @@ class MpSessionsTest(unittest.TestCase):
         listed = self.parsed(self.run_sessions("list", "--workspace", "mine", "--json",
                                                MULTIPROMPT_TAB=caller["tmux"]))
         names = {row.get("name") for row in listed}
-        self.assertEqual(names, {"Anchor", "Caller", "Peer"})
+        self.assertEqual(names, {"Caller", "Peer"})
         for row in listed:
             self.assertEqual(row.get("workspace"), "Home")
 
@@ -362,60 +373,63 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(missing.returncode, 2)
         self.assertIn("no chat named", missing.stderr)
 
-    def test_SOFT_3131_close_restart_restores_the_one_desktop_record(self):
-        listing = json.loads((ROOT / "tools/fixtures/SOFT-3131/away-listing.json").read_text())
-        started = self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Away", "--group", "Ops",
-                                               MP_SESSIONS_TEST_LIST=json.dumps(listing)))
-        closed = self.parsed(self.run_sessions("close", "Field chat", "--json"))
-        self.assertTrue(closed["state"]["closed"])
-        restarted = self.parsed(self.run_sessions("restart", "Field chat"))
-        self.assertEqual(restarted["sid"], started["sid"])
-        for field in ("host", "workspace", "group", "position", "kind", "sid"):
-            self.assertEqual(restarted["state"][field], closed["state"][field], field)
-        self.assertFalse(restarted["state"]["closed"])
-        for config in self.host.glob("*.config.json"):
-            self.assertFalse(any(key in json.loads(config.read_text()) for key in ("spawn_workspace", "spawn_group", "spawn_after_tab", "spawn_host_name", "spawn_tab_kind")))
+    def test_MUBO_294_send_without_a_host_slot_still_reaches_the_chat(self):
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(peer)
+        servers = self.servers_file()
+        done = self.run_sessions("send", "Peer", "hello there", MULTIPROMPT_HOST=None,
+                                 MULTIPROMPT_SERVERS_FILE=str(servers), MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertEqual(sent["sid"], peer["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
 
-    def test_SOFT_3131_list_shows_workspace_and_filters_case_insensitively(self):
-        listing = json.loads((ROOT / "tools/fixtures/SOFT-3131/vstack-listing.json").read_text())
-        self.parsed(self.run_sessions("start", "--name", "Field chat", "--workspace", "Vstack", "--group", "Build",
-                                      MP_SESSIONS_TEST_LIST=json.dumps(listing)))
-        table = self.run_sessions("list")
-        self.assertEqual(table.returncode, 0, table.stderr)
-        self.assertIn("Vstack", table.stdout)
-        self.assertIn("Build", table.stdout)
-        filtered = self.parsed(self.run_sessions("list", "--workspace", "vstack", "--json"))
-        self.assertIn("Field chat", {row["name"] for row in filtered})
-        self.assertTrue(all(row["workspace"] == "Vstack" for row in filtered))
+    def test_MUBO_294_start_takes_the_servers_file_slot_for_this_machine(self):
+        servers = self.servers_file(slot=0, hostname=socket.gethostname())
+        started = self.parsed(self.run_sessions("start", "--name", "Slot chat", MULTIPROMPT_HOST=None,
+                                                MULTIPROMPT_SERVERS_FILE=str(servers)))
+        self.assertEqual(started["host"], "remote-1")
+        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config["spawn_host"], 0)
 
-    def test_SOFT_3131_restart_uses_server_placement_without_close(self):
-        started = self.parsed(self.run_sessions("start", "--name", "Remote chat", "--workspace", "Away"))
-        first = self.parsed(self.run_sessions("restart", "Remote chat"))
-        self.assertEqual(first["state"]["workspace"], "Away")
-        self.assertEqual(first["state"]["sid"], started["sid"])
-        opens = [json.loads(call[1]) for call in self.events("zsb") if call[0] == "tab-action"]
-        self.assertEqual(len(opens), 1)
+    def test_MUBO_294_start_falls_back_to_the_callers_recorded_slot(self):
+        caller = self.parsed(self.run_sessions("start", "--name", "Caller", "--workspace", "Home"))
+        servers = self.servers_file()
+        started = self.parsed(self.run_sessions("start", "--name", "Neighbour", MULTIPROMPT_HOST=None,
+                                                MULTIPROMPT_SERVERS_FILE=str(servers),
+                                                MULTIPROMPT_TAB=caller["tmux"]))
+        self.assertEqual(started["host"], "remote-1")
 
-    def test_SOFT_3131_restart_refuses_a_missing_workspace_before_starting_host(self):
-        self.parsed(self.run_sessions("start", "--name", "Gone home", "--workspace", "Away"))
-        self.parsed(self.run_sessions("close", "Gone home", "--json"))
-        state = json.loads(self.state_file.read_text())
-        state["listing"]["workspaces"] = [ws for ws in state["listing"]["workspaces"] if ws["name"] == "Home"]
-        self.state_file.write_text(json.dumps(state))
-        self.log.write_text("")
-        restarted = self.run_sessions("restart", "Gone home")
-        self.assertEqual(restarted.returncode, 2, restarted.stdout)
-        self.assertIn("UnknownWorkspace", restarted.stderr)
-        self.assertEqual(self.events("host"), [])
+    def test_MUBO_294_start_without_any_slot_names_the_file_and_the_field(self):
+        servers = self.servers_file()
+        refused = self.run_sessions("start", "--name", "Homeless", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(refused.stdout, "")
+        self.assertIn("multiprompt_slot", refused.stderr)
+        self.assertIn(str(servers), refused.stderr)
+        self.assertIn("MULTIPROMPT_HOST", refused.stderr)
 
-    def test_SOFT_3131_restart_refuses_a_shell_reopen_before_starting_host(self):
-        self.parsed(self.run_sessions("start", "--name", "Shell risk"))
-        self.parsed(self.run_sessions("close", "Shell risk", "--json"))
-        self.log.write_text("")
-        restarted = self.run_sessions("restart", "Shell risk", MP_SESSIONS_TEST_SHELL_TAB="1")
-        self.assertEqual(restarted.returncode, 2, restarted.stdout)
-        self.assertIn("did not confirm", restarted.stderr)
-        self.assertEqual(self.events("host"), [])
+    def test_MUBO_294_the_env_slot_wins_over_the_servers_file(self):
+        servers = self.servers_file(slot=2, hostname=socket.gethostname())
+        started = self.parsed(self.run_sessions("start", "--name", "Env chat", MULTIPROMPT_HOST="0",
+                                                MULTIPROMPT_SERVERS_FILE=str(servers)))
+        self.assertEqual(started["host"], "remote-1")
+        refused = self.run_sessions("start", "--name", "Slot two", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("desktop host list is unavailable", refused.stderr)
+
+    def test_MUBO_294_a_machine_named_twice_in_the_servers_file_is_refused(self):
+        servers = self.servers_file(slot=0, hostname=socket.gethostname())
+        facts = json.loads(servers.read_text(encoding="utf-8"))
+        facts["servers"][1]["hostname"] = socket.gethostname()
+        servers.write_text(json.dumps(facts), encoding="utf-8")
+        refused = self.run_sessions("start", "--name", "Ambiguous", MULTIPROMPT_HOST=None,
+                                    MULTIPROMPT_SERVERS_FILE=str(servers))
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("more than one server", refused.stderr)
 
     def test_SOFT_3093_list_json_shows_a_hosted_chat_with_no_terminal(self):
         key = "a" * 32
@@ -430,10 +444,12 @@ class MpSessionsTest(unittest.TestCase):
                         " print('live-other')\nelse:\n sys.exit(1)\n", encoding="utf-8")
         tmux.chmod(0o755)
         rows = self.parsed(self.run_sessions("list", "--json"))
-        hosted = next(row for row in rows if row["tmux"] == "live-hosted")
-        self.assertEqual(hosted["name"], "Hosted Lead")
-        self.assertEqual(hosted["sid"], "hosted-session")
-        self.assertTrue(hosted["running"])
+        self.assertEqual([row["tmux"] for row in rows], ["live-hosted"])
+        self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
+                                       cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
+                                       workspace=None, group=None, busy=False, running=True, self=False,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
 
 if __name__ == "__main__":

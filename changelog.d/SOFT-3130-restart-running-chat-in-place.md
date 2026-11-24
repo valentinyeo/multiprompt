@@ -1,1 +1,0 @@
-You can restart a live chat in place so new logins or settings take effect without closing its tab.

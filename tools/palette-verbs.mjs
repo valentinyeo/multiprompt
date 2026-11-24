@@ -3,15 +3,12 @@ export const screenOnly = {
   "chat": "the chat open on this screen",
   "pane": "the browser or computer pane on this screen",
   "menu": "menus that only open another list",
-  "local": "marks stored on this PC (lock, keep-alive, snooze, remind), plus quit, restart, and crash tools",
+  "local": "marks stored on this PC (lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools",
   "account": "sign-in and account devices",
   "focus": "focusing a tab or workspace already on screen"
 };
 
 export const verbs = {
-  "SEARCH_UNARCHIVE_HIDDEN_OFFSET": "restore",
-  "SEARCH_REOPEN_OFFSET": "restore",
-  "SEARCH_TABCTX_PIN_TOP": "pin",
   "SEARCH_CODEX_TMUX_OFFSET": "open",
   "SEARCH_CREATEWS_OFFSET": "workspace",
   "SEARCH_FAVORITE_OFFSET": "star",
@@ -34,13 +31,14 @@ export const verbs = {
   "SEARCH_SHOW_FREQUENT_OFFSET": "settings",
   "SEARCH_SYNC_NAME_OFFSET": "manual",
   "SEARCH_TABCTX_END_TMUX": "close",
+  "SEARCH_TABCTX_PIN_TOP": "pin",
   "SEARCH_TABCTX_FAVORITE": "star",
   "SEARCH_TABCTX_GROUP_ADD_OFFSET": "move",
   "SEARCH_TABCTX_GROUP_NEW": "group",
   "SEARCH_TABCTX_GROUP_NEW_TAB_IN": "open",
   "SEARCH_TABCTX_GROUP_REMOVE": "move",
-  "SEARCH_TABCTX_ARCHIVE": "archive",
-  "SEARCH_TABCTX_HIDE": "wait",
+  "SEARCH_TABCTX_ARCHIVE": "close",
+  "SEARCH_TABCTX_HIDE": "close",
   "SEARCH_TABCTX_MOVE_NEW_WS": "workspace",
   "SEARCH_TABCTX_MUTE": "mute",
   "SEARCH_TABCTX_RENAME": "rename",
@@ -52,8 +50,7 @@ export const verbs = {
   "SEARCH_MOVE_WORKSPACE_SERVER_OFFSET": "workspace",
   "SEARCH_NEW_TAB_ON_SERVER_OFFSET": "open",
   "SEARCH_WORKSPACE_SERVER_ROW_OFFSET": "open",
-  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open",
-  "SEARCH_TABCTX_CHAT_RESTART_IN_PLACE": "restart"
+  "SEARCH_TABCTX_NEW_TAB_ON_SERVER": "open"
 };
 
 export const screen = {
@@ -199,6 +196,7 @@ export const screen = {
   "SEARCH_REMOVE_SERVER_1_OFFSET": "account",
   "SEARCH_REMOVE_SERVER_2_OFFSET": "account",
   "SEARCH_REMOVE_SERVER_3_OFFSET": "account",
+  "SEARCH_REOPEN_OFFSET": "local",
   "SEARCH_REOPEN_SERVER_SHELL_OFFSET": "menu",
   "SEARCH_RESTART_OFFSET": "local",
   "SEARCH_ROOM_ROW_OFFSET": "focus",
@@ -257,6 +255,7 @@ export const screen = {
   "SEARCH_UI_BIGGER_OFFSET": "window",
   "SEARCH_UI_RESET_OFFSET": "window",
   "SEARCH_UI_SMALLER_OFFSET": "window",
+  "SEARCH_UNARCHIVE_HIDDEN_OFFSET": "local",
   "SEARCH_UNARCHIVE_UNATTACHED_OFFSET": "local",
   "SEARCH_UNREADONLY_OFFSET": "local",
   "SEARCH_UPDATE_OFFSET": "local",
