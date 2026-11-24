@@ -8766,6 +8766,46 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertIn('PINEAPPLE', wire)
 
 
+class MUBO_239_DisplayHistoryReplyIdTest(unittest.TestCase):
+    provider = 'claude'
+    sid = 'mubo-239-history'
+    tmux = 'mubo-239-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.session = dict(state=dict(display_history=True))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=io.BytesIO()))
+
+    def history_rows(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        if not history.exists():
+            return []
+        return [json.loads(line)['row'] for line in history.read_text().splitlines() if line.strip()]
+
+    def test_text_done_reuses_the_live_item_id_in_display_history(self):
+        reader.host_event(self.provider, self.sid, None, self.session, 'text.done',
+                          dict(text='Hello once'), item='msg_X:text:0')
+        rows = self.history_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], 'msg_X:text:0')
+        self.assertEqual(rows[0]['text'], 'Hello once')
+
+    def test_legacy_history_rows_still_decode(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        history.parent.mkdir(parents=True, exist_ok=True)
+        legacy = dict(type='multiprompt_history',
+                      row=dict(role='assistant', id='history-deadbeef', text='Older reply', timestamp='2026-01-01T00:00:00'))
+        history.write_text(json.dumps(legacy, separators=(',', ':')) + '\n')
+        rows = reader.conversation_rows(legacy, self.provider)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], 'history-deadbeef')
+        self.assertEqual(rows[0]['text'], 'Older reply')
+
+
 class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
     provider = 'pi'
     sid = 'pi-login-answer'

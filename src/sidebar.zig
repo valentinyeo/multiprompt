@@ -2869,7 +2869,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_theme_mode)
                 L("Search themes...")
             else if (app_state.g_search_workspace_delete_mode)
-                L("Search workspaces to delete...")
+                if (@import("workspaces.zig").workspaceDeleteMoveSource() != null) L("Where should the chats go?") else L("Search workspaces to delete...")
             else if (app_state.g_search_workspace_mode)
                 switch (app_state.g_search_workspace_action) {
                     .open => L("Search workspaces to open..."),
@@ -4595,7 +4595,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var ws_buf: [112]u16 = undefined;
                             var wsl: usize = 0;
                             const confirming = if (app_state.g_search_workspace_delete_confirm) |c| c == @as(u32, @intCast(workspace_idx)) else false;
-                            const prefix = if (confirming) "Press Enter Again: " else "Delete Workspace: ";
+                            const moving = @import("workspaces.zig").workspaceDeleteMoveSource() != null;
+                            const prefix = if (moving) "Move Chats To: " else if (confirming) "Press Enter Again: " else "Delete Workspace: ";
                             for (prefix) |c| {
                                 ws_buf[wsl] = c;
                                 wsl += 1;
@@ -4610,7 +4611,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                             var ws_hint: [64]u16 = undefined;
-                            const hint: []const u8 = if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
+                            const hint: []const u8 = if (moving) "move" else if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
                             const id_len = @min(hint.len, ws_hint.len);
                             for (0..id_len) |ii| ws_hint[ii] = @intCast(hint[ii]);
                             var ws_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };

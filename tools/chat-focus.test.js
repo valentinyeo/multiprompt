@@ -21,7 +21,7 @@ const main = read('src/main.zig');
 const composer = read('src/chat_composer.zig');
 const driver = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
-const recipe = driver.slice(driver.indexOf("        'chat-focus' {"), driver.indexOf("        'appearance' {\n            Select-Theme"));
+const recipe = driver.slice(driver.indexOf("        'chat-focus' {"), driver.indexOf("        'appearance' {"));
 
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
