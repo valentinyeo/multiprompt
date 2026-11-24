@@ -3877,8 +3877,9 @@ def host_cursor_argv(provider, sid, base, mode=None):
 
 
 def host_antigravity_argv(provider, sid, base, mode=None):
-    command = base + ["--input-format", "stream-json", "--output-format", "stream-json",
-                      "--dangerously-skip-permissions", "--print="]
+    model = [] if any(part == "--model" or part.startswith("--model=") for part in base[1:]) else ["--model", "gemini-4-neon-medium"]
+    command = base + model + ["--input-format", "stream-json", "--output-format", "stream-json",
+                              "--dangerously-skip-permissions", "--print="]
     native = host_session_state(provider, sid).get("native_session")
     if isinstance(native, str) and native:
         return command + ["--conversation", native]

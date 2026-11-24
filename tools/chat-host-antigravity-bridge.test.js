@@ -39,7 +39,12 @@ with tempfile.TemporaryDirectory() as directory:
     paths = r['host_paths']('antigravity', sid)
     r['host_write'](paths['config'], dict(enabled=True, provider='antigravity', sid=sid, tmux=tmux, cwd=directory))
     argv0 = r['host_antigravity_argv']('antigravity', sid, ['agy'])
-    assert argv0 == ['agy', '--input-format', 'stream-json', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--print='], argv0
+    assert argv0 == ['agy', '--model', 'gemini-4-neon-medium', '--input-format', 'stream-json', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--print='], argv0
+    for chosen in (['--model', 'gemini-4-neon-high'], ['--model=gemini-4-neon-high']):
+        explicit = r['host_antigravity_argv']('antigravity', sid, ['agy', *chosen])
+        assert explicit[1:1 + len(chosen)] == chosen, explicit
+        assert 'gemini-4-neon-medium' not in explicit, explicit
+        assert sum(part == '--model' or part.startswith('--model=') for part in explicit) == 1, explicit
     stream = io.BytesIO()
     signals = []
     fake_agent = SimpleNamespace(stdin=stream, send_signal=lambda sig: signals.append(sig))
@@ -51,6 +56,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert session['state']['native_session'] == conv
     argv1 = r['host_antigravity_argv']('antigravity', sid, ['agy'])
     assert argv1[-2:] == ['--conversation', conv], argv1
+    assert argv1[:3] == ['agy', '--model', 'gemini-4-neon-medium'], argv1
     with patch.dict(r, host_attempt=lambda *args: dict(status='claimed')):
         reply = r['host_handle_request']('antigravity', sid, tmux, session, dict(op='deliver', id='antigravity_message_01', attempt='attempt-1', epoch=1, text='Check status'))
     assert reply == dict(status='sent'), reply
