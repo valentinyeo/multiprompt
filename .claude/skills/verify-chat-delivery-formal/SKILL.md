@@ -69,6 +69,8 @@ SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` ass
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. `message_store_transaction`, `message_poll`, `message_poll_locked`, the covered `chat_send.zig` fragments, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
+
 MUBO-249 adds one boolean to `ChatHistoryEntry` in `src/app_state.zig` so a hidden chat's next history read can be pulled forward when the chat is shown. `ChatOutboxEntry` and every covered decision, bound, probe and mutation check are unchanged, so only that file's hash and the sync commit move.
 
 MUBO-246 turns the blocked row into a send failure. The reader records a `blocked` settlement fact from the text after `Original prompt:`, the host stream marks the matching send not sent, and the connector binds the attempt to a `not_sent` fact so the shared store says failed. The prompt is matched the same way echoes are, and `promptKept` true or a different prompt changes nothing. `mayType`, `stateOnLoad`, `showsNotSent`, `assign`, the covered `chat_send.zig` fragments, the native probes and `decisions.json` are unchanged, because the recorded decisions never include a hook block; only the reader and connector hashes move.
