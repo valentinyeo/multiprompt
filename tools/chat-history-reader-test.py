@@ -2161,20 +2161,42 @@ class HistoryReaderTest(unittest.TestCase):
     def test_mubo_246_a_prompt_a_hook_blocked_is_a_send_failure(self):
         self.path.write_text(MUBO_246_FIXTURE.read_text())
         blocked = mubo_246_blocked_row()
-        fact = reader.settlement_event(blocked, 'claude')
+        self.assertIsNone(reader.settlement_event(blocked, 'claude'))
+        fact = reader.settlement_event(blocked, 'claude', True)
         self.assertEqual(fact['settlement'], dict(operation='blocked', content=MUBO_246_PROMPT))
         self.assertEqual(fact['timestamp'], blocked['timestamp'])
         kept = next(event for event in mubo_246_events() if event.get('promptSubmitEnding', {}).get('promptKept') is True)
-        self.assertIsNone(reader.settlement_event(kept, 'claude'))
+        self.assertIsNone(reader.settlement_event(kept, 'claude', True))
         delivered = next(event for event in mubo_246_events() if event.get('type') == 'user')
-        self.assertIsNone(reader.settlement_event(delivered, 'claude'))
-        self.assertIsNone(reader.settlement_event(dict(blocked, isSidechain=True), 'claude'))
-        self.assertIsNone(reader.settlement_event(blocked, 'codex'))
-        self.query.update(settlement=True, offset=0, cached_sid='')
+        self.assertIsNone(reader.settlement_event(delivered, 'claude', True))
+        self.assertIsNone(reader.settlement_event(dict(blocked, isSidechain=True), 'claude', True))
+        self.assertIsNone(reader.settlement_event(blocked, 'codex', True))
+        self.query.update(settlement=True, blocked_settlement=True, offset=0, cached_sid='')
         _, rows = self.read()
         self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
                          [dict(operation='blocked', content=MUBO_246_PROMPT)])
         self.assertEqual([row['text'] for row in rows if row.get('role') == 'user'], ['summarise the open pull requests'])
+
+    def test_mubo_246_a_client_without_the_opt_in_reads_master_output(self):
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(settlement=True, offset=0, cached_sid='')
+        wire = reader.response(dict(self.query))
+        self.assertNotIn('blocked', wire)
+        without_opt_in = wire.splitlines()[1:-1]
+        self.assertEqual([json.loads(row)['text'] for row in without_opt_in], ['summarise the open pull requests', 'Two are open.'])
+        ignored = [event for event in mubo_246_events() if event.get('promptSubmitEnding')]
+        self.path.write_text(''.join(json.dumps(event) + '\n' for event in mubo_246_events() if event not in ignored))
+        self.query.update(cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        master = reader.response(dict(self.query))
+        self.assertEqual(without_opt_in, master.splitlines()[1:-1])
+        self.assertNotIn('blocked', master)
+        self.path.write_text(MUBO_246_FIXTURE.read_text())
+        self.query.update(blocked_settlement=True, cached_sid='', inode=0, offset=0, mtime=0, probe='')
+        _, rows = self.read()
+        self.assertEqual([row['settlement'] for row in rows if row.get('settlement')],
+                         [dict(operation='blocked', content=MUBO_246_PROMPT)])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Two are open.'])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'user'], ['summarise the open pull requests'])
 
     def test_queue_removal_and_contentless_dequeue_popall_survive_delta_paging(self):
         self.query['settlement'] = True
