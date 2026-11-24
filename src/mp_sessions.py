@@ -181,6 +181,81 @@ def default_workspace(listing):
     raise ValueError("no workspace is visible; open the desktop app")
 
 
+def synced_workspaces(send):
+    names = []
+    seen = set()
+
+    def add(value):
+        if not isinstance(value, str) or not value.strip():
+            return
+        name = value.strip()
+        if name.casefold() in seen:
+            return
+        seen.add(name.casefold())
+        names.append(name)
+
+    read = getattr(send, "read_json", None)
+    path = getattr(send, "layout_path", None)
+    layout = read(path()) if callable(read) and callable(path) else None
+    if isinstance(layout, dict):
+        for workspace in layout.get("workspaces") or []:
+            add(workspace.get("name") if isinstance(workspace, dict) else None)
+        for tab in layout.get("tabs") or []:
+            add(tab.get("workspace") if isinstance(tab, dict) else None)
+    published = getattr(send, "published_entries", None)
+    if callable(published):
+        for entry in published().values():
+            add(entry.get("workspace"))
+    root = getattr(send, "host_root", None)
+    if callable(root):
+        for config_path in sorted(root().glob("*.config.json")):
+            config = read(config_path) if callable(read) else None
+            if config:
+                add(config.get("spawn_workspace"))
+    return names
+
+
+def resolve_synced_workspace(send, requested):
+    known = synced_workspaces(send)
+    if requested:
+        for name in known:
+            if name.casefold() == requested.casefold():
+                return name
+        if not known:
+            return requested
+        raise ValueError("no workspace named " + repr(requested) + "; the synced layout has " + ", ".join(known))
+    own_tmux = getattr(send, "own_tmux", None)
+    tmux = own_tmux() if callable(own_tmux) else None
+    synced, _host = synced_layout_map(send, tmux)
+    tab = synced.get(tmux) if tmux else None
+    if tab and tab.get("workspace"):
+        return tab["workspace"]
+    if known:
+        return known[0]
+    raise ValueError("no workspace is visible; open the desktop app")
+
+
+def synced_host_name(send, slot):
+    read = getattr(send, "read_json", None)
+    root = getattr(send, "host_root", None)
+    if callable(read) and callable(root):
+        for config_path in sorted(root().glob("*.config.json")):
+            config = read(config_path)
+            if not config or config.get("spawn_host") != slot:
+                continue
+            name = config.get("spawn_host_name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+    facts = servers_facts() or {}
+    for server in facts.get("servers") or []:
+        if not isinstance(server, dict) or server.get(SERVER_SLOT_FIELD) != slot:
+            continue
+        name = server.get("hostname")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
 def workspace_anchor(listing, workspace):
     for name, group, tab in load_send().iter_tabs(listing):
         if name == workspace and tab.get("id"):
@@ -398,6 +473,8 @@ def find_existing(send, listing, slot, display, folder):
 
 
 def ensure_visible(send, listing, target, display):
+    if listing.get("ok") is not True:
+        return dict(ok=False, error="desktop_offline")
     workspace = target.get("workspace")
     if not workspace:
         workspace = default_workspace(listing)
@@ -659,9 +736,14 @@ def cmd_start(args):
     if task is not None and (not task.strip() or "\x00" in task):
         raise ValueError("empty task")
     listing = send.zsb("workspace-list")
+    online = listing.get("ok") is True
     slot = start_slot(send, listing)
-    host = host_name(listing, slot)
-    workspace = (args.workspace or "").strip() or default_workspace(listing)
+    host = host_name(listing, slot) if online else synced_host_name(send, slot)
+    requested = (args.workspace or "").strip()
+    if online:
+        workspace = requested or default_workspace(listing)
+    else:
+        workspace = resolve_synced_workspace(send, requested)
     group = None if args.group is None else display_name(args.group)
     existing = find_existing(send, listing, slot, display, folder)
     if existing:

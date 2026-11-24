@@ -503,6 +503,48 @@ class MpSessionsTest(unittest.TestCase):
             self.assertEqual(row["workspace"], "Studio")
             self.assertEqual(row["self"], row["tmux"] == "live-1111aaaa")
 
+    def write_synced_layout(self):
+        layout_dir = self.home / ".local/share/multiprompt"
+        layout_dir.mkdir(parents=True, exist_ok=True)
+        (layout_dir / "layout.json").write_text(
+            (MUBO_194_FIXTURES / "layout.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+    def start_configs(self):
+        return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.host.glob("*.config.json"))]
+
+    def test_MUBO_194_start_without_a_desktop_creates_the_chat_in_a_synced_workspace(self):
+        self.write_synced_layout()
+        offline = json.dumps(dict(ok=False, error="bridge_offline"))
+        first = self.parsed(self.run_sessions("start", "--name", "Late Lead", "--folder", str(self.work),
+                                              "--workspace", "Studio", "--provider", "claude",
+                                              MP_SESSIONS_TEST_LIST=offline))
+        self.assertEqual(first["status"], "started")
+        self.assertEqual(first["workspace"], "Studio")
+        self.assertFalse(first["visible"])
+        self.assertEqual(first["visible_error"], "desktop_offline")
+        configs = self.start_configs()
+        self.assertEqual(len(configs), 1)
+        self.assertEqual((configs[0]["spawn_workspace"], configs[0]["spawn_name"], configs[0]["tmux"]),
+                         ("Studio", "late lead", first["tmux"]))
+        self.assertNotIn("session-open", [call[0] for call in self.events("zsb")])
+        second = self.parsed(self.run_sessions("start", "--name", "Late Lead", "--folder", str(self.work),
+                                               "--workspace", "Studio", "--provider", "claude",
+                                               MP_SESSIONS_TEST_LIST=offline))
+        self.assertEqual(second["status"], "already")
+        self.assertEqual((second["tmux"], second["sid"], second["workspace"]),
+                         (first["tmux"], first["sid"], "Studio"))
+        self.assertEqual(len(self.start_configs()), 1)
+
+    def test_MUBO_194_start_without_a_desktop_refuses_an_unknown_workspace_plainly(self):
+        self.write_synced_layout()
+        offline = json.dumps(dict(ok=False, error="bridge_offline"))
+        failed = self.run_sessions("start", "--name", "Late Lead", "--folder", str(self.work),
+                                   "--workspace", "Ghost Room", "--provider", "claude",
+                                   MP_SESSIONS_TEST_LIST=offline)
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("mp-sessions: no workspace named 'Ghost Room'", failed.stderr)
+        self.assertEqual(self.start_configs(), [])
+
     def serve_hosted_fixture(self, entries):
         self.seed_hosted_fixture(entries)
         sock_temp = tempfile.TemporaryDirectory(prefix="mp-", dir="/tmp")
