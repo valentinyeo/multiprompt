@@ -1,10 +1,10 @@
 # Every session message
 
-Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-chat-delivery/drive.ps1, tools/chat-full-history-proof.mjs
+Source files: src/win32.zig, src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-chat-delivery/drive.ps1, tools/chat-full-history-proof.mjs
 
 ## Sub-features
 
-- A long session opens with all 50 known user/assistant messages in order, not just its recent tail.
+- A long session opens with all 50 known user/assistant messages in order, not just its recent tail. Its cold-open limit also covers the transport startup event and its Win32 `ResetEvent` declaration.
 - The same 50 messages remain available after a normal owned-app restart with the same profile and app-written cache.
 - All 264 tool blocks reach layout but remain invisible under the existing messages-only policy.
 - The app's own reader opens on a tail frame that holds at least one user or assistant row (`chat-tail-frame-holds-message`), so no message-less frame reaches the renderer.

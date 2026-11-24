@@ -98,6 +98,8 @@ MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response
 
 Whole-file drift stops before checking, even for an unrelated function change. This favors an explicit source review over silently trusting a stale model. Re-read the covered functions and callers; change the mapping, native probes or bounds when needed. Update `decisions.json` only from native output after understanding the semantic change. Update hashes and move the sync commit forward **only after confirming the verification still describes the code**. A hash refresh alone is not verification.
 
+MUBO-280 reviewed `328a76079` after the relayout bottom-follow fix. The only render-file change since the recorded hash is the `chatSetTopPad` call from `openScroll` to `openingScroll`. `chatRelayout`, `chatEchoNotSent`, the pending-bubble count, native decisions, replay and mutations are unchanged. Only the render-file hash and sync commit move; the delivery properties and bounds do not change.
+
 ## Prove the checker can fail
 
 `--self-test` first checks a reliable control with no timeout or restart. It then copies real source into temporary directories and plants two breaks. Both run in that same reliable control, so existing restart/timeout findings cannot satisfy a mutation test:
