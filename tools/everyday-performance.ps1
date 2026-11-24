@@ -79,7 +79,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
             $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[switch] chat content shown shell=$shell ", '', $start, 30000)
-            if ((Read-State).active_tab -ne $target) { throw 'Target state mismatch' }
+            [void](Await 'target persisted after confirmed paint' { $saved = Read-State; $null -ne $saved -and $saved.active_tab -eq $target })
             if ($i -ge 10) { Save-Sample 'switching' ($i - 10) $start $ms $offset "target=$target shell=$shell nonempty paint" }
             [EverydayPerformance]::ObserveFor(100)
         }
@@ -89,7 +89,7 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         $start = [EverydayPerformance]::Tick()
         [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
         [void][EverydayPerformance]::AwaitLog($log, $offset, "[switch] chat content shown shell=$longShell ", '', $start, 30000)
-        if ((Read-State).active_tab -ne 1) { throw 'Long chat target mismatch' }
+        [void](Await 'long chat persisted after confirmed paint' { $saved = Read-State; $null -ne $saved -and $saved.active_tab -eq 1 })
         Foreground
         $edit = [ChatDeliveryDesktop]::Composer($main)
         $expected = [ChatDeliveryDesktop]::Text($edit)
@@ -122,10 +122,11 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         for ($i = 0; $i -lt ($Count + 10); $i++) {
             Foreground
             $delta = if (($i % 20) -lt 10) { 120 } else { -120 }
+            $paintBefore = [EverydayPerformance]::PaintCount($log)
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, $delta)
-            $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] wheel delta=$delta moved=", '[chat] position ', $start, 30000)
+            $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] wheel delta=$delta moved=", '[chat] position ', $start, 30000, $paintBefore)
             $range = [EverydayPerformance]::Tail($log, $offset)
             if ($range -match '\[chat\] wheel delta=-?\d+ moved=0 ') { throw 'No-op scrolling sample' }
             if ($i -ge 10) { Save-Sample 'scrolling' ($i - 10) $start $ms $offset "delta=$delta nonzero scroll and subsequent paint" }
@@ -144,10 +145,11 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             $streamText += " chunk-$i is the next piece of a live reply."
             $row = @{ type='assistant'; timestamp=[DateTime]::UtcNow.ToString('o'); sessionId='a1b2c3d4-1068-4000-8000-000000000001'; uuid=[guid]::NewGuid().ToString(); isSidechain=$false; message=@{ role='assistant'; id="everyday-stream-$trial"; model='claude-opus-5-5'; content=@(@{ type='text'; text=$streamText }) } }
             $json = ($row | ConvertTo-Json -Depth 6 -Compress) + "`n"
+            $paintBefore = [EverydayPerformance]::PaintCount($log)
             $offset = [EverydayPerformance]::Length($log)
             $start = [EverydayPerformance]::Tick()
             [IO.File]::AppendAllText($streamPath, $json, $encoding)
-            $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] push shell=$longShell ", '[chat] position ', $start, 30000)
+            $ms = [EverydayPerformance]::AwaitLog($log, $offset, "[chat] push shell=$longShell ", '[chat] position ', $start, 30000, $paintBefore)
             if ($i -ge 10) { Save-Sample 'streaming' ($i - 10) $start $ms $offset "cumulative update=$i bytes=$($encoding.GetByteCount($json))" }
             [EverydayPerformance]::ObserveFor(37 + (($i * 53) % 113))
         }

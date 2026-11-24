@@ -27,11 +27,26 @@ public static class EverydayPerformance {
             using (var reader = new StreamReader(stream)) return reader.ReadToEnd();
         }
     }
+    public static long PaintCount(string path) {
+        string text = Tail(path, Math.Max(0, Length(path) - 65536));
+        var matches = System.Text.RegularExpressions.Regex.Matches(text, @"\[chat\] position [^\r\n]+ paints=(\d+)");
+        if (matches.Count == 0) throw new InvalidOperationException("Missing prior transcript paint count");
+        return long.Parse(matches[matches.Count - 1].Groups[1].Value);
+    }
     public static double AwaitLog(string path, long offset, string first, string after, long started, int timeout) {
+        return AwaitLog(path, offset, first, after, started, timeout, -1);
+    }
+    public static double AwaitLog(string path, long offset, string first, string after, long started, int timeout, long paintBefore) {
         while ((Tick() - started) * 1000.0 / Frequency() < timeout) {
             string text = Tail(path, offset);
             int at = text.IndexOf(first, StringComparison.Ordinal);
-            if (at >= 0 && (after == "" || text.IndexOf(after, at + first.Length, StringComparison.Ordinal) >= 0)) {
+            bool painted = paintBefore < 0;
+            if (at >= 0 && !painted) {
+                var frames = System.Text.RegularExpressions.Regex.Matches(text.Substring(at), @"\[chat\] position [^\r\n]+ paints=(\d+)");
+                foreach (System.Text.RegularExpressions.Match frame in frames)
+                    if (long.Parse(frame.Groups[1].Value) > paintBefore) painted = true;
+            }
+            if (at >= 0 && painted && (after == "" || text.IndexOf(after, at + first.Length, StringComparison.Ordinal) >= 0)) {
                 if (DwmFlush() < 0) throw new InvalidOperationException("DwmFlush failed");
                 return (Tick() - started) * 1000.0 / Frequency();
             }
