@@ -13,7 +13,7 @@ Nobody opens this from the app. The outage is visible when chats are missing, un
 
 ## Driving it with GitHub CI
 
-The `Emergency lane` workflow listens for pull request open, sync, ready-for-review, label, unlabeled, close and manual dispatch events. Each eligible pull request runs `node tools/check-emergency-lane.mjs check`. While any open non-draft pull request carries `emergency`, every other open non-draft pull request fails `emergency-lane` until that pull request merges, closes, or loses the label. When the emergency pull request closes or the label changes, the refresh step reruns `emergency-lane` on the remaining open pull requests.
+The `Emergency lane` workflow listens for pull request open, sync, ready-for-review, label, unlabeled, close and manual dispatch events. Each eligible pull request runs `node tools/check-emergency-lane.mjs check`. While any open non-draft pull request carries `emergency`, every other open non-draft pull request fails `emergency-lane` until that pull request merges, closes, or loses the label. When the emergency pull request closes or the label changes, the refresh step reruns `emergency-lane` on the remaining open pull requests. The verifier does not wait for that workflow or download its artifact; it is a lane gate, not a proof.
 
 A pull request with the `emergency` label follows the same owned-journey-only rule as a repair pull request: `tools/pr-verifier.cjs` limits journeys to the files the diff touches. After the emergency pull request merges to master, `auto-release.yml` publishes it. Resource observation left the release path, so `tools/emergency-release-path.test.mjs` keeps the measured sub-hour path documented in `openwiki/operations/build-and-install.md` honest.
 
