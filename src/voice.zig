@@ -2427,6 +2427,15 @@ fn showDictationStatus(msg: []const u8, ms: u64) void {
     showHeaderNoticeAscii(msg, ms, false);
 }
 
+pub fn dictationStopRecording() void {
+    if (!app_state.g_dictation_recording.load(.acquire)) return;
+    app_state.g_dictation_recording.store(false, .release);
+    app_state.g_dictation_level.store(0, .release);
+    dictationAudit("stop", 0);
+    @import("chat_composer.zig").chatDictationSync();
+    showDictationStatus("Dictation transcribing...", 60000);
+}
+
 pub fn toggleDictation() void {
     defer @import("chat_composer.zig").chatDictationSync();
     if (app_state.g_voice_mode_active and app_state.g_voice_always_listen and !app_state.g_voice_mic_failed and app_state.g_voice_mic_run.load(.acquire)) {
@@ -2436,9 +2445,7 @@ pub fn toggleDictation() void {
     app_state.g_dictation_enter_stop_queued.store(false, .release);
     app_state.g_dictation_send_queued.store(false, .release);
     if (app_state.g_dictation_recording.load(.acquire)) {
-        app_state.g_dictation_recording.store(false, .release);
-        dictationAudit("stop", 0);
-        showDictationStatus("Dictation transcribing...", 60000);
+        dictationStopRecording();
         return;
     }
     if (app_state.g_dictation_running.load(.acquire)) {
