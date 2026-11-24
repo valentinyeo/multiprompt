@@ -1321,6 +1321,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "script",           "session-close",  "session-move",   "session-open",
         "session-rebind",   "session-rename", "session-status", "shell-open",
         "shoturl",
+        "session-pin",
+        "session-unpin",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
         "version",          "workspace-list",
@@ -2595,6 +2597,15 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     return zsbTabReply(out, "moved", args.tab, null);
 }
 
+fn zsbTabPin(argv: []const []const u8, out: []u8, comptime ops: type, comptime pinned: bool) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = if (pinned) "session-pin" else "session-unpin", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    app_state.shells[idx].pinned_top = pinned;
+    app_state.shells[idx].starred_pinned_top = pinned;
+    ops.persist();
+    return zsbTabReply(out, if (pinned) "pinned" else "unpinned", args.tab, null);
+}
+
 fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = "session-rebind", .allowed = &.{ .tab, .host, .tmux }, .required = &.{ .tab, .tmux } }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
@@ -2674,13 +2685,16 @@ const ZsbTabOps = struct {
 
 fn zsbIsTabVerb(verb: []const u8) bool {
     return std.mem.eql(u8, verb, "session-close") or std.mem.eql(u8, verb, "session-rebind") or
-        std.mem.eql(u8, verb, "session-rename") or std.mem.eql(u8, verb, "session-move");
+        std.mem.eql(u8, verb, "session-rename") or std.mem.eql(u8, verb, "session-move") or
+        std.mem.eql(u8, verb, "session-pin") or std.mem.eql(u8, verb, "session-unpin");
 }
 
 fn zsbTabCommand(args: []const []const u8, out: []u8, comptime ops: type) usize {
     if (std.mem.eql(u8, args[0], "session-close")) return zsbTabClose(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rebind")) return zsbTabRebind(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rename")) return zsbTabRename(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-pin")) return zsbTabPin(args, out, ops, true);
+    if (std.mem.eql(u8, args[0], "session-unpin")) return zsbTabPin(args, out, ops, false);
     return zsbTabMove(args, out, ops);
 }
 
@@ -3346,6 +3360,27 @@ test "session-close removes a background tab and refuses the active, pinned and 
     try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
     try std.testing.expectEqual(active_id, app_state.shells[app_state.active_shell].shell_id);
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+}
+
+test "session-pin and session-unpin set and clear both pin marks and refuse unknown tabs" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const active = app_state.active_shell;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
+    try std.testing.expect(app_state.shells[1].pinned_top);
+    try std.testing.expect(app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"pinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42" }, &out));
+    try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.persisted);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"unpinned\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-unpin", "--tab", "42" }, &out));
+    try std.testing.expect(!app_state.shells[1].pinned_top);
+    try std.testing.expect(!app_state.shells[1].starred_pinned_top);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "99" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", zsbTabTestRun(&.{ "session-pin", "--tab", "42", "--name", "x" }, &out));
+    try std.testing.expectEqual(active, app_state.active_shell);
 }
 
 test "session-rename sets a manual title with Unicode and keeps the active tab" {
