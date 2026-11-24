@@ -53,7 +53,7 @@ jobs:
           HEAD=${HEAD_INPUT:-$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)}
           [[ "$BASE" =~ ^[0-9a-f]{7,40}$ && "$HEAD" =~ ^[0-9a-f]{7,40}$ ]]
           for SHA in "$BASE" "$HEAD"; do
-            git cat-file -e "$SHA^{commit}" 2>/dev/null || git fetch origin "$SHA"
+            git rev-parse --verify --quiet "$SHA^{commit}" >/dev/null || git fetch origin "$SHA"
           done
           BASE=$(git rev-parse "$BASE^{commit}")
           HEAD=$(git rev-parse "$HEAD^{commit}")
