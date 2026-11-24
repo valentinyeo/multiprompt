@@ -4,7 +4,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
 import { ticketRecord, ticketLine, resolveReleaseTitles, loadTicketTitles } from './ticket-titles.mjs';
-import { canonicalTicketId, fragmentTicketId, parseTicketId, ticketKeyKind, unlinkedTicketId } from './ticket-id.js';
+import { canonicalTicketId, fragmentTicketId, parseTicketId, ticketIds, ticketKeyKind, unlinkedTicketId } from './ticket-id.js';
 const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
@@ -183,7 +183,7 @@ export function classifyTrees(base, head, changed) {
 const fragmentFiles = tree => Object.fromEntries(Object.entries(tree).filter(([file]) => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md'));
 const addedSince = (current, previous) => Object.fromEntries(Object.entries(current).filter(([file, text]) => previous[file] !== text));
 
-function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
+function buildUnresolvedChangelog(files, tag, history = [], commits = [], warn = () => {}) {
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw new Error('Invalid release tag');
   const version = tag.slice(1);
   if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) {
@@ -221,12 +221,18 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
     if (reviewed && sha !== reviewed[0]) throw new Error(`${stepTag}: reviewed release commit does not match ${sha || 'missing commit'}`);
     const notes = new Map(Object.entries(reviewed?.[1] || {}));
     const unlinked = new Set();
+    const commitTickets = new Set();
     if (!reviewed) {
       for (const commit of stepCommits || []) {
         const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
         const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
-        if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
         const text = (lead ? commit.subject.slice(lead.length).replace(/^\s*[,:]\s*/, '') : commit.subject).trim();
+        for (const key of ticketIds(commit.subject)) commitTickets.add(key);
+        if (!tickets.length) {
+          if (current) warn(`${stepTag}: commit ${commit.sha.slice(0, 7)} has no ticket key; publishing its line without a link`);
+          if (text) unlinked.add(text);
+          continue;
+        }
         for (const ticket of tickets) {
           const id = releaseNote(ticket, text, unlinked);
           if (id && !notes.has(id)) notes.set(id, text);
@@ -237,8 +243,10 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
       const lines = fragmentText(file, text);
       const id = releaseNote(/^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-[^/]+\.md$/.exec(file)?.[1], lines[0], unlinked);
       if (!id) continue;
-      if (!reviewed && !notes.has(id)) throw new Error(`${stepTag}: ${id} fragment has no matching commit ticket`);
-      if (!notes.has(id)) notes.set(id, lines[0]);
+      if (!notes.has(id)) {
+        if (!reviewed && current && !commitTickets.has(id)) warn(`${stepTag}: ${id} fragment has no matching commit ticket; publishing it from its fragment text`);
+        notes.set(id, lines[0]);
+      }
     }
     if (!notes.size && !unlinked.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
     if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
@@ -279,8 +287,8 @@ export function applyTicketTitles(source, titles, fallbacks = {}) {
   });
 }
 
-export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog) {
-  const built = buildUnresolvedChangelog(files, tag, history, commits);
+export function buildChangelog(files, tag, history = [], commits = [], titles = titleCatalog, warn = () => {}) {
+  const built = buildUnresolvedChangelog(files, tag, history, commits, warn);
   return applyTicketTitles(built.changelog, titles, built.fallbacks);
 }
 
@@ -446,7 +454,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const history = await releaseHistory(base, files[changelogPath], publishedTags);
       if (!history.length && compareTags(base, 'v0.28.1027') >= 0) throw new Error('No published baseline; fetch published release tags before building');
       const commits = history.length ? releaseCommits(`refs/tags/${history.at(-1).tag}`, 'HEAD') : [];
-      const built = buildUnresolvedChangelog(files, base, history, commits);
+      const built = buildUnresolvedChangelog(files, base, history, commits, line => console.error(`Release notes warning: ${line}`));
       const resolved = await resolveReleaseTitles(changelogTicketIds(built.changelog), titleCatalog, process.env.HYPERTASK_AGENT_TOKEN);
       for (const [key, kind] of new Map([...built.skipped, ...resolved.unresolved])) console.error(`Release notes skip ${key}: ${kind}`);
       fs.writeFileSync(changelogPath, applyTicketTitles(built.changelog, resolved.titles, built.fallbacks));

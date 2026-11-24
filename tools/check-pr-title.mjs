@@ -2,6 +2,7 @@ import process from 'node:process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseTicketId } from './ticket-id.js';
+import { checkMergeTitle } from './merge-title.js';
 
 const leadingTicket = /^([A-Z][A-Z0-9]*-\d+):/;
 const usage = 'Usage: PR_TITLE="SOFT-123: Fix the release build" node tools/check-pr-title.mjs';
@@ -22,7 +23,9 @@ export function checkTitle(title) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const title = checkTitle(process.argv[2] ?? process.env.PR_TITLE);
+    const keys = checkMergeTitle(title, (process.env.PR_FILES || '').split(/\s+/).filter(Boolean));
     console.log(`Pull request title OK: ${title}`);
+    if (keys.length) console.log(`Changelog fragments agree: ${keys.join(', ')}`);
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
