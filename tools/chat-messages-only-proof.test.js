@@ -178,11 +178,12 @@ test('IGSH-857 the stand-in agent writes the todo before the baseline so the sta
 
 
 test('IGSH-1055 measures visible content inside the expanded transcript host', async () => {
-  const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
+  const { transcriptGeometry, reservedBands } = await import('./chat-messages-only-proof.mjs');
   assert.equal(typeof transcriptGeometry, 'function', 'owned viewport measurement is available');
+  assert.deepEqual(reservedBands(), { working: 14, newMessages: 30 }, 'SOFT-3077 always reserves the new-message band');
   const host = { left: 30, top: 40, width: 960, height: 800 };
   const status = { left: 30, top: 80, width: 960, height: 28 };
-  const composer = { left: 80, top: 750, width: 800, height: 60 };
+  const composer = { left: 80, top: 766, width: 800, height: 60 };
   const viewport = { left: 30, top: 80, width: 960, height: 644 };
   assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
     transcript: { left: 30, top: 108, width: 960, height: 616 },
@@ -191,7 +192,7 @@ test('IGSH-1055 measures visible content inside the expanded transcript host', a
   });
   assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
   assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
-  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /working strip/);
+  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 750 }, viewport), /working strip/);
   assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /working strip/);
   const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
   assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),

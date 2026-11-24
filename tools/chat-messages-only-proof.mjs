@@ -5,6 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { verifyCleanCoverage } from './check-clean-chat-output.mjs';
 import { readBmp } from './chat-code-font-proof.mjs';
 
+export function reservedBands() {
+  const source = fs.readFileSync(new URL('../src/chat_composer.zig', import.meta.url), 'utf8');
+  const band = /pub fn chatNewMessagesHeight\(\) i32 \{\s*return uiScaled\((\d+)\);/.exec(source);
+  assert.ok(band, 'app declares the reserved new-message band');
+  return { working: 14, newMessages: Number(band[1]) };
+}
+
 export function transcriptGeometry(host, status, composer, viewport) {
   for (const rect of [host, status, composer, viewport]) {
     assert.ok(Object.values(rect).every(Number.isSafeInteger), 'integer owned window bounds required');
@@ -15,13 +22,15 @@ export function transcriptGeometry(host, status, composer, viewport) {
   assert.ok(viewport.left === host.left && viewport.width === host.width && viewport.top === status.top,
     'reported content must match the owned status and transcript');
   const bottom = viewport.top + viewport.height;
+  const bands = reservedBands();
   const gap = composer.top - Math.floor(12 * status.height / 28) - bottom;
-  assert.equal(gap, Math.floor(14 * status.height / 28), 'removed working strip must not reserve space');
+  assert.equal(gap, Math.max(Math.floor(bands.working * status.height / 28), Math.floor(bands.newMessages * status.height / 28)),
+    'removed working strip must not reserve space beyond the new-message band');
   assert.ok(bottom > top + 100 && bottom < host.top + host.height, 'visible transcript content must exclude composer');
   return {
     transcript: { left: host.left, top, width: host.width, height: bottom - top },
     rows: status,
-    working: { left: host.left, top: bottom, width: host.width, height: Math.floor(14 * status.height / 28) },
+    working: { left: host.left, top: bottom, width: host.width, height: Math.floor(reservedBands().working * status.height / 28) },
   };
 }
 
