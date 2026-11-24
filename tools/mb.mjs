@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
 
@@ -25,13 +27,14 @@ commands:
   workspace list
   workspace create <name> [--color N]
   workspace rename <old> <new>
-  workspace delete <name>
+  workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
   group list
   group create <name>
   group rename <old> <new>
   group delete <name>
   roster apply <file> [--dry-run]
+  health [--json] [--ping]
 
 every write names its server: --host is required to create a tab, and a reopen takes the
 host recorded when the chat was created. There is no default host.
@@ -58,7 +61,7 @@ const REFUSALS = {
 
 function parse(argv) {
   const flags = { _: [] };
-  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo']);
+  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
@@ -66,7 +69,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux'].includes(name)) flags[name] = true;
+    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -432,17 +435,25 @@ async function workspaceCommand(ctx, sub, flags) {
     const owners = readOwners(ctx);
     const seen = await readLayout(ctx);
     if (!seen.data.layout.workspaces.some(item => item.name === name)) { ctx.out(`already deleted workspace ${name}`); return; }
-    if (owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
+    const chats = seen.data.layout.tabs.filter(tab => tab.workspace === name);
+    const moveTo = flags['move-to'] === undefined ? null : workspaceName(flags['move-to']);
+    if (chats.length > 0 && moveTo === null) throw new Failure(`workspace ${name} has ${chats.length} chat${chats.length === 1 ? '' : 's'}; give --move-to <workspace>`);
+    if (moveTo !== null) {
+      if (moveTo === name) throw new Failure('move-to must be a different workspace');
+      if (!seen.data.layout.workspaces.some(item => item.name === moveTo)) throw new Failure(`workspace ${moveTo} not found`);
+    }
+    if (chats.some(tab => owners.sessions[tabId(tab)]?.owner !== 'mb')) throw new Failure('not owned');
+    if (moveTo === null && owners.workspaces[name]?.owner !== 'mb') throw new Failure('not owned');
     const result = await edit(ctx, layout => {
-      const foreign = layout.tabs.some(tab => tab.workspace === name && owners.sessions[tabId(tab)]?.owner !== 'mb');
-      if (foreign) throw new Failure('not owned');
-      const next = layout.tabs.filter(tab => tab.workspace !== name);
-      if (next.length === layout.tabs.length && layout.workspaces.every(item => item.name !== name)) return null;
-      layout.tabs = next;
+      if (moveTo !== null) for (const tab of layout.tabs) if (tab.workspace === name) tab.workspace = moveTo;
+      layout.tabs = layout.tabs.filter(tab => tab.workspace !== name);
       layout.workspaces = layout.workspaces.filter(item => item.name !== name);
       return layout;
     });
-    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) await releaseOwned(ctx, owners, owned);
+    for (const owned of Object.values(owners.sessions).filter(item => item.workspace === name)) {
+      if (moveTo === null) await releaseOwned(ctx, owners, owned);
+      else owned.workspace = moveTo;
+    }
     delete owners.workspaces[name];
     writeOwners(ctx, owners);
     ctx.out(`deleted workspace ${name} (revision ${result.revision})`);
@@ -803,6 +814,35 @@ async function pull(ctx, flags) {
   await list(ctx, flags);
 }
 
+function mpSessionsScript(env) {
+  const runtime = join(env.HOME || '', '.multiprompt-runtime/mp-sessions');
+  const talk = join(env.HOME || '', '.local/share/multiprompt-talk/mp_sessions.py');
+  const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'mp-sessions');
+  for (const candidate of [env.MULTIPROMPT_MP_SESSIONS, runtime, talk, checkout]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
+}
+
+async function health(ctx, flags) {
+  if (flags._.length) throw new Failure('health takes no arguments');
+  const args = ['health'];
+  if (flags.json) args.push('--json');
+  if (flags.ping) args.push('--ping');
+  const script = mpSessionsScript(ctx.env);
+  const home = ctx.env.HOME;
+  if (!home) throw new Failure('HOME is required');
+  const result = spawnSync('python3', [script, ...args], {
+    encoding: 'utf8',
+    env: { ...ctx.env, HOME: home, PATH: ctx.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }
+  });
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const err = (result.stderr || '').trimEnd();
+  if (err) ctx.err(err);
+  return result.status ?? 1;
+}
+
 export async function run(argv, overrides = {}) {
   const env = overrides.env || process.env;
   const out = overrides.out || (line => process.stdout.write(line + '\n'));
@@ -810,6 +850,12 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (command === 'health') {
+      const flags = parse(rest);
+      const home = env.HOME;
+      if (!home) throw new Failure('HOME is required');
+      return await health({ env, out, err }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;
