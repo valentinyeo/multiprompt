@@ -4536,6 +4536,37 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.assertEqual(spawn.call_count, 2)
             self.assertEqual(self.send.call_count, 0)
 
+    def serve_history_reads(self, requests):
+        incoming = types.SimpleNamespace(buffer=io.BytesIO(('\n'.join(json.dumps(request) for request in requests) + '\n').encode()))
+        output = io.StringIO()
+        with patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve('pass')
+        return [json.loads(line) for line in output.getvalue().splitlines()]
+
+    def history_polls(self, count):
+        return [dict(self.base, id=index, op='message_snapshot') for index in range(1, count + 1)]
+
+    def test_mubo_528_an_idle_chat_poll_starts_no_message_worker(self):
+        def child(*args, **kwargs):
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers = self.serve_history_reads(self.history_polls(3))
+        self.assertEqual([answer['id'] for answer in answers], [1, 2, 3])
+        self.assertEqual(spawn.call_count, 0, 'a chat with no queued work must not start a message worker')
+
+    def test_mubo_528_a_chat_with_work_starts_one_worker_and_reuses_it(self):
+        self.submit()
+        held = []
+        def child(*args, **kwargs):
+            held.extend(os.dup(fd) for fd in kwargs.get('pass_fds') or ())
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        self.addCleanup(lambda: [os.close(fd) for fd in held])
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers = self.serve_history_reads(self.history_polls(5))
+        self.assertEqual(len(answers), 5)
+        self.assertEqual(spawn.call_count, 1, 'later polls must reach the running worker instead of starting another')
+        self.assertTrue(held, 'the worker must hold the lock its caller took before it finishes starting')
+
     def test_duplicate_worker_returns_without_blocking(self):
         import fcntl
         self.submit()
