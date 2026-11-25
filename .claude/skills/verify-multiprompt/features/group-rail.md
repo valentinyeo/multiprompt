@@ -1,6 +1,6 @@
 # Group headlines
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-group-rail.ps1, tools/fixtures/IGSH-1150/*
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-group-rail.ps1, tools/fixtures/IGSH-1150/*
 
 Verify on: push
 

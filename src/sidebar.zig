@@ -457,6 +457,7 @@ const lineLooksLikeAiIdlePrompt = @import("shell_poll.zig").lineLooksLikeAiIdleP
 const lineLooksLikeAiWorking = @import("shell_poll.zig").lineLooksLikeAiWorking;
 const lineLooksLikeGenericTmuxStatusPreview = @import("shell_poll.zig").lineLooksLikeGenericTmuxStatusPreview;
 const shellProcessAliveForRead = @import("shell_poll.zig").shellProcessAliveForRead;
+const sidebar_attention = @import("sidebar_attention.zig");
 
 pub fn findGroupIdx(gid: u32) ?u32 {
     if (gid == 0) return null;
@@ -489,374 +490,6 @@ pub fn tintColor(base: DWORD, color: DWORD, num: u32, den: u32) DWORD {
     const g: u32 = (bg * keep + cg * num) / den;
     const b: u32 = (bb * keep + cb * num) / den;
     return RGB(@intCast(@min(r, @as(u32, 255))), @intCast(@min(g, @as(u32, 255))), @intCast(@min(b, @as(u32, 255))));
-}
-
-fn tabPassesUnreadFilter(i: usize) bool {
-    if (app_state.shells[i].inbox_archived and !app_state.shells[i].needs_attention and i != app_state.active_shell) return false;
-    return !app_state.g_unread_only or app_state.shells[i].needs_attention or i == app_state.active_shell;
-}
-
-pub fn isTabHidden(idx: u32) bool {
-    if (idx >= app_state.shell_count) return false;
-    if (app_state.g_sidebar_view != null) return !@import("workspaces.zig").sidebarViewShellVisible(idx);
-    if (app_state.g_starred_workspace and !@import("workspaces.zig").starredShellVisible(idx)) return true;
-    if (!app_state.g_starred_workspace and app_state.g_single_window and (app_state.shells[idx].workspace != app_state.g_active_workspace or app_state.g_ws_snoozed[app_state.shells[idx].workspace])) return true;
-    if (!app_state.g_starred_workspace and app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention and idx != app_state.active_shell) return true;
-    if (!app_state.g_starred_workspace and !tabPassesUnreadFilter(idx)) return true;
-    const gid = tabGroupId(idx);
-    if (gid == 0) return false;
-    if (findGroupIdx(gid)) |gi| return app_state.groups[gi].collapsed;
-    return false;
-}
-
-pub fn findNextVisibleTab(from: u32, dir: i32) ?u32 {
-    if (app_state.shell_count == 0) return null;
-
-    if (app_state.g_tab_sort_auto) {
-        var rows: [MAX_ROWS]Row = undefined;
-        const rn = layoutRows(&rows);
-        var vis: [MAX_SHELLS]u32 = undefined;
-        var vc: u32 = 0;
-        for (0..rn) |ri| {
-            if (rows[ri].kind == .tab and vc < MAX_SHELLS) {
-                vis[vc] = rows[ri].shell_idx;
-                vc += 1;
-            }
-        }
-        if (vc == 0) return null;
-        var cur: ?u32 = null;
-        for (0..vc) |vi| {
-            if (vis[vi] == from) {
-                cur = @intCast(vi);
-                break;
-            }
-        }
-        const c = cur orelse return vis[0];
-        var step: u32 = 1;
-        while (step < vc) : (step += 1) {
-            const ni: u32 = if (dir > 0)
-                (c + step) % vc
-            else
-                (c + vc - (step % vc)) % vc;
-            const idx = vis[ni];
-            if (!isTabHidden(idx)) return idx;
-        }
-        return null;
-    }
-
-    var step: u32 = 1;
-    while (step <= app_state.shell_count) : (step += 1) {
-        const idx: u32 = if (dir > 0)
-            (from + step) % app_state.shell_count
-        else blk: {
-            const back: u32 = step % app_state.shell_count;
-            break :blk (from + app_state.shell_count - back) % app_state.shell_count;
-        };
-        if (!isTabHidden(idx)) return idx;
-    }
-    return null;
-}
-
-pub fn readArchiveContent(i: usize) ?archive_rules.Content {
-    if (i >= app_state.shell_count or app_state.shells[i].pid == 0 or !shellProcessAliveForRead(i)) return null;
-    _ = FreeConsole();
-    if (AttachConsole(app_state.shells[i].pid) == 0) return null;
-    defer _ = FreeConsole();
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return null;
-    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
-    const win = info.srWindow;
-    const width: u32 = @intCast(win.right - win.left + 1);
-    var content = archive_rules.Content{};
-    var line_buf: [256]u16 = undefined;
-    var scanned: u32 = 0;
-    var ry: i16 = win.bottom;
-    while (ry >= win.top and scanned < 64) : (ry -= 1) {
-        scanned += 1;
-        var chars_read: DWORD = 0;
-        if (ReadConsoleOutputCharacterW(handle, &line_buf, @min(width, 256), .{ .x = win.left, .y = ry }, &chars_read) == 0) continue;
-        const line = line_buf[0..@intCast(chars_read)];
-        content.add(line, (ry == win.bottom and app_state.shells[i].kind == .tmux) or lineLooksLikeGenericTmuxStatusPreview(&app_state.shells[i], line), lineLooksLikeAiIdlePrompt(line), lineLooksLikeAiWorking(line));
-    }
-    return content;
-}
-
-pub fn recordInboxArchive(i: usize) bool {
-    if (i >= app_state.shell_count) return false;
-    const content = readArchiveContent(i);
-    app_state.shells[i].archive_content = content orelse .{};
-    app_state.shells[i].archive_content_valid = content != null;
-    app_state.shells[i].archive_time = nowFileTime();
-    app_state.shells[i].archive_done = app_state.shells[i].last_done_time;
-    app_state.shells[i].archive_active = 0;
-    app_state.shells[i].inbox_archived = true;
-    return true;
-}
-
-pub fn archiveHasNewContentSnapshot(shell: *const Shell, content: *const archive_rules.Content) bool {
-    return shell.archive_content_valid and archive_rules.returnReason(shell.archive_time, shell.archive_done, shell.archive_active, &shell.archive_content, content) != .none;
-}
-
-pub fn archiveHasNewContent(i: usize) bool {
-    const content = readArchiveContent(i) orelse return false;
-    if (!app_state.shells[i].archive_content_valid) {
-        app_state.shells[i].archive_content = content;
-        app_state.shells[i].archive_content_valid = true;
-        saveSession();
-        return false;
-    }
-    return archiveHasNewContentSnapshot(&app_state.shells[i], &content);
-}
-
-pub fn logUnarchive(i: usize, reason: []const u8) void {
-    var buf: [180]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, "unarchive shell_id={d} reason={s}", .{ app_state.shells[i].shell_id, reason }) catch return;
-    debugLog(msg);
-}
-
-pub fn writeArchiveMarkers(out: []u8, shell: *const Shell) usize {
-    var pos: usize = 0;
-    const pre = ",\"archive_time\":";
-    @memcpy(out[pos .. pos + pre.len], pre);
-    pos += pre.len;
-    pos += writeUintTo(out[pos..], shell.archive_time);
-    const done = ",\"archive_done\":";
-    @memcpy(out[pos .. pos + done.len], done);
-    pos += done.len;
-    pos += writeUintTo(out[pos..], shell.archive_done);
-    const last = ",\"last_done_time\":";
-    @memcpy(out[pos .. pos + last.len], last);
-    pos += last.len;
-    pos += writeUintTo(out[pos..], shell.last_done_time);
-    const snapshots = .{
-        .{ shell.archive_content_valid, shell.archive_content, ",\"archive_rows\":\"" },
-        .{ shell.last_done_content_valid, shell.last_done_content, ",\"done_rows\":\"" },
-    };
-    inline for (snapshots) |snapshot| {
-        if (snapshot[0]) {
-            const rows = snapshot[2];
-            @memcpy(out[pos .. pos + rows.len], rows);
-            pos += rows.len;
-            const hex = "0123456789abcdef";
-            for (snapshot[1].rows[0..snapshot[1].len]) |row| {
-                for (0..16) |digit| {
-                    const shift: u6 = @intCast((15 - digit) * 4);
-                    out[pos] = hex[@as(usize, @intCast((row >> shift) & 15))];
-                    pos += 1;
-                }
-            }
-            out[pos] = '"';
-            pos += 1;
-        }
-    }
-    return pos;
-}
-
-pub fn restoreArchiveMarkers(shell: *Shell, tab: *const SavedTab) void {
-    shell.archive_time = tab.archive_time;
-    shell.archive_done = tab.archive_done;
-    shell.last_done_time = tab.last_done_time;
-    shell.last_done_content = tab.last_done_content;
-    shell.last_done_content_valid = tab.last_done_content_valid;
-    shell.archive_content = tab.archive_content;
-    shell.archive_content_valid = tab.archive_content_valid;
-}
-
-pub fn hideActiveTabUntilAttention() void {
-    if (app_state.active_shell >= app_state.shell_count) return;
-    const idx = app_state.active_shell;
-    if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention) {
-        if (findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1)) |nxt| {
-            @import("console.zig").switchToShellByUser(nxt);
-            showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
-        } else {
-            showHeaderNoticeAscii("No other visible tab", 3000, true);
-        }
-        return;
-    }
-
-    const had_inbox_context = app_state.g_inbox_step_context_active;
-    const inbox_next = inboxNextRowFromContext();
-    if (had_inbox_context and inbox_next == null) {
-        showHeaderNoticeAscii("No next session in this Inbox split", 3000, true);
-        return;
-    }
-
-    const was_att = app_state.shells[idx].needs_attention;
-    if (!recordInboxArchive(idx)) return;
-    app_state.shells[idx].needs_attention = false;
-    app_state.shells[idx].activity = .idle;
-    app_state.shells[idx].last_active_event = 0;
-    app_state.shells[idx].hidden_idle_streak = 0;
-    stopSpinnerTimerIfIdle();
-
-    if (inbox_next) |ri| {
-        rememberInboxArchiveUndo(@intFromPtr(app_state.g_main_hwnd), app_state.shells[idx].shell_id, was_att);
-        publishInboxStateNow();
-        saveSession();
-        invalidateSidebar();
-        showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
-        if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
-        return;
-    }
-
-    const next = findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1);
-    if (next) |nxt| {
-        rememberInboxArchiveUndo(@intFromPtr(app_state.g_main_hwnd), app_state.shells[idx].shell_id, was_att);
-        @import("console.zig").switchToShellByUser(nxt);
-        showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
-    } else {
-        app_state.shells[idx].inbox_archived = false;
-        showHeaderNoticeAscii("No other visible tab", 3000, true);
-    }
-
-    publishInboxStateNow();
-    saveSession();
-    invalidateSidebar();
-    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-}
-
-fn userPresentOnSelectedTab() bool {
-    return foregroundIsOurs() and !activeBrowserSurfaceHasForegroundFocus();
-}
-
-pub fn dotTargetsTab(i: usize) bool {
-    if (!app_state.ISSUE_274_DOT_ON_SELECTED_TAB) return i != app_state.active_shell;
-    return i != app_state.active_shell or !userPresentOnSelectedTab();
-}
-
-pub fn clearSelectedTabDotOnReturn() void {
-    if (!app_state.ISSUE_274_DOT_ON_SELECTED_TAB or app_state.active_shell >= app_state.shell_count) return;
-    const s = &app_state.shells[app_state.active_shell];
-    if (!s.needs_attention or !userPresentOnSelectedTab()) return;
-    if (s.last_blue_dot_source == .manual or s.last_blue_dot_source == .restore) return;
-    s.needs_attention = false;
-    recordShellDiagEvent(app_state.active_shell, "blue dot cleared", "returned");
-    invalidateSidebar();
-    publishInboxState();
-    if (!app_state.g_restoring) saveSession();
-}
-
-pub fn setBlueDot(i: usize, source: attention_rules.Source, done_after_activity: bool) bool {
-    if (i >= app_state.shell_count or app_state.shells[i].needs_attention) return false;
-    const s = &app_state.shells[i];
-    if (!attention_rules.allow(source, .{
-        .hook_capable = s.hook_capable or s.claude_sid_len > 0,
-        .turn_active = s.turn_pending,
-        .done_after_activity = done_after_activity,
-        .console_working = s.console_working,
-        .selected_tab = app_state.ISSUE_274_DOT_ON_SELECTED_TAB and i == app_state.active_shell,
-        .user_present = userPresentOnSelectedTab(),
-    })) return false;
-    s.needs_attention = true;
-    s.last_blue_dot_source = source;
-    s.last_blue_dot_time = nowFileTime();
-    var line: [180]u8 = undefined;
-    var name: [64]u8 = undefined;
-    for (s.name[0..s.name_len], 0..) |ch, n| name[n] = if (ch >= 32 and ch < 127) @intCast(ch) else '?';
-    const msg = std.fmt.bufPrint(&line, "blue dot source={s} tab={s} time={d}", .{ @tagName(source), name[0..s.name_len], s.last_blue_dot_time }) catch return true;
-    debugLog(msg);
-    recordShellDiagEvent(i, "blue dot", @tagName(source));
-    return true;
-}
-
-pub fn noteRestoredBlueDot(i: usize) void {
-    if (i >= app_state.shell_count or !app_state.shells[i].needs_attention) return;
-    app_state.shells[i].needs_attention = false;
-    _ = setBlueDot(i, .restore, false);
-}
-
-pub fn markShellUnread(idx: usize) void {
-    if (idx >= app_state.shell_count) return;
-    _ = setBlueDot(idx, .manual, false);
-    if (app_state.shells[idx].inbox_archived) logUnarchive(idx, "explicit mark unread");
-    app_state.shells[idx].inbox_archived = false;
-    app_state.shells[idx].last_active = nowFileTime();
-    publishInboxState();
-    saveSession();
-    invalidateSidebar();
-    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-}
-
-pub fn markActiveShellUnread() void {
-    if (app_state.active_shell >= app_state.shell_count) return;
-    markShellUnread(app_state.active_shell);
-    showHeaderNoticeAscii("Marked unread", 1800, false);
-}
-
-pub fn toggleKeepAwakeForActiveShell() void {
-    if (app_state.active_shell >= app_state.shell_count) return;
-    app_state.shells[app_state.active_shell].keep_awake = !app_state.shells[app_state.active_shell].keep_awake;
-    if (app_state.shells[app_state.active_shell].keep_awake and app_state.shells[app_state.active_shell].browser_frozen) {
-        wakeBrowserPaneFromFreeze(app_state.active_shell);
-    }
-    invalidateSidebar();
-    if (!app_state.g_restoring) saveSession();
-    showHeaderNoticeAscii(if (app_state.shells[app_state.active_shell].keep_awake) "Keep Tab Awake: On" else "Keep Tab Awake: Off", 1800, false);
-}
-
-pub fn workspaceHasTabExcept(ws: u8, except_idx: u32) bool {
-    for (0..app_state.shell_count) |i| {
-        if (@as(u32, @intCast(i)) == except_idx) continue;
-        if (app_state.shells[i].workspace == ws) return true;
-    }
-    return false;
-}
-
-pub fn firstTabInWorkspace(ws: u8) ?u32 {
-    for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].workspace == ws) return @intCast(i);
-    }
-    return null;
-}
-
-pub fn findCloseNeighborInWorkspace(closed_idx: u32, ws: u8) ?u32 {
-    if (closed_idx >= app_state.shell_count) return null;
-
-    var rows: [MAX_ROWS]Row = undefined;
-    const row_count = layoutRows(&rows);
-    var closed_row: ?u32 = null;
-    for (0..row_count) |ri| {
-        const row = rows[ri];
-        if (row.kind == .tab and row.shell_idx == closed_idx) {
-            closed_row = @intCast(ri);
-            break;
-        }
-    }
-
-    if (closed_row) |cr| {
-        var ri = cr;
-        while (ri > 0) {
-            ri -= 1;
-            const row = rows[ri];
-            if (row.kind != .tab) continue;
-            const candidate = row.shell_idx;
-            if (candidate >= app_state.shell_count or candidate == closed_idx) continue;
-            if (app_state.shells[candidate].workspace == ws and !isTabHidden(candidate)) return candidate;
-        }
-
-        ri = cr + 1;
-        while (ri < row_count) : (ri += 1) {
-            const row = rows[ri];
-            if (row.kind != .tab) continue;
-            const candidate = row.shell_idx;
-            if (candidate >= app_state.shell_count or candidate == closed_idx) continue;
-            if (app_state.shells[candidate].workspace == ws and !isTabHidden(candidate)) return candidate;
-        }
-        return null;
-    }
-
-    var i = closed_idx;
-    while (i > 0) {
-        i -= 1;
-        if (app_state.shells[i].workspace == ws and !isTabHidden(i)) return i;
-    }
-    i = closed_idx + 1;
-    while (i < app_state.shell_count) : (i += 1) {
-        if (app_state.shells[i].workspace == ws and !isTabHidden(i)) return i;
-    }
-    return null;
 }
 
 pub fn tabGroupId(idx: usize) u32 {
@@ -1275,17 +908,26 @@ fn frozenPlaceBefore(_: void, a: FrozenPlace, b: FrozenPlace) bool {
 }
 
 pub fn freezeSidebarOrder() void {
-    if (app_state.g_sidebar_order_frozen) return;
+    if (app_state.g_sidebar_order_frozen) {
+        if (app_state.g_sidebar_view == null) return;
+        _ = thawSidebarOrder();
+    }
     const row_count = layoutRows(&g_freeze_rows);
     g_frozen_places_len = 0;
     for (g_freeze_rows[0..row_count]) |row| {
-        if (row.kind != .tab or row.shell_idx >= app_state.shell_count) continue;
-        if (g_frozen_places_len >= MAX_SHELLS) break;
-        g_frozen_places[g_frozen_places_len] = .{
-            .shell_id = app_state.shells[row.shell_idx].shell_id,
-            .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+        const sid: ?u32 = switch (row.kind) {
+            .tab => if (row.shell_idx < app_state.shell_count) app_state.shells[row.shell_idx].shell_id else null,
+            .inbox => if (row.shell_idx < app_state.g_inbox_row_count) app_state.g_inbox_rows[row.shell_idx].sid else null,
+            else => null,
         };
-        g_frozen_places_len += 1;
+        if (sid) |shell_id| {
+            if (g_frozen_places_len >= MAX_SHELLS) break;
+            g_frozen_places[g_frozen_places_len] = .{
+                .shell_id = shell_id,
+                .place = @intCast(MAX_SHELLS - g_frozen_places_len),
+            };
+            g_frozen_places_len += 1;
+        }
     }
     std.mem.sort(FrozenPlace, g_frozen_places[0..g_frozen_places_len], {}, frozenPlaceBefore);
     app_state.g_sidebar_order_frozen = true;
@@ -1522,15 +1164,25 @@ fn layoutViewRows(out: *[MAX_ROWS]Row, view: @import("workspace_view.zig").Built
         indices[count] = @intCast(i);
         count += 1;
     }
+    const split = view.split();
     const Order = struct {
         split: u32,
         now_ms: u64,
 
         fn less(ctx: @This(), a: u32, b: u32) bool {
+            if (app_state.g_sidebar_order_frozen and g_frozen_places_len > 0) {
+                const pa = frozenPlaceOf(app_state.g_inbox_rows[a].sid);
+                const pb = frozenPlaceOf(app_state.g_inbox_rows[b].sid);
+                if (pa != pb) {
+                    if (pa == 0) return false;
+                    if (pb == 0) return true;
+                    return pa > pb;
+                }
+            }
             return @import("inbox.zig").rowLessForSplit(ctx.split, ctx.now_ms, app_state.g_inbox_rows[a], app_state.g_inbox_rows[b]);
         }
     };
-    std.mem.sort(u32, indices[0..count], Order{ .split = view.split(), .now_ms = now_ms }, Order.less);
+    std.mem.sort(u32, indices[0..count], Order{ .split = split, .now_ms = now_ms }, Order.less);
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     var n: u32 = 0;
     for (indices[0..count]) |ri| {
@@ -5465,6 +5117,37 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
+test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_ws = app_state.g_active_workspace;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_ws;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 2;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].workspace = 2;
+    app_state.shells[0].pid = 0;
+    app_state.shells[0].hook_capable = true;
+    app_state.shells[0].inbox_archived = true;
+    app_state.shells[0].archive_time = 1000;
+    app_state.shells[0].archive_done = 1000;
+    app_state.shells[0].last_done_time = 1000;
+    try std.testing.expect(isTabHidden(0));
+    try std.testing.expect(!archiveHasNewContent(0));
+    app_state.shells[0].last_done_time = 2000;
+    try std.testing.expect(archiveHasNewContent(0));
+}
+
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
     const saved_shells = app_state.shells[0..4].*;
     const saved_count = app_state.shell_count;
@@ -5859,6 +5542,62 @@ test "SOFT-2378 a clicked chat that is rebuilt keeps its row under the pointer" 
     try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
 }
 
+test "SOFT-3124 a workspace view keeps the selected row in place until another row is selected" {
+    const saved_view = app_state.g_sidebar_view;
+    const saved_single = app_state.g_single_window;
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_shell_count = app_state.shell_count;
+    const saved_inbox_count = app_state.g_inbox_row_count;
+    const saved_inbox_ws_count = app_state.g_inbox_ws_count;
+    const saved_inbox_ws = app_state.g_inbox_ws[0];
+    const saved_inbox_rows = app_state.g_inbox_rows[0..3].*;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        _ = thawSidebarOrder();
+        app_state.g_sidebar_view = saved_view;
+        app_state.g_single_window = saved_single;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_shell_count;
+        app_state.g_inbox_row_count = saved_inbox_count;
+        app_state.g_inbox_ws_count = saved_inbox_ws_count;
+        app_state.g_inbox_ws[0] = saved_inbox_ws;
+        app_state.g_inbox_rows[0..3].* = saved_inbox_rows;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_single_window = true;
+    app_state.g_sidebar_view = .all;
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 3;
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0].hwnd = @intFromPtr(app_state.g_main_hwnd);
+    app_state.g_inbox_row_count = 3;
+    for ([_]struct { sid: u32, la: u64 }{
+        .{ .sid = 11, .la = 100 },
+        .{ .sid = 12, .la = 200 },
+        .{ .sid = 13, .la = 50 },
+    }, 0..) |entry, i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = entry.sid;
+        app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = entry.sid, .la = entry.la };
+    }
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 12), app_state.shells[rows[0].shell_idx].shell_id);
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    app_state.g_inbox_rows[2].lv = 9_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[2].shell_idx].shell_id);
+
+    freezeSidebarOrder();
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 13), app_state.shells[rows[0].shell_idx].shell_id);
+    app_state.g_inbox_rows[1].lv = 8_000;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 11), app_state.shells[rows[2].shell_idx].shell_id);
+}
+
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {
     const saved_groups = app_state.groups;
     const saved_count = app_state.group_count;
@@ -5918,3 +5657,25 @@ test "IGSH-1890 group order lists groups used only in the Favorites view" {
     try std.testing.expectEqualStrings("Product", names[0]);
     try std.testing.expectEqualStrings("Hypertask", names[1]);
 }
+
+const tabPassesUnreadFilter = sidebar_attention.tabPassesUnreadFilter;
+pub const isTabHidden = sidebar_attention.isTabHidden;
+pub const findNextVisibleTab = sidebar_attention.findNextVisibleTab;
+pub const readArchiveContent = sidebar_attention.readArchiveContent;
+pub const recordInboxArchive = sidebar_attention.recordInboxArchive;
+pub const archiveHasNewContentSnapshot = sidebar_attention.archiveHasNewContentSnapshot;
+pub const archiveHasNewContent = sidebar_attention.archiveHasNewContent;
+pub const logUnarchive = sidebar_attention.logUnarchive;
+pub const writeArchiveMarkers = sidebar_attention.writeArchiveMarkers;
+pub const restoreArchiveMarkers = sidebar_attention.restoreArchiveMarkers;
+pub const hideActiveTabUntilAttention = sidebar_attention.hideActiveTabUntilAttention;
+pub const dotTargetsTab = sidebar_attention.dotTargetsTab;
+pub const clearSelectedTabDotOnReturn = sidebar_attention.clearSelectedTabDotOnReturn;
+pub const setBlueDot = sidebar_attention.setBlueDot;
+pub const noteRestoredBlueDot = sidebar_attention.noteRestoredBlueDot;
+pub const markShellUnread = sidebar_attention.markShellUnread;
+pub const markActiveShellUnread = sidebar_attention.markActiveShellUnread;
+pub const toggleKeepAwakeForActiveShell = sidebar_attention.toggleKeepAwakeForActiveShell;
+pub const workspaceHasTabExcept = sidebar_attention.workspaceHasTabExcept;
+pub const firstTabInWorkspace = sidebar_attention.firstTabInWorkspace;
+pub const findCloseNeighborInWorkspace = sidebar_attention.findCloseNeighborInWorkspace;

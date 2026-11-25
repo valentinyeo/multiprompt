@@ -1,6 +1,6 @@
 # Chat delivery
 
-Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
+Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-chat-delivery/drive.ps1, tools/chat-missing-note-proof.mjs, .github/workflows/verify-chat-steady.yml
 
 ## Sub-features
 
@@ -70,7 +70,7 @@ It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message 
 
 ### Instant saved chat (IGSH-1289)
 
-Dispatch `verify.yml` on the branch with `feature=chat-instant`.
+UNREACHABLE as a dispatch today: `gh workflow run verify.yml -f feature=chat-instant` is refused as an unsupported journey, because there is no `chat-instant` file in `features/` and `verify.yml` only turns on `CHAT_INSTANT_PROOF` from that matrix stem. The prerequisite is a `chat-instant` feature map, or a supported stem that sets that flag.
 This feature selects the existing chat-delivery driver.
 The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
 It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer.
@@ -141,6 +141,10 @@ The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exa
 
 Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
 The owned Windows app sends while busy. The stand-in runs the production message dispatcher and connector polling in a Windows-hosted thread, with Windows file locks and notification polling. The queued message must reach the host's `accepted` state and appear once, dimmed. The simulated agent removes it from the queue while busy and delays the transcript: the same bubble must turn normal within one second with working dots. The stand-in then writes a `queued_command` attachment. Timed frames must keep the same bubble normal throughout the handoff, and the rendered transcript must contain it once. The composer stays empty. Screenshots, copied transcripts, host outbox, transcript, executable doctor and cleanup receipts remain in the artifact. The stand-in is not a real agent or SSH server. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
+
+### Fresh start stays live (MUBO-452)
+
+Run `verify.yml -f feature=chat-fresh-start`. The hosted stand-in serves its saved history as the chat display and answers `fresh_start` with a pending reload that streams a reply until the driver ends it. The owned app presses Fresh start through the real Ctrl+K row (`target=6498`), then the artifact must show the reloading dots (`chat-working-proof.mjs` on a captured frame) and the streaming reply in the copied rendered conversation while the reload is still pending. A message typed into the real composer during the reload must reach the host as a held `busy` answer, stay a waiting bubble (never `failed` or Not sent), and reach the chat exactly once after the reload finishes; the final copied conversation holds it exactly once beside the reloading reply. See [Fresh start stays live](chat-fresh-start.md) for the sub-features and the evidence list. The Windows-side dispatch loop is the harness stand-in for the server's message worker, so the reader suite, not this journey, covers the stall watchdog.
 
 ### Quoted reactions (IGSH-975)
 

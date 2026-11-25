@@ -50,6 +50,8 @@
   ["browser_pane.zig", "fn inboxButtonRect"],
   ["app_state.zig", "const MAX_GROUPS"],
   ["sidebar.zig", "fn displayedGroupColor"],
+  ["sidebar_attention.zig", "fn tabPassesUnreadFilter"],
+  ["sidebar.zig", "fn tabGroupId"],
   ["app_state.zig", "const RowKind"],
   ["sidebar.zig", "fn sidebarUseKey"],
   ["app_state.zig", "const HitTarget"],

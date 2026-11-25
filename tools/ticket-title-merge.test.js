@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { canonicalTicketId, parseTicketId } = require('./ticket-id.js');
 
 const root = path.resolve(__dirname, '..');
 
@@ -17,7 +18,9 @@ test('the title catalog is one file per ticket and nothing else', () => {
   const dir = path.join(root, 'tools/ticket-titles');
   assert.ok(fs.statSync(dir).isDirectory(), 'catalog is a directory');
   for (const name of fs.readdirSync(dir)) {
-    assert.match(name, /^(?:IGSH|HYCI|MUBO)-[1-9]\d*\.txt$/);
+    const ticket = parseTicketId(name.slice(0, -'.txt'.length));
+    assert.ok(ticket, `${name} names a known ticket`);
+    assert.equal(name, `${canonicalTicketId(ticket.id)}.txt`, `${name} is the canonical file name for its ticket`);
     assert.ok(holdsOneTitleLine(fs.readFileSync(path.join(dir, name), 'utf8')), `${name} holds one title line`);
   }
 });

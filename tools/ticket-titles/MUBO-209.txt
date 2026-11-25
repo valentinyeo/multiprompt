@@ -1,0 +1,1 @@
+Paste, Ctrl+C and scrolling work in server shell tabs again

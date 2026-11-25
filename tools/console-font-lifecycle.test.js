@@ -120,6 +120,8 @@ fn pollFonts() void {
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
     .replaceAll('@import("focus.zig").', '')
+    .replaceAll('@import("sidebar.zig").thawSidebarOrder()', 'thawSidebarOrder()')
+    .replaceAll('@import("sidebar.zig").freezeSidebarOrder()', 'freezeSidebarOrder()')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole')
     .replaceAll('@import("native_session.zig").restyle', 'nativeRestyle')
@@ -435,6 +437,8 @@ fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn openChatView() void { g_chat_active = true; }
 fn saveSession() void {}
 fn loadInboxModel() void {}
+fn thawSidebarOrder() bool { return false; }
+fn freezeSidebarOrder() void {}
 fn chatBenchEnabled() bool { return false; }
 fn chatViewOwnsInput() bool { return g_chat_active; }
 fn resetFontCache() void {}

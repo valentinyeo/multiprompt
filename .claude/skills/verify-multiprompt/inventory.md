@@ -1,6 +1,6 @@
 # Verification migration inventory
 
-Baseline `b51c0c164`. The checkout contains 138 tracked PowerShell scripts, including build/install helpers, and 50 scheduled workflows. The ticket counts predate this revision. No reachable script is deleted in this slice. Files sharing a row have the same disposition.
+Baseline `b51c0c164`, where the checkout had 138 tracked PowerShell scripts, including build/install helpers, and 50 scheduled workflows. At `43c8df86a` the same commands report 146 scripts and 59 scheduled workflows, so treat these rows as the migration plan for that baseline, not as a current file listing. The ticket counts predate this revision. No reachable script is deleted in this slice. Files sharing a row have the same disposition.
 
 Reproduce the inventory with `git ls-files "*.ps1"` and `rg -l "^  schedule:" .github/workflows`. Follow-up means consolidate the recipe behind `drive.ps1`, prove equivalent visible/side-effect coverage on hosted Windows, then remove its old route. Keep native/shared helpers; never convert diagnostic-only checks into desktop proof.
 

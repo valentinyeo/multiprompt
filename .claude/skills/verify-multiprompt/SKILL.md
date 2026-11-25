@@ -38,13 +38,17 @@ Invoke [control.ps1](control.ps1) only through `verify.yml` on GitHub Windows:
 
 Area maps may use `drive.ps1 <feature> <journey>` with the same identity arguments (see each file). Harness: .NET UI Automation for identity, Win32 SendInput with layout-mapped keys (not Unicode packets). Custom palette rows: real Ctrl+K search plus arrow/Enter — no invented accessibility nodes or private WM_APP messages. Foreground must be our window before input.
 
-Reconnect maps ([ssh-tab-reconnect](features/ssh-tab-reconnect.md), [ended remote session](features/ended-remote-session.md), [saved remote workspace](features/saved-remote-workspace.md)) use [`.github/workflows/verify-reconnect.yml`](../../.github/workflows/verify-reconnect.yml) and [`tools/verify-reconnect/`](../../tools/verify-reconnect/) on Windows; the harness never runs on the Linux server. Do not pass those stems to `verify.yml`.
+Reconnect maps ([ssh-tab-reconnect](features/ssh-tab-reconnect.md), [ended remote session](features/ended-remote-session.md), [saved remote workspace](features/saved-remote-workspace.md)) use [`.github/workflows/verify-reconnect.yml`](../../../.github/workflows/verify-reconnect.yml) and [`tools/verify-reconnect/`](../../../tools/verify-reconnect/) on Windows; the harness never runs on the Linux server. Do not pass those stems to `verify.yml`.
 
 Journey detail: [Chat delivery](features/chat-delivery.md), [chat focus](features/chat-focus.md) (`WM_GETTEXTLENGTH/WM_GETTEXT`), [chat dictation](features/chat-dictation.md), [server chat](features/server-chat.md), [browser pane stuck](features/browser-pane-stuck.md) (static contract: `node tools/check-browser-pane-stuck.mjs`). Missing preconditions fail with evidence; never weaken the user path or write app settings to green a run.
 
 ## Evidence
 
-Artifact `verify-<feature>` holds screenshots, `.uia.json`, `actions.json`, `result.json`, optional `process-tree.json`, `build.json`, `doctor.json`, logs, and `data/` before scratch removal. Prove the real user path, the action and resulting state, and independently read side effects. Cite only files you opened; if you cannot view PNGs, read JSON and saved state and say screenshots were unreviewed. More: [verification-reference.md](verification-reference.md#evidence).
+Artifact `verify-<feature>` holds `journey.mp4`, `video.json`, screenshots, `.uia.json`, `actions.json`, `result.json`, optional `process-tree.json`, `build.json`, `doctor.json`, logs, and `data/` before scratch removal. Prove the real user path, the action and resulting state, and independently read side effects. Cite only files you opened; if you cannot view PNGs, read JSON and saved state and say screenshots were unreviewed. More: [verification-reference.md](verification-reference.md#evidence).
+
+## Done video
+
+Every journey records `journey.mp4`. The PR verifier runs the same journey with the head's driver on pinned master and head builds, preserving `before.mp4` and `after.mp4` in their evidence artifacts. For every screen change or urgent fix, run `node tools/done-video.mjs <pr-number> [journey]`; it prints the before and after paths, one per line. Post the ticket's Done comment with the board CLI's `comment-add` command using `--kind done`, 2-3 plain sentences, and `--attach <before-path> --attach <after-path>`. Attach both video files so they play on the ticket, and link both in the PR, labelled BEFORE and AFTER. Never mark Done with only one clip.
 
 ## Cleanup
 

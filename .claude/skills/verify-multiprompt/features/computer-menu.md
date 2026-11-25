@@ -1,6 +1,6 @@
 # Computer in the chat menu
 
-Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-computer-menu.ps1
+Source files: src/window*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-computer-menu.ps1, src/computer_pane.zig, src/message_menu.zig
 
 ## Sub-features
 

@@ -1,6 +1,6 @@
 # Chat composer dictation
 
-Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-dictation.ps1, src/voice.zig
+Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-dictation.ps1, src/voice.zig
 
 Verify on: push
 
@@ -43,6 +43,8 @@ For each stop method (`dictation-enter`, `dictation-ctrl-d`, `dictation-mic-clic
 5. Require the idle microphone, the production audio/response/status/composer-delivery audit stages, and retain the draft. Only normal Ctrl+A / Backspace clear between cases.
 
 Artifact: `verify-chat-dictation`. Inspect `before.png`, `action.png`, `after.png`, each `*-listening.png` / `*-delivered.png`, `*-mic.png` and `*-mic.json`, each `<method>.text.json`, `actions.json`, `doctor.json`, `build.json`, `result.json`, `process-tree.json`, and `data/roaming/ZigShell/dictation-audit.log`. The text records contain exact WM_GETTEXT, expected text, HWND/PID and elapsed milliseconds. `result.json` retains all three named cases and the explicit boundary. No screenshot has been inspected until a real run is downloaded.
+
+Two extra cases make the provider slow on purpose (MUBO-290). The file `%APPDATA%\ZigShell\dictation-stall` makes the offline fixture transcription wait 2.5 s before it answers, so only the recording and the button can change the screen. Stop and send each start dictation, type a marker, then click the real stop or send control. Within **1000 ms** of that click the microphone must be the idle glyph with no active fill, the typed marker must still sit in the box, and the audit must show `fixture-provider-stall` without `fixture-provider-stall-end`, which proves the button returned while the background transcription was still running. The case then waits for the stall to finish: for send the armed message leaves exactly once, and only once the words are known. The stall lives inside the offline fixture boundary and cannot run outside `chat-dictation`.
 
 ## Gotchas
 

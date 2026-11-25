@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - run: node --test tools/release-version.test.mjs tools/version-stamp.test.mjs tools/release-update-gate.test.mjs
+      - run: node --test tools/release-version.test.mjs tools/version-stamp.test.mjs tools/release-update-gate.test.mjs tools/release-never-stops-on-keys.test.mjs tools/merge-title.test.js tools/automerge-admit-run.test.js
   journeys:
     uses: ./.github/workflows/verify.yml
     with:

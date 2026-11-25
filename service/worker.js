@@ -1,4 +1,4 @@
-import { makeAuth, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
+import { makeAuth, allowed, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
 import { appPage, confirmPage } from './pages.js';
 import { remotePhotoKey, validPhotoPng } from './bot-photo.js';
 
@@ -146,9 +146,19 @@ async function sessionAccount(request, env, auth) {
   const email = session?.user?.email?.toLowerCase();
   return email && isAllowed(env, email) ? email : null;
 }
+const emptyLayout = JSON.stringify({ schema: 1, revision: 1, workspaces: [], tabs: [] });
+async function loadLayout(db, account) {
+  let row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(account).first();
+  if (!row) {
+    await db.prepare('INSERT OR IGNORE INTO layouts (account,revision,layout) VALUES (?,1,?)').bind(account, emptyLayout).run();
+    row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(account).first();
+  }
+  return row;
+}
 function sameOrigin(request, env) {
   const origin = request.headers.get('Origin');
-  if (!origin || !origins(env).includes(origin) || origin !== new URL(request.url).origin) fail(403, 'cross_origin');
+  const requestOrigin = new URL(request.url).origin;
+  if (!origin || !origins(env, requestOrigin).includes(origin) || origin !== requestOrigin) fail(403, 'cross_origin');
 }
 async function tokens(db, device, refresh) {
   const access = random();
@@ -181,7 +191,7 @@ async function issue(db, email, { redirect, state, challenge, name }, status = 3
 const redirectTo = (location, status = 302) => new Response(null, { status, headers: { Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 const html = (text, status = 200) => new Response(text, { status, headers: {
   'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; form-action 'self' http://127.0.0.1:* dev.multiprompt.companion: dev.multiprompt.companion.debug: dev.multiprompt.companion.m3:; frame-ancestors 'none'; base-uri 'none'"
+  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src https://deploy.workers.cloudflare.com; connect-src 'self'; form-action 'self' http://127.0.0.1:* dev.multiprompt.companion: dev.multiprompt.companion.debug: dev.multiprompt.companion.m3:; frame-ancestors 'none'; base-uri 'none'"
 } });
 export function safeNext(next) {
   return next === '/?passkey=add' || typeof next === 'string' && /^\/(login|authorize)\?[^\\#]*$/.test(next) && !next.startsWith('//') ? next : null;
@@ -232,7 +242,7 @@ export default {
         const supplied = request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{32,128})$/)?.[1];
         if (!env.USAGE_PUSH_TOKEN || !supplied || await hash(supplied) !== await hash(env.USAGE_PUSH_TOKEN)) fail(401, 'service_token_required');
         const status = validateUsage(await body(request, 256 * 1024));
-        await db.prepare('INSERT INTO usage (account,updated,status) VALUES (?,?,?) ON CONFLICT(account) DO UPDATE SET updated=excluded.updated,status=excluded.status').bind(env.USAGE_ACCOUNT || env.ACCOUNT_EMAIL, now(), JSON.stringify(status)).run();
+        await db.prepare('INSERT INTO usage (account,updated,status) VALUES (?,?,?) ON CONFLICT(account) DO UPDATE SET updated=excluded.updated,status=excluded.status').bind(env.USAGE_ACCOUNT || env.ACCOUNT_EMAIL || allowed(env)[0], now(), JSON.stringify(status)).run();
         return json({ stored: true });
       }
       if (url.pathname === '/oauth/token' && request.method === 'POST') {
@@ -353,7 +363,7 @@ export default {
           png = b.png;
         }
         for (let attempt = 0; attempt < 20; attempt++) {
-          const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+          const row = await loadLayout(db, device.account);
           if (!row) fail(503, 'layout_not_seeded');
           const layout = JSON.parse(row.layout);
           const tabs = scoped(device, layout).tabs;
@@ -389,7 +399,7 @@ export default {
         fail(409, 'revision_conflict');
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
-        const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+        const row = await loadLayout(db, device.account);
         if (!row) fail(503, 'layout_not_seeded');
         return reply({ revision: row.revision, layout: scoped(device, JSON.parse(row.layout)) });
       }
@@ -397,7 +407,7 @@ export default {
         const b = await body(request);
         let layout = validateLayout(b.layout);
         if (!Number.isSafeInteger(b.base_revision) || b.base_revision < 0) fail(400, 'invalid_revision');
-        const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+        const row = await loadLayout(db, device.account);
         const previousLayout = row ? JSON.parse(row.layout) : null;
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);

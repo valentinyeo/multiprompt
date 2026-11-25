@@ -42,12 +42,13 @@ Type-Text '/verify-owner'
 Wait-Until { (Read-SharedText $script:slashLog) -match 'chat-ac: fetched host=[02] bytes=[1-9]' } 'owner command request completed'
 Snapshot 'slash-owner-catalog'
 Press @(0x09) 'Tab: accept the account-specific skill'
-if ([VerifyNative]::EditText($script:slashComposer) -cne '/verify-owner ') { throw 'SOFT-2584 owner skill unavailable in the account tab' }
+if ([VerifyNative]::EditText($script:slashComposer) -cne '/verify-owner ') { throw 'SOFT-3053 owner skill unavailable in the account tab' }
 $ownerRequests = @(Get-Content (Join-Path $remoteState 'completion-owner.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
-if (-not ($ownerRequests | Where-Object { $_.target -ceq 'remote-1' -and $_.owner -ceq 'inne' -and $_.request.Contains('/home/inne/projects/sample') })) { throw 'SOFT-2584 completion did not reach the account owning the tab' }
+if (-not ($ownerRequests | Where-Object { $_.target -ceq 'remote-3' -and $_.owner -ceq 'inne' -and $_.request.Contains('/home/inne/projects/sample') })) { throw 'SOFT-3053 completion did not reach the account owning the tab' }
+if (@($ownerRequests | Where-Object { $_.owner -ceq 'inne' -and $_.target -cne 'remote-3' }).Count -ne 0) { throw 'SOFT-3053 owner skill was asked of a host that is not the account host' }
 Copy-Item (Join-Path $remoteState 'completion-owner.jsonl') (Join-Path $Evidence 'completion-owner.jsonl')
 Snapshot 'slash-owner-accepted'
-$result.checks += @{ name = 'owner-command-catalog'; accepted = '/verify-owner '; target = 'remote-1'; owner = 'inne'; passed = $true }
+$result.checks += @{ name = 'owner-command-catalog'; accepted = '/verify-owner '; target = 'remote-3'; owner = 'inne'; passed = $true }
 $offset = (Read-SharedText $script:slashLog).Length
 Send-Slash '/plan'
 Wait-SlashPalette 12000 $offset

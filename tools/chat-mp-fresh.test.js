@@ -129,8 +129,9 @@ with tempfile.TemporaryDirectory() as directory:
     r['host_fresh_resume'](provider, sid, tmux, session)
     sent = json.loads(session['agent'].stdin.getvalue().decode())
     prompt = sent['message']['content'][0]['text']
-    assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
-    assert '/board-drain' in prompt and 'saved.json' in prompt
+    assert prompt.startswith('/valentin-mode Fresh start. The host inlined your saved handover:')
+    assert '/board-drain' in prompt and 'Resume the board drain.' in prompt
+    assert 'read the handover at' not in prompt
     if session.get('db') is not None:
         session['db'].close()
 print('MP_FRESH_PASS')
@@ -167,7 +168,8 @@ with tempfile.TemporaryDirectory() as directory:
     r['host_fresh_resume'](provider, sid, tmux, session)
     sent = json.loads(session['agent'].stdin.getvalue().decode())
     prompt = sent['message']['content'][0]['text']
-    assert prompt.startswith('/valentin-mode Fresh start: read the handover at ')
+    assert prompt.startswith('/valentin-mode Fresh start. The host inlined your saved handover:')
+    assert 'Resume after transcript load.' in prompt
     if session.get('db') is not None:
         session['db'].close()
 print('MP_FRESH_PASS')

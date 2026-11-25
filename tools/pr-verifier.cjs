@@ -9,6 +9,7 @@ const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
 const MAX_LINE = 400;
 const SLOW_FEATURES = new Set(['browser-switch-speed', 'chat-switch-speed', 'pane-layout', 'live-chat-pane']);
+const CHAT_SEND_REPLY_JOURNEYS = new Set(['chat-delivery', 'server-chat']);
 const VERDICTS = ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED'];
 const MARKER = '<!-- pstack-verifier -->';
 const CODEX_MODEL = 'gpt-6.1-sol';
@@ -30,15 +31,24 @@ function oneLine(value, limit = MAX_LINE) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
+function isEmergency(pr) {
+  return (pr.labels || []).some(label => String(typeof label === 'string' ? label : label.name).trim().toLowerCase() === 'emergency');
+}
+
 function isRepair(pr) {
   return /\bbug(?:[ -]?fix)?\b|^fix(?:\([^)]*\))?[!:]|\bfix(?:es|ed)?\b/i.test(pr.title || '') ||
     (pr.labels || []).some(label => /^(?:bug|bug[ -]?fix|defect|regression)$/i.test(typeof label === 'string' ? label : label.name));
+}
+
+function ownedJourneysOnly(pr) {
+  return isRepair(pr) || isEmergency(pr);
 }
 
 function isExemptUnmappedFile(file) {
   if (file.startsWith('openwiki/') || file.startsWith('docs/')) return true;
   if (file.startsWith('changelog.d/')) return true;
   if (file.startsWith('tools/ticket-titles/')) return true;
+  if (file.startsWith('src/testdata/')) return true;
   if (file.startsWith('.github/')) return true;
   if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) return true;
   return false;
@@ -68,7 +78,7 @@ function validateSelection(raw, available, pr = {}) {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
-  const bugFix = isRepair(pr);
+  const bugFix = ownedJourneysOnly(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
   const features = [];
   const dropped = [];
@@ -125,6 +135,8 @@ function describeRun(directory, name) {
       .filter(item => item.passed === false)
       .map(item => JSON.stringify([item.name, item.detail])))].sort() : [],
     screenshots: files.filter(file => /\.png$/i.test(file)),
+    videos: files.filter(file => /(?:^|\/)journey\.mp4$/i.test(file) && fs.statSync(path.join(directory, file)).size > 0),
+    comparisonVideos: files.filter(file => /(?:^|\/)(before|after)\.mp4$/i.test(file) && fs.statSync(path.join(directory, file)).size > 0),
     files: files.slice(0, 60),
   };
 }
@@ -191,14 +203,16 @@ function downloadFailures(evidenceDir) {
 
 function summarize(evidenceDir, features) {
   const names = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
-  const summary = { head: {} };
+  const summary = { head: {}, before: {} };
   for (const feature of features) {
     const pattern = featureDirPattern(feature);
     summary.head[feature] = [];
+    summary.before[feature] = [];
     for (const name of names.sort()) {
       const match = name.match(pattern);
-      if (!match || match[1]) continue;
-      summary.head[feature].push(describeRun(path.join(evidenceDir, name), name));
+      if (!match) continue;
+      const side = match[1] ? summary.before : summary.head;
+      side[feature].push(describeRun(path.join(evidenceDir, name), name));
     }
   }
   summary.downloadFailures = downloadFailures(evidenceDir);
@@ -211,7 +225,7 @@ function infrastructureError(value) {
 
 function runOutcome(run) {
   if (run.status === 'failed' && run.error && run.failureKind !== 'infrastructure' && !infrastructureError(run.error)) return 'failed';
-  if (run.failureKind === 'infrastructure' || infrastructureError(run.error) || infrastructureError(run.cleanup) || run.screenshots?.length === 0) return 'blocked';
+  if (run.failureKind === 'infrastructure' || infrastructureError(run.error) || infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0) return 'blocked';
   if (run.status === 'passed') return 'passed';
   return run.status === 'failed' ? 'failed' : 'blocked';
 }
@@ -230,8 +244,8 @@ function journeyRows(summary, features = Object.keys(summary.head)) {
     const head = worst(headRuns);
     const inherited = masterFailures.has(feature) && head !== 'passed';
     const blocked = inherited
-      ? headRuns.some(run => infrastructureError(run.cleanup) || run.screenshots?.length === 0)
-      : headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
+      ? headRuns.some(run => infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0)
+      : headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0 || run.videos?.length === 0);
     return { feature, head, inherited, blocked };
   });
 }
@@ -312,7 +326,13 @@ function evidenceMarkdown(summary, selection) {
     lines.push(`## ${row.feature}: head ${row.head}${row.inherited ? ', inherited from master nightly' : ''}`, '');
     for (const run of summary.head[row.feature]) {
       lines.push(`- head artifact ${run.artifact}: status ${run.status}, checks ${run.checks}, cleanup ${run.cleanup || 'none recorded'}${run.error ? `, error ${run.error}` : ''}`);
+      for (const video of (run.videos || []).slice(0, 4)) lines.push(`  - evidence/${run.artifact}/${video}`);
+      for (const video of run.comparisonVideos || []) lines.push(`  - evidence/${run.artifact}/${video}`);
       for (const shot of run.screenshots.slice(0, 12)) lines.push(`  - evidence/${run.artifact}/${shot}`);
+    }
+    for (const run of summary.before?.[row.feature] || []) {
+      lines.push(`- before artifact ${run.artifact}: status ${run.status} (base behavior, not a head regression)`);
+      for (const video of run.comparisonVideos || []) lines.push(`  - evidence/${run.artifact}/${video}`);
     }
     lines.push('');
   }
@@ -361,10 +381,19 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     (name === 'head' && job.result === 'failure' && !rows.some(row => row.head === 'failed') &&
       (rows.every(row => row.head === 'passed') || rows.some(row => row.head !== 'passed' && !row.inherited))));
   const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
-  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
+  const missingVideos = selection.features.flatMap(feature => (summary.head?.[feature] || []).filter(run => run.videos?.length === 0).map(run => run.artifact || feature));
+  const missingComparison = jobs.before ? selection.features.filter(feature => {
+    const heads = summary.head?.[feature] || [];
+    const befores = summary.before?.[feature] || [];
+    return !heads.length || heads.some(run => !run.comparisonVideos?.includes('after.mp4') || !befores.some(before =>
+      before.artifact.replace(/-[0-9a-f]{40}/, '') === run.artifact && before.comparisonVideos?.includes('before.mp4')));
+  }) : [];
+  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length || missingComparison.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
+    if (missingComparison.length) notes.push(`Missing before.mp4 or after.mp4 for the same journey: ${missingComparison.join(', ')}.`);
     for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
+    if (missingVideos.length) notes.push(`Missing journey.mp4 in evidence: ${missingVideos.join(', ')}.`);
     if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head})`).join(', ')}.`);
     for (const [name, job] of prerequisites) notes.push(`${name} job ${job.result}; full verification could not complete.`);
   }
@@ -383,6 +412,12 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   if (selection.journeyNotes?.length) {
     if (final === 'PASS') final = 'PASS+NOTES';
     for (const note of selection.journeyNotes) notes.push(oneLine(note));
+  }
+  const chatFiles = Array.isArray(selection.chatFiles) ? selection.chatFiles : [];
+  const chatReplyShown = rows.some(row => CHAT_SEND_REPLY_JOURNEYS.has(row.feature) && row.head === 'passed');
+  if (chatFiles.length && !chatReplyShown && final !== 'BLOCKED') {
+    final = 'FAIL';
+    notes.unshift(`Chat source changed (${chatFiles.join(', ')}) and no selected journey that sends a message and reads the reply passed at this head; ${[...CHAT_SEND_REPLY_JOURNEYS].join(', ')} must pass.`);
   }
   if (!ran.length && final === 'PASS') {
     final = 'PASS+NOTES';
@@ -468,6 +503,14 @@ function cancelledRunNeedsRetry(run, pr, checks, runs) {
     (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
 }
 
+function supersededCancellation(run, pr, runs) {
+  if (run.head_sha && run.head_sha !== pr.head.sha) return true;
+  const title = run.display_title || `verify PR ${pr.number}`;
+  return runs.some(candidate => Number(candidate.id) > Number(run.id) && candidate.display_title === title &&
+    (candidate.head_sha === pr.head.sha || candidate.event === 'workflow_dispatch') &&
+    !['completed', 'cancelled'].includes(candidate.status));
+}
+
 function githubState(env, { number, headSha }) {
   const [owner, name] = env.REPO.split('/');
   const suites = `checkSuites(last:100) { nodes { status conclusion workflowRun { databaseId workflow { name } }
@@ -511,6 +554,7 @@ function recover(env) {
       gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
     }
+    if (supersededCancellation(run, pr, runs)) return;
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
@@ -555,12 +599,13 @@ function resolve(env) {
   const dispatched = env.EVENT_NAME === 'workflow_dispatch';
   const eligible = pr.state === 'OPEN' && !pr.isCrossRepository && (dispatched || !pr.isDraft);
   if (eligible) gh(['api', `repos/${repo}/statuses/${pr.headRefOid}`, '-X', 'POST', '-f', 'context=pstack-verifier', '-f', 'state=pending', '-f', 'description=Verification is checking current PR metadata and evidence']);
-  const baseSha = isRepair(pr)
+  const baseSha = ownedJourneysOnly(pr)
     ? gh(['api', `repos/${repo}/commits/master`, '--jq', '.sha']).trim()
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
   const { engine = '', problem = '' } = pickVerifier(pr.body);
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
+  const baseTipSha = gh(['api', `repos/${repo}/commits/${pr.baseRefName}`, '--jq', '.sha']).trim();
+  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
 }
 
 function availableFeatures(env) {
@@ -601,7 +646,7 @@ function latestArtifacts(artifacts, selection) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && !match[1];
+      return match;
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||
@@ -964,6 +1009,7 @@ async function main(argv, env) {
     selection.unmapped = mapped.unmapped;
     selection.journeyNotes = mapped.notes || [];
     selection.ciWorkflows = mapped.ciWorkflows || [];
+    selection.chatFiles = mapped.chatFiles || [];
     if (mapped.unmapped.length) {
       selection.uncovered = oneLine([selection.uncovered, `Unmapped files: ${mapped.unmapped.join(', ')}`].filter(Boolean).join(' '), 1200);
     }
@@ -1013,7 +1059,7 @@ async function main(argv, env) {
     }
     if (env.PR_NUMBER) {
       try {
-        Object.assign(selection, { bugFix: isRepair(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
+        Object.assign(selection, { bugFix: ownedJourneysOnly(JSON.parse(gh(['pr', 'view', env.PR_NUMBER, '--repo', env.REPO, '--json', 'title,labels,body']))) });
       } catch {
         infrastructure.push('Could not confirm bug-fix metadata; verification is BLOCKED.');
       }
@@ -1052,7 +1098,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, userFacingUnmapped };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, isRepair, isEmergency, ownedJourneysOnly, userFacingUnmapped };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

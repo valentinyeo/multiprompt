@@ -5,32 +5,26 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
-  "workers_dev": false,
+  "workers_dev": true,
   "preview_urls": false,
-  "routes": [
-    {
-      "pattern": "account.example.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "dash.example.com",
-      "custom_domain": true
-    }
-  ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "multiprompt-account",
-      "database_id": "YOUR_D1_DATABASE_ID"
+      "database_id": "YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
     }
   ],
-  "send_email": [{ "name": "EMAIL" }],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
   "vars": {
     "ALLOWED_EMAILS": "owner@example.com",
-    "AUTH_ORIGINS": "https://account.example.com,https://dash.example.com",
-    "COOKIE_DOMAIN": "example.com",
-    "RP_ID": "example.com",
+    "AUTH_ORIGINS": "",
+    "COOKIE_DOMAIN": "",
+    "RP_ID": "",
     "EMAIL_FROM": "multiprompt <login@example.com>",
     "GOOGLE_CLIENT_ID": "",
     "ACCOUNT_EMAIL": "owner@example.com"

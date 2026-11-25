@@ -7,9 +7,16 @@ import time
 
 SID = 'a1b2c3d4-1668-4000-8000-000000001668'
 REPLY = 'The hosted stand-in reply is visible.'
+RESUME_REPLY = 'The handover is reloaded, here is the next unfinished task.'
 
 
-def install(namespace, root, record, steady=False):
+def command_markup(text):
+    parts = text.strip().split(None, 1)
+    arguments = parts[1] if len(parts) > 1 else ''
+    return '<command-message>' + parts[0].lstrip('/') + '</command-message>\n<command-args>' + arguments + '</command-args>'
+
+
+def install(namespace, root, record, steady=False, fresh=False):
     previous_switch = namespace['host_dispatch_switch']
     previous_owned = namespace['host_owned']
     previous_deliver = namespace['host_deliver']
@@ -77,12 +84,20 @@ def install(namespace, root, record, steady=False):
     def owned(provider, sid):
         return matches(provider, sid) or previous_owned(provider, sid)
 
-    def deliver(provider, sid, token, attempt, epoch, text):
+    def deliver(provider, sid, token, attempt, epoch, text, display=False):
         if not matches(provider, sid):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
-        session = {'turn': 'standin-turn', 'state': {},
-                   'sends': [dict(id=token, attempt=attempt, accepted=False)]}
+        sent = dict(id=token, attempt=attempt, accepted=False)
+        state = dict(display_history=True) if display else {}
+        if text.lstrip().startswith('/'):
+            sent['text'] = command_markup(text)
+            state['display_history'] = True
+        session = {'turn': 'standin-turn', 'state': state,
+                   'sends': [sent]}
+        if display:
+            namespace['host_history_append'](provider, sid, session, dict(role='user', id=token, text=text))
+            record('working-host.jsonl', stage='user-row', sid=sid, id=token)
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
         record('working-host.jsonl', stage='turn.started', sid=sid, id=token)
@@ -154,3 +169,116 @@ def install(namespace, root, record, steady=False):
     namespace['host_owned'] = owned
     namespace['host_deliver'] = deliver
     namespace['start_message_worker'] = worker
+    if fresh:
+        install_fresh(namespace, root, record, deliver)
+
+
+def install_fresh(namespace, root, record, deliver):
+    pending = threading.Event()
+    pending.set()
+    seeded = threading.Event()
+
+    def state(extra=None):
+        value = dict(provider='claude', sid=SID, tmux='verify-agent', display_history=True)
+        value.update(extra or {})
+        namespace['host_state_write']('claude', SID, value)
+
+    def seed():
+        if seeded.is_set():
+            return
+        seeded.set()
+        session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
+        namespace['host_history_append']('claude', SID, session,
+                                         dict(role='user', id='standin-before', text='Before the fresh start'))
+        namespace['host_history_append']('claude', SID, session,
+                                         dict(role='assistant', id='standin-before-reply', text='Saved context before the reload.'))
+        namespace['host_write'](namespace['host_paths']('claude', SID)['config'],
+                                dict(enabled=True, tmux='verify-agent'))
+        state()
+        namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')
+        if session.get('db') is not None:
+            session['db'].close()
+            del session['db']
+        record('working-host.jsonl', stage='fresh-history-ready', sid=SID)
+
+    def fresh_reply(query):
+        if query.get('op') != 'fresh_start' or query.get('sid') != SID:
+            return None
+        record('working-host.jsonl', stage='fresh-start-requested', sid=SID)
+        reload()
+        return dict(status='started')
+
+    def reload():
+        session = {'turn': 'standin-fresh-turn', 'state': {'display_history': True}}
+        state(dict(fresh_start=dict(phase='resume', file='standin.handover.json', started=time.time())))
+        namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.started',
+                                dict(message_id='standin-resume', text_sha256='', uuids=[]))
+        record('working-host.jsonl', stage='fresh-start-pending', sid=SID, turn=session['turn'])
+        if session.get('db') is not None:
+            session['db'].close()
+            del session['db']
+
+        def stream():
+            text = RESUME_REPLY
+            for index in range(1, 4):
+                time.sleep(0.4)
+                text += ' Reloading segment %d.' % index
+                namespace['host_event']('claude', SID, 'verify-agent', session, 'text.delta',
+                                        dict(text=text, done=False), 'standin-resume-reply')
+                record('working-host.jsonl', stage='fresh-resume-delta', sid=SID, segment=index)
+            deadline = time.monotonic() + 400
+            while not (root / 'working-resume-done').exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            namespace['host_event']('claude', SID, 'verify-agent', session, 'text.done',
+                                    dict(text=text), 'standin-resume-reply')
+            namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended',
+                                    dict(status='completed'))
+            if session.get('db') is not None:
+                session['db'].close()
+            state()
+            pending.clear()
+            record('working-host.jsonl', stage='fresh-start-finished', sid=SID)
+
+        threading.Thread(target=stream, daemon=True).start()
+
+    def held_deliver(provider, sid, token, attempt, epoch, text, room_scope=None):
+        if provider == 'claude' and sid == SID and pending.is_set():
+            record('working-host.jsonl', stage='deliver-held', sid=sid, id=token, text=text)
+            return {'status': 'busy', 'reason': 'fresh_start_pending'}
+        return deliver(provider, sid, token, attempt, epoch, text, display=True)
+
+    def dispatch_loop(query, source, only_if_work=False):
+        if query.get('provider') != 'claude' or query.get('sid') != SID or query.get('op') != 'message_submit':
+            return
+        request = dict(message_protocol=1, tmux='verify-agent', provider='claude', sid=SID, op='message_dispatch')
+
+        def run():
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                result = namespace['message_store_request'](request)
+                row = result.get('message') if isinstance(result, dict) else None
+                if row is not None:
+                    record('working-host.jsonl', stage='dispatch', sid=SID, state=row.get('state'), id=row.get('id'))
+                    if row.get('state') in ('accepted', 'started'):
+                        return
+                time.sleep(0.25)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    original_reply = namespace['host_reply']
+    original_request = namespace['serve_request']
+
+    def reply(query):
+        answer = fresh_reply(query)
+        return original_reply(query) if answer is None else answer
+
+    def request(line, source, subscriptions, lock):
+        original_request(line, source, subscriptions, lock)
+        query = json.loads(line)
+        if query.get('op') == 'events_subscribe' and query.get('sid') == SID:
+            seed()
+
+    namespace['host_reply'] = reply
+    namespace['serve_request'] = request
+    namespace['host_deliver'] = held_deliver
+    namespace['start_message_worker'] = dispatch_loop

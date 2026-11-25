@@ -16,6 +16,7 @@ typedef struct {
     int width, height, rows, cols, scroll, wheel;
     int anchor, end, selecting, selected;
     WCHAR surrogate;
+    int escape_pending;
     uint32_t background;
     int caret_created;
     int caret_w, caret_h;
@@ -25,8 +26,39 @@ typedef struct {
 
 typedef struct { TerminalWindow *window; int attached; } Creation;
 
+#define PASTE_LIMIT 524288
+
 static TerminalWindow *get(HWND hwnd) { return (TerminalWindow *)GetWindowLongPtrW(hwnd, GWLP_USERDATA); }
 static int clamp(int value, int lo, int hi) { return value < lo ? lo : value > hi ? hi : value; }
+
+static size_t utf8(uint32_t cp, char *out) {
+    if (cp < 0x80) { out[0] = (char)cp; return 1; }
+    if (cp < 0x800) { out[0] = (char)(0xc0 | (cp >> 6)); out[1] = (char)(0x80 | (cp & 0x3f)); return 2; }
+    if (cp < 0x10000) { out[0] = (char)(0xe0 | (cp >> 12)); out[1] = (char)(0x80 | ((cp >> 6) & 0x3f)); out[2] = (char)(0x80 | (cp & 0x3f)); return 3; }
+    out[0] = (char)(0xf0 | (cp >> 18)); out[1] = (char)(0x80 | ((cp >> 12) & 0x3f)); out[2] = (char)(0x80 | ((cp >> 6) & 0x3f)); out[3] = (char)(0x80 | (cp & 0x3f)); return 4;
+}
+
+static int paste_has_line_break(const WCHAR *text, size_t count) {
+    for (size_t i = 0; i < count && text[i]; i++) if (text[i] == L'\r' || text[i] == L'\n') return 1;
+    return 0;
+}
+
+static size_t paste_text(char *out, size_t capacity, const WCHAR *text, size_t count) {
+    size_t used = 0;
+    for (size_t i = 0; i < count && text[i]; i++) {
+        uint32_t value = (uint16_t)text[i];
+        if (value == '\r' || value == '\n') {
+            if (value == '\r' && i + 1 < count && text[i + 1] == L'\n') i++;
+            value = '\r';
+        } else if (value >= 0xd800 && value <= 0xdbff) {
+            if (i + 1 < count && text[i + 1] >= 0xdc00 && text[i + 1] <= 0xdfff) value = 0x10000 + ((value - 0xd800) << 10) + ((uint32_t)text[++i] - 0xdc00);
+            else value = 0xfffd;
+        } else if (value >= 0xdc00 && value <= 0xdfff) value = 0xfffd;
+        if (used + 4 > capacity) break;
+        used += utf8(value, out + used);
+    }
+    return used;
+}
 
 static void caret_blink_arm(TerminalWindow *t, int arm) {
     UINT interval = GetCaretBlinkTime();
@@ -221,6 +253,7 @@ void mp_terminal_window_feed(HWND hwnd, const char *bytes, size_t length) {
 
 static void input(TerminalWindow *t, uint32_t value, int mod) {
     t->selected = t->selecting = t->scroll = 0;
+    t->escape_pending = 0;
     mp_terminal_char(t->model, value, mod);
     caret(t);
     InvalidateRect(t->hwnd, NULL, FALSE);
@@ -288,14 +321,24 @@ void mp_terminal_window_paste(HWND hwnd) {
     const WCHAR *text = memory ? GlobalLock(memory) : NULL;
     size_t count = memory ? GlobalSize(memory) / sizeof(WCHAR) : 0;
     if (text) {
-        mp_terminal_paste(t->model, 1);
-        for (size_t i = 0; i < count && text[i]; i++) {
-            WCHAR value = text[i];
-            if (value == L'\r' && i + 1 < count && text[i + 1] == L'\n') i++;
-            character(t, value, 0);
+        size_t capacity = count * 3 + 16;
+        if (capacity > PASTE_LIMIT) capacity = PASTE_LIMIT;
+        char *payload = malloc(capacity);
+        if (payload) {
+            size_t used = 0;
+            int bracketed = mp_terminal_bracketed_paste(t->model) && paste_has_line_break(text, count);
+            if (t->escape_pending) payload[used++] = 0x1b;
+            if (bracketed) { memcpy(payload + used, "\x1b[200~", 6); used += 6; }
+            used += paste_text(payload + used, capacity - used - 6, text, count);
+            if (bracketed) { memcpy(payload + used, "\x1b[201~", 6); used += 6; }
+            t->escape_pending = 0;
+            t->surrogate = 0;
+            t->scroll = t->selected = t->selecting = 0;
+            mp_terminal_paste_text(t->model, payload, used);
+            free(payload);
+            caret(t);
+            InvalidateRect(hwnd, NULL, FALSE);
         }
-        if (t->surrogate) { t->surrogate = 0; input(t, 0xfffd, 0); }
-        mp_terminal_paste(t->model, 0);
         GlobalUnlock(memory);
     }
     CloseClipboard();
@@ -384,6 +427,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
             int k = key(wp);
             if (k) {
                 t->scroll = t->selected = 0;
+                t->escape_pending = k == VTERM_KEY_ESCAPE;
                 int repeats = LOWORD(lp); if (!repeats) repeats = 1;
                 for (int i = 0; i < repeats; i++) mp_terminal_key(t->model, k, mod);
                 caret(t);
@@ -409,6 +453,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
             int mod = modifiers();
             if (message == WM_LBUTTONDOWN) SetFocus(hwnd);
             if (mp_terminal_mouse_mode(t->model) && !(mod & VTERM_MOD_SHIFT)) {
+                t->escape_pending = 0;
                 if (message == WM_LBUTTONDOWN) SetCapture(hwnd);
                 if (message == WM_LBUTTONUP && GetCapture() == hwnd) ReleaseCapture();
                 mp_terminal_mouse(t->model, index / t->cols, index % t->cols, message == WM_MOUSEMOVE ? 0 : 1, message == WM_LBUTTONDOWN, mod);
@@ -420,7 +465,11 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
                 SetCapture(hwnd);
             } else if (t->selecting) {
                 t->end = index;
-                if (message == WM_LBUTTONUP) { t->selecting = 0; ReleaseCapture(); }
+                if (message == WM_LBUTTONUP) {
+                    t->selecting = 0;
+                    if (t->anchor == t->end) t->selected = 0;
+                    ReleaseCapture();
+                }
             } else return 0;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;

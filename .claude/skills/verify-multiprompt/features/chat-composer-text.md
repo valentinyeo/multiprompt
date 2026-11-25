@@ -1,6 +1,6 @@
 # Chat composer text
 
-Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-composer-text.ps1, tools/chat-composer-text-proof.mjs
+Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connectors/*, src/tmux*, src/message*, src/chat_history_reader.py, tools/verify-chat-delivery/*, src/settings*, src/themes.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-composer-text.ps1, tools/chat-composer-text-proof.mjs
 
 IGSH-760: typing must not flash blank text or a different background between keystrokes. IGSH-731: the message box uses the transcript's grayscale DirectWrite rendering without changing native EDIT input, geometry or caret ownership.
 

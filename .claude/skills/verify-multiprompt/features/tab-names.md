@@ -1,6 +1,6 @@
 # Tab names
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-tab-names.ps1
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/update*, src/release*, src/startup.zig, src/launch_snapshot.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-tab-names.ps1
 
 Tabs whose saved names were not typed by hand (agent or folder names) keep their names and their order across restarts. A restart never renames them to the folder the shell starts in.
 

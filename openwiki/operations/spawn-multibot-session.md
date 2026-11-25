@@ -7,7 +7,7 @@ Use one command for visible live chats and background runners. Run it on the ser
 - Node.js 22, Python 3, tmux, and `flock` on the Unix server.
 - The Multibot reader already installed for the server user.
 - An approved account service key in `MULTIPROMPT_KEY`. A workspace key is limited to its own workspace. Keep keys out of arguments, logs, transcripts, and agent instructions.
-- `--host` names this server's account slot, 0 through 2, on every create. A reopen reuses the slot recorded when the chat was created. There is no default slot. Never publish a local session under another server's slot.
+- `--host` names this server's account slot, 0 through 2, and wins when given. Without it a create uses the slot recorded for that chat, then `MULTIPROMPT_HOST`, then `multiprompt_slot` on this machine's entry in the installed servers file. A reopen reuses the slot recorded when the chat was created. Never publish a local session under another server's slot.
 - Visible chats need signed-in, online desktop and phone clients. Headless chats need account authorization, but no running client.
 - Group placement needs the service's `groups` capability. Older services are refused before setup when a group is requested.
 
@@ -77,9 +77,9 @@ Run the command once per shell runner. Three runners can share one workspace and
 
 ## One roster command
 
-`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
+`node tools/mb.mjs` lists, opens, closes, archives, unarchives, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb pin` and `mb unpin` set or clear a tab's pin through the desktop's own tab bridge. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
 
-These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (pin, lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
+These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (lock, keep-alive, snooze, remind), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
 
 `mb workspace color <workspace> <color>` sets a workspace color from 0 to 7. `mb style <session> --face <0-19> --color <0-7> --photo <png>` sets the face, color, and photo the layout service already stores. A photo is a PNG file; the service keeps the image and a revision on the session.
 

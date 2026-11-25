@@ -3,12 +3,21 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?required}" "${SHIP_SESSION_NAME:?required}" "${CRASH_BOARD_COMMAND:?required}" "${CRASH_GH_COMMAND:?required}"
 "$CRASH_BOARD_COMMAND" context --json >/dev/null
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-install -d "$HOME/.local/share/multiprompt-crash-tickets" "$HOME/.config/multiprompt" "$HOME/.config/systemd/user"
-for file in crash-report-tickets.py crash-reports.py; do
-  install -m 644 "$root/service/$file" "$HOME/.local/share/multiprompt-crash-tickets/$file"
-done
-install -m 644 "$root/service/crash-report-tickets.service" "$HOME/.config/systemd/user/"
-install -m 644 "$root/service/crash-report-tickets.timer" "$HOME/.config/systemd/user/"
+repo=${CRASH_REPORT_TICKETS_REPO:-$HOME/projects/multiprompt-crash-report-tickets}
+if [ -d "$repo/.git" ]; then
+  git -C "$repo" fetch --depth 1 origin master
+  git -C "$repo" checkout -q --detach origin/master
+elif [ -e "$repo" ]; then
+  echo "refusing to install into existing $repo: it is not a git clone" >&2
+  exit 1
+else
+  install -d "$(dirname -- "$repo")"
+  git clone --depth 1 https://github.com/valentinyeo/multiprompt.git "$repo"
+fi
+install -d "$HOME/.config/multiprompt" "$HOME/.config/systemd/user"
+rm -f "$HOME/.config/systemd/user/crash-report-tickets.service" "$HOME/.config/systemd/user/crash-report-tickets.timer"
+sed "s|%h/projects/multiprompt-crash-report-tickets|$repo|g" "$root/service/crash-report-tickets.service" > "$HOME/.config/systemd/user/crash-report-tickets.service"
+install -m 644 "$root/service/crash-report-tickets.timer" "$HOME/.config/systemd/user/crash-report-tickets.timer"
 python3 - <<'PY'
 import json
 import os
@@ -20,4 +29,4 @@ path.write_text('\n'.join(name + '=' + json.dumps(os.environ[name]) for name in 
 PY
 systemctl --user daemon-reload
 systemctl --user enable --now crash-report-tickets.timer
-printf 'Automatic desktop report triage installed\n'
+printf 'Automatic desktop report triage installed from %s\n' "$repo"

@@ -4,7 +4,7 @@
 
 Start with [long chats](features/long-session-chat.md), [real server chats](features/server-chats.md), [/clear](features/chat-clear.md), [Stop](features/chat-stop.md) and [sending](features/chat-message-sending.md). The [feature index](features/README.md) links the full source-action map. [Shortcuts](features/shortcuts.md) maps every SHORTCUT_ROWS entry; the owning files map palette IDs/dynamic families and the [architecture crosswalk](features/sidebar-sessions.md#architecture-feature-crosswalk) maps the design document.
 
-A source-complete map is not a live pass. Each operation names its existing focused journeys and the exact prerequisites for any unreachable full path. Existing ticket rows below retain their historical coverage; do not relabel them covered because a recipe was added. Part A (`w-2567a`, SOFT-2567) supplies real-size seed data; Part B (`w-2567b`, SOFT-2567) supplies real SSH/tmux. Neither is duplicated here. Authenticated accounts, provider CLIs, audio, Computer and missing native input/assertion paths remain separately explicit.
+A source-complete map is not a live pass. Each operation names its existing focused journeys and the exact prerequisites for any unreachable full path. Existing ticket rows below retain their historical coverage; do not relabel them covered because a recipe was added. Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted `server-chat` journey; Part A (`w-2567a`, SOFT-2567) was closed unmerged, so no real-size seed data exists. Authenticated accounts, provider CLIs, audio, Computer and missing native input/assertion paths remain separately explicit.
 
 Per-run source-reader notes, screenshots reviewed and triage stay in scratch notes or the ticket, not this historical table.
 
@@ -40,6 +40,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-807 | Alt+Q retains chat/browser/shell input routing without a pane focus outline in any theme. | pane-layout | journey extended, not run | Paired GitHub Windows runs: pinned pre-fix `9618091700e09f5958a48390449dc5067874d5dd` must fail on margin pixels after input cycles; fixed build must pass with matching reviewed screenshots. No local execution; see GATES.md. |
 | IGSH-813 | A centered pill counts newly arriving messages while reading older transcript text, with jump and dismiss controls. | chat-messages-only, chat-view | journey extended, not yet run | Run Windows native tests and both branch journeys; inspect visible, dismissed and jumped screenshots, exact count transitions, app identity and cleanup. Structured transcript boundary, not arbitrary console redraws. |
 | IGSH-812 | Ctrl+D and a far-right microphone dictate into the Chat View message box without blocking typing. | chat-dictation | Windows proof recorded | [Recording screenshots and exact text](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090); [named stall retains evidence](https://github.com/valentinyeo/multiprompt/actions/runs/40262943273). Recorded PCM and provider-response replay prove app delivery, not acoustic recognition or hardware. |
+| MUBO-291 | Switching to another chat stops the recording, and the abandoned words never reach the chat in front. | chat-dictation-switch | Windows red and green passed | [Red on the journey commit](https://github.com/valentinyeo/multiprompt/actions/runs/45463197212), revision 43191bbe: the audit log held only `start` and `fixture-audio-bytes` after the switch, so the recording kept running. [Green on the fix](https://github.com/valentinyeo/multiprompt/actions/runs/45470820802), revision 2a60b35c: `cancel` and `chat-switch` arrived 361 ms after Ctrl+Tab, `audio-bytes` closed the capture worker, no transcription or delivery stage appeared, and both message boxes stayed empty with idle microphone pixels. Two seeded local chats and real inputs; the offline fixture replaces the microphone and provider only. |
 | IGSH-820 | Pin to Top protects tabs from removal without a marker; session and view locks are removed. | chat-view-everywhere | native regressions and journey updated, not yet run | Run the committed revision on GitHub Windows and inspect the unpin-first notice, normal cross and removed-command screenshots; native tests cover other refused paths and old saved files. |
 | IGSH-717 | Selecting message text and pressing Enter quotes only that selection. | chat-view (`selection-enter-reply`) | branch drag failed; fix awaiting rerun | Run against v0.28.851 as a negative control and the branch on GitHub Windows; first require visible selection, then a nonempty partial quote, focused composer, no send, and inspect both selection screenshots. |
 | IGSH-725 | Docked browser panes keep their native monitor scale when opened or restored. | browser-pane-locked | journey extended, not yet run | Run the branch on GitHub Windows and inspect launch/restart DPI evidence; mixed-DPI hardware must confirm visual sharpness and tab switching. |
@@ -134,48 +135,106 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-847 | Agents can distinguish a created tab from a connected or failed SSH session. | session-open | partial | Journey requires disconnected status and the exact logged nonzero exit code; updated journey and CI not run yet. Successful remote attachment still needs credentials. |
 | IGSH-988 | Agents can rename, rebind, move and close terminal tabs from the command line without touching the active tab. | session-tabs | partial | Journey drives four background tabs through the real local listener, checks the saved layout and a restart; successful remote attachment after a rebind is not verified because no server is supplied. |
 
-## Live results on this pass
+## Live results
 
-These are the supplied real GitHub runs on this branch, not new executions by this documentation edit. Run links use `https://github.com/valentinyeo/multiprompt/actions/runs/<id>`. A tag `chat-view` run does not run the branch-only native painter/tests cited above. The three reconnect stems share one driver run; chat-sync-audit is a Linux diagnostic, not a desktop journey.
+`gh workflow run verify.yml -f feature=all` is the whole map in one run: 78 jobs over 70 journey stems, because `title-bar` and `window-controls` fan out per DPI and browser theme. Two complete runs are recorded here, both real GitHub `windows-latest` desktops:
 
-| Stem | Last run on this pass | Result |
-| --- | --- | --- |
-| appearance | 39871210688, v0.28.821 | passed |
-| workspaces | 39871210688, v0.28.821 | passed |
-| workspace-focus | 39871210688, v0.28.821 | passed |
-| inbox | 39871210688, v0.28.821 | passed |
-| command-palette | 39871210688, v0.28.821 | passed |
-| session-open | 39871210688, v0.28.821 | Previous journey passed; IGSH-847 status assertions not run |
-| session-tabs | not run in this pass; added by IGSH-988 with its own GitHub runs | — |
-| favorites-groups | 39871210688, v0.28.821 | passed |
-| browser-pane-stuck | 39871210688, v0.28.821 | passed |
-| browser-pane-locked | 39871210688, v0.28.821 | passed |
-| palette-order | not run in this pass; added afterwards by IGSH-612 with its own GitHub runs | — |
-| remind-me | not run in this pass; added by IGSH-702 | — |
-| tab-names | not run in this pass; added by IGSH-901 with its own GitHub runs | — |
-| group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
-| pane-layout | 39871210688, v0.28.821 | passed before IGSH-810 mask assertions; dark/light/amoled mask journey not yet run |
-| chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
-| chat-tables | 39871210688, v0.28.821 | passed |
-| sessions | 39871210688, v0.28.821 | failed: focus stays on frame after rename; `real console command wrote file` |
-| safe-updates | 39871584220, branch build | passed; tags refused by design |
-| browser-emulation | 39871584220, branch build | passed; tags refused by design |
-| ssh-tab-reconnect | 39870853585, exe_source=v0.28.820 | passed |
-| ended-remote-session | 39870853585, exe_source=v0.28.820 | passed |
-| saved-remote-workspace | 39870853585, exe_source=v0.28.820 | passed |
-| chat-sync-audit | 39870850652 | passed |
+- master nightly [44866859649](https://github.com/valentinyeo/multiprompt/actions/runs/44866859649) at `cb71094`, 65 passed and 13 failed.
+- branch dispatch [44931544248](https://github.com/valentinyeo/multiprompt/actions/runs/44931544248) at `b6d2d79` (the same app source), 65 passed and 13 failed.
+- PR 1181 map-only verifier [44943330221](https://github.com/valentinyeo/multiprompt/actions/runs/44943330221) at `c0dcf88ee`: eight capped head journeys (including `bot-photo` at 96 and 144) passed with artifacts; the `pstack-verifier` FAIL came from `test-vps (1)` (`chat echo CPU budgets`) and a second `head / verify (bot-photo)` matrix job, not from map selection or journey checks.
 
-Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684784) fails earlier at `renamed tab persisted`. There is no earlier verify.yml sessions run. Keep this product gap separate from harness fixes and do not weaken the journey. Appearance on v0.28.820 failed `IGSH-587: main window did not start maximized` because that release predates the asserted change; use a release containing every change the harness asserts.
+Read the table before trusting a "passed" sentence in a recipe: a recipe describes a journey, it is not a current green board. `bot-photo`, `group-rail` and `command-palette` differ between the two runs, so those three are flaky rather than stable. Dispatch `feature=all` on your own branch when a journey's result decides your change.
+
+| Stem | 2026-11-21 master nightly | 2026-11-21 branch `feature=all` | Decisive line when red |
+| --- | --- | --- | --- |
+| app-icon | passed | passed |  |
+| appearance | passed | passed |  |
+| bot-photo | passed at 96, failed at 144 | passed at both | latest branch run is green; the master failure was fixture cleanup, `RemoveFileSystemItemIOError` |
+| browser-corners | passed | passed |  |
+| browser-emulation | passed | passed |  |
+| browser-own-profile | passed | passed |  |
+| browser-pane-locked | passed | passed |  |
+| browser-pane-stuck | failed | failed | `Connected pane closed, hid, or lost its identity past the opening deadline`; quarantined in `tools/journey-policy.json`, so it warns instead of blocking |
+| browser-switch-speed | passed | passed |  |
+| browser-typing | passed | passed |  |
+| chat-browser-autoload | passed | passed |  |
+| chat-browser-shortcut | passed | passed |  |
+| chat-code-font | passed | passed |  |
+| chat-composer-text | passed | passed |  |
+| chat-delivery | passed | passed |  |
+| chat-dictation | passed | passed |  |
+| chat-dictation-switch | dispatch only | dispatch only | Not in either matrix; run it with `-f feature=chat-dictation-switch` because it needs the offline dictation fixture |
+| chat-double-click | failed | failed | `Chat delivery verification failed`; `verify-chat-double-click/result.json` has the failing check |
+| chat-first-paint | passed | passed |  |
+| chat-focus | failed | failed | `Waited 20 s for palette contains named command Sidebar: hide`; see the harness gaps below |
+| chat-full-history | passed | passed |  |
+| chat-messages-only | failed | failed | `Timed out: arrival at bottom stays clear` |
+| chat-model | passed | passed |  |
+| chat-newest | passed | passed |  |
+| chat-not-sent-remove | passed | passed |  |
+| chat-options | failed | failed | `Waited 45 s for real question and Other cards painted` |
+| chat-send-latency | passed | passed |  |
+| chat-skill-pill | passed | passed |  |
+| chat-slash | passed | passed |  |
+| chat-startup-failure | passed | passed |  |
+| chat-still | failed | failed | `Newest message pixels changed after the first frame` |
+| chat-switch-speed | failed | failed | master: `worst window hang 213.7 ms (limit 100)`; branch: `Waited 20 s for manual tab order saved before creating sessions` |
+| chat-tables | passed | passed |  |
+| chat-view | passed | passed |  |
+| chat-view-everywhere | passed | passed |  |
+| chat-working | passed | passed |  |
+| chat-working-live | passed | passed |  |
+| command-palette | passed | failed | `Waited 20 s for named command Pick repo ... changed the visible screen` |
+| composer-buttons | passed | passed |  |
+| computer-menu | passed | passed |  |
+| favorites-groups | passed | passed |  |
+| group-rail | failed | passed | `Waited 20 s for command palette initialized and owned frame focused` on master only |
+| inbox | passed | passed |  |
+| inbox-no-footer | failed | failed | `Waited 20 s for U toggled published attention after Escape` |
+| inbox-order | passed | passed |  |
+| inbox-space | passed | passed |  |
+| link-picker | passed | passed |  |
+| live-chat-pane | passed | passed |  |
+| palette-order | passed | passed |  |
+| pane-layout | passed | passed |  |
+| permission-rows | passed | passed |  |
+| relaunch-saved-sessions | passed | passed |  |
+| remind-me | passed | passed |  |
+| safe-updates | passed | passed |  |
+| server-chat | passed | passed |  |
+| server-open-group | passed | passed |  |
+| servers | passed | passed |  |
+| session-actions | failed | failed | `Session actions verification failed; inspect result.json` |
+| session-open | passed | passed |  |
+| session-restore | passed | passed |  |
+| session-tabs | passed | passed |  |
+| sessions | passed | passed |  |
+| settings-panel | passed | passed |  |
+| status-card | passed | passed |  |
+| tab-names | passed | passed |  |
+| title-bar | passed at 96, 120 and 144 DPI, light and dark | same |  |
+| tmux-binding | passed | passed |  |
+| whats-new | passed | passed |  |
+| window-controls | failed at 96, passed at 120 and 144 | failed at 96 and 120, passed at 144 | `The property error cannot be found on this object`; see the harness gaps below |
+| workspace-focus | passed | passed |  |
+| workspaces | failed | failed | `Waited 20 s for workspace card dismissed` |
+
+These are real hosted Windows runs, not local execution. A tag run verifies a published release instead of the branch and does not run branch-only native painters.
+
+The three reconnect stems ([ssh-tab-reconnect](features/ssh-tab-reconnect.md), [ended remote session](features/ended-remote-session.md), [saved remote workspace](features/saved-remote-workspace.md)) share one `verify-reconnect.yml` driver run and are not part of `feature=all`. Its master run [44866364630](https://github.com/valentinyeo/multiprompt/actions/runs/44866364630) on 2026-11-21 failed and its logs were already unavailable, so re-dispatch `gh workflow run verify-reconnect.yml --ref <branch> -f exe_source=build` before claiming any of the three. `chat-sync-audit` is a Linux diagnostic job, not a desktop journey.
+
+### Known harness gaps behind the reds above
+
+- **`Sidebar: hide` is not a palette row.** `tools/journey-commands.mjs` maps that name to `SEARCH_SIDEBAR_HIDE_OFFSET`, and `.claude/skills/verify-multiprompt/control-inline-rename.ps1` waits for it when it hides the sidebar. Source keeps the label (`global_sidebar_hide` in `src/ui_words.zon`) and the handler, but nothing appends `SEARCH_SIDEBAR_HIDE_OFFSET` to `g_search_results`. The generated row is `SEARCH_HIDESIDEBAR_OFFSET`, labelled `Sidebar: expand` (`src/main.zig:5989`, `src/command_palette.zig:4661`). Any journey that hides the sidebar through that command cannot pass, which is what `chat-focus` reports on both runs. Fixing it changes what the driver does, so it needs its own branch and a hosted run, not a documentation edit.
+- **`window-controls` at 96 and 120 DPI** read a PowerShell error property that the failing object does not carry, so the job reports a harness exception instead of the real cause.
+
+The other reds need their own artifacts read before anyone calls them a product gap or a flake: `bot-photo` (fixture cleanup), `chat-double-click`, `chat-messages-only`, `chat-options`, `chat-still`, `chat-switch-speed`, `command-palette`, `group-rail`, `inbox-no-footer`, `session-actions`, `workspaces`, `browser-pane-stuck`. Do not weaken a journey to turn one green.
 
 A change that alters a mapped feature updates its map and this table in the same PR.
 
-| IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and a pinned pre-fix red control | chat-messages-only | Run results and screenshot review are recorded in GATES.md; no local builds or tests |
-
-| IGSH-766 | Quiet group headlines without fills, rails or chevrons; headline clicks hide and restore members with saved collapse state. | group-rail | journey updated; GitHub Windows execution pending | This pass uses source checks only; run the identical driver on v0.28.861 for no-fill/no-rail/flush-left failures, then the branch for all four sidebar-headline markers. |
-
 ## IGSH-1289 instant saved chat
 
-`chat-instant` checks saved history before a deliberately delayed connection, first paint below one second, and two pre-connect messages arriving once in order in the production host store. Windows execution pending. Existing send and view shortcuts are reused. No real SSH server or provider response is claimed.
+`chat-instant` checks saved history before a deliberately delayed connection, first paint below one second, and two pre-connect messages arriving once in order in the production host store. It is not dispatchable at this revision: `tools/verify-chat-delivery/instant-chat.ps1` and the `CHAT_INSTANT_PROOF` step remain, but there is no `chat-instant` feature map, so `-f feature=chat-instant` is refused as an unsupported journey. Windows execution pending, and a stem is the missing prerequisite. Existing send and view shortcuts are reused. No real SSH server or provider response is claimed.
 
 ## IGSH-815 full-session history
 

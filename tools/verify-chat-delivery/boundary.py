@@ -1009,10 +1009,11 @@ def completion(remote):
     def reply(line):
         if state().get("slashProof"):
             target = next((arg for arg in ARGS if arg in ("remote-1", "remote-2", "remote-3")), "unknown")
-            owner = "inne" if "sudo -n -H -u inne -- python3 /home/inne/" in " ".join(ARGS) else "login"
-            record("completion-owner.jsonl", target=target, owner=owner, request=line.strip())
             fields = line.rstrip("\n").split("\t")
-            if target != "remote-1" or owner != "inne":
+            cwd = fields[4] if len(fields) > 4 else ""
+            owner = "inne" if cwd == "/home/inne" or cwd.startswith("/home/inne/") else "login"
+            record("completion-owner.jsonl", target=target, owner=owner, request=line.strip())
+            if target != "remote-3" or owner != "inne":
                 return f"@mp\t{fields[0]}\t{fields[1]}\terror\t-\t0\n@@MP_END@@\n"
             return f"@mp\t{fields[0]}\t{fields[1]}\tok\t/home/inne/projects/sample\t1\nS\tverify-owner\t\tOwner account skill\n@@MP_END@@\n"
         helper.CACHE.write_text(json.dumps({"key": helper.cache_key(), "at": time.time(), "commands": []}), encoding="utf-8")
@@ -1219,13 +1220,14 @@ def reader_namespace():
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
         fixture.install(namespace, ROOT, record)
-    if state().get("name") in ("working-live", "steady-live"):
+    if state().get("name") in ("working-live", "steady-live", "fresh-start-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
         spec = importlib.util.spec_from_file_location("working_host", fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live",
+                        fresh=state().get("name") == "fresh-start-live")
         original_push = namespace["events_push"]
 
         def working_push(subscriptions):

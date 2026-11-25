@@ -50,6 +50,7 @@ Journey: sessions, tab-names, session-actions. UNREACHABLE for dynamic remote na
 | `SEARCH_SHELL_DIAG_OFFSET` | Ctrl+K, type **copy session diagnostics**, then select the matching action with Up/Down and Enter. Follow `identity` above. |
 | `SEARCH_SYNC_NAME_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_COPY_ID` | Right-click the intended tab, then choose **Copy chat ID**. Follow `identity` above. |
+| `SEARCH_RENAME_SYNC_OFFSET` | Ctrl+K, search for **rename session**. Follow `identity` above. |
 | `SEARCH_TABCTX_RENAME` | Right-click the intended tab, then choose **Rename**. Follow `identity` above. |
 | `SEARCH_THREADTITLE_OFFSET` | Ctrl+K, type **thread title**, then select the matching action with Up/Down and Enter. Follow `identity` above. |
 
@@ -88,6 +89,7 @@ Journey: favorites-groups, group-rail, session-tabs. UNREACHABLE for full multi-
 | `SEARCH_TABCTX_GROUP_REMOVE` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_KEEPALIVE` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_MUTE` | Right-click the intended tab, then choose **Mute Tab / Unmute Tab**. Follow `organize` above. |
+| `SEARCH_PIN_TOP_OFFSET` | Ctrl+K, search for **pin tab to top**. Follow `organize` above. |
 | `SEARCH_TABCTX_PIN_TOP` | Right-click the intended tab, then choose **Pin to Top / Unpin from Top**. Follow `organize` above. |
 | `SEARCH_TABSORT_INBOX_OFFSET` | Ctrl+K, search for **tab order**. Follow `organize` above. |
 | `SEARCH_TABSORT_MANUAL_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
@@ -102,7 +104,10 @@ Journey: session-actions; focused reconnect maps cover disconnect boundaries. UN
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
+| `SEARCH_ARCHIVE_OFFSET` | Ctrl+K, search for **archive session**. Follow `close` above. |
 | `SEARCH_CLOSE_DISCONNECTED_OFFSET` | Ctrl+K, search for **Close all disconnected sessions**. Follow `close` above. |
+| `SEARCH_CLOSETAB_OFFSET` | Ctrl+K, search for **close tab**. Follow `close` above. |
+| `SEARCH_END_TMUX_OFFSET` | Ctrl+K, search for **end tmux session**. Follow `close` above. |
 | `SEARCH_TABCTX_ARCHIVE` | Right-click the intended tab, then choose **Archive / close session**. Follow `close` above. |
 | `SEARCH_TABCTX_CLOSE_DISCONNECTED` | Right-click the intended tab, then choose **Close all disconnected sessions**. Follow `close` above. |
 | `SEARCH_TABCTX_END_TMUX` | Right-click the intended tab, then choose **Delete session**. Follow `close` above. |
@@ -120,6 +125,7 @@ UNREACHABLE until Part B supplies multiple live, waiting, archived and unattache
 | --- | --- |
 | `SEARCH_ARCHIVED_OFFSET` | UNREACHABLE since SOFT-2444: Ctrl+K lists active sessions only and nothing appends these rows. Use `SEARCH_ARCHIVED_VIEW_OFFSET` and the All Sessions Archived tab instead. |
 | `SEARCH_ARCHIVED_VIEW_OFFSET` | Ctrl+K, search for **archived sessions**. Follow `overview` above. |
+| `SEARCH_REOPEN_SERVER_SHELL_OFFSET` | On a server tab, Ctrl+K, search for **reopen server shell**, then pick one of the detached sessions it lists for that server. Attaching the same session twice is a no-op. Follow `overview` above. |
 | `SEARCH_SESSION_OVERVIEW_MENU_OFFSET` | Ctrl+K, search for **show all sessions**. Follow `overview` above. |
 | `SEARCH_SESSION_OVERVIEW_ROW_OFFSET` | Open **All Sessions**, filter if needed, then select the displayed session row. Follow `overview` above. |
 | `SEARCH_UNARCHIVE_HIDDEN_OFFSET` | Ctrl+K, type **restore waiting**, then select the matching action with Up/Down and Enter. Follow `overview` above. |

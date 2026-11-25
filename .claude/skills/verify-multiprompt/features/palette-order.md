@@ -1,6 +1,6 @@
 # Palette order
 
-Source files: src/command_palette.zig, src/shortcuts.zig, src/search*, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-palette-order.ps1
+Source files: src/command_palette.zig, src/shortcuts.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-palette-order.ps1
 
 Verify on: push
 

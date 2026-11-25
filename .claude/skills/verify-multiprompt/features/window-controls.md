@@ -1,6 +1,6 @@
 # Window controls
 
-Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-window-controls.ps1
+Source files: src/window*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/window-controls.ps1, .claude/skills/verify-multiprompt/window-controls-native.cs
 
 ## Sub-features
 

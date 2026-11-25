@@ -1,6 +1,6 @@
 # Own browser profile per workspace
 
-Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/mp_zsb.sh, tools/vps-multiprompt-browser.sh, tools/agent-notifications/user_browser.py, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
 
 Verify on: push
 
@@ -57,13 +57,27 @@ No new UI means no profile opt-in UI, not absence of the Google sign-in action. 
 The optional `owner_browser_proof` dispatch input adds a real Unix-user round
 trip after initial shared/own pane setup. This explicit mode tests owner access,
 not the separate profile-restart journey. Its JSON contains `target`, `knownHost`, `session`
-and `tunnel`; the session must start with `mp-proof-`. The workflow uploads
-only a fresh SSH public key before building. Authorize that key temporarily,
-restricted to `tools/agent-notifications/owner_browser_live.py` in an isolated
-proof directory. That directory holds `proof-config.json` with `user` and
-`session`, the wrapper, and a separate broker/tunnel. No production socket or
-worker is used. Revoke the public key after verification; the private key
-never leaves the disposable runner. Retain `owner-browser-live.json`,
-`owner-browser-pane.png` and `owner-browser-desktop.png` as proof. The round trip
-requires the actual Unix user's open/read/click plus foreign-session and
-global-command denial against the real hosted native browser.
+and `tunnel`; the session must start with `mp-proof-`. The proof directory is a
+checkout of this repository, so `tools/agent-notifications/owner_browser_live.py`
+can read the reader and the shipped tools; it also holds `proof-config.json`
+with `user` and `session`, and the owner broker plus the reverse tunnel. The
+workflow uploads only a fresh SSH public key before building. Authorize that key
+temporarily, restricted to `owner_browser_live.py` in that isolated directory.
+Revoke the public key after verification; the private key never leaves the
+disposable runner.
+
+The round trip exercises the real owner path, not a copy: it installs the shared
+runtime for the owner through the same delegation command the app uses, requires
+`~/.multiprompt-runtime/zsb` to be executable, registers the proof session for
+that Unix user, and drives `zsb` with the delegating environment including
+`ZSB_SOCKET=/tmp/mp-browser-<bridge uid>/control.sock`. No per-user copy and no
+private socket path is used. It requires the actual Unix user's open/read/click
+plus foreign-session and global-command denial against the real hosted native
+browser. Retain `owner-browser-live.json`, `owner-browser-pane.png` and
+`owner-browser-desktop.png` as proof; `owner-browser-live.json` also records the
+relay endpoint that answered.
+
+The reproducible gate for this chain is `tools/owner-chat-browser.test.py` in
+`test.yml`: it creates the two OS users on an Ubuntu runner and fails when the
+runtime CLI or the relay is not in place. It needs no server and touches no live
+host.

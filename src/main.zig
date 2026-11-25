@@ -2383,7 +2383,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const leave_cursor = @import("hover_track.zig").Cursor{ .x = leave_pt.x, .y = leave_pt.y, .over_window = WindowFromPoint(leave_screen) == hwnd };
             const pointer_in_sidebar = !app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and
                 @import("hover_track.zig").shouldRearm(leave_client.right, leave_client.bottom, leave_cursor);
-            if (!pointer_in_sidebar and @import("sidebar.zig").thawSidebarOrder()) {
+            if (!pointer_in_sidebar and app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_room_hover != null) {
@@ -2420,7 +2420,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const pointer_in_sidebar = !app_state.g_hide_sidebar and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W();
             if (pointer_in_sidebar) {
                 @import("sidebar.zig").freezeSidebarOrder();
-            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+            } else if (app_state.g_sidebar_view == null and @import("sidebar.zig").thawSidebarOrder()) {
                 _ = InvalidateRect(hwnd, null, 0);
             }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {

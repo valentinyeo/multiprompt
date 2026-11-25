@@ -1,6 +1,6 @@
 # Settings panel
 
-Source files: src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-settings-panel.ps1
+Source files: src/settings*, src/themes.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/settings-panel.ps1
 
 Verify on: push
 

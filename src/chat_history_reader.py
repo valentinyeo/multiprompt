@@ -29,10 +29,12 @@ HOME = Path.home()
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
+_COMMAND_MESSAGE = re.compile(r"<command-message>\s*(.*?)\s*</command-message>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
-_MENTION_WIRE_NOTE = re.compile(r"\n\n\(This line is addressed to .*? or relay it unless you are also asked\.\)\s*\Z", re.S)
+_MENTION_WIRE_NOTE = re.compile(r"\n\n\((?:This line is addressed to .*? or relay it unless you are also asked|Valentin wrote this to you\. It also mentions .*? or relay it)\.\)\s*\Z", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
+_LOCAL_COMMAND_OUTPUT = re.compile(r"<local-command-(stdout|stderr)>(.*?)</local-command-\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
 SEARCH_ASCII_FOLDS = "ßİŉſǰẖẗẘẙẚẞKﬀﬁﬂﬃﬄﬅﬆ"
 END = "@@MP_END@@"
@@ -224,18 +226,17 @@ def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
         text = re.sub(r"^[ \t]*</?pasted_content\b[^>]*>[ \t]*\r?\n?", "", text, flags=re.I | re.M)
         text = re.sub(r"</?pasted_content\b[^>]*>", " ", text, flags=re.I).strip()
-    if "<command-name>" in text:
-        name = _COMMAND_NAME.search(text)
-        if name:
-            args = _COMMAND_ARGS.search(text)
-            command = name.group(1).strip()
-            if command and not command.startswith("/"):
-                command = "/" + command
-            arguments = args.group(1).strip() if args else ""
-            arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
-            if not command:
-                return arguments
-            return command_reply(command, arguments)
+    name = _COMMAND_NAME.search(text) if "<command-name>" in text else _COMMAND_MESSAGE.search(text) if "<command-message>" in text else None
+    if name:
+        args = _COMMAND_ARGS.search(text)
+        command = name.group(1).strip()
+        if command and not command.startswith("/"):
+            command = "/" + command
+        arguments = args.group(1).strip() if args else ""
+        arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
+        if not command:
+            return arguments
+        return command_reply(command, arguments)
     if "<local-command-" in text:
         text = _LOCAL_COMMAND.sub("", text)
     return text
@@ -822,10 +823,15 @@ def conversation_event(event, agent):
         text = visible_prompt(clean_command_markup(text))
     if not text.strip():
         return None
-    identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
+    if event.get("kind") in ("user", "assistant"):
+        identity = event.get("message_id") or event.get("id") or event.get("uuid") or ""
+    else:
+        identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
+    if isinstance(identity, str) and identity and role == "assistant":
+        result["reply_id"] = ("hax-" + identity) if event.get("kind") == "assistant" else identity
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -1080,18 +1086,62 @@ def pair_tool_rows(rows):
     return paired
 
 
-def settlement_event(event, agent):
+ORIGINAL_PROMPT = "Original prompt:"
+
+
+def blocked_prompt(event):
+    ending = event.get("promptSubmitEnding") if isinstance(event, dict) else None
+    if not isinstance(ending, dict) or ending.get("promptKept") is not False:
+        return None
+    content = event.get("content")
+    if not isinstance(content, str):
+        return None
+    index = content.rfind(ORIGINAL_PROMPT)
+    if index < 0:
+        return None
+    text = visible_prompt(content[index + len(ORIGINAL_PROMPT):].strip()).strip()
+    return text or None
+
+
+def unknown_command(event):
+    if not isinstance(event, dict) or event.get("isSidechain"):
+        return None
+    kind = event.get("type")
+    content = event.get("content")
+    if (kind == "system" and event.get("subtype") == "informational" and
+            event.get("level") in ("warning", "error") and isinstance(content, str) and
+            content.startswith(("Unknown command: /", "Args from unknown skill: "))):
+        return content.splitlines()[0].strip()
+    if kind != "user" or event.get("isMeta"):
+        return None
+    message = event.get("message")
+    text = message.get("content") if isinstance(message, dict) else None
+    if isinstance(text, list):
+        text = "\n".join(part.get("text", "") for part in text
+                         if isinstance(part, dict) and isinstance(part.get("text"), str))
+    if not isinstance(text, str):
+        return None
+    for match in _LOCAL_COMMAND_OUTPUT.finditer(text):
+        output = html.unescape(match.group(2)).strip()
+        if output.startswith(("Unknown command: /", "Args from unknown skill: ")):
+            return output
+    return None
+
+
+def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
     kind = event.get("type")
     operation = event.get("operation")
     content = event.get("content", "")
-    if kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
+    blocked = blocked_prompt(event) if blocked_settlement else None
+    rejected = unknown_command(event)
+    if blocked is not None:
+        fact = dict(operation="blocked", content=blocked)
+    elif rejected is not None:
+        fact = dict(operation="rejected", content=rejected)
+    elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
         fact = dict(operation=operation, content=content if isinstance(content, str) else "")
-    elif (kind == "system" and event.get("subtype") == "informational" and
-          event.get("level") in ("warning", "error") and isinstance(content, str) and
-          content.startswith(("Unknown command: /", "Args from unknown skill: "))):
-        fact = dict(operation="rejected", content=content)
     else:
         return None
     timestamp = event.get("timestamp", "")
@@ -1717,7 +1767,7 @@ def resolve_response_path(q, source=None, as_owner=False):
         history = host_paths(agent, sid)["history"]
         if history.is_file():
             return agent, sid, history, None
-    if agent == "hax":
+    if agent == "hax" and hosted:
         return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if agent == "pi":
         try:
@@ -2002,6 +2052,7 @@ def search_response(q, path, agent, sid):
 
 def tail_view(q, agent, fill):
     return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(q.get("blocked_settlement")),
             bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
             bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
 
@@ -2171,7 +2222,7 @@ def response(q, source=None, as_owner=False, resolved=None):
                     elif operation in ("enqueue", "remove") and stamp >= previous[0]:
                         queue_stamps[content] = (stamp, timestamp)
             if message is None and q.get("settlement"):
-                fact = settlement_event(event, agent)
+                fact = settlement_event(event, agent, bool(q.get("blocked_settlement")))
                 if fact:
                     messages.insert(0, fact)
             if q.get("source_offsets"):
@@ -2633,7 +2684,7 @@ def message_expire(db, provider, sid):
     def idle(rows):
         if not rows:
             return rows
-        if host_turn_busy(provider, sid):
+        if host_turn_busy(provider, sid) or host_fresh_pending(provider, sid):
             return []
         held = host_held(provider, sid)
         return [row for row in rows if row[0] not in held]
@@ -2816,10 +2867,18 @@ HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', '
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
 HOST_NIGHTLY_HOUR = 4
+HOST_ROTATE_RECHECK = 60
+HOST_START_RETRY_STEPS = (0, 30, 90, 180, 240)
 HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
 HOST_FRESH_RETRY_WAIT = 120
+HOST_FRESH_HOLD_GRACE = 60
+HOST_FRESH_PENDING_WAITS = dict(HOST_FRESH_TIMEOUTS, resume_failed=HOST_FRESH_RETRY_WAIT)
+HOST_FRESH_CONTEXT_LIMIT = 6000
+HOST_FRESH_CONTEXT_MESSAGE_LIMIT = 1200
+HOST_FRESH_HANDOVER_NOISE = re.compile(
+    r"(?:^Reloaded skills:|hit your \d+-hour limit|hit your .* limit|^You've hit your )", re.I | re.M)
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -3023,6 +3082,16 @@ def host_command(provider, sid):
         if resolved is None:
             return None
         parts = [resolved]
+    extra = config.get("args")
+    return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+
+
+def host_named_command(provider, sid):
+    config = host_config(provider, sid) or {}
+    command = config.get("command")
+    parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
+    if parts and os.path.isabs(parts[0]) and Path(parts[0]).is_relative_to(HOME):
+        parts = [host_binary_name(provider)] + parts[1:]
     extra = config.get("args")
     return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
 
@@ -3521,6 +3590,7 @@ def host_stop(provider, sid, force=False):
             time.sleep(0.125)
     host_clear_stale(provider, sid)
     host_clear_pane(provider, sid)
+    host_owner_session_release(provider, sid)
     return dict(status="stopped")
 
 
@@ -3727,6 +3797,40 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_owner_browser_endpoint():
+    return '/tmp/mp-browser-' + str(os.getuid()) + '/control.sock'
+
+
+def host_owner_sessions_dir():
+    return HOME / '.local/state/multiprompt/owner-sessions'
+
+
+def host_owner_session_register(provider, sid, user):
+    name = host_chat_name(provider, sid)
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except (KeyError, AttributeError):
+        return None
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name) or type(uid) is not int or uid <= 0:
+        return None
+    path = host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')
+    try:
+        host_write(path, dict(session=name, uid=uid, at=time.time()))
+    except OSError:
+        return None
+    return path
+
+
+def host_owner_session_release(provider, sid):
+    name = host_chat_name(provider, sid)
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+        return
+    try:
+        (host_owner_sessions_dir() / (hashlib.sha256(name.encode('utf-8')).hexdigest() + '.json')).unlink()
+    except OSError:
+        pass
+
+
 def host_agent_env(provider, sid):
     config = host_config(provider, sid) or {}
     env = dict(os.environ)
@@ -3865,18 +3969,40 @@ def host_settings_event(provider, sid, tmux, session):
     host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied, mode=host_permission_mode(provider, sid, session.get("state"))))
 
 
+def host_owner_launch(provider, sid, owner):
+    user, home = owner
+    env = {"PATH": "/usr/bin:/bin"}
+    prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
+              "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider,
+              "MULTIBOT_APP_VERSION=" + globals().get('MULTIBOT_APP_VERSION', '')]
+    tmux = host_chat_name(provider, sid)
+    if tmux:
+        prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
+    prefix.append("ZSB_SOCKET=" + host_owner_browser_endpoint())
+    shell = ["/bin/sh", "-l", "-c"]
+    folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
+    setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+    return prefix, shell, setup, env
+
+
+def host_agent_ready(provider, sid):
+    owner = conversation_owner(host_cwd(provider, sid), include_home=True)
+    if owner is None or owner[1] == HOME:
+        return host_command(provider, sid) is not None
+    prefix, shell, setup, env = host_owner_launch(provider, sid, owner)
+    try:
+        probe = subprocess.run(prefix + shell + [setup + 'command -v "$1" >/dev/null', "agent-ready", host_named_command(provider, sid)[0]],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
 def host_agent_start(provider, sid, mode=None):
     cwd = host_cwd(provider, sid)
     owner = conversation_owner(cwd, include_home=True)
     cross_owner = owner is not None and owner[1] != HOME
-    if cross_owner:
-        config = host_config(provider, sid) or {}
-        command = config.get("command")
-        base = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
-        extra = config.get("args")
-        base = base + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
-    else:
-        base = host_command(provider, sid)
+    base = host_named_command(provider, sid) if cross_owner else host_command(provider, sid)
     if base is None:
         return None
     if provider == "claude":
@@ -3902,17 +4028,8 @@ def host_agent_start(provider, sid, mode=None):
     else:
         command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
     if cross_owner:
-        user, home = owner
-        env = {"PATH": "/usr/bin:/bin"}
-        prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
-                  "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider,
-                  "MULTIBOT_APP_VERSION=" + globals().get('MULTIBOT_APP_VERSION', '')]
-        tmux = host_chat_name(provider, sid)
-        if tmux:
-            prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
-        shell = ["/bin/sh", "-l", "-c"]
-        folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
-        setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+        config = host_config(provider, sid) or {}
+        prefix, shell, setup, env = host_owner_launch(provider, sid, owner)
         if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku", "fable"):
             setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; '
         source = host_reader_source()
@@ -3937,6 +4054,7 @@ def host_agent_start(provider, sid, mode=None):
             else:
                 check_command = "--resume" if probe.returncode == 74 else "--session-id"
             command[-2:] = [check_command, native]
+        host_owner_session_register(provider, sid, owner[0])
         command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
         try:
             return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -4024,10 +4142,23 @@ def host_history_append(provider, sid, session, row):
                timestamp=row.get("timestamp") or datetime.now().isoformat())
     path = host_paths(provider, sid)["history"]
     data = (json.dumps(dict(type="multiprompt_history", row=row), separators=(",", ":")) + "\n").encode("utf-8")
+    tail = session.get("history_tail") if isinstance(session.get("history_tail"), dict) else None
+    if (row.get("role") == "assistant" and isinstance(tail, dict) and tail.get("id") == row["id"] and isinstance(tail.get("start"), int) and
+            isinstance(tail.get("end"), int) and path.is_file() and path.stat().st_size == tail["end"]):
+        with path.open("r+b") as stream:
+            stream.truncate(tail["start"])
+            stream.seek(tail["start"])
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        session["history_tail"] = dict(id=row["id"], start=tail["start"], end=tail["start"] + len(data))
+        return
+    start = path.stat().st_size if path.is_file() else 0
     with path.open("ab") as stream:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+    session["history_tail"] = dict(id=row["id"], start=start, end=start + len(data))
 
 
 @contextmanager
@@ -4103,6 +4234,7 @@ def host_fresh_archive(provider, sid, tmux, session):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        session["history_tail"] = None
         session["state"]["display_history"] = True
         host_state_write(provider, sid, session["state"])
     finally:
@@ -4153,8 +4285,101 @@ def host_fresh_note_transcript(state, transcript):
         return
 
 
+def host_fresh_phase_wait(fresh):
+    if not isinstance(fresh, dict):
+        return None
+    wait = HOST_FRESH_PENDING_WAITS.get(fresh.get("phase"))
+    started = fresh.get("started")
+    if not isinstance(wait, int) or type(started) not in (int, float):
+        return None
+    if time.time() - started > wait + HOST_FRESH_HOLD_GRACE:
+        return None
+    return wait
+
+
+def host_fresh_pending(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return False
+    return host_fresh_phase_wait(host_session_state(provider, sid).get("fresh_start")) is not None
+
+
 def host_fresh_busy(session):
     return session["turn"] is not None or session["sends"] or session["parked"]
+
+
+def host_fresh_handover_usable(text):
+    if not isinstance(text, str):
+        return False
+    raw = text.strip()
+    if not raw or raw.startswith("---\n"):
+        return False
+    if "<command-message>" in raw or "<local-command-" in raw:
+        return False
+    cleaned = clean_command_markup(raw).strip()
+    if not cleaned or HOST_FRESH_HANDOVER_NOISE.search(cleaned):
+        return False
+    return True
+
+
+def host_fresh_handover_pick(chunks):
+    if not isinstance(chunks, dict):
+        return None
+    values = [text.strip() for text in chunks.values() if host_fresh_handover_usable(text)]
+    if not values:
+        return None
+    return max(values, key=len)
+
+
+def host_fresh_context_from_rows(rows):
+    lines = []
+    for row in rows:
+        text = row.get("text")
+        role = row.get("role")
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        text = text.strip()
+        if not text or text.startswith("---\n"):
+            continue
+        if role == "assistant" and not host_fresh_handover_usable(text):
+            continue
+        if len(text) > HOST_FRESH_CONTEXT_MESSAGE_LIMIT:
+            text = text[:HOST_FRESH_CONTEXT_MESSAGE_LIMIT] + " [shortened]"
+        lines.append(("You" if role == "assistant" else "User") + ": " + text)
+    kept, size = [], 0
+    for line in reversed(lines):
+        size += len(line.encode("utf-8")) + 2
+        if size > HOST_FRESH_CONTEXT_LIMIT:
+            break
+        kept.append(line)
+    kept.reverse()
+    return "\n\n".join(kept) if kept else "No earlier messages were saved."
+
+
+def host_fresh_recent_context(provider, sid, tmux):
+    try:
+        rows = host_switch_rows(provider, sid, tmux)
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        rows = []
+    return host_fresh_context_from_rows(rows)
+
+
+def host_fresh_handover_from_history(provider, sid, tmux):
+    body = host_fresh_recent_context(provider, sid, tmux)
+    if body == "No earlier messages were saved.":
+        return None
+    return ("No handover reply was captured. Recent conversation before the fresh start, oldest first:\n\n" + body)
+
+
+def host_fresh_resume_body(provider, sid, tmux, fresh, saved):
+    text = saved.get("text") if isinstance(saved, dict) else None
+    if host_fresh_handover_usable(text):
+        return ("The host read only your saved handover file, " + fresh["file"] + ":\n\n" + text.strip() +
+                "\n\nAcknowledge reading this handover and name the next unfinished task. "
+                "Do not execute work or call tools in this first reply.")
+    context = host_fresh_recent_context(provider, sid, tmux)
+    return ("The saved handover did not contain usable text. Recent context from before the fresh start:\n\n" +
+            context + "\n\nAcknowledge what you can continue from and name the next unfinished task. "
+            "Do not execute work or call tools in this first reply.")
 
 
 def host_fresh_handover_path(provider, sid):
@@ -4389,13 +4614,6 @@ def host_fresh_drain_queued(provider, sid, tmux, session):
     return True
 
 
-def host_fresh_reply(texts):
-    if not isinstance(texts, dict):
-        return ""
-    replies = [value.strip() for value in texts.values() if isinstance(value, str) and value.strip()]
-    return max(replies, key=len) if replies else ""
-
-
 def host_fresh_finish(provider, sid, tmux, session, status):
     fresh = session["state"].get("fresh_start")
     if not isinstance(fresh, dict):
@@ -4409,7 +4627,9 @@ def host_fresh_finish(provider, sid, tmux, session, status):
         return
     if fresh["phase"] != "handover":
         return
-    text = host_fresh_reply(fresh.get("text"))
+    text = host_fresh_handover_pick(fresh.get("text"))
+    if not text:
+        text = host_fresh_handover_from_history(provider, sid, tmux)
     if status != "completed" or not text or len(text.encode("utf-8")) > HOST_EVENT_TEXT_LIMIT:
         host_fresh_error(provider, sid, tmux, session, "The handover did not finish.")
         return
@@ -4450,23 +4670,26 @@ def host_fresh_resume(provider, sid, tmux, session):
     if not saved or not isinstance(saved.get("text"), str) or not saved["text"].strip():
         host_fresh_error(provider, sid, tmux, session, "Could not read the saved handover.")
         return
+    body = host_fresh_resume_body(provider, sid, tmux, fresh, saved)
     if fresh.get("switch_from") in HOST_AI_NAMES:
         prompt = ("You are the same chat, now running on " + HOST_AI_NAMES[provider] + " instead of " +
                   HOST_AI_NAMES[fresh["switch_from"]] + ". Your name, picture, address and board login "
-                  "are unchanged. Your earlier conversation stays visible above as display history, not context. "
-                  "The host read only your saved handover file, " + fresh["file"] + ":\n\n" + saved["text"] +
-                  "\n\nAcknowledge reading this handover and name the next unfinished task. "
-                  "Do not execute work or call tools in this first reply.")
+                  "are unchanged. Your earlier conversation stays visible above as display history, not context. " +
+                  body)
     elif session["state"].get("valentin_mode"):
-        handover_path = (host_paths(provider, sid)["root"] / fresh["file"]).resolve()
-        prompt = ("/valentin-mode Fresh start: read the handover at " + str(handover_path) +
-                  ", re-run /board-drain, resume.")
+        text = saved.get("text") if isinstance(saved, dict) else None
+        if host_fresh_handover_usable(text):
+            prompt = ("/valentin-mode Fresh start. The host inlined your saved handover:\n\n" + text.strip() +
+                      "\n\nRe-run /board-drain and resume. Acknowledge the handover and name the next unfinished task. "
+                      "Do not execute work or call tools in this first reply.")
+        else:
+            context = host_fresh_recent_context(provider, sid, tmux)
+            prompt = ("/valentin-mode Fresh start. The saved handover was not usable. Recent context:\n\n" + context +
+                      "\n\nRe-run /board-drain and resume. Acknowledge what you can continue from and name the next "
+                      "unfinished task. Do not execute work or call tools in this first reply.")
     else:
         prompt = ("You are the same chat after a fresh start. Your name, picture, address and board login "
-                  "are unchanged. Your previous conversation is display history, not context. "
-                  "The host read only your saved handover file, " + fresh["file"] + ":\n\n" + saved["text"] +
-                  "\n\nAcknowledge reading this handover and name the next unfinished task. "
-                  "Do not execute work or call tools in this first reply.")
+                  "are unchanged. Your previous conversation is display history, not context. " + body)
     if not host_fresh_send(provider, sid, tmux, session, prompt):
         host_fresh_error(provider, sid, tmux, session, "Could not deliver the saved handover.")
         return
@@ -4820,7 +5043,7 @@ def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
-                   control_wait={})
+                   control_wait={}, hax_reply=None, history_tail=None)
 
 
 def host_db(provider, sid, tmux, session):
@@ -4843,7 +5066,7 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
     inflight = session.get("inflight")
     isolated = isinstance(inflight, dict) and inflight.get("room_scope") is not None
     if not isolated and kind == "text.done" and isinstance(payload, dict) and payload.get("text"):
-        if isinstance(fresh, dict) and fresh.get("phase") == "handover":
+        if isinstance(fresh, dict) and fresh.get("phase") == "handover" and host_fresh_handover_usable(payload["text"]):
             fresh["text"][item or "reply"] = payload["text"]
         host_history_append(provider, sid, session, dict(role="assistant", text=payload["text"], id=item))
     elif not isolated and kind == "item.started" and isinstance(payload, dict) and payload.get("type") == "tool_call":
@@ -5023,6 +5246,20 @@ def host_turn_started(provider, sid, tmux, session, entry):
                turn=entry["turn"])
 
 
+def host_rejected_command(provider, sid, tmux, session, event):
+    output = unknown_command(event)
+    if output is None or not output.startswith("Unknown command: /"):
+        return
+    wanted = " ".join(output.split(":", 1)[1].split())
+    for item in session.get("sends") or []:
+        if item.get("accepted") or not item.get("text"):
+            continue
+        sent = " ".join(item["text"].split())
+        if sent == wanted or sent.startswith(wanted + " "):
+            host_unsent(provider, sid, tmux, session, item["id"], "unknown_command")
+            return
+
+
 def host_user_event(provider, sid, tmux, session, event):
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     for block in message.get("content") if isinstance(message.get("content"), list) else []:
@@ -5031,6 +5268,7 @@ def host_user_event(provider, sid, tmux, session, event):
             host_event(provider, sid, tmux, session, "item.done",
                        dict(status="failed" if failed else "completed", output=host_tool_output(block.get("content")),
                             is_error=failed), block["tool_use_id"])
+    host_rejected_command(provider, sid, tmux, session, event)
     host_bind_uuid(provider, sid, tmux, session, event)
 
 
@@ -5563,6 +5801,10 @@ def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
     if kind == "system":
+        if event.get("subtype") == "informational":
+            host_blocked_prompt(provider, sid, tmux, session, event)
+            host_rejected_command(provider, sid, tmux, session, event)
+            return
         if event.get("subtype") == "init":
             session["ready"] = True
             capabilities = event.get("capabilities")
@@ -5638,6 +5880,18 @@ def host_claude_open(provider, sid, tmux, session):
 
 def host_cursor_open(provider, sid, tmux, session):
     pass
+
+
+def host_blocked_prompt(provider, sid, tmux, session, event):
+    prompt = blocked_prompt(event)
+    if prompt is None:
+        return
+    wanted = squashed(prompt)
+    entry = next((item for item in session.get("sends") or []
+                  if not item.get("accepted") and item.get("text") and squashed(item["text"]) == wanted), None)
+    if entry is None:
+        return
+    host_unsent(provider, sid, tmux, session, entry["id"], "blocked_by_hook")
 
 
 def host_claude_write(provider, sid, session, token, text):
@@ -6266,6 +6520,7 @@ def host_pi_set_model(provider, sid, tmux, session, request):
 def host_hax_open(provider, sid, tmux, session):
     session["ready"] = True
     session["hax_message"] = 0
+    session["hax_reply"] = None
     host_log(provider, sid, "init", dict(session=session["state"].get("native_session")))
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
@@ -6274,13 +6529,34 @@ def host_hax_write(provider, sid, session, token, text):
     return host_control_send(session, dict(type="prompt", id=token, message=text))
 
 
+def host_hax_message_id(record):
+    for key in ("message_id", "id", "uuid"):
+        value = record.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def host_hax_record(provider, sid, tmux, session, record):
     kind = record.get("kind")
     if kind == "assistant" and isinstance(record.get("text"), str) and record["text"]:
-        session["hax_message"] += 1
-        block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
-        host_complete(provider, sid, tmux, session, block, record["text"])
+        text = record["text"]
+        ident = host_hax_message_id(record)
+        current = session.get("hax_reply") if isinstance(session.get("hax_reply"), dict) else None
+        grows = (isinstance(current, dict) and current.get("block") is not None and
+                 (not ident or not current.get("id") or ident == current.get("id")) and
+                 text.startswith(current.get("text") or "\x00"))
+        if grows:
+            block = current["block"]
+        elif ident:
+            block = host_stream_block(session, "hax-" + ident, "text", 0)
+        else:
+            session["hax_message"] += 1
+            block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
+        host_complete(provider, sid, tmux, session, block, text)
+        session["hax_reply"] = dict(block=block, text=text, id=ident)
     elif kind == "tool_call" and isinstance(record.get("call_id"), str):
+        session["hax_reply"] = None
         tool = record.get("tool_name") if isinstance(record.get("tool_name"), str) else "tool"
         try:
             arguments = json.loads(record.get("arguments") or "{}")
@@ -6421,6 +6697,57 @@ def host_accept_client(provider, sid, tmux, session, server):
             pass
 
 
+def host_start_agent(provider, sid, mode=None):
+    try:
+        agent = host_agent_start(provider, sid, mode)
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
+        return None, ("cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else
+                      "agent_not_found" if isinstance(error, FileNotFoundError) else "agent_unavailable")
+    except RuntimeError as error:
+        return None, str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
+    return agent, None if agent is not None else "agent_not_found"
+
+
+def host_start_wait(server, seconds):
+    import select
+    deadline = time.time() + seconds
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        try:
+            ready = select.select([server], [], [], remaining)[0]
+        except (OSError, ValueError):
+            return
+        if not ready:
+            return
+        try:
+            server.accept()[0].close()
+        except OSError:
+            return
+
+
+def host_agent_retryable(provider, sid):
+    return host_named_command(provider, sid)[0] == host_binary_name(provider)
+
+
+def host_start_agent_retry(provider, sid, server, mode=None):
+    reason = None
+    steps = HOST_START_RETRY_STEPS if host_agent_retryable(provider, sid) else (0,)
+    for attempt, wait in enumerate(steps or (0,)):
+        if wait and attempt:
+            host_log(provider, sid, "start_retry_wait", dict(attempt=attempt, wait=wait, reason=reason))
+            host_start_wait(server, wait)
+        agent, reason = host_start_agent(provider, sid, mode)
+        if agent is not None:
+            if attempt:
+                host_log(provider, sid, "start_retry_ok", dict(attempt=attempt))
+            return agent, None
+        if reason != "agent_not_found":
+            return None, reason
+    return None, reason
+
+
 def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0):
     state["startup_failure"] = dict(reason=reason, config=host_config(provider, sid), retry_generation=retry_generation)
     host_state_write(provider, sid, state)
@@ -6506,7 +6833,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 continue
             if idle and host_fresh_drain_queued(provider, sid, tmux, session):
                 continue
-            if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
+            if idle and not session["sends"] and (host_restart_requested(provider, sid) or
+                                                  (host_nightly_due(provider, sid) and host_rotate_ready(provider, sid, session))):
                 if host_rotate(provider, sid, session, agent):
                     return
             for key, _ in selector.select(host_flush_timeout(session)):
@@ -6572,14 +6900,7 @@ def host_main(provider, sid):
         mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
         if mode in HOST_SAVED_PERMISSION_MODES:
             host_save_permission_mode(provider, sid, mode)
-        try:
-            agent = host_agent_start(provider, sid, mode)
-            reason = "agent_not_found" if agent is None else None
-        except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
-            reason = "cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else (
-                "agent_not_found" if isinstance(error, FileNotFoundError) else "agent_unavailable")
-        except RuntimeError as error:
-            reason = str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
+        agent, reason = host_start_agent_retry(provider, sid, server, mode)
         if reason:
             host_startup_failure(provider, sid, tmux, state, reason, retry_generation)
             return 5 if reason == "agent_not_found" else 4
@@ -6692,6 +7013,19 @@ def host_published_runtime():
     except OSError:
         pass
     return host_runtime_file()
+
+
+def host_rotate_ready(provider, sid, session, now=None):
+    now = time.time() if now is None else now
+    checked = session.get("rotate_checked")
+    if type(checked) in (int, float) and now - checked < HOST_ROTATE_RECHECK:
+        return session.get("rotate_ready") is True
+    ready = host_agent_ready(provider, sid)
+    session["rotate_checked"] = now
+    session["rotate_ready"] = ready
+    if not ready:
+        host_log(provider, sid, "rotate_deferred", dict(reason="agent_not_found"))
+    return ready
 
 
 def host_rotate(provider, sid, session, agent):
@@ -7020,6 +7354,17 @@ def chat_names_prune(known, published, hosts):
             del known[key]
 
 
+def chat_names_scope(record, entry):
+    for field in ("workspace", "group"):
+        value = entry.get(field)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and len(value) <= 64 and not any(ord(c) < 32 for c in value):
+            record[field] = value
+    return record
+
+
 def chat_names_publish(entries):
     if not isinstance(entries, list) or len(entries) > 256:
         return dict(status="refused", reason="invalid_names")
@@ -7036,13 +7381,13 @@ def chat_names_publish(entries):
         name = name.strip()
         if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
             continue
+        record = chat_names_scope(dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None), entry)
         host = chat_names_entry(hosts, tmux, sid)
-        entry_name = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
         if host is None:
-            published[tmux] = entry_name
+            published[tmux] = record
         else:
-            published[host["tmux"]] = dict(name=name, at=now, sid=host["sid"],
-                                           conversation=chat_names_conversation(host["provider"], host["sid"]))
+            record.update(sid=host["sid"], conversation=chat_names_conversation(host["provider"], host["sid"]))
+            published[host["tmux"]] = record
     chat_names_prune(known, published, hosts)
     known.update(published)
     chat_names_write(known)
@@ -7616,7 +7961,8 @@ def message_worker(tmux, provider, sid):
                             return
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
-                        held = pending is not None and pending[0] in host_held(provider, sid)
+                        held = pending is not None and (pending[0] in host_held(provider, sid)
+                                                        or host_fresh_pending(provider, sid))
                         if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()
@@ -9005,6 +9351,8 @@ if __name__ == '__main__':
                     ('mp-sessions', 'mp-sessions', 'MP_SESSIONS_SOURCE'),
                     ('mp-fresh', 'mp-fresh', 'MP_FRESH_SOURCE'),
                     ('mp-zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('zsb', 'mp-zsb', 'ZSB_SOURCE'),
+                    ('multiprompt-browser', 'mp-zsb', 'ZSB_SOURCE'),
                     ('mp-layout', 'mp-layout.mjs', 'MP_LAYOUT_SOURCE'),
                 )
 

@@ -4,6 +4,7 @@
 typedef struct {
     char bytes[8192];
     size_t used;
+    int calls;
     int rows, cols;
 } WindowFixture;
 
@@ -12,6 +13,7 @@ static void window_output(const char *bytes, size_t length, void *user) {
     assert(f->used + length < sizeof(f->bytes));
     memcpy(f->bytes + f->used, bytes, length);
     f->used += length;
+    f->calls++;
     f->bytes[f->used] = 0;
 }
 
@@ -101,6 +103,9 @@ static void terminal_window_cycle(HWND parent, int check_resources) {
     ReleaseDC(hwnd, screen);
     DeleteObject(measure);
     window_feed(hwnd, "\033[2J\033[Hcopy");
+    SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(metrics.tmAveCharWidth, 0));
+    SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(metrics.tmAveCharWidth, 0));
+    assert(mp_terminal_window_copy(hwnd) == 0);
     SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(0, 0));
     SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(metrics.tmAveCharWidth * 3, 0));
     mp_terminal_window_copy(hwnd);
@@ -112,9 +117,33 @@ static void terminal_window_cycle(HWND parent, int check_resources) {
     GlobalUnlock(memory);
     CloseClipboard();
     active->used = 0;
+    active->calls = 0;
     window_feed(hwnd, "\033[?2004h");
     mp_terminal_window_paste(hwnd);
-    assert(!strcmp(active->bytes, "\033[200~copy\033[201~"));
+    assert(!strcmp(active->bytes, "copy"));
+    assert(active->calls == 1);
+    active->used = 0;
+    active->calls = 0;
+    SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 1);
+    active->used = 0;
+    active->calls = 0;
+    mp_terminal_window_paste(hwnd);
+    assert(!strcmp(active->bytes, "\033copy"));
+    assert(active->calls == 1);
+    active->used = 0;
+    active->calls = 0;
+    assert(OpenClipboard(parent));
+    assert(EmptyClipboard());
+    HGLOBAL lines = GlobalAlloc(GMEM_MOVEABLE, 32);
+    assert(lines);
+    WCHAR *line_text = GlobalLock(lines);
+    wcscpy(line_text, L"one\r\ntwo\r\n");
+    GlobalUnlock(lines);
+    assert(SetClipboardData(CF_UNICODETEXT, lines));
+    CloseClipboard();
+    mp_terminal_window_paste(hwnd);
+    assert(!strcmp(active->bytes, "\033[200~one\rtwo\r\033[201~"));
+    assert(active->calls == 1);
     for (int i = 0; i < 30; i++) {
         assert(DestroyWindow(windows[i]));
         assert(!IsWindow(windows[i]));

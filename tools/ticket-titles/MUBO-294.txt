@@ -1,0 +1,1 @@
+Chats cannot message other chats after the latest release

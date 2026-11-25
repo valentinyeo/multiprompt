@@ -1,6 +1,6 @@
 # Session restore
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-restore.ps1
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/session*, src/ssh_reconnect.zig, src/launch_plan.zig, src/ssh*, src/tmux*, src/launch_cache.zig, src/update*, src/release*, src/startup.zig, src/launch_snapshot.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-restore.ps1
 
 Verify on: push
 

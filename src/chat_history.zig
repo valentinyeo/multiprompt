@@ -5,7 +5,7 @@ const style = @import("chat_style.zig");
 const echo = @import("chat_echo.zig");
 const diff = @import("chat_diff.zig");
 
-const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", reply_id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub var settlement_parses: std.atomic.Value(usize) = .init(0);
 pub var source_rows_scanned: std.atomic.Value(usize) = .init(0);
@@ -39,7 +39,7 @@ pub const History = struct {
 
     const cache_allocator = std.heap.page_allocator;
 
-    const SettleKind = enum { rejected, enqueue, pop_all, remove, other };
+    const SettleKind = enum { rejected, blocked, enqueue, pop_all, remove, other };
     const SettleFact = struct { stamp: i64, kind: SettleKind, start: usize, len: usize, hash: u64 };
 
     const SettleCache = struct {
@@ -86,7 +86,7 @@ pub const History = struct {
                 var normalized: [32768]u16 = undefined;
                 const norm = echo.normalize(wide, &normalized);
                 const op = fact.operation;
-                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
+                const kind: SettleKind = if (std.mem.eql(u8, op, "rejected")) .rejected else if (std.mem.eql(u8, op, "blocked")) .blocked else if (std.mem.eql(u8, op, "enqueue")) .enqueue else if (std.mem.eql(u8, op, "popAll")) .pop_all else if (std.mem.eql(u8, op, "remove") or std.mem.eql(u8, op, "dequeue")) .remove else .other;
                 const start = self.pool.items.len;
                 try self.pool.appendSlice(cache_allocator, wide);
                 try self.facts.append(cache_allocator, .{ .stamp = echo.stampMs(m.timestamp), .kind = kind, .start = start, .len = wide.len, .hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm)) });
@@ -202,7 +202,7 @@ pub const History = struct {
         return result;
     }
 
-    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8) !void {
+    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8, reply_id: []const u8) !void {
         const start = self.text.items.len;
         const first_block = self.blocks.items.len;
         const max_blocks = 1 + std.mem.count(u8, bytes, "\n");
@@ -216,9 +216,11 @@ pub const History = struct {
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
         const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
         const row_key = if (id.len == 0) 0 else md.rowKey(id);
+        const reply_key = if (reply_id.len > 0) md.rowKey(reply_id) else row_key;
         for (self.blocks.items[first_block..]) |*block| {
             block.message_id = message_id;
             block.row_key = row_key;
+            block.reply_key = reply_key;
             block.reaction_reference = @import("chat_reaction.zig").reference(id);
             block.source_offset = source_offset;
             block.source_end = source_end;
@@ -240,6 +242,8 @@ pub const History = struct {
         defer last_id.deinit(a);
         var last_read_id: std.ArrayList(u8) = .empty;
         defer last_read_id.deinit(a);
+        var last_reply_id: std.ArrayList(u8) = .empty;
+        defer last_reply_id.deinit(a);
         var last_stamp: std.ArrayList(u8) = .empty;
         defer last_stamp.deinit(a);
         var last_role: md.Role = .prose;
@@ -305,12 +309,12 @@ pub const History = struct {
                 continue;
             }
             if (std.mem.eql(u8, m.role, "tool")) {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_reply_id.items);
                 message.clearRetainingCapacity();
                 last_id.clearRetainingCapacity();
                 if (m.text.len == 0) continue;
                 const tool_text_start = self.text.items.len;
-                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id);
+                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id, "");
                 const index = self.blocks.items.len - 1;
                 var block = &self.blocks.items[index];
                 block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "running") orelse .running;
@@ -336,7 +340,7 @@ pub const History = struct {
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_reply_id.items);
                 message.clearRetainingCapacity();
                 source_offset = m.offset;
                 segment = m.segment;
@@ -345,6 +349,7 @@ pub const History = struct {
                 self.last_block = self.blocks.items.len;
                 last_stamp.clearRetainingCapacity();
                 try last_stamp.appendSlice(a, m.timestamp);
+                last_reply_id.clearRetainingCapacity();
             }
             source_end = m.end;
             try message.appendSlice(a, m.text);
@@ -352,9 +357,10 @@ pub const History = struct {
             try last_id.appendSlice(a, m.id);
             last_read_id.clearRetainingCapacity();
             try last_read_id.appendSlice(a, m.read_id orelse m.id);
+            if (last_reply_id.items.len == 0 and m.reply_id.len > 0) try last_reply_id.appendSlice(a, m.reply_id);
             last_role = role;
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items, last_reply_id.items);
         var pending = tools.valueIterator();
         while (pending.next()) |tool| {
             if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {
@@ -408,6 +414,10 @@ pub const History = struct {
                 const fresh = echo.isNewBlock(pending.anchor, stamp, 0, true);
                 if (fact.kind == .rejected) {
                     if (fresh and echo.refusesCommand(content, pending.text)) result.refused = true;
+                    continue;
+                }
+                if (fact.kind == .blocked) {
+                    if (fresh and echo.sameText(content, pending.text)) result.refused = true;
                     continue;
                 }
                 const matches = fresh and echo.sameText(content, pending.text);
@@ -1417,6 +1427,21 @@ test "settlement: remove dequeue and popAll track the matching queue entry, not 
     later.anchor.after_ms = echo.stampMs("2026-10-13T11:06:59.442Z");
     try std.testing.expect(!(try h.deliveryEvidence(a, later)).refused);
     try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, later)).removed_ms);
+}
+
+test "MUBO-246 a prompt a hook blocked is a send failure for that message only" {
+    const a = std.testing.allocator;
+    const prompt = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on this queue");
+    var h = History{};
+    defer h.deinit(a);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-11-22T23:47:01.315Z\",\"settlement\":{\"operation\":\"blocked\",\"content\":\"/pstack:poteto-mode full autopilot on this queue\"}}\n");
+    const pending = echo.Pending{ .prefix = prompt, .text = prompt, .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect((try h.deliveryEvidence(a, pending)).refused);
+    const elsewhere = echo.Pending{ .prefix = prompt, .text = std.unicode.utf8ToUtf16LeStringLiteral("/pstack:poteto-mode full autopilot on another queue"), .anchor = .{ .after_ms = echo.stampMs("2026-11-22T23:47:00.000Z") } };
+    try std.testing.expect(!(try h.deliveryEvidence(a, elsewhere)).refused);
+    var older = pending;
+    older.anchor.after_ms = echo.stampMs("2026-11-22T23:47:01.315Z");
+    try std.testing.expect(!(try h.deliveryEvidence(a, older)).refused);
 }
 
 test "ISSUE-349 incomplete queue cannot blame A for C before A is delivered" {

@@ -21,6 +21,10 @@ The version is `APP_VERSION` in `src/main.zig`; the title bar and the `MPVERSION
 
 After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publishes the new version as the latest GitHub Release, with the extension ZIP and SHA-256 checksums. Existing version tags are not republished. Keep credentials, runtime state, screenshots and build outputs out of commits. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for configuration and checks.
 
+## Emergency lane
+
+Use this only when Valentin cannot reach or see his chats, or cannot work. The verification owner adds the GitHub label `emergency` to the fixing pull request; CI never creates that label. While the label is on an open pull request, the `emergency-lane` check fails on every other open pull request, and that pull request follows the same owned-journey-only verifier rule as a repair. After merge, a master push still runs `auto-release.yml`. Resource observation runs nightly, not on the release path, so the measured workflow timeouts plus the five-minute in-app updater poll keep a merge on his desktop inside one hour.
+
 ## Automatic desktop updates
 
 The window appears without waiting for GitHub. Checks and downloads run in the background at launch and every five minutes. Only an already staged, verified release can install at cold launch before tabs restore, and only when no other workspace window is running.

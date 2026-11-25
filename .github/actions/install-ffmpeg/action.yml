@@ -16,7 +16,7 @@ runs:
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
         path: ${{ runner.temp }}/ffmpeg-${{ inputs.version }}
-        key: ${{ runner.os }}-ffmpeg-${{ inputs.version }}
+        key: ${{ runner.os }}-ffmpeg-${{ inputs.version }}-2
     - name: Install FFmpeg
       if: runner.os == 'Windows'
       shell: pwsh
@@ -37,9 +37,14 @@ runs:
           Write-Host "FFmpeg ready: $first"
         }
         if ($env:FFMPEG_CACHE_HIT -eq 'true' -and (Test-Path (Join-Path $target 'ffmpeg.exe'))) {
-          Write-Host "FFmpeg $pinned restored from cache"
-          Use-Ffmpeg $target
-          exit 0
+          $cached = (& (Join-Path $target 'ffmpeg.exe') -version 2>$null | Select-Object -First 1)
+          if ($LASTEXITCODE -eq 0 -and $cached) {
+            Write-Host "FFmpeg $pinned restored from cache"
+            Use-Ffmpeg $target
+            exit 0
+          }
+          Write-Host "FFmpeg $pinned restored from cache but does not run; installing a fresh copy"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $target
         }
         $existing = Get-Command ffmpeg -ErrorAction SilentlyContinue
         if ($existing) {

@@ -16,7 +16,7 @@ function body(source, signature, next) {
 }
 
 test("IGSH-1820 Inbox archive ignores pin state", () => {
-  const sidebar = read("sidebar.zig");
+  const sidebar = read("sidebar_attention.zig");
   const archive = body(sidebar, "fn recordInboxArchive(", "fn archiveHasNewContentSnapshot(");
   assert.doesNotMatch(archive, /rejectPinnedSessionClose/);
   const hide = body(sidebar, "fn hideActiveTabUntilAttention(", "fn userPresentOnSelectedTab(");

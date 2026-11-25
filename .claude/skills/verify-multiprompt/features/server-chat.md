@@ -1,14 +1,15 @@
 # Runner-owned server chat
 
-Source files: tools/verify-server-chat/*, src/ssh*, src/tmux*, src/chat*, src/console.zig, src/session.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control.ps1
+Source files: tools/verify-server-chat/*, src/ssh*, src/tmux*, src/chat*, src/console.zig, src/session.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/control-library.ps1
 
 Verify on: push, pull_request
 
 ## Sub-features
 
 - Open a saved Linux tmux chat and copy its persisted seed reply from the Windows Chat View.
-- Send a message with the real composer and Enter. Require exactly one server-side provider receipt and the reply copied from the visible transcript.
+- Send a message with the real composer and Enter. Require exactly one server-side provider receipt and exactly one copy of the reply in the copied visible transcript.
 - Type `/clear`, dismiss autocomplete, and send it. The production composer terminates bare trigger tokens with one space, so require exactly one provider receipt of `/clear ` and its rendered reply, then send another message successfully.
+- Resync the transcript from the server with the Chat View: Resync command. Each server reply must still appear exactly once in the copied transcript. A hosted chat keeps its Chat View, so Alt+C cannot close it.
 - Authenticate with a new ed25519 key for this job. The private directory and file allow only the Windows runner SID, with inheritance removed.
 - Retain an actual desktop recording and evidence even when the journey fails.
 
@@ -24,7 +25,7 @@ Preconditions: GitHub `windows-latest`, the branch executable, WSL2 Ubuntu 24.04
 
 The PR verifier can select this map automatically. Do not dispatch another run while its push-triggered checks are running. For a separate authorized manual run, select `feature=server-chat` in `verify.yml`.
 
-Require `result.json` status `passed`, all four named cases passed, zero app processes after owned-job cleanup, `keyRemoved=true`, and successful `videoExit`. Watch `journey.mp4`; inspect `open.png`, `send.png`, `clear.png`, `after-clear.png`, copied text, `*-server.json`, `key-acl.json`, `ssh-preflight.txt`, `sshd.log`, `actions.json`, `doctor.json` and `build.json` in `verify-server-chat`. The private key and profile never enter the artifact. Cleanup stops the dedicated WSL distribution and deletes the disposable Windows profile.
+Require `result.json` status `passed`, all five named cases passed, zero app processes after owned-job cleanup, `keyRemoved=true`, and successful `videoExit`. Watch `journey.mp4`; inspect `open.png`, `send.png`, `clear.png`, `after-clear.png`, `reloaded.png`, copied text, `*-server.json`, `key-acl.json`, `ssh-preflight.txt`, `sshd.log`, `actions.json`, `doctor.json` and `build.json` in `verify-server-chat`. The private key and profile never enter the artifact. Cleanup stops the dedicated WSL distribution and deletes the disposable Windows profile.
 
 ## Gotchas
 

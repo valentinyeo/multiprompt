@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `261a7bf4acab8552bbe1a90d8b1e4d2187031d6b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `9db3f9b5a`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-243 adds a name-resolution path for published chat names and publishes a new Claude conversation to the account layout and the name entry on init. All twelve covered reader functions are unchanged from the prior sync, as is every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to conversation changes.
 
@@ -44,6 +44,28 @@ SOFT-2681 publishes Claude's current native session and changes transcript selec
 SOFT-3097 changes only the reader's command reconstruction: `clean_command_markup` drops the mention wire note from `<command-args>` before `command_reply`. The covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions, the recorded provider events, the probes and the decision table are unchanged. Only the reader hash and the sync commit move.
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-246 also gates that blocked settlement behind `blocked_settlement` in the history query so a phone build with a fixed settlement enum keeps its history read. The gate sits outside every switch function, so only the reader hash moves.
+
+MUBO-246 handles a prompt a UserPromptSubmit hook blocked before the chat read it: a settlement fact from the transcript, a not-sent send in the host stream and a not-sent fact from the connector. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-454 rewrites the mention wire note and drops `currentLive`'s exclude argument. That sits outside every covered switch function, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. All of it sits outside the covered switch functions, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns, while a hosted hax chat still answers from the host history only. hax is not a switch target and no covered switch, usage-limit or auto-switch function calls that resolver, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
+
+MUBO-293 rebuilds the typed slash command in the reader's command path and records a refused slash command's settlement. No covered switch, usage-limit, auto-switch or dispatch function calls that path, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
+
+MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish` for `~/.local/state/multiprompt/chat-names.json`. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash moves; the sync commit names the merged master tip.
+
+MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
+MUBO-293 merges master `5baddb613`. The optional `workspace` and `group` strings in `chat_names_publish` sit outside every covered switch function, and the MUBO-293 command rebuild and refused-command settlement sit outside them too. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
+MUBO-452 holds a queued message through a pending fresh start in `message_expire` and `message_worker`. `host_fresh_phase_wait` and `host_fresh_pending` read the host session state and are new; no covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` or `host_dispatch_switch` function calls them, so the model, bounds, decisions, probes and mutations are unchanged. Merging master `9db3f9b5a` carries MUBO-293's command rebuild and MUBO-135's once-only server reply row in the reader; both sit outside every covered switch function, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |

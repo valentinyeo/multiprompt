@@ -1,0 +1,1 @@
+Chats you open in All, Frequent, or Favorites stay in place until you pick another one.

@@ -1,6 +1,6 @@
 # Relaunch saved sessions
 
-Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-relaunch-saved-sessions.ps1, src/notify_ports.zig
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/session*, src/ssh_reconnect.zig, src/launch_plan.zig, src/ssh*, src/tmux*, src/launch_cache.zig, src/update*, src/release*, src/startup.zig, src/launch_snapshot.zig, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-relaunch-saved-sessions.ps1, src/notify_ports.zig
 
 Verify on: push
 
@@ -31,7 +31,7 @@ Dispatch `gh workflow run verify.yml -f feature=relaunch-saved-sessions` (or `--
 
 ## Gotchas
 
-The driver performs one initial launch plus two relaunches. Its 14 local CMD processes and six identity-less tmux records come from a synthetic seed; this is not Part A real-size or Part B real-SSH proof. Other legacy journeys also seed state. Neither verify.yml nor release-gate.yml has a direct push trigger at this revision.
+The driver performs one initial launch plus two relaunches. Its 14 local CMD processes and six identity-less tmux records come from a synthetic seed; this is not Part A real-size or Part B real-SSH proof. Other legacy journeys also seed state. At this revision `verify.yml` runs on `schedule`, `pull_request` and `workflow_dispatch`, and `release-gate.yml` on `schedule` and `workflow_dispatch`; neither runs on a plain push.
 
 
 - Red control: `origin/master` before the IGSH-890 fix publishes the cached copies, so step 2 fails with `sessions listed twice in the sidebar` or the relaunch never finishes restoring. The red and green run links are on the IGSH-900 ticket.

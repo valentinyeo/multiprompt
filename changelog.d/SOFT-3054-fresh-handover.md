@@ -1,0 +1,1 @@
+Fresh start now hands the new session real work context instead of leftover slash-command notices.

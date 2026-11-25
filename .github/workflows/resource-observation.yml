@@ -56,6 +56,14 @@ jobs:
       - name: Evaluate resource gate
         if: always()
         run: node tools/resource-guard/evaluate.mjs
+      - name: File measured latency warnings
+        if: always()
+        continue-on-error: true
+        env:
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: node tools/resource-warning-ticket.mjs resource-evidence/verdict.json "$env:RUN_URL" "$env:SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

@@ -45,8 +45,10 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 | `SEARCH_WORKSPACE_COLOR_OFFSET` | Ctrl+K, type **workspace color**, then select the matching action with Up/Down and Enter. Follow `workspace` above. |
 | `SEARCH_WORKSPACE_DELETE_MENU_OFFSET` | Ctrl+K, search for **delete workspace**. Follow `workspace` above. |
 | `SEARCH_WORKSPACE_DELETE_OFFSET` | Open **Delete workspace**, then select the disposable archived workspace name and confirm a second time. Follow `workspace` above. |
+| `SEARCH_NEWWIN_OFFSET` | Ctrl+K, search for **new workspace window**, to open the workspace in its own top-level window. Follow `workspace` above. |
 | `SEARCH_WORKSPACE_OFFSET` | Open Ctrl+K **Open workspace**, then select the displayed workspace name. Follow `workspace` above. |
 | `SEARCH_WSMOVE_NEW_OFFSET` | Ctrl+K, search for **move to new workspace**. Follow `workspace` above. |
+| `SEARCH_WSMOVE_MENU_OFFSET` | Ctrl+K, search for **move to workspace**. Follow `workspace` above. |
 | `SEARCH_WSMOVE_OFFSET` | Choose **Move to workspace**, then select its destination name. Follow `workspace` above. |
 | `SEARCH_WSSORT_MENU_OFFSET` | Ctrl+K, search for **sort workspaces**. Follow `workspace` above. |
 | `SEARCH_WSSORT_OFFSET` | Open **Sort workspaces**, then choose the displayed sort mode. Follow `workspace` above. |

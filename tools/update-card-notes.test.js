@@ -38,7 +38,10 @@ test('filler cannot be published as a ticket title', async () => {
         .{ .text = "IGSH-1300 Checks and fixes, no visible change", .ticket = "IGSH-1300" },
     } },
 };`;
-  assert.throws(() => releaseNotes(source, 'v0.28.1400'), /title/);
+  const warnings = [];
+  assert.deepEqual(releaseNotes(source, 'v0.28.1400', line => warnings.push(line)).releases[0], { version: '0.28.1400', changes: [], tickets: [] });
+  assert.equal(warnings.length, 1, warnings.join('\n'));
+  assert.match(warnings[0], /IGSH-1300 has no title this release can publish/);
 });
 
 test('historical and current lines use the same authoritative title', async () => {
@@ -165,14 +168,16 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(fixture, /names.push\('release-notes.json'\)/);
 });
 
-test('unidentified legacy lines cannot be published', async () => {
+test('unidentified legacy lines publish without a link and warn', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const source = `pub const CHANGELOG = [_]ChangelogEntry{
     .{ .ver = "0.28.901", .items = &.{
         .{ .text = "Unidentified legacy note", .ticket = "" },
     } },
 };`;
-  assert.throws(() => releaseNotes(source, 'v0.28.901'), /unidentified/);
+  const warnings = [];
+  assert.deepEqual(releaseNotes(source, 'v0.28.901', line => warnings.push(line)).releases[0], { version: '0.28.901', changes: ['Unidentified legacy note'], tickets: [null] });
+  assert.deepEqual(warnings, ['Release 0.28.901: a line has no ticket key; publishing it without a link']);
 });
 
 test('changed implementation is comment-free and leaves no error log', async () => {
@@ -308,9 +313,18 @@ test('release contains one linked authoritative line for each commit ticket', as
   const latest = releaseNotes(generated, 'v0.28.1100').releases[0];
   assert.deepEqual(latest.changes, ['IGSH-2 Chat title', 'IGSH-3 Checks title']);
   assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2', 'https://app.hypertask.ai/detail/project-2060/3']);
-  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }], titles), /bad123.*leading ticket ID/);
-  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [], titles), /fragment has no matching commit ticket/);
-  assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /unidentified/);
+  const warnings = [];
+  const warn = line => warnings.push(line);
+  const keyless = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }], titles, warn);
+  assert.match(keyless, /\.ticket = "no-ticket"/);
+  assert.ok(warnings.includes('v0.28.1100: commit bad123 has no ticket key; publishing its line without a link'), warnings.join('\n'));
+  const fragmentsOnly = buildChangelog(files, 'v0.28.1100', [], [], titles, warn);
+  assert.match(fragmentsOnly, /IGSH-2 Chat title/);
+  assert.ok(warnings.includes('v0.28.1100: IGSH-2 fragment has no matching commit ticket; publishing it from its fragment text'), warnings.join('\n'));
+  const forgedWarnings = [];
+  const forged = releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100', line => forgedWarnings.push(line)).releases[0];
+  assert.deepEqual(forged.tickets, [null, 'https://app.hypertask.ai/detail/project-2060/3']);
+  assert.deepEqual(forgedWarnings, ['Release 0.28.1100: a line has no ticket key; publishing it without a link']);
 });
 
 test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () => {
@@ -331,7 +345,10 @@ test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () 
   assert.ok(latest.changes.some(line => line.startsWith('IGSH-1610 ')));
   assert.ok(latest.changes.some(line => line.startsWith('IGSH-1615 ')));
   assert.match(generated, /\.ticket = "IGSH-1615"/);
-  assert.throws(() => buildChangelog(files, 'v0.28.1448', [], [{ sha: '8f52c2a6', subject: commits[0].subject }, commits[1]]), /8f52c2a6.*leading ticket ID/);
+  const warnings = [];
+  const unreviewed = buildChangelog(files, 'v0.28.1448', [], [{ sha: '8f52c2a6', subject: commits[0].subject }, commits[1]], undefined, line => warnings.push(line));
+  assert.match(unreviewed, /Add AGENTS\.md pointing every agent at CLAUDE\.md/);
+  assert.ok(warnings.some(line => /commit 8f52c2a has no ticket key/.test(line)), warnings.join('\n'));
 });
 
 test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => {

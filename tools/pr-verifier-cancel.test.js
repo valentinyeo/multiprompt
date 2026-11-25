@@ -97,11 +97,90 @@ else if (route.endsWith('/runs?per_page=100')) console.log(JSON.stringify([{ id:
   }
 });
 
-test('the verifier runs one head journey set and never schedules a base build', () => {
+test('the verifier records the same journeys on base and head with the head harness', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
   assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
-  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, before\]/);
   assert.match(workflow, /head:\n    needs: \[resolve, select\]/);
   assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache|base_cache/);
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.match(workflow, /app_revision: \$\{\{ needs.resolve.outputs.base_tip_sha \}\}/);
+  assert.match(workflow, /video_label: before/);
+  assert.match(workflow, /video_label: after/);
+});
+
+const oldHead = 'a'.repeat(40);
+const newHead = 'b'.repeat(40);
+
+function cancelledRun(headSha) {
+  return { id: 1, status: 'completed', conclusion: 'cancelled', event: 'pull_request', head_sha: headSha,
+    head_repository: { full_name: 'owner/repo' }, display_title: 'verify PR 1076',
+    html_url: 'https://github.com/owner/repo/actions/runs/1', pull_requests: [] };
+}
+
+function recoveryCalls(workflowRun, runs, pullHead) {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-stale-'));
+  try {
+    const requests = path.join(directory, 'requests');
+    const event = path.join(directory, 'event.json');
+    fs.writeFileSync(event, JSON.stringify({ repository: { default_branch: 'master' }, workflow_run: workflowRun }));
+    fs.writeFileSync(path.join(directory, 'gh'), String.raw`#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\n');
+const route = args.find(arg => arg.startsWith('repos/')) || '';
+if (args.includes('graphql')) {
+  const pull = JSON.parse(process.env.PULL);
+  console.log(JSON.stringify({ data: { repository: { pullRequest: { number: pull.number, state: 'OPEN', isDraft: false, title: '', body: '', headRefOid: pull.head.sha, baseRefName: 'master', headRepository: { nameWithOwner: pull.head.repo.full_name }, comments: { nodes: [] }, commits: { nodes: [{ commit: { checkSuites: { nodes: [] } } }] } } } } }));
+} else if (route.endsWith('/runs?per_page=100')) console.log(process.env.RUNS);
+else console.log('{}');
+`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'recover'], { encoding: 'utf8', env: {
+      ...process.env, PATH: `${directory}${path.delimiter}${process.env.PATH}`, REQUESTS: requests, GITHUB_EVENT_PATH: event,
+      REPO: 'owner/repo', RUNS: JSON.stringify(runs),
+      PULL: JSON.stringify({ number: 1076, state: 'open', draft: false, head: { sha: pullHead, repo: { full_name: 'owner/repo' } } }),
+    } });
+    const calls = fs.existsSync(requests) ? fs.readFileSync(requests, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+    return { status: result.status, stderr: result.stderr, calls };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const stampsHead = calls => calls.filter(args => args.includes('name=pstack-verifier') || args.includes('name=pstack-verifier (BLOCKED)'));
+
+test('a cancelled run never publishes a verdict for a head it did not verify', () => {
+  assert.equal(typeof verifier.supersededCancellation, 'function');
+  const pull = { number: 1076, head: { sha: newHead } };
+  const queued = [{ id: 2, display_title: 'verify PR 1076', head_sha: newHead, status: 'queued' }];
+  assert.equal(verifier.supersededCancellation(cancelledRun(oldHead), pull, []), true);
+  assert.equal(verifier.supersededCancellation(cancelledRun(newHead), pull, queued), true);
+  assert.equal(verifier.supersededCancellation(cancelledRun(newHead), pull, [{ id: 2, display_title: 'verify PR 1076', head_sha: newHead, status: 'completed' }]), false);
+  assert.equal(verifier.supersededCancellation(cancelledRun(newHead), pull, [{ id: 2, display_title: 'verify PR 999', head_sha: newHead, status: 'queued' }]), false);
+  assert.equal(verifier.supersededCancellation(cancelledRun(newHead), pull, []), false);
+});
+
+test('a push that cancelled the older head run leaves the new head pending, with no BLOCKED check', { skip: process.platform !== 'linux' }, () => {
+  const { status, stderr, calls } = recoveryCalls(cancelledRun(oldHead),
+    [{ id: 1, display_title: 'verify PR 1076', head_sha: oldHead, event: 'pull_request', status: 'completed' },
+      { id: 2, display_title: 'verify PR 1076', head_sha: newHead, event: 'pull_request', status: 'queued' }], newHead);
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(stampsHead(calls), []);
+  assert.equal(calls.some(args => args[0] === 'pr' && args[1] === 'comment'), false);
+});
+
+test('a cancelled run for the current head with no newer run still reports BLOCKED', { skip: process.platform !== 'linux' }, () => {
+  const { status, stderr, calls } = recoveryCalls(cancelledRun(newHead),
+    [{ id: 1, display_title: 'verify PR 1076', head_sha: newHead, event: 'pull_request', status: 'completed' }], newHead);
+  assert.equal(status, 0, stderr);
+  const stamped = stampsHead(calls);
+  assert.ok(stamped.length >= 1);
+  for (const args of stamped) {
+    assert.ok(args.includes(`head_sha=${newHead}`));
+    assert.ok(args.includes(`output[title]=pstack-verifier: BLOCKED`));
+    assert.ok(args.some(arg => arg.startsWith('output[summary]=') && arg.startsWith(`output[summary]=pstack-verifier: BLOCKED @ ${newHead}\n`)));
+  }
+  assert.equal(calls.some(args => args[0] === 'pr' && args[1] === 'comment'), true);
 });

@@ -7,6 +7,8 @@
 
 struct MPTerminal {
     VTerm *terminal;
+    MPTerminalOutput output;
+    void *user;
     VTermScreen *screen;
     VTermScreenCell *history[HISTORY_LINES];
     int lengths[HISTORY_LINES];
@@ -16,7 +18,6 @@ struct MPTerminal {
     int cols;
     int cursor_visible;
     int mouse_mode;
-    int alternate;
 };
 
 static int clear_history(void *user) {
@@ -62,7 +63,6 @@ static int property(VTermProp prop, VTermValue *value, void *user) {
     MPTerminal *t = user;
     if (prop == VTERM_PROP_CURSORVISIBLE) t->cursor_visible = value->boolean;
     if (prop == VTERM_PROP_MOUSE) t->mouse_mode = value->number;
-    if (prop == VTERM_PROP_ALTSCREEN) t->alternate = value->boolean;
     return 1;
 }
 
@@ -77,6 +77,8 @@ MPTerminal *mp_terminal_new(int rows, int cols, MPTerminalOutput output, void *u
     if (rows < 1 || rows > 512 || cols < 1 || cols > 1024) return NULL;
     MPTerminal *t = calloc(1, sizeof(*t));
     if (!t) return NULL;
+    t->output = output;
+    t->user = user;
     t->terminal = vterm_new(rows, cols);
     t->rows = rows;
     t->cols = cols;
@@ -134,7 +136,6 @@ static uint32_t rgb(MPTerminal *t, VTermColor value) {
 
 int mp_terminal_cell(MPTerminal *t, int row, int col, int scroll, MPTerminalCell *out) {
     if (row < 0 || row >= t->rows || col < 0 || col >= t->cols) return 0;
-    if (t->alternate) scroll = 0;
     if (scroll < 0) scroll = 0;
     if (scroll > t->count) scroll = t->count;
     row -= scroll;
@@ -156,7 +157,7 @@ int mp_terminal_cell(MPTerminal *t, int row, int col, int scroll, MPTerminalCell
     return 1;
 }
 
-int mp_terminal_history(MPTerminal *t) { return t->alternate ? 0 : t->count; }
+int mp_terminal_history(MPTerminal *t) { return t->count; }
 int mp_terminal_mouse_mode(MPTerminal *t) { return t->mouse_mode; }
 
 int mp_terminal_cursor(MPTerminal *t, int *row, int *col) {
@@ -174,11 +175,17 @@ void mp_terminal_key(MPTerminal *t, int key, int modifiers) {
 
 void mp_terminal_char(MPTerminal *t, uint32_t value, int modifiers) {
     if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) value = 0xfffd;
+    if (value < 0x20 || value == 0x7f) modifiers &= ~VTERM_MOD_CTRL;
     vterm_keyboard_unichar(t->terminal, value, (VTermModifier)(modifiers & VTERM_ALL_MODS_MASK));
 }
 
-void mp_terminal_paste(MPTerminal *t, int begin) {
-    if (begin) vterm_keyboard_start_paste(t->terminal); else vterm_keyboard_end_paste(t->terminal);
+int mp_terminal_bracketed_paste(MPTerminal *t) {
+    return vterm_get_bracketpaste(t->terminal);
+}
+
+void mp_terminal_paste_text(MPTerminal *t, const char *bytes, size_t length) {
+    if (length == 0 || !t->output) return;
+    t->output(bytes, length, t->user);
 }
 
 void mp_terminal_mouse(MPTerminal *t, int row, int col, int button, int pressed, int modifiers) {

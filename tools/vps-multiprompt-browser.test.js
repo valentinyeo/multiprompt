@@ -6,6 +6,8 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
+const TUNNEL_TITLE = 'sshd: multiprompt-tunnel-fixture@notty';
+process.title = TUNNEL_TITLE;
 
 async function run(args, reply, script = wrapper, env = {}) {
   const sockets = new Set();
@@ -203,14 +205,61 @@ test('owner broker socket controls a pane without reading a vault token', { skip
   }
 });
 
-test('missing owner broker never falls back to the shared relay', { skip: process.platform === 'win32' }, async () => {
+test('missing owner broker is reported with its socket path', { skip: process.platform === 'win32' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-owner-missing-'));
   try {
+    const endpoint = path.join(dir, 'missing');
     const result = await run(['status'], () => assert.fail('broker fell back to TCP'), wrapper,
-      { ZSB_SOCKET: path.join(dir, 'missing') });
+      { ZSB_SOCKET: endpoint });
     assert.equal(result.code, 1);
-    assert.equal(JSON.parse(result.stdout).error, 'tunnel_down');
+    assert.equal(JSON.parse(result.stdout).error, 'relay_unavailable');
+    assert.match(result.stderr, new RegExp(endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a stale process on the pane port is named, not called a tunnel', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-stale-port-'));
+  process.title = 'python3 /home/inne/.local/share/zigshell/mp_notify_relay.py';
+  const server = net.createServer(socket => {
+    socket.on('error', () => {});
+    socket.on('data', () => socket.end());
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const child = spawn('bash', [wrapper, 'status'], {
+      env: { ...process.env, HOME: dir, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port),
+        ZSB_SOCKET: '', MULTIPROMP_NOTIFY_RELAY_TOKEN: 'stale-holder-test' },
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => stdout += chunk);
+    child.stderr.on('data', chunk => stderr += chunk);
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    assert.equal(code, 1, stdout + stderr);
+    const reply = JSON.parse(stdout);
+    assert.equal(reply.error, 'port_conflict');
+    assert.equal(reply.holder.pid, process.pid);
+    assert.match(reply.message, new RegExp(String(port)));
+    assert.match(reply.message, /not by the Multiprompt SSH tunnel/);
+    assert.match(reply.message, /mp_notify_relay\.py/);
+    assert.match(stderr, /multiprompt app not reachable/);
+    assert.doesNotMatch(stdout, /tunnel_down/);
+  } finally {
+    process.title = TUNNEL_TITLE;
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the SSH tunnel holding the pane port is not called a conflict', { skip: process.platform === 'win32' }, async () => {
+  const result = await run(['status'], '');
+  assert.equal(result.code, 1);
+  const reply = JSON.parse(result.stdout);
+  assert.equal(reply.error, 'empty_reply');
+  assert.doesNotMatch(result.stdout, /port_conflict/);
 });
 
 test('owner browser proof keeps disposable credentials outside evidence', () => {

@@ -2,41 +2,58 @@
 
 A Cloudflare Worker and D1 database implementing device enrollment, PKCE authorization codes, rotating refresh tokens, device revocation, and revision-based workspace synchronization. Layout metadata is plaintext in D1, not end-to-end encrypted. Tokens are stored hashed; the desktop protects local credentials with Windows DPAPI.
 
+## Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/valentinyeo/multiprompt/tree/master/service)
+
+Clicking the button clones `service/`, provisions a fresh D1 database, runs `migrations/0001_initial.sql`, and deploys the Worker to your `workers.dev` subdomain. Set:
+
+- `ALLOWED_EMAILS`: comma-separated emails permitted to sign in with Better Auth
+- `ACCOUNT_EMAIL`: the default account receiving usage updates (keep it in `ALLOWED_EMAILS`)
+- `BETTER_AUTH_SECRET`: a random secret (at least 32 characters, for example from `openssl rand -hex 32`)
+
+An account's first layout request automatically initializes an empty schema-1 layout (`{"schema":1,"revision":1,"workspaces":[],"tabs":[]}`). When `AUTH_ORIGINS`, `COOKIE_DOMAIN`, and `RP_ID` are left blank, the Worker uses its own origin and hostname so sign-in and passkeys work on `workers.dev` without a custom domain.
+
 ## Configure your own deployment
 
-`wrangler.jsonc` is an example, not a ready-to-deploy production configuration. Replace:
+`wrangler.jsonc` works out of the box with the Deploy to Cloudflare button. For a manual or custom-domain deployment, configure:
 
-- `account_id`: your Cloudflare account ID
-- route `pattern`: your account-service domain
+- `account_id`: optional if you do not pass `CLOUDFLARE_ACCOUNT_ID` in the environment
+- custom `routes`: your account-service and dashboard domains (and set `workers_dev` to `false` if desired)
 - `database_id`: the ID from `npx wrangler d1 create multiprompt-account`
 - `ACCOUNT_EMAIL`: the default account receiving usage updates
 - `ALLOWED_EMAILS`: comma-separated emails permitted to use Better Auth
-- `AUTH_ORIGINS`: your account-service and dashboard HTTPS origins
-- `COOKIE_DOMAIN`, `RP_ID`: your shared cookie domain and passkey relying-party domain
+- `AUTH_ORIGINS`: optional comma-separated HTTPS origins for custom domains
+- `COOKIE_DOMAIN`, `RP_ID`: optional shared cookie domain and passkey relying-party domain
 - `EMAIL_FROM`: your verified sign-in sender address
 
 Keep `ACCOUNT_EMAIL` in `ALLOWED_EMAILS`. Sign-in uses only Better Auth; remove any legacy edge login gate from your deployment. Without a Better Auth session, device authorization redirects to the service's own sign-in page. There is no plaintext development authentication bypass.
 
-Better Auth provides email codes, magic links, passkeys and an optional Google sign-in, with a dashboard at `https://dash.example.com`. Configure `BETTER_AUTH_SECRET` and `USAGE_PUSH_TOKEN` through Wrangler secrets. Email delivery requires a configured email binding, `RESEND_API_KEY`, or `BETTER_AUTH_API_KEY`; Google sign-in requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set `USAGE_ACCOUNT` to override the usage recipient; otherwise it uses `ACCOUNT_EMAIL`. Never commit secret values.
+Better Auth provides email codes, magic links, passkeys and an optional Google sign-in, with a dashboard at `/`. Configure `BETTER_AUTH_SECRET` and optional `USAGE_PUSH_TOKEN` through Wrangler secrets. Email delivery uses `RESEND_API_KEY`, the configured `EMAIL` binding (Cloudflare Email Routing / Email Service), or `BETTER_AUTH_API_KEY`; Google sign-in requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set `USAGE_ACCOUNT` to override the usage recipient; otherwise it uses `ACCOUNT_EMAIL`. Never commit secret values.
 
 ```sh
 npm ci
 npm test
-npx wrangler d1 execute multiprompt-account --remote --file schema.sql
-npx wrangler deploy
+npm run deploy
 ```
 
-Provide `CLOUDFLARE_API_TOKEN` through your environment or a secret store. Never commit it. Deploy only to resources you own. The example domain must be changed before deployment. Owner-specific provisioning and production verification scripts are not included.
-
-Before first use, seed `layouts` with your configured account email, revision `1`, and a schema-1 JSON layout. An empty layout is valid:
-
-```json
-{"schema":1,"revision":1,"workspaces":[],"tabs":[]}
-```
+`npm run deploy` runs `wrangler d1 migrations apply DB --remote` and then `wrangler deploy`. Provide `CLOUDFLARE_API_TOKEN` through your environment or a secret store. Never commit it. Deploy only to resources you own. Owner-specific provisioning and production verification scripts are not included.
 
 For self-hosted desktop sync, change the public service origin in `src/account_client.zig`. `MULTIPROMPT_NO_LOGIN=1` skips account login and cloud sync for local development. This does not bypass Worker authentication.
 
 Read Android crashes newest first with `python3 service/crash-reports.py --limit 20` using `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; use `--database NAME` to override `multiprompt-account` or `--json` for raw rows.
+
+## Scheduled freeze triage
+
+`tools/install-crash-report-tickets.sh` runs the automatic freeze triage from a checkout of this repo, never from a copy outside it. It keeps a shallow clone in `~/projects/multiprompt-crash-report-tickets` (override with `CRASH_REPORT_TICKETS_REPO`), writes the timer and service from `service/`, and points both at `service/crash-report-tickets.py` in that clone. Before each run the service fetches `origin/master` into the clone, so a merged fix reaches the live timer without reinstalling. A failed fetch is ignored and the run uses the copy it has. Credentials stay in `~/.config/multiprompt/crash-report-tickets.env`, mode 600.
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=... SHIP_SESSION_NAME=... CRASH_BOARD_COMMAND=... CRASH_GH_COMMAND=... tools/install-crash-report-tickets.sh
+systemctl --user start crash-report-tickets.service
+journalctl --user -u crash-report-tickets.service -n 40
+```
+
+Stop it with `systemctl --user disable --now crash-report-tickets.timer`.
 
 ## Tests and API
 
@@ -58,9 +75,7 @@ Read Android crashes newest first with `python3 service/crash-reports.py --limit
 - `GET`, `PUT`, `DELETE /v1/bot-photos/{key}`: account-scoped remote session pictures. Workspace keys can access only their workspace's sessions. PUT accepts `{ "png": "<base64>" }`, with a PNG no larger than 256 by 256 pixels and 65536 decoded bytes. GET returns the same shape or 404. Keys use the lowercase hex remote digest from `bot_photo_key.zig`, including the raw host byte. The Worker owns each tab's positive `photo` revision, exposes it only to clients requesting `bot_photo`, and preserves it regardless of layout PUT contents. DELETE removes the picture and tab revision.
 - `GET`, `PUT /v1/secrets/deepgram`: device Bearer auth only; the account's Deepgram dictation key, shared by every device on the account. PUT accepts `{ "key": "<text>" }`, one to 256 printable ASCII characters without spaces, and answers `{ "stored": true }`. GET answers `{ "key": "<text>" }` or 404. Service keys and browser sessions are refused with 403, and one account can never read another account's key. The desktop app logs only where the key came from, never its value.
 
-Apply the additive `account_secrets` table in `schema.sql` before deploying a Worker that serves this route.
-
-Apply the additive `bot_photos` table in `schema.sql` before deploying this Worker. Existing clients remain compatible: layout responses omit `photo` unless requested, and old layout uploads cannot erase pictures.
+`migrations/0001_initial.sql` creates `account_secrets` and `bot_photos` along with the rest of the schema; `npm run deploy` applies it before the Worker goes live. Existing clients remain compatible: layout responses omit `photo` unless requested, and old layout uploads cannot erase pictures.
 
 Callbacks accept only exact Android companion callback schemes or `http://127.0.0.1:<port>/callback`. Layout schema allows workspace names and tmux tab names, identities, host-slot indices (0/1/2), workspace membership, optional manual-title flags, and optional boolean `favorite` stars, and optional non-negative safe-integer `used` Unix-epoch millisecond timestamps. It rejects local paths, PIDs, SSH keys, and credential fields. Limits match desktop capacity: nine workspaces and 256 tabs.
 

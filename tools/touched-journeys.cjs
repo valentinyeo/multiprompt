@@ -5,7 +5,16 @@ const { discoverFeatures } = require('./verify-features.cjs');
 const SHARED_CORE_MAPS = 5;
 const MAX_JOURNEYS = 8;
 const SMOKE_JOURNEY = 'appearance';
-const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml']);
+const VERIFIER_OWN_CI_WORKFLOWS = new Set(['ci-repair-receipt.yml', 'emergency-lane.yml']);
+const CHAT_SOURCE_FILES = new Set([
+  'src/chat_echo.zig',
+  'src/chat_history.zig',
+  'src/chat_history_reader.py',
+  'src/chat_render.zig',
+  'src/chat_send.zig',
+  'src/chat_session.zig',
+]);
+const CHAT_JOURNEYS = ['chat-still', 'server-chat'];
 
 function patternFor(source) {
   return new RegExp(`^${source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
@@ -53,15 +62,32 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
   }
   let features = [];
   const notes = [];
+  let ranked = [];
   if (specificityOf.size) {
-    const ranked = [...specificityOf].sort(([left, a], [right, b]) => a - b || left.localeCompare(right));
+    ranked = [...specificityOf].sort(([left, a], [right, b]) => a - b || left.localeCompare(right));
     features = ranked.slice(0, MAX_JOURNEYS).map(([feature]) => feature).sort();
     const dropped = ranked.slice(MAX_JOURNEYS).map(([feature]) => feature).sort();
     if (dropped.length) notes.push(`Over the ${MAX_JOURNEYS}-journey cap, only the most specific journeys ran; dropped: ${dropped.join(', ')}.`);
   } else if (sourceChange && available.includes(SMOKE_JOURNEY)) {
     features = [SMOKE_JOURNEY];
   }
-  return { features, unmapped, ...(notes.length ? { notes } : {}), ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}) };
+  const chatFiles = files.filter(file => CHAT_SOURCE_FILES.has(file)).sort();
+  const chatJourneys = chatFiles.length ? CHAT_JOURNEYS.filter(name => available.includes(name)) : [];
+  if (chatJourneys.length) {
+    const order = ranked.map(([feature]) => feature);
+    const optional = order.filter(feature => features.includes(feature) && !chatJourneys.includes(feature));
+    const kept = optional.slice(0, Math.max(0, MAX_JOURNEYS - chatJourneys.length));
+    const dropped = optional.filter(feature => !kept.includes(feature));
+    if (dropped.length) notes.push(`Chat source changes always run ${chatJourneys.join(', ')}; dropped for that cap: ${dropped.join(', ')}.`);
+    features = [...new Set([...chatJourneys, ...kept])].sort();
+  }
+  return {
+    features,
+    unmapped,
+    ...(notes.length ? { notes } : {}),
+    ...(ciWorkflows.size ? { ciWorkflows: [...ciWorkflows].sort() } : {}),
+    ...(chatFiles.length ? { chatFiles } : {}),
+  };
 }
 
 async function touchedJourneysForDiff(baseRef, headRef = 'HEAD', directory, root = process.cwd()) {

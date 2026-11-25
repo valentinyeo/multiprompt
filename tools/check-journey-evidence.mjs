@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const workflowsDirectory = path.join(root, '.github/workflows');
 
-const evidencePath = /evidence|screenshots?|\.(?:png|bmp|jpe?g|webp)(?:$|['"\s,*])/i;
-const screenshotName = /\.(?:png|bmp|jpe?g|webp)$/i;
-const screenshotToken = /\.(?:png|bmp|jpe?g|webp)(?:$|[*?'"\s,])/i;
+const evidencePath = /evidence|screenshots?|\.(?:png|bmp|jpe?g|webp|mp4)(?:$|['"\s,*])/i;
+const screenshotName = /\.(?:png|bmp|jpe?g|webp|mp4)$/i;
+const screenshotToken = /\.(?:png|bmp|jpe?g|webp|mp4)(?:$|[*?'"\s,])/i;
 const removal = /(?:^|[\s;&|]|-)(?:Remove-Item|rm|rmdir|rd|del)\s+([^\r\n;&|]+)/i;
 const fileSuffix = /\.(?:json|log|txt|md|ya?ml)$/i;
 
@@ -92,10 +92,40 @@ function removesEvidence(target, scope) {
   return scope.screenshots && screenshotName.test(target);
 }
 
+function stepName(step) {
+  const found = /^\s*-?\s*name:\s*(.*)$/m.exec(step.text.join('\n'));
+  return found ? found[1].trim() : '';
+}
+
+function checkVerifyVideoRecording(file, job, problems) {
+  if (file !== '.github/workflows/verify.yml' || job.name !== 'verify') return;
+  const ffmpegStep = job.steps.find(step => /uses:\s*\.\/\.github\/actions\/install-ffmpeg\b/.test(step.text.join('\n')));
+  if (!ffmpegStep) {
+    problems.push(`${file} (job ${job.name}): does not install FFmpeg for journey video recording`);
+  } else {
+    const condition = stepCondition(ffmpegStep);
+    if (condition) {
+      problems.push(`${file}:${ffmpegStep.line} (job ${job.name}): installs FFmpeg conditionally (${condition}), so other journeys lose journey.mp4`);
+    }
+  }
+  for (const name of ['Launch Doctor Drive Evidence Cleanup', 'Verify real native browser journey']) {
+    const step = job.steps.find(candidate => stepName(candidate) === name);
+    if (!step) continue;
+    const body = step.text.join('\n');
+    if (!/drive\.ps1\b/.test(body)) {
+      problems.push(`${file}:${step.line} (job ${job.name}): ${name} does not run drive.ps1, so journeys produce no journey.mp4`);
+    }
+    if (/control\.ps1\s+-Feature\s+\$env:FEATURE\b/.test(body)) {
+      problems.push(`${file}:${step.line} (job ${job.name}): ${name} calls control.ps1 directly for $env:FEATURE, bypassing journey.mp4 recording`);
+    }
+  }
+}
+
 export function checkJourneyEvidence(files) {
   const problems = [];
   for (const [file, source] of Object.entries(files)) {
     for (const job of parseWorkflow(source)) {
+      checkVerifyVideoRecording(file, job, problems);
       const uploads = [];
       for (const [index, step] of job.steps.entries()) {
         const paths = stepPaths(step).filter(value => evidencePath.test(value));

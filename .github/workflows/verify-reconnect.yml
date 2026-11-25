@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-reconnect-${{ github.event.pull_request.number || github.ref }}
+  group: verify-reconnect-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -32,14 +32,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Install pinned Windows Zig
-        shell: pwsh
-        run: |
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
       - name: Acquire real app and compile boundary stand-in
         shell: pwsh
         env:

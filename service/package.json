@@ -1,1 +1,49 @@
-{"name":"multiprompt-account","private":true,"type":"module","scripts":{"pretest":"wrangler deploy --dry-run --outdir .build","test":"node --test test/*.test.js","dev":"wrangler dev","deploy":"wrangler deploy"},"devDependencies":{"miniflare":"^5.20261006.1-alpha","wrangler":"^4.0.0"},"dependencies":{"@better-auth/infra":"0.4.17","@better-auth/passkey":"1.7.7","better-auth":"1.7.7"}}
+{
+  "name": "multiprompt-account",
+  "private": true,
+  "type": "module",
+  "cloudflare": {
+    "bindings": {
+      "ALLOWED_EMAILS": {
+        "description": "Comma-separated email addresses permitted to sign in."
+      },
+      "ACCOUNT_EMAIL": {
+        "description": "Default account email for layout and usage sync (must be in `ALLOWED_EMAILS`)."
+      },
+      "BETTER_AUTH_SECRET": {
+        "description": "Random secret (at least 32 characters) for signing sessions, for example from `openssl rand -hex 32`."
+      },
+      "EMAIL_FROM": {
+        "description": "Verified sender address for sign-in codes and magic links."
+      },
+      "AUTH_ORIGINS": {
+        "description": "Optional comma-separated HTTPS origins for custom domains. Leave blank on `workers.dev`."
+      },
+      "COOKIE_DOMAIN": {
+        "description": "Optional shared cookie domain for custom subdomains. Leave blank on `workers.dev`."
+      },
+      "RP_ID": {
+        "description": "Optional passkey relying-party domain. Leave blank to use the Worker hostname."
+      },
+      "GOOGLE_CLIENT_ID": {
+        "description": "Optional Google OAuth client ID."
+      }
+    }
+  },
+  "scripts": {
+    "pretest": "wrangler deploy --dry-run --outdir .build",
+    "test": "node --test test/*.test.js",
+    "dev": "wrangler dev",
+    "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run db:migrations:apply && wrangler deploy"
+  },
+  "devDependencies": {
+    "miniflare": "^5.20261006.1-alpha",
+    "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "@better-auth/infra": "0.4.17",
+    "@better-auth/passkey": "1.7.7",
+    "better-auth": "1.7.7"
+  }
+}

@@ -35,9 +35,33 @@ th{font-size:12px;font-weight:600;background:var(--field)}
 @media (max-width:600px){main{padding:16px}.narrow{margin:16px auto}button,.btn{width:100%}th,td{padding:8px}}
 `;
 
-const shell = (title, body, script = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
-<style>${style}</style></head><body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`;
+const shell = (title, body, script = '', css = style, font = 'IBM+Plex+Sans:wght@400;600') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=${font}&display=swap" rel="stylesheet">
+<style>${css}</style></head><body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`;
+
+const signinStyle = `
+:root{color-scheme:dark}*{box-sizing:border-box}[hidden]{display:none!important}
+html,body{margin:0;min-height:100%;background:#000;color:#fff}
+body{font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:-.16px}
+::selection{background:#fff;color:#000}
+main{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:64px 24px}
+.entry{width:100%;max-width:440px;text-align:center}
+h1{font-size:clamp(44px,8vw,64px);font-weight:500;line-height:1.05;letter-spacing:-.035em;margin:0 0 20px}
+p{margin:0;color:#aaa}.intro{font-size:16px;margin-bottom:40px}
+nav{display:flex;flex-direction:column;gap:12px}
+button,.btn{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:60px;padding:16px 24px;border:0;border-radius:999px;background:#fff;color:#000;font:inherit;font-weight:500;text-decoration:none;cursor:pointer}
+button:hover,.btn:hover{background:#e5e5e5}button:disabled{opacity:.6;cursor:wait}
+button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:5px}
+.deploy{flex-direction:column;gap:2px;padding:16px 24px}.deploy img{width:184px;height:39px;filter:grayscale(1) invert(1);border-radius:6px}
+.privacy{font-size:12px;margin-top:28px}
+#account{text-align:left;margin-top:32px;padding-top:28px;border-top:1px solid #333}
+h2{font-size:20px;font-weight:500;margin:0 0 16px}.stack{display:flex;flex-direction:column;gap:12px}
+.or{margin:24px 0;color:#aaa;text-align:center;font-size:12px}
+label{display:block;margin:20px 0 8px;color:#ccc;font-size:13px}
+input{width:100%;min-height:52px;border:1px solid #555;border-radius:20px;padding:12px 16px;margin-bottom:16px;background:#000;color:#fff;caret-color:#fff;font:inherit;font-size:16px}
+.row{display:flex;flex-direction:column;gap:12px}.note{font-size:13px;color:#aaa;margin-top:16px;overflow-wrap:anywhere}.note.err{color:#fff}
+@media(max-width:600px){main{padding:48px 20px}.entry{max-width:400px}h1{font-size:48px}.intro{margin-bottom:32px}button,.btn{padding-left:16px;padding-right:16px;font-size:13px}}
+`;
 
 const common = `
 const $ = s => document.querySelector(s);
@@ -64,20 +88,35 @@ async function passkeyGet(o) {
 `;
 
 function signin({ next, google, mail }) {
-  const body = `<header><b>multiprompt</b><span class="sp"></span></header>
-<main data-page="signin" data-methods="${['passkey', mail && 'email', google && 'google'].filter(Boolean).join(',')}"><div class="tile narrow">
-<h1>Sign in</h1><p>${mail ? 'Use a passkey, or get a sign-in link by email.' : 'Use a passkey.'}</p>
-<div class="stack"><button id="pk" type="button">Sign in with a passkey <span aria-hidden="true">&#8594;</span></button></div>
-${mail ? '<div class="or">or</div>' : '<p id="no-mail" class="note">Email codes are not switched on yet. Use a passkey.</p>'}
+  const body = `<main data-page="signin" data-methods="${['passkey', mail && 'email', google && 'google'].filter(Boolean).join(',')}"><div class="entry">
+<h1>Multi Bot</h1><p class="intro">Your hub. Your Cloudflare.</p>
+<nav aria-label="Get started">
+<a class="btn deploy" href="https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fvalentinyeo%2Fmultiprompt%2Ftree%2Fmaster%2Fservice"><span>Deploy your own hub</span><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" width="184" height="39"></a>
+<button id="enter" type="button" aria-expanded="false" aria-controls="account">Sign in or sign up with a passkey</button>
+<a class="btn" href="https://github.com/valentinyeo/multiprompt/releases/latest/download/multiprompt-x64.exe">Download for Windows</a>
+</nav>
+<p class="privacy">SSH keys stay on your computer.</p>
+<section id="account" aria-labelledby="account-title" hidden><h2 id="account-title">Sign in to your hub</h2>
+<div class="stack"><button id="pk" type="button">Use an existing passkey</button></div>
+${mail ? '<p class="or">New here? To create a passkey, verify your email first.<br>Use an email allowed by your hub.</p>' : '<p id="no-mail" class="note">New here? Your hub needs email delivery configured before you can sign up. You can still use an existing passkey.</p>'}
 <form id="f-email"${mail ? '' : ' hidden'}><label for="email">Email</label><input id="email" type="email" autocomplete="username webauthn" required>
 <div class="row"><button type="submit" id="send-link">Email me a link <span aria-hidden="true">&#8594;</span></button><button type="submit" id="send-code" class="ghost">Use a code instead</button></div></form>
 <form id="f-code" hidden><label for="otp">6-digit code</label><input id="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
 <div class="row"><button type="submit">Sign in <span aria-hidden="true">&#8594;</span></button><button type="button" class="ghost" id="again">Use another email</button></div></form>
 ${google ? '<div class="or">or</div><button id="google" type="button" class="secondary">Continue with Google <span aria-hidden="true">&#8594;</span></button>' : ''}
-<div id="msg" class="note" role="status"></div></div></main>`;
+<button id="create-pk" type="button" hidden>Create your passkey</button>
+<div id="msg" class="note" role="status"></div></section></div></main>`;
   const script = common + `
 const next = ${js(next || '/')}; const msg = $('#msg'); let email = '';
 const done = () => { location.replace(next); };
+$('#enter').onclick = () => { $('#account').hidden = false; $('#enter').setAttribute('aria-expanded', 'true'); $('#pk').focus(); };
+$('#create-pk').onclick = async () => {
+  const button = $('#create-pk'); button.disabled = true;
+  try { note(msg, 'Follow your browser prompt to create a passkey.'); const o = await call('/api/auth/passkey/generate-register-options');
+    await call('/api/auth/passkey/verify-registration', { method: 'POST', body: JSON.stringify({ response: await passkeyCreate(o), name: navigator.platform || 'Passkey' }) }); done(); }
+  catch (err) { note(msg, 'Could not create a passkey. Try again: ' + err.message, true); }
+  finally { button.disabled = false; }
+};
 $('#f-email').onsubmit = async e => { e.preventDefault(); email = $('#email').value.trim().toLowerCase();
   const byCode = e.submitter && e.submitter.id === 'send-code';
   try { note(msg, 'Sending...');
@@ -87,7 +126,8 @@ $('#f-email').onsubmit = async e => { e.preventDefault(); email = $('#email').va
       note(msg, 'If this email has an account, a sign-in link is on its way. Open it on this device.'); } }
   catch (err) { note(msg, 'Could not send a code: ' + err.message, true); } };
 $('#f-code').onsubmit = async e => { e.preventDefault();
-  try { await call('/api/auth/sign-in/email-otp', { method: 'POST', body: JSON.stringify({ email, otp: $('#otp').value.trim() }) }); done(); }
+  try { await call('/api/auth/sign-in/email-otp', { method: 'POST', body: JSON.stringify({ email, otp: $('#otp').value.trim() }) });
+    $('#f-code').hidden = true; $('#create-pk').hidden = false; $('#create-pk').focus(); note(msg, 'Email verified. Create your passkey to continue.'); }
   catch (err) { note(msg, 'That code did not work: ' + err.message, true); } };
 $('#again').onclick = () => { $('#f-code').hidden = true; $('#f-email').hidden = false; note(msg, ''); };
 $('#pk').onclick = async () => {
@@ -98,7 +138,7 @@ const g = $('#google'); if (g) g.onclick = async () => {
   try { const r = await call('/api/auth/sign-in/social', { method: 'POST', body: JSON.stringify({ provider: 'google', callbackURL: next }) }); location.href = r.url; }
   catch (err) { note(msg, 'Google sign-in failed: ' + err.message, true); } };
 `;
-  return shell('multiprompt sign-in', body, script);
+  return shell('Multi Bot | Sign in', body, script, signinStyle, 'Inter:wght@400;500;600');
 }
 
 function dash({ email }) {

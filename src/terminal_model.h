@@ -24,6 +24,7 @@ int mp_terminal_mouse_mode(MPTerminal *);
 int mp_terminal_cursor(MPTerminal *, int *, int *);
 void mp_terminal_key(MPTerminal *, int, int);
 void mp_terminal_char(MPTerminal *, uint32_t, int);
-void mp_terminal_paste(MPTerminal *, int);
+int mp_terminal_bracketed_paste(MPTerminal *);
+void mp_terminal_paste_text(MPTerminal *, const char *, size_t);
 void mp_terminal_mouse(MPTerminal *, int, int, int, int, int);
 #endif

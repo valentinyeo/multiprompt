@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "provider": "claude",
+  "sid": "synthetic-owner",
+  "tmux": "synthetic-chat",
+  "cwd": "/home/synthetic_owner/workspace",
+  "permission_mode": "bypassPermissions",
+  "model": "sonnet",
+  "nightly": true,
+  "command": [
+    "/home/synthetic_runner/.local/bin/claude"
+  ]
+}

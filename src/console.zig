@@ -2977,6 +2977,8 @@ pub fn paneGuardKeepUser(requested: u32) void {
 }
 
 pub fn switchToShellByUser(idx: u32) void {
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and idx != app_state.active_shell)
+        @import("sidebar.zig").freezeSidebarOrder();
     const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
     if (idx < app_state.shell_count) {
         @import("room_frontend.zig").cancelRestoreForUser();
@@ -2994,7 +2996,10 @@ pub fn switchToShell(idx: u32) void {
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
-    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) app_state.g_sidebar_view = null;
+    if (app_state.g_sidebar_view != null and idx < app_state.shell_count and !@import("workspaces.zig").sidebarViewShellVisible(idx)) {
+        _ = @import("sidebar.zig").thawSidebarOrder();
+        app_state.g_sidebar_view = null;
+    }
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -3012,6 +3017,7 @@ pub fn switchToShell(idx: u32) void {
     app_state.g_browser_switch_preparing = defer_native_browser;
     defer app_state.g_browser_switch_preparing = browser_preparing_previous;
     if (idx != app_state.active_shell) {
+        @import("voice.zig").cancelDictationOnTabSwitch();
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }

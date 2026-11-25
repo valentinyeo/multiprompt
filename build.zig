@@ -210,6 +210,7 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = if (b.option([]const u8, "test-filter", "Run matching desktop module tests")) |filter| &.{filter} else &.{},
     });
 
     const listener_helper = b.addTest(.{
@@ -358,7 +359,7 @@ pub fn build(b: *std.Build) void {
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js", "tools/chat-mp-fresh.test.js", "tools/chat-fresh-start.test.js", "tools/session-link.test.js", "tools/session-link-click.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
-    const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js", "tools/chat-host-socket-root.test.js" });
+    const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js", "tools/chat-host-owner-binary.test.js", "tools/chat-host-socket-root.test.js" });
     vps_test_step.dependOn(&startup_retry_tests.step);
     const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js", "tools/session-actions.test.js" });
     test_step.dependOn(&end_session_tests.step);
@@ -430,6 +431,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
+    const chat_skill_pill_anywhere = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-pill-anywhere.test.js" });
+    chat_skill_pill_anywhere.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&chat_skill_pill_anywhere.step);
     const chat_last_batch_time_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-last-batch-time.test.js" });
     test_step.dependOn(&chat_last_batch_time_tests.step);
     const chat_live_redraw_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-redraw.test.js" });

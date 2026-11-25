@@ -36,7 +36,7 @@ function median(values) {
 }
 
 function oldBudget(calibrateReadingMs) {
-  return Math.max(floor, Math.ceil(calibrateReadingMs * (heaviestWork / smallWork) * slack));
+  return Math.max(50, Math.ceil(calibrateReadingMs * (heaviestWork / smallWork) * 1.35));
 }
 
 function newBudget(referencePerCallMs) {

@@ -78,3 +78,10 @@ test('an action that never gives up fails', () => {
   const problems = checkFfmpegInstall({}, broken);
   assert.match(problems.join('\n'), /does not fail the step once the retries run out/);
 });
+
+test('an action that trusts a restored cache fails', () => {
+  const broken = action().replace(/\n\s*\$cached = [^]*?installing a fresh copy"\n\s*Remove-Item -Recurse -Force -ErrorAction SilentlyContinue \$target\n/, '\n');
+  assert.notEqual(broken, action(), 'the cache check moved; update this control');
+  const problems = checkFfmpegInstall({}, broken);
+  assert.match(problems.join('\n'), /trusts a restored cache without checking it runs/);
+});

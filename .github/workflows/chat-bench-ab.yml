@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: chat-bench-ab-${{ github.event.pull_request.number || github.ref }}
+  group: chat-bench-ab-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -93,6 +93,8 @@ jobs:
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
           sudo mkdir -p /opt/chat-bench
           sudo chown "$(id -u):$(id -g)" /opt/chat-bench
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
       - name: Prepare synthetic fixtures and reader tooling
         working-directory: tooling
         run: |
@@ -100,10 +102,7 @@ jobs:
           cp -r tools src /opt/chat-bench/tooling/
           cp -r ../results/. /opt/chat-bench/results/
           cd /opt/chat-bench
-          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
-          echo '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz' | sha256sum -c -
-          tar -xf zig.tar.xz
-          export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
+          export ZIG="$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig"
           export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
           export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
           cd tooling
@@ -133,7 +132,7 @@ jobs:
           trap 'cp -r /opt/chat-bench/results/. "$destination/"' EXIT
           cd /opt/chat-bench/tooling
           export GITHUB_ACTIONS=true
-          export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
+          export ZIG="$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig"
           export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
           export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
           while IFS=$'\t' read -r label result; do

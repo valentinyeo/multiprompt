@@ -403,7 +403,7 @@ function WindowShot([string]$Name) {
 }
 
 function Snapshot([string]$Name) {
-    trap { if (-not $result.error) { $result.failureKind = 'infrastructure' }; throw }
+    trap { if (-not $result['error']) { $result.failureKind = 'infrastructure' }; throw }
     Write-Host "Evidence: snapshot $Name, focused UI Automation element"
     $foreground = [VerifyNative]::GetForegroundWindow()
     $focus = @{ foreground = $foreground.ToInt64(); capturedAt = [DateTime]::UtcNow.ToString('o') }
@@ -426,7 +426,8 @@ function Snapshot([string]$Name) {
     Write-Host "Evidence: snapshot $Name, UI Automation subtree"
     $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
     $tree = foreach ($node in $nodes) {
-        @{ name = $node.Current.Name; class = $node.Current.ClassName; type = $node.Current.ControlType.ProgrammaticName; pid = $node.Current.ProcessId; handle = $node.Current.NativeWindowHandle }
+        try { @{ name = $node.Current.Name; class = $node.Current.ClassName; type = $node.Current.ControlType.ProgrammaticName; pid = $node.Current.ProcessId; handle = $node.Current.NativeWindowHandle } }
+        catch { @{ lost = $true; error = $_.Exception.Message } }
     }
     Save-Json @($tree) ($Name + '.uia.json')
     [void][VerifyNative]::DwmFlush()

@@ -225,8 +225,7 @@ static int premove(VTermRect rect, void *user)
   if(((screen->callbacks && screen->callbacks->sb_pushline) ||
         (screen->callbacks_has_pushline4 && screen->callbacks && screen->callbacks->sb_pushline4)) &&
      rect.start_row == 0 && rect.start_col == 0 &&        // starts top-left corner
-     rect.end_col == screen->cols &&                      // full width
-     screen->buffer == screen->buffers[BUFIDX_PRIMARY]) { // not altscreen
+     rect.end_col == screen->cols) {                      // full width
     for(int row = 0; row < rect.end_row; row++) {
       const VTermLineInfo *lineinfo = vterm_state_get_lineinfo(screen->state, row);
       sb_pushline_from_row(screen, row, lineinfo->continuation);

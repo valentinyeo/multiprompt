@@ -13,10 +13,13 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Formal Switch AI](chat-switch-ai-formal.md).
 - [Automatic AI switch](chat-auto-switch.md).
 - [CI repair receipt](ci-repair-receipt.md).
+- [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Agent feedback wishes](agent-feedback.md).
+- [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
-Part A (`w-2567a`, SOFT-2567) owns real-size seeded data. Part B (`w-2567b`, SOFT-2567) owns runner-hosted real SSH/tmux chats. These maps consume those prerequisites; they do not duplicate them. A named synthetic journey is not live-server proof.
+Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted real SSH/tmux `server-chat` journey indexed below; maps that need a real server consume it rather than duplicating it. Part A (`w-2567a`, SOFT-2567, real-size seeded data) never landed: [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070) was closed unmerged, so no real-size profile exists. A named synthetic journey is not live-server proof.
 
 ## User-facing features
 
@@ -56,13 +59,13 @@ Coverage is a report, not a gate. The weekly `maintain-verification.yml` pass ru
 
 - Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
 - A real branch build or checksum-verified release executable with matching embedded version.
-- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one owned single-window instance and an initialized CMD tab. Existing baseline recipes start empty; real-size coverage must use Part A's disclosed seeded profile. The harness must see the owned `ZigShell` HWND through UI Automation.
+- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one owned single-window instance and an initialized CMD tab. Existing baseline recipes start empty; there is no real-size seeded profile, because Part A was closed unmerged, so a real-size claim needs a fixture that lands first. The harness must see the owned `ZigShell` HWND through UI Automation.
 - Documented `MULTIPROMPT_NO_LOGIN=1` offline mode. Account login, device approval, sync, real AI agents, SSH/tmux and browser integration are not verified by this baseline.
-- Read-only Doctor passes before input. Never rewrite app state after launch, set app settings to bypass a user action or reuse a shared desktop. Part A owns all new real-size seed data; existing legacy fixtures retain their disclosed boundaries.
+- Read-only Doctor passes before input. Never rewrite app state after launch, set app settings to bypass a user action or reuse a shared desktop. Existing legacy fixtures retain their disclosed boundaries; no Part A real-size seed data exists.
 
 ## Driving conventions
 
-For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`. Which journeys a trigger runs comes from each map's `Verify on:` line: `appearance`, `chat-still` and `server-chat` declare `pull_request`; the 23 maps that declare `push` make up the nightly matrix. Every other map is dispatch-only. Pull requests normally get their journeys from `.github/workflows/pr-verifier.yml`, which selects by `Source files:` rather than by `Verify on:`. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without a model picker, capped at eight per pull request. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. A source file that more than five maps list, such as `src/main.zig` or `src/command_palette.zig`, is shared core and selects no journey by itself; when nothing is selected for a `src/` change, `appearance` runs as the one smoke journey. Journeys dropped over the cap are named in the verdict.
 
@@ -104,6 +107,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Dictation stops when the chat changes](chat-dictation-switch.md): Ctrl+Tab during dictation stops the recording on the chat that started it, the chat in front keeps an empty message box, and nothing is transcribed or delivered afterwards.
 - [Jump to newest](chat-newest.md): Shift+G twice, exact draft preservation and the renamed palette action, with direct verifier checks.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
@@ -157,6 +161,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remove a stuck Not sent message](chat-not-sent-remove.md): Up then Delete removes a Not sent message from an old session.
 - [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
 - [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
+- [Fresh start stays live](chat-fresh-start.md): Fresh start keeps the reloading reply and dots on screen and holds a message typed during the reload until it lands once.
 - [Double-click thumbs up](chat-double-click.md): real mouse add/remove, painted badge, unchanged draft and exactly one transport submission.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
@@ -193,4 +198,4 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
 
-Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+Part A ([PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070), `seed-profile.py`, `seed-profile.ps1`, the `chat-real-size` journey) was closed unmerged, so master still has no real-size seeded profile. Part B ([PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072)) merged on 2026-11-18 as the runner-owned SSH/tmux `server-chat` journey, which runs as `feature=server-chat`; use it rather than adding another server fixture. Do not add replacement real-size fixtures here until a Part A equivalent lands.

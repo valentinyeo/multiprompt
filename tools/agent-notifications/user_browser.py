@@ -17,6 +17,31 @@ PANE_COMMANDS = frozenset((
     "insert", "key", "back", "forward", "reload", "screenshot", "console",
     "activate", "close-tab", "tab", "eval", "script", "emulate",
 ))
+HOSTED_TTL = 7 * 24 * 3600
+
+
+def hosted_dir():
+    return Path.home() / ".local/state/multiprompt/owner-sessions"
+
+
+def hosted_owner(session):
+    try:
+        entries = sorted(hosted_dir().iterdir())
+    except OSError:
+        return None
+    for path in entries:
+        try:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 4096):
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (isinstance(data, dict) and data.get("session") == session and type(data.get("uid")) is int
+                and time.time() - float(data.get("at") or 0) < HOSTED_TTL):
+            return data["uid"]
+    return None
 
 
 def owners(uid, session):
@@ -67,6 +92,31 @@ def resolve_tab(layout, host, outer):
     return key.encode()
 
 
+def forward_hosted(client, directory, wire, relay):
+    for path in relay.zsb_sockets(relay.sockets(directory), session_of(wire)):
+        upstream = relay.connect(path, time.monotonic() + 0.8)
+        if upstream is None:
+            continue
+        with upstream:
+            upstream.settimeout(90)
+            upstream.sendall(wire if wire.endswith(b"\n") else wire + b"\n")
+            chunks, size = [], 0
+            while chunk := upstream.recv(65536):
+                size += len(chunk)
+                if size > 16 * 1024 * 1024:
+                    raise ValueError("Browser reply exceeded transport limit")
+                chunks.append(chunk)
+        reply = b"".join(chunks)
+        if reply:
+            client.sendall(reply)
+            return True
+    return False
+
+
+def session_of(wire):
+    return wire.rstrip(b"\n").split(b":", 2)[1]
+
+
 def handle(client, directory, host, relay):
     with client:
         try:
@@ -82,6 +132,10 @@ def handle(client, directory, host, relay):
             if args[0] in ("open", "navigate") and len(args) > 1:
                 if not args[1].startswith(("https://", "http://", "about:blank", "data:text/html")):
                     raise ValueError("Only web pages may open through the owner channel")
+            if hosted_owner(session.decode()) == uid:
+                if not forward_hosted(client, directory, wire, relay):
+                    raise ValueError("Hosted chat has no connected desktop")
+                return
             outer = owners(uid, session.decode())
             if not outer:
                 raise ValueError("Session does not belong to this Unix user")

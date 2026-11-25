@@ -124,6 +124,8 @@ jobs:
     timeout-minutes: 15
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     strategy:
       matrix:
         include:
@@ -135,13 +137,24 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
+      - name: Restore Zig toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
       - name: Install Zig 0.16.0
-        run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
-          tar -xJf zig.tar.xz
-          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -172,6 +185,8 @@ jobs:
         with:
           name: multiprompt-${{ matrix.arch }}
           path: dist/*
+      - name: Bound Zig cache before save
+        run: python3 tools/trim-zig-cache.py --cap-mib 1600
 
   launch:
     needs: [prepare, build]
@@ -184,9 +199,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: multiprompt-x64
@@ -207,73 +219,13 @@ jobs:
           path: release-proof/
           if-no-files-found: error
 
-  resource-observation:
-    needs: [prepare, build]
-    runs-on: windows-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Test guard
-        run: node --test tools/resource-guard/snapshot.test.mjs tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: multiprompt-x64
-          path: release-bin
-      - name: Prepare synthetic SSH and pinned baseline
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ./tools/resource-guard/setup.ps1
-          Copy-Item release-bin/zigshell-bridge-x64.exe release-bin/zigshell-bridge.exe
-      - name: Test Windows resource staging and sessions
-        shell: pwsh
-        run: |
-          ./tools/resource-guard/stage.test.ps1
-          ./tools/resource-guard/session.test.ps1
-      - name: Test owned TCP connections
-        shell: pwsh
-        run: ./tools/resource-guard/tcp.test.ps1
-      - name: Test fixture process lifetime
-        shell: pwsh
-        run: ./tools/resource-guard/launcher-lifetime.test.ps1
-      - name: Measure baseline
-        shell: pwsh
-        run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
-      - name: Measure candidate
-        shell: pwsh
-        run: ./tools/resource-guard/measure.ps1 -Exe release-bin/multiprompt-x64.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
-      - name: Evaluate resource gate
-        if: always()
-        run: node tools/resource-guard/evaluate.mjs
-      - name: File measured latency warnings
-        if: always()
-        continue-on-error: true
-        env:
-          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
-        run: node tools/resource-warning-ticket.mjs resource-evidence/verdict.json "$env:RUN_URL" "$env:SOURCE_SHA"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: release-resource-observation
-          path: resource-evidence/
-          if-no-files-found: warn
-
   symbols:
     needs: prepare
     timeout-minutes: 15
     name: symbols-${{ matrix.arch }}
     runs-on: ubuntu-latest
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     strategy:
       matrix:
         include:
@@ -285,13 +237,24 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
+      - name: Restore Zig toolchain
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-release-v1-${{ matrix.arch }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
       - name: Install Zig 0.16.0
-        run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
-          tar -xJf zig.tar.xz
-          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-notes-source
@@ -341,7 +304,7 @@ jobs:
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   release:
-    needs: [prepare, build, launch, gitleaks, resource-observation]
+    needs: [prepare, build, launch, gitleaks]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -350,7 +313,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: multiprompt-x64

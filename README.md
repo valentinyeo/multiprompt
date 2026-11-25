@@ -62,6 +62,12 @@ The app lands in `zig-out/bin/multiprompt.exe`.
 
 Release builds include Rooms. Pass `-Drooms-preview=true` to include Rooms in a non-release build, or `-Drooms-preview=false` to leave them out.
 
+## Cloud service
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/valentinyeo/multiprompt/tree/master/service)
+
+Deploys the Multibot cloud service (`service/`) with its D1 database and schema on your Cloudflare account. See [service/README.md](service/README.md) for configuration and optional custom-domain setup.
+
 ## Contributing
 
 Bug reports and ideas are welcome as GitHub issues. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.

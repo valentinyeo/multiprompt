@@ -15,7 +15,10 @@ test('generation shares ticket titles with both historical and current release n
   assert.deepEqual(notes.releases.map(row => row.changes), [['IGSH-2 Full current title'], ['IGSH-1 Earlier café title']]);
   assert.equal(notes.releases[0].tickets[0], 'https://app.hypertask.ai/detail/project-2060/2');
   assert.doesNotMatch(source, /Checks and fixes/);
-  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'x', subject: 'IGSH-2: Change' }], { 'IGSH-2': 'Current' }), /IGSH-1/);
+  const warnings = [];
+  const kept = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'x', subject: 'IGSH-2: Change' }], { 'IGSH-2': 'Current' }, line => warnings.push(line));
+  assert.match(kept, /\.text = "Old product text", \.ticket = "IGSH-1"/);
+  assert.ok(warnings.some(line => /IGSH-1 has no title this release can publish; its published line stays unchanged/.test(line)), warnings.join('\n'));
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'x', subject: 'IGSH-2: Change' }], { 'IGSH-1': 'Earlier', 'IGSH-2': '' }), /IGSH-2/);
 });
 
@@ -58,10 +61,18 @@ test('modern releases cannot publish an empty ticket list', async () => {
   assert.throws(() => releaseNotes(source, 'v0.28.1027'), /needs plain ticketed lines/);
 });
 
-test('malformed ticketed release lines fail instead of disappearing', async () => {
+test('malformed ticketed release lines warn and never disappear silently', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
-  for (const text of ['IGSH-7 ', 'A previous description', 'IGSH-7 Checks and fixes, no visible change']) {
+  for (const [text, changes, tickets] of [
+    ['IGSH-7 ', [], []],
+    ['A previous description', ['A previous description'], [null]],
+    ['IGSH-7 Checks and fixes, no visible change', [], []],
+  ]) {
     const source = `const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "1.0.0", .items = &.{\n        .{ .text = ${JSON.stringify(text)}, .ticket = "IGSH-7" },\n    } },\n};\n`;
-    assert.throws(() => releaseNotes(source, 'v1.0.0'));
+    const warnings = [];
+    const release = releaseNotes(source, 'v1.0.0', line => warnings.push(line)).releases[0];
+    assert.deepEqual(release.changes, changes, text);
+    assert.deepEqual(release.tickets, tickets, text);
+    assert.equal(warnings.length, 1, warnings.join('\n'));
   }
 });

@@ -1,0 +1,1 @@
+Clicked chat jumps to the top of the All list

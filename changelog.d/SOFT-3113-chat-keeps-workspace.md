@@ -1,0 +1,1 @@
+A live chat in Waiting stays listed in its workspace after it finishes a reply.

@@ -7,7 +7,10 @@ import { sendEmail as infraEmail } from '@better-auth/infra/email';
 
 export const allowed = env => (env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 export const isAllowed = (env, email) => typeof email === 'string' && allowed(env).includes(email.toLowerCase());
-export const origins = env => (env.AUTH_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
+export const origins = (env, fallback) => {
+  const configured = (env.AUTH_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
+  return configured.length ? configured : fallback ? [fallback] : [];
+};
 
 export const mailConfigured = env => Boolean((env.EMAIL && typeof env.EMAIL.send === 'function') || env.RESEND_API_KEY || infraKey(env));
 export const infraKey = env => (env.BETTER_AUTH_API_KEY || '').trim();
@@ -22,10 +25,6 @@ export const sendLink = (env, email, url) => sendMail(env, email,
   { template: 'magic-link', variables: { magicLink: url, userEmail: email, appName: 'multiprompt', expirationMinutes: '5' } });
 async function sendMail(env, email, subject, text, infra) {
   const from = env.EMAIL_FROM || 'multiprompt <login@example.com>';
-  if (env.EMAIL && typeof env.EMAIL.send === 'function') {
-    await env.EMAIL.send({ to: email, from, subject, text });
-    return;
-  }
   if (env.RESEND_API_KEY) {
     const response = await fetch(env.EMAIL_API_URL || 'https://api.resend.com/emails', {
       method: 'POST',
@@ -34,6 +33,14 @@ async function sendMail(env, email, subject, text, infra) {
     });
     if (!response.ok) throw new APIError('SERVICE_UNAVAILABLE', { message: 'email_unavailable' });
     return;
+  }
+  if (env.EMAIL && typeof env.EMAIL.send === 'function') {
+    try {
+      await env.EMAIL.send({ to: email, from, subject, text });
+      return;
+    } catch (error) {
+      if (!infraKey(env)) throw error;
+    }
   }
   if (infraKey(env)) {
     const result = await infraEmail({ to: email, ...infra }, { apiKey: infraKey(env) });
@@ -44,6 +51,8 @@ async function sendMail(env, email, subject, text, infra) {
 }
 
 export function makeAuth(env, origin) {
+  const trusted = origins(env, origin);
+  const rpID = (env.RP_ID || '').trim() || new URL(origin).hostname;
   const google = googleConfigured(env)
     ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, prompt: 'select_account' } } : {};
   return betterAuth({
@@ -52,7 +61,7 @@ export function makeAuth(env, origin) {
     baseURL: origin,
     basePath: '/api/auth',
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: origins(env),
+    trustedOrigins: trusted,
     emailAndPassword: { enabled: false },
     socialProviders: google,
     session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24, freshAge: 60 * 15 },
@@ -78,7 +87,7 @@ export function makeAuth(env, origin) {
           await sendLink(env, email, url);
         }
       }),
-      passkey({ rpID: env.RP_ID, rpName: 'multiprompt', origin: origins(env) }),
+      passkey({ rpID, rpName: 'multiprompt', origin: trusted }),
       ...(infraKey(env) ? [dash({ apiKey: infraKey(env) })] : [])
     ]
   });
