@@ -2775,10 +2775,15 @@ def message_services(tmux, provider, sid):
                 codex_attempt_finish=lambda key, outcome: codex_attempt_finish(tmux, key, outcome))
 
 
-def message_connector(provider):
+def message_connector_source(provider):
     sources = globals().get('CONNECTOR_SOURCES', {})
     encoded = sources.get(provider) if isinstance(sources, dict) else None
-    if not isinstance(encoded, str):
+    return encoded if isinstance(encoded, str) else None
+
+
+def message_connector(provider):
+    encoded = message_connector_source(provider)
+    if encoded is None:
         return None
     namespace = {'__name__': 'multiprompt_connector_' + provider}
     exec(compile(base64.b64decode(encoded, validate=True), '<chat-connector>', 'exec'), namespace)
@@ -2859,6 +2864,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
 HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor', 'antigravity')
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
+MESSAGE_WORKER_LOCK_ENV = 'MULTIPROMPT_MESSAGE_WORKER_LOCK_FD'
 HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent', 'antigravity': 'agy'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
@@ -4873,7 +4879,7 @@ def host_auto_switch_redeliver(tmux, message_id, reply):
         if not changed:
             return False
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (message_id,)).fetchone()))
-    start_message_worker(dict(tmux=tmux, provider=provider, sid=sid), host_reader_source(), only_if_work=True)
+    start_message_worker(dict(tmux=tmux, provider=provider, sid=sid), host_reader_source())
     message_store_request(dict(message_protocol=1, tmux=tmux, provider=provider, sid=sid, op="message_dispatch"))
     return True
 
@@ -7892,30 +7898,63 @@ def message_poll_locked(tmux, provider, sid):
                 message_apply_connector(db, provider, sid, epoch, result)
 
 
-def start_message_worker(q, source, only_if_work=False):
-    if source is None:
+def message_work_state(db, provider, sid):
+    return db.execute("SELECT SUM(state='queued'),MIN(CASE WHEN state='sent' THEN deadline END),SUM(state IN ('failed','accepted','started')) FROM shared_messages WHERE provider=? AND sid=?", (provider, sid)).fetchone()
+
+
+def message_worker_due(provider, sid):
+    from contextlib import closing
+    path = message_store_path()
+    if not path.is_file():
+        return False
+    try:
+        with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shared_messages'").fetchone():
+                return False
+            queued, deadline, observed = message_work_state(db, provider, sid)
+    except sqlite3.Error:
+        return True
+    return bool(queued) or deadline is not None or (bool(observed) and message_connector_source(provider) is not None)
+
+
+def message_worker_lock(lock_path):
+    inherited = os.environ.pop(MESSAGE_WORKER_LOCK_ENV, '')
+    if inherited.isdigit() and os.name == 'posix':
+        try:
+            return os.fdopen(int(inherited), 'a')
+        except OSError:
+            pass
+    return lock_path.open('a')
+
+
+def start_message_worker(q, source):
+    if source is None or not message_worker_due(q['provider'], q['sid']):
         return
-    if only_if_work:
-        from contextlib import closing
-        with closing(message_store_db(q['tmux'])) as db:
-            if not db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent','failed','accepted','started') LIMIT 1", (q['provider'], q['sid'])).fetchone():
-                return
     import fcntl
     path = message_store_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_path = path.with_suffix('.' + hashlib.sha256((q['provider'] + ':' + q['sid']).encode()).hexdigest() + '.message-worker')
-    with lock_path.open('a') as lock:
+    lock = lock_path.open('a')
+    try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             message_worker_wake(lock_path)
             return
-    bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<message-worker>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
-    child = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--message-worker', q['tmux'], q['provider'], q['sid']], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    try:
-        child.stdin.write(base64.b64encode(source.encode()) + b'\n')
+        handed_over = os.name == 'posix'
+        if handed_over:
+            options = dict(pass_fds=(lock.fileno(),), env=dict(os.environ, **{MESSAGE_WORKER_LOCK_ENV: str(lock.fileno())}))
+        else:
+            options = {}
+            lock.close()
+        bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<message-worker>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
+        child = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--message-worker', q['tmux'], q['provider'], q['sid']], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, **options)
+        try:
+            child.stdin.write(base64.b64encode(source.encode()) + b'\n')
+        finally:
+            child.stdin.close()
     finally:
-        child.stdin.close()
+        lock.close()
 
 
 def message_worker_wake_path(lock_path):
@@ -7977,7 +8016,7 @@ def message_worker(tmux, provider, sid):
     from contextlib import closing
     path = message_store_path()
     lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.message-worker')
-    with lock_path.open('a') as lock:
+    with message_worker_lock(lock_path) as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -8030,7 +8069,7 @@ def message_worker(tmux, provider, sid):
                         message_poll(tmux, provider, sid)
                         message_store_request(dict(request, op='message_dispatch'))
                         with closing(message_store_db(tmux)) as db:
-                            queued, deadline, observed = db.execute("SELECT SUM(state='queued'),MIN(CASE WHEN state='sent' THEN deadline END),SUM(state IN ('failed','accepted','started')) FROM shared_messages WHERE provider=? AND sid=?", (provider, sid)).fetchone()
+                            queued, deadline, observed = message_work_state(db, provider, sid)
                         if not queued and deadline is None:
                             if not observed or message_connector(provider) is None:
                                 return
@@ -9238,10 +9277,8 @@ def serve_request(line, source, subscriptions, lock):
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
             result = message_store_request(query)
-            if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot'):
+            if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot', 'message_events', 'message_status'):
                 start_message_worker(query, source)
-            elif query.get('op') in ('message_events', 'message_status'):
-                start_message_worker(query, source, only_if_work=True)
             serve_print(dict(id=rid, message_protocol=1, result=result))
             return
         if query.get("op") in ("send", "question_text"):

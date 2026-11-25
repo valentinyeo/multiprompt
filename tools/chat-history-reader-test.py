@@ -4536,6 +4536,50 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.assertEqual(spawn.call_count, 2)
             self.assertEqual(self.send.call_count, 0)
 
+    def serve_polls(self, count, gap=0.0):
+        requests = [dict(self.base, id=index, op='message_snapshot') for index in range(1, count + 1)]
+        read_end, write_end = os.pipe()
+        started = time.monotonic()
+        def feed():
+            with os.fdopen(write_end, 'wb') as stream:
+                for request in requests:
+                    time.sleep(gap)
+                    stream.write((json.dumps(request) + '\n').encode())
+                    stream.flush()
+        writer = threading.Thread(target=feed, daemon=True)
+        output = io.StringIO()
+        try:
+            with os.fdopen(read_end, 'rb') as incoming, patch.object(reader.sys, 'stdin', types.SimpleNamespace(buffer=incoming)), patch.object(reader.sys, 'stdout', output):
+                writer.start()
+                reader.serve('pass')
+        finally:
+            writer.join(5)
+        return [json.loads(line) for line in output.getvalue().splitlines()], time.monotonic() - started
+
+    def test_mubo_528_an_idle_chat_poll_starts_no_message_worker(self):
+        def child(*args, **kwargs):
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers, elapsed = self.serve_polls(5, gap=0.2)
+        print(f'MUBO-528 idle_polls=5 worker_spawns={spawn.call_count} seconds={elapsed:.2f}', file=sys.stderr)
+        self.assertEqual([answer['id'] for answer in answers], [1, 2, 3, 4, 5])
+        self.assertGreaterEqual(elapsed, 0.8, 'the idle polls must span a real second of reading')
+        self.assertEqual(spawn.call_count, 0, 'a chat with nothing queued must not start a message worker')
+
+    def test_mubo_528_a_chat_with_work_starts_one_worker_and_reuses_it(self):
+        self.submit()
+        inherited = []
+        def child(*args, **kwargs):
+            inherited.extend(os.dup(fd) for fd in kwargs.get('pass_fds') or ())
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        self.addCleanup(lambda: [os.close(fd) for fd in inherited])
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers, _ = self.serve_polls(5, gap=0.05)
+        print(f'MUBO-528 work_polls=5 worker_spawns={spawn.call_count} reused={len(inherited)}', file=sys.stderr)
+        self.assertEqual(len(answers), 5)
+        self.assertEqual(spawn.call_count, 1, 'later polls must reach the running worker instead of starting another')
+        self.assertTrue(inherited, 'the worker must hold the lock its caller took before the reader finished compiling')
+
     def test_duplicate_worker_returns_without_blocking(self):
         import fcntl
         self.submit()

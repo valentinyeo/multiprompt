@@ -41,7 +41,7 @@ MUBO-221 merges master `91d6d9e9cb27aa29ecc58a2e8473013e0de18cc0` at `8e6e1237fb
 
 MUBO-221 reviews `1a59f4ad97899f924ca18a24a5568caf5519d134`. The reader's only change since the preceding PR head selects Neon 4 in `host_antigravity_argv`; none of the covered switch, history, usage-limit, or auto-switch functions changed. The reader hash and sync commit move, while the model, bounds, decisions, probes, and mutation controls stay unchanged. Hosted self-tests must rerun; model selection and rendered-history continuity remain separate desktop proof.
 
-Last reviewed source/model sync commit is `257df205bcc2804ea897b65a0259163eebe52afc`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `2d3eeee17b4fe6dd433b110577c42df91b96be9c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
@@ -70,6 +70,8 @@ MUBO-293 merges master `5baddb613`. The optional `workspace` and `group` strings
 MUBO-452 holds a queued message through a pending fresh start in `message_expire` and `message_worker`. `host_fresh_phase_wait` and `host_fresh_pending` read the host session state and are new; no covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` or `host_dispatch_switch` function calls them, so the model, bounds, decisions, probes and mutations are unchanged. Merging master `9db3f9b5a` carries MUBO-293's command rebuild and MUBO-135's once-only server reply row in the reader; both sit outside every covered switch function, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
+
+MUBO-528 makes `start_message_worker` ask the store whether a message is due before it forks, and hands its locked descriptor to the child so a poll during the child's startup reaches that lock. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |
