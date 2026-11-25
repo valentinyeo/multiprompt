@@ -1,0 +1,1 @@
+New chats from the command line show no tab

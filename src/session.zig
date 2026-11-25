@@ -475,7 +475,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + chat_id_pre.len], chat_id_pre);
         pos += chat_id_pre.len;
         pos += writeUintTo(json_buf[pos..], app_state.shells[i].chat_id);
-        if (app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) {
+        if ((app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) or app_state.shells[i].ai_agent == 8) {
             const agent_field = std.fmt.bufPrint(json_buf[pos..], ",\"ai_agent\":{d}", .{app_state.shells[i].ai_agent}) catch return false;
             pos += agent_field.len;
         }
@@ -2501,6 +2501,18 @@ test "IGSH-1447 a remote tab saves the folder it was opened in" {
     defer pi_parsed.deinit();
     try std.testing.expectEqual(@as(u32, 1), json_reader.sessionTabs(pi_parsed.value, &tabs, MAX_LWS));
     try std.testing.expectEqual(@as(u8, 3), tabs[0].ai_agent);
+    app_state.shells[0].ai_agent = 8;
+    const sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    @memcpy(app_state.shells[0].claude_sid[0..sid.len], sid);
+    app_state.shells[0].claude_sid_len = sid.len;
+    try std.testing.expect(saveSessionTo(path, null));
+    const agy_bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(agy_bytes);
+    var agy_parsed = try json_reader.parse(std.testing.allocator, agy_bytes);
+    defer agy_parsed.deinit();
+    try std.testing.expectEqual(@as(u32, 1), json_reader.sessionTabs(agy_parsed.value, &tabs, MAX_LWS));
+    try std.testing.expectEqual(@as(u8, 8), tabs[0].ai_agent);
+    try std.testing.expectEqualStrings(sid, tabs[0].claude_sid[0..tabs[0].claude_sid_len]);
 }
 
 test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {

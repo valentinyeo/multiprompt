@@ -745,6 +745,7 @@ const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFS
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
+const SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -956,6 +957,7 @@ const spawnWorkspacePlainClaudeSession = @import("command_palette.zig").spawnWor
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
 const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
 const spawnCursorTmuxSession = @import("command_palette.zig").spawnCursorTmuxSession;
+const spawnAntigravityTmuxSession = @import("command_palette.zig").spawnAntigravityTmuxSession;
 const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const notifyTabCapReached = @import("console.zig").notifyTabCapReached;
@@ -5508,13 +5510,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET) {
+                if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET or target == app_state.SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
-                    _ = @import("command_palette.zig").startSwitchAi(app_state.active_shell, if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) 1 else if (target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) 2 else 3);
+                    _ = @import("command_palette.zig").startSwitchAi(app_state.active_shell, if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) 1 else if (target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) 2 else if (target == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET) 3 else 4);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -6249,33 +6251,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(hwnd, WM_APP_NEW_TAB_DEFAULT, 1, 0);
                     return 0;
                 }
-                if (target == SEARCH_NEW_PI_CHAT_OFFSET) {
+                if (target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     applySearchSpawnContext(hwnd);
-                    const spawned_pi = spawnPiTmuxSession();
+                    const spawned_hosted = if (target == SEARCH_NEW_PI_CHAT_OFFSET)
+                        spawnPiTmuxSession()
+                    else if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET)
+                        spawnCursorTmuxSession()
+                    else
+                        spawnAntigravityTmuxSession();
                     applyPendingGroup();
-                    if (!spawned_pi) showActiveShellAfterOverlay();
+                    if (!spawned_hosted) showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    if (spawned_pi) {
-                        app_state.g_refocus_remaining = 4;
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
-                    } else {
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
-                    }
-                    return 0;
-                }
-                if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    applySearchSpawnContext(hwnd);
-                    const spawned_cursor = spawnCursorTmuxSession();
-                    applyPendingGroup();
-                    if (!spawned_cursor) showActiveShellAfterOverlay();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    if (spawned_cursor) {
+                    if (spawned_hosted) {
                         app_state.g_refocus_remaining = 4;
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
                     } else {
@@ -7539,7 +7529,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or target == app_state.SEARCH_TABCTX_SWITCH_ANTIGRAVITY or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7569,8 +7559,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("chat_send.zig").chatStopAgent(ti);
                         } else if (target == app_state.SEARCH_TABCTX_FRESH_START) {
                             _ = @import("command_palette.zig").startFreshChat(ti);
-                        } else if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI) {
-                            _ = @import("command_palette.zig").startSwitchAi(ti, if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) 1 else if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) 2 else 3);
+                        } else if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE or target == app_state.SEARCH_TABCTX_SWITCH_CODEX or target == app_state.SEARCH_TABCTX_SWITCH_PI or target == app_state.SEARCH_TABCTX_SWITCH_ANTIGRAVITY) {
+                            _ = @import("command_palette.zig").startSwitchAi(ti, if (target == app_state.SEARCH_TABCTX_SWITCH_CLAUDE) 1 else if (target == app_state.SEARCH_TABCTX_SWITCH_CODEX) 2 else if (target == app_state.SEARCH_TABCTX_SWITCH_PI) 3 else 4);
                         } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
                             _ = @import("chat_send.zig").chatRestartAi(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {

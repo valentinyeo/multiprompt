@@ -1,0 +1,12 @@
+{
+  "bridges": [
+    {"pid": 4211, "command": "/usr/bin/python3 /home/agent/.local/share/zigshell/mp_notify_relay.py"},
+    {"pid": 4212, "command": "sshd: agent@notty"}
+  ],
+  "conflicts": [
+    {"pid": 4213, "command": "python3 /fixtures/stale_listener.py"},
+    {"pid": 4214, "command": "python3 /fixtures/mp_notify_relay.py.backup"},
+    {"pid": 4215, "command": "node /fixtures/mp_notify_relay.py"},
+    {"pid": 4216, "command": "python3 -c mp_notify_relay.py"}
+  ]
+}

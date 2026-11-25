@@ -53,6 +53,10 @@ for provider in r['HOST_ADAPTERS']:
         elif provider == 'pi':
             r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='message_update', assistantMessageEvent=dict(type='text_end', contentIndex=0, content='Finish the saved draft. Keep the same board login.'))))
             r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='agent_settled')))
+        elif provider == 'antigravity':
+            r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(event='step_update', step_update=dict(conversation_id=old_native, step_index=1, state='ACTIVE', step_type='agent_response', text_delta='Finish the saved draft. Keep the same board login.'))))
+            r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(event='step_update', step_update=dict(conversation_id=old_native, step_index=1, state='DONE', step_type='agent_response'))))
+            r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(event='result', result=dict(conversation_id=old_native, status='SUCCESS', response='Finish the saved draft. Keep the same board login.'))))
         else:
             r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='hax', record=dict(kind='assistant', text='Finish the saved draft. Keep the same board login.'))))
             r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='bridge_end', outcome='complete', exit=0, session=old_native)))
@@ -75,9 +79,9 @@ for provider in r['HOST_ADAPTERS']:
         elif provider == 'pi':
             argv = r['host_pi_argv'](provider, sid, ['fake-agent'])
             assert argv[argv.index('--session-id') + 1] == native
-        elif provider in ('hax', 'cursor'):
+        elif provider in ('hax', 'cursor', 'antigravity'):
             argv = r['HOST_ADAPTERS'][provider]['argv'](provider, sid, ['fake-agent'])
-            assert '--resume' not in argv and '--hax-resume' not in argv
+            assert '--resume' not in argv and '--hax-resume' not in argv and '--conversation' not in argv
         else:
             commands = []
             with patch.dict(r, host_codex_call=lambda session, method, params, purpose: commands.append((method, params))):

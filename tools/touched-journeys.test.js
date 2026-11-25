@@ -183,7 +183,7 @@ test('SOFT-2902 a wide PR runs at most eight journeys, not every feature its sha
   ];
   const result = touchedJourneys(files, directory);
   assert.ok(result.features.length <= 8, `PR #1121 selected ${result.features.length} journeys: ${result.features.join(', ')}`);
-  assert.deepEqual(result.features, ['sessions']);
+  assert.deepEqual(result.features, ['antigravity-chats', 'sessions']);
 });
 
 test('the full set retains every DPI and browser-theme variant without multiplying unrelated journeys', () => {

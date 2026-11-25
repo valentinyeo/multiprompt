@@ -2907,11 +2907,11 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor')
+HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor', 'antigravity')
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
 MESSAGE_WORKER_LOCK_ENV = 'MULTIPROMPT_MESSAGE_WORKER_LOCK_FD'
-HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent', 'antigravity': 'agy'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
@@ -3776,6 +3776,9 @@ def host_resume(provider, sid, tmux=None, cwd=None, mode=None):
 
 def host_send(provider, sid, text, tmux=None):
     import uuid
+    moved = host_switch_follow(sid)
+    if moved is not None:
+        provider, sid = moved
     if not host_identity(provider, sid):
         return dict(status='refused', reason='unsupported_provider')
     if not isinstance(text, str) or not text.strip() or '\x00' in text:
@@ -3790,7 +3793,14 @@ def host_send(provider, sid, text, tmux=None):
     store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
     try:
         submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text, origin='agent'))
+        queued = submitted.get('message') if isinstance(submitted, dict) else None
+        if isinstance(queued, dict) and host_identity(queued.get('provider'), queued.get('sid')):
+            store['provider'], store['sid'] = queued['provider'], queued['sid']
         message_store_request(dict(store, op='message_dispatch'))
+        later = host_switch_follow(store['sid'])
+        if later is not None and later != (store['provider'], store['sid']):
+            store['provider'], store['sid'] = later
+            message_store_request(dict(store, op='message_dispatch'))
         message = message_store_request(dict(store, op='message_status', message_id=token)).get('message')
     except (OSError, ValueError, KeyError, TypeError):
         return dict(status='error', reason='message_store_failed', id=token)
@@ -3957,6 +3967,16 @@ def host_cursor_argv(provider, sid, base, mode=None):
     native = host_session_state(provider, sid).get("native_session")
     if isinstance(native, str) and native:
         return command + ["--resume", native]
+    return command
+
+
+def host_antigravity_argv(provider, sid, base, mode=None):
+    model = [] if any(part == "--model" or part.startswith("--model=") for part in base[1:]) else ["--model", "gemini-4-neon-medium"]
+    command = base + model + ["--input-format", "stream-json", "--output-format", "stream-json",
+                              "--dangerously-skip-permissions", "--print="]
+    native = host_session_state(provider, sid).get("native_session")
+    if isinstance(native, str) and native:
+        return command + ["--conversation", native]
     return command
 
 
@@ -4748,12 +4768,12 @@ def host_fresh_resume(provider, sid, tmux, session):
     session["fresh_resumed"] = True
 
 
-HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi")
-HOST_SWITCH_TARGETS = ("claude", "codex", "pi")
+HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi", antigravity="Antigravity")
+HOST_SWITCH_TARGETS = ("claude", "codex", "pi", "antigravity")
 HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
-HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
+HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi")
 HOST_AUTO_SWITCH_COOLDOWN = 60 * 60
 HOST_AUTO_SWITCH_WAIT = 120
 HOST_AUTO_SWITCH_TRIGGERS = dict(claude=("result",), codex=("error",), pi=("message_end", "agent_settled"),
@@ -5020,11 +5040,30 @@ def host_switch_abort(target, new_sid, paths=None):
 
 
 def host_switch_ai(provider, sid, target, reason=None):
-    moved = host_switch_follow(sid)
-    if moved is not None:
-        provider, sid = moved
-    if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
-        return dict(status="refused", reason="unsupported_provider")
+    import fcntl
+    reply = dict(status="refused", reason="unsupported_provider")
+    for _ in range(5):
+        moved = host_switch_follow(sid)
+        if moved is not None:
+            provider, sid = moved
+        if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
+            return dict(status="refused", reason="unsupported_provider")
+        if host_turn_busy(provider, sid):
+            return dict(status="busy", reason="chat_busy")
+        with message_dispatch_lock_path(provider, sid).open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            later = host_switch_follow(sid)
+            if later is not None and later != (provider, sid):
+                provider, sid = later
+                continue
+            reply = host_switch_ai_locked(provider, sid, target, reason)
+            break
+    if reply.get("status") == "switched":
+        start_message_worker(dict(tmux=reply["tmux"], provider=reply["provider"], sid=reply["sid"]), host_reader_source())
+    return reply
+
+
+def host_switch_ai_locked(provider, sid, target, reason=None):
     config = host_config(provider, sid)
     if config is None:
         return dict(status="refused", reason="host_disabled")
@@ -5068,7 +5107,14 @@ def host_switch_ai(provider, sid, target, reason=None):
             host_start(provider, sid)
         return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
                     running=HOST_AI_NAMES[provider], start=started)
+    switched_path = host_switched_path()
+    previous_moved = host_read(switched_path)
+    moved_map = dict(previous_moved) if isinstance(previous_moved, dict) else {}
+    old_config_path = host_paths(provider, sid)["config"]
     try:
+        moved_map[sid] = [target, new_sid]
+        host_write(switched_path, moved_map)
+        host_write(old_config_path, dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -5077,11 +5123,12 @@ def host_switch_ai(provider, sid, target, reason=None):
             db.execute("INSERT OR REPLACE INTO message_locators(provider,sid,tmux) VALUES (?,?,?)", (target, new_sid, tmux))
             db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state='queued'",
                        (target, new_sid, provider, sid))
-        moved_map = host_read(host_switched_path()) or {}
-        moved_map[sid] = [target, new_sid]
-        host_write(host_switched_path(), moved_map)
-        host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        if isinstance(previous_moved, dict):
+            host_write(switched_path, previous_moved)
+        elif switched_path.exists():
+            switched_path.unlink(missing_ok=True)
+        host_write(old_config_path, config)
         host_stop(target, new_sid)
         host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
@@ -5875,10 +5922,14 @@ def host_claude_event(provider, sid, tmux, session, event):
                     host_log(provider, sid, "model_settings_mismatch",
                              dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
+                previous = session["state"].get("native_session") or session["state"].get("context_session")
                 session["state"]["native_session"] = event["session_id"]
                 config = host_config(provider, sid)
                 if config is not None:
                     host_write(host_paths(provider, sid)["config"], dict(config, native_session=event["session_id"]))
+                if event["session_id"] != previous:
+                    host_layout_publish_conversation(provider, sid, event["session_id"])
+                    chat_names_follow(provider, sid, event["session_id"])
             host_state_write(provider, sid, session["state"])
             host_log(provider, sid, "init", dict(session=event.get("session_id")))
             host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
@@ -5928,6 +5979,137 @@ def host_claude_open(provider, sid, tmux, session):
 
 def host_cursor_open(provider, sid, tmux, session):
     pass
+
+
+def host_antigravity_open(provider, sid, tmux, session):
+    pass
+
+
+def host_antigravity_write(provider, sid, session, token, text):
+    return host_control_send(session, dict(event="user", message=dict(role="user", content=text)))
+
+
+def host_antigravity_interrupt(provider, sid, session):
+    import signal
+    agent = session.get("agent")
+    if agent is None:
+        return dict(status="error", reason="agent_missing")
+    try:
+        agent.send_signal(signal.SIGINT)
+    except (OSError, ValueError):
+        return dict(status="error", reason="interrupt_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
+def host_antigravity_set_mode(provider, sid, session, mode):
+    return host_refuse("antigravity_mode_fixed")
+
+
+def host_antigravity_names(session, entity, update):
+    entry = next((item for item in reversed(session.get("sends") or []) if not item.get("uuid")), None)
+    if entry is None:
+        return None
+    names = [entry["id"]]
+    for source in (update, entity):
+        for key in ("user_message_uuid", "user_message_uuids"):
+            value = source.get(key)
+            listed = value if isinstance(value, list) else [value]
+            names.extend(item for item in listed if isinstance(item, str) and item)
+    entry["uuid"] = list(dict.fromkeys(names))
+    return entry
+
+
+def host_antigravity_event(provider, sid, tmux, session, event):
+    kind = event.get("event")
+    if kind == "init":
+        session["ready"] = True
+        native = event.get("conversation_id")
+        if isinstance(native, str) and native:
+            session["state"]["native_session"] = native
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "init", dict(session=native))
+        host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
+        return
+    if kind == "step_update":
+        update = event.get("step_update") if isinstance(event.get("step_update"), dict) else {}
+        step_type = update.get("step_type")
+        state = update.get("state")
+        step_index = update.get("step_index")
+        step_key = "agy-" + str(step_index if type(step_index) is int else 0)
+        native = update.get("conversation_id")
+        if isinstance(native, str) and native and not session["state"].get("native_session"):
+            session["state"]["native_session"] = native
+        if step_type == "user_input":
+            named = host_antigravity_names(session, event, update)
+            if named is not None:
+                host_turn_started(provider, sid, tmux, session, named)
+            host_accept(provider, sid, tmux, session, event)
+            return
+        if step_type == "agent_response":
+            host_accept(provider, sid, tmux, session, event)
+            thinking_delta = update.get("thinking_delta")
+            if isinstance(thinking_delta, str) and thinking_delta:
+                host_delta(session, host_stream_block(session, step_key, "thinking", 0), thinking_delta)
+            text_delta = update.get("text_delta")
+            if isinstance(text_delta, str) and text_delta:
+                session["agy_emitted_text"] = True
+                host_delta(session, host_stream_block(session, step_key, "text", 1), text_delta)
+            if state in ("DONE", "ERROR", "CANCELED"):
+                entry = session["messages"].get(step_key)
+                if isinstance(entry, dict):
+                    for block in entry["blocks"]:
+                        if not block["done"]:
+                            host_complete(provider, sid, tmux, session, block)
+            return
+        if step_type == "tool":
+            host_accept(provider, sid, tmux, session, event)
+            info = update.get("tool_info") if isinstance(update.get("tool_info"), dict) else {}
+            tool = (update.get("tool_name") if isinstance(update.get("tool_name"), str)
+                    else info.get("name") if isinstance(info.get("name"), str) else "tool")
+            params = info.get("parameters") if isinstance(info.get("parameters"), dict) else {}
+            tool_id = "agy-tool-" + str(step_index if type(step_index) is int else 0)
+            started = session.setdefault("agy_tools", set())
+            if tool_id not in started:
+                started.add(tool_id)
+                host_event(provider, sid, tmux, session, "item.started",
+                           dict(type="tool_call", tool=tool, input=params, title=tool, display_name=tool), tool_id)
+            if state in ("DONE", "ERROR", "CANCELED"):
+                failed = state != "DONE" or bool(info.get("is_error"))
+                output = info.get("output") if "output" in info else info.get("error")
+                host_event(provider, sid, tmux, session, "item.done",
+                           dict(status="failed" if failed else "completed", output=host_tool_output(output),
+                                is_error=failed), tool_id)
+                started.discard(tool_id)
+            return
+        return
+    if kind == "result":
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        inflight = session.get("inflight")
+        if isinstance(inflight, dict) and not inflight.get("accepted"):
+            host_accept(provider, sid, tmux, session, event)
+        native = result.get("conversation_id")
+        if isinstance(native, str) and native:
+            session["state"]["native_session"] = native
+        response_text = result.get("response")
+        if isinstance(response_text, str) and response_text and not session.get("agy_emitted_text"):
+            block = host_stream_block(session, "agy-result", "text", 0)
+            host_complete(provider, sid, tmux, session, block, response_text)
+        if session.get("interrupted") or result.get("finished_reason") == "interrupted":
+            status = "interrupted"
+        elif result.get("status") == "SUCCESS":
+            status = "completed"
+        else:
+            status = "failed"
+        session["state"]["result"] = dict(subtype=status, at=time.time())
+        session.pop("agy_tools", None)
+        session.pop("agy_emitted_text", None)
+        host_turn_end(provider, sid, tmux, session,
+                      dict(status=status, stop_reason=result.get("finished_reason"),
+                           usage=result.get("usage") or {}),
+                      dict(subtype=status))
 
 
 def host_blocked_prompt(provider, sid, tmux, session, event):
@@ -6672,6 +6854,10 @@ HOST_ADAPTERS = {
     "cursor": dict(argv=host_cursor_argv, open=host_cursor_open, write=host_claude_write, event=host_cursor_event,
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
+    "antigravity": dict(argv=host_antigravity_argv, open=host_antigravity_open, write=host_antigravity_write,
+                        event=host_antigravity_event, answer=host_pi_answer, interrupt=host_antigravity_interrupt,
+                        set_mode=host_antigravity_set_mode,
+                        binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
 
 
@@ -7337,46 +7523,126 @@ def chat_names_path():
     return HOME / ".local/state/multiprompt/chat-names.json"
 
 
+def chat_names_read():
+    try:
+        known = json.loads(chat_names_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        known = {}
+    return known if isinstance(known, dict) else {}
+
+
+def chat_names_write(known):
+    path = chat_names_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    temporary.write_text(json.dumps(known, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def chat_names_conversation(provider, sid):
+    native = host_session_state(provider, sid).get("native_session")
+    return native if isinstance(native, str) and SESSION_ID.fullmatch(native) else sid
+
+
+def chat_names_hosts():
+    hosts = {}
+    for chat in host_chats(include_terminal=True):
+        hosts[chat["name"]] = dict(tmux=chat["name"], sid=chat["sid"], provider=chat["provider"])
+    return hosts
+
+
+def chat_names_sessions():
+    try:
+        done = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return set(done.stdout.split()) if done.returncode == 0 else None
+
+
+def chat_names_entry(hosts, tmux, sid):
+    host = hosts.get(tmux)
+    if host is None and isinstance(sid, str):
+        host = next((candidate for candidate in hosts.values() if candidate["sid"] == sid), None)
+    return host
+
+
+def chat_names_prune(known, published, hosts):
+    current = {host["sid"]: host["tmux"] for host in hosts.values()}
+    sessions = False
+    for key in list(known):
+        if key in published:
+            continue
+        stored = known[key]
+        if not isinstance(stored, dict) or not isinstance(stored.get("name"), str):
+            continue
+        stored_sid = stored.get("sid")
+        if isinstance(stored_sid, str) and current.get(stored_sid) not in (None, key):
+            del known[key]
+            continue
+        if key in hosts:
+            continue
+        if sessions is False:
+            sessions = chat_names_sessions()
+        if sessions is not None and key not in sessions:
+            del known[key]
+
+
+def chat_names_scope(record, entry):
+    for field in ("workspace", "group"):
+        value = entry.get(field)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and len(value) <= 64 and not any(ord(c) < 32 for c in value):
+            record[field] = value
+    return record
+
+
 def chat_names_publish(entries):
     if not isinstance(entries, list) or len(entries) > 256:
         return dict(status="refused", reason="invalid_names")
-    path = chat_names_path()
-    try:
-        known = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        known = {}
-    if not isinstance(known, dict):
-        known = {}
+    known = chat_names_read()
+    hosts = chat_names_hosts()
     now = time.time()
-    count = 0
+    published = {}
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        tmux, name = entry.get("tmux"), entry.get("name")
+        tmux, name, sid = entry.get("tmux"), entry.get("name"), entry.get("sid")
         if not isinstance(tmux, str) or CHAT_NAME_TMUX.match(tmux) is None or not isinstance(name, str):
             continue
         name = name.strip()
         if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
             continue
-        sid = entry.get("sid")
-        record = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
-        workspace = entry.get("workspace")
-        if isinstance(workspace, str):
-            workspace = workspace.strip()
-            if workspace and len(workspace) <= 64 and not any(ord(c) < 32 for c in workspace):
-                record["workspace"] = workspace
-        group = entry.get("group")
-        if isinstance(group, str):
-            group = group.strip()
-            if group and len(group) <= 64 and not any(ord(c) < 32 for c in group):
-                record["group"] = group
-        known[tmux] = record
-        count += 1
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
-    temporary.write_text(json.dumps(known, separators=(",", ":")), encoding="utf-8")
-    os.replace(temporary, path)
-    return dict(status="ok", count=count)
+        record = chat_names_scope(dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None), entry)
+        host = chat_names_entry(hosts, tmux, sid)
+        if host is None:
+            published[tmux] = record
+        else:
+            record.update(sid=host["sid"], conversation=chat_names_conversation(host["provider"], host["sid"]))
+            published[host["tmux"]] = record
+    chat_names_prune(known, published, hosts)
+    known.update(published)
+    chat_names_write(known)
+    return dict(status="ok", count=len(published))
+
+
+def chat_names_follow(provider, sid, conversation):
+    config = host_config(provider, sid) or {}
+    tmux = config.get("tmux")
+    if not isinstance(tmux, str) or CHAT_NAME_TMUX.match(tmux) is None:
+        return False
+    known = chat_names_read()
+    entry = known.get(tmux)
+    if not isinstance(entry, dict) or entry.get("sid") not in (sid, None, ""):
+        return False
+    entry.update(sid=sid, conversation=conversation)
+    for key in [key for key, value in known.items()
+                if key != tmux and isinstance(value, dict) and value.get("sid") == sid]:
+        del known[key]
+    chat_names_write(known)
+    return True
 
 
 def host_adopt(provider, sid, tmux, cwd=None, mode=None):
@@ -7419,6 +7685,12 @@ def message_recall(provider, sid, tmux, token, attempt, text):
     return dict(status='refused', reason='recall_unavailable')
 
 
+def message_dispatch_lock_path(provider, sid):
+    path = message_store_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
+
+
 def message_store_request(q):
     import fcntl
     provider, sid, tmux = q.get('provider'), q.get('sid'), q.get('tmux')
@@ -7428,10 +7700,7 @@ def message_store_request(q):
         raise ValueError('invalid message protocol or identity')
     if q.get('op') not in ('message_dispatch', 'message_reset'):
         return message_store_transaction(q)
-    path = message_store_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
-    with lock_path.open('a') as lock:
+    with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return message_store_transaction(q)
 
@@ -7446,6 +7715,10 @@ def message_store_transaction(q):
         resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
     with closing(message_store_db(tmux)) as db, db:
         db.execute('BEGIN IMMEDIATE')
+        if op == 'message_submit':
+            moved = host_switch_follow(sid)
+            if moved is not None:
+                provider, sid = moved
         db.execute('INSERT OR IGNORE INTO message_chats(provider,sid) VALUES (?,?)', (provider, sid))
         epoch, seq = db.execute('SELECT epoch,seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         if provider == 'codex':
@@ -7764,9 +8037,7 @@ def message_store_transaction(q):
 
 def message_poll(tmux, provider, sid):
     import fcntl
-    path = message_store_path()
-    lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
-    with lock_path.open('a') as lock:
+    with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         message_poll_locked(tmux, provider, sid)
 

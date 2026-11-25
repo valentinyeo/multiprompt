@@ -228,6 +228,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | /login in a Pi chat | Log in to a Pi provider. Pi shows its own prompts and links in the chat, and the next reply uses that login |
 | Ctrl+K -&gt; Log in | Log in to a Pi provider from this Pi chat. Same as /login |
 | Ctrl+K -&gt; New Cursor chat | Start a Cursor CLI live chat in this workspace folder, same chat view as Claude |
+| Ctrl+K -&gt; New Antigravity Sessions | Start an Antigravity CLI live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
@@ -269,7 +270,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+A in Chat View | Select all transcript text (transcript focus; composer keeps its own Ctrl+A) |
 | Ctrl+K "Chat View: Resync chat" | Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending |
 | Ctrl+K "Chat View: Fresh start" / right-click tab | Save a handover and start empty context in the same chat; keep its name, picture, address and readable history. Wait for the current reply first |
-| Ctrl+K "Chat View: Switch AI to Claude" (Codex, Pi) / right-click tab | Move this chat to another AI and keep its name, picture, place, address and readable history. The new AI starts from a saved handover. Wait for the current reply first |
+| Ctrl+K "Chat View: Switch AI to Claude" (Codex, Pi, Antigravity) / right-click tab | Move this chat to another AI and keep its name, picture, place, address and readable history. The new AI starts from a saved handover. Wait for the current reply first |
 | Ctrl+K "Chat View: Auto-switch AI when a plan runs out" | When this chat's AI runs out of plan, the host moves the chat to the next AI with plan left, on its own. The name, history and unanswered message follow it, and a row says which AI ran out. Off switches that off, and an AI that ran out is skipped for an hour |
 | Ctrl+K "Chat View: Restart this chat on the newest version" | Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends |
 | Ctrl+K "Chat View: Restart every idle live chat" | Restart every running live chat on this server on the newest version; chats that are replying restart when their reply ends. Every live chat also restarts nightly at 04:00 local server time |

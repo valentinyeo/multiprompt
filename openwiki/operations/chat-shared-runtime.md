@@ -190,7 +190,7 @@ Desktop and Android compatibility still requires a live check on both clients be
 
 ## Switch AI
 
-Ctrl+K "Chat View: Switch AI to Claude", "Switch AI to Codex" and "Switch AI to Pi" and the right-click tab palette use the live-host channel. The row for the chat's current AI is hidden. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host switch-ai <provider> <sid> --to <claude|codex|pi>`.
+Ctrl+K "Chat View: Switch AI to Claude", "Switch AI to Codex", "Switch AI to Pi" and "Switch AI to Antigravity" and the right-click tab palette use the live-host channel. The row for the chat's current AI is hidden. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host switch-ai <provider> <sid> --to <claude|codex|pi|antigravity>`.
 
 Switch AI refuses a chat that is still replying. An idle live agent is stopped first. The host writes a handover from the saved readable history: the last messages, plus a pointer to the full history file. It starts the target AI under a new session id behind the same chat name. The new AI reads the handover before any queued message is delivered, using the Fresh start gate.
 
