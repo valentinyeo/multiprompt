@@ -1229,6 +1229,50 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
+test('reader runtime publication keeps the immutable reader file and journals its filename', () => {
+  const script = String.raw`
+import ast, hashlib, json, os, sys, tempfile, time
+from pathlib import Path
+boundary = Path(sys.argv[1])
+wanted = ('record', 'runtime_directory', 'publish_runtime')
+functions = [node for node in ast.parse(boundary.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef) and node.name in wanted]
+assert [node.name for node in functions] == list(wanted), [node.name for node in functions]
+source = 'RUNTIME_GENERATION = 7\n'
+digest = hashlib.sha256(source.encode('utf-8')).hexdigest()
+for held in (False, True):
+    with tempfile.TemporaryDirectory() as temp:
+        home = Path(temp) / 'home'
+        state = Path(temp) / 'state'
+        home.mkdir()
+        state.mkdir()
+        os.environ['HOME'] = os.environ['USERPROFILE'] = str(home)
+        if held:
+            (state / 'stale-reader').write_text('older shared reader without the provider\n', encoding='utf-8')
+        directory = home / '.multiprompt-runtime'
+        directory.mkdir()
+        pointer = directory / 'reader.py'
+        pointer.write_text('older shared reader without the provider\n', encoding='utf-8')
+        scope = dict(ROOT=state, Path=Path, os=os, json=json, time=time, state=lambda: dict(name='antigravity-chats'))
+        exec(compile(ast.Module(body=functions, type_ignores=[]), '<boundary-publish>', 'exec'), scope)
+        namespace = dict(READER_SOURCE=source, RUNTIME_GENERATION=7)
+        scope['publish_runtime'](namespace)
+        runtime = directory / (digest + '.py')
+        assert runtime.read_text(encoding='utf-8') == source, 'immutable runtime file holds the published reader'
+        assert json.loads((directory / 'active.json').read_text(encoding='utf-8')) == dict(protocol=1, generation=7, sha256=digest)
+        expected = 'older shared reader without the provider\n' if held else source
+        assert pointer.read_text(encoding='utf-8') == expected, ('shared pointer', held)
+        assert namespace['ENGINE_INFO'] == dict(protocol=1, generation=7, sha256=digest)
+        rows = [json.loads(line) for line in (state / 'runtime-publish.jsonl').read_text(encoding='utf-8').splitlines()]
+        assert len(rows) == 1, rows
+        row = rows[0]
+        assert row['sha256'] == digest and row['generation'] == 7 and row['sharedPointerHeld'] is held, row
+        assert row['file'] == runtime.name, row
+        assert row['case'] == 'antigravity-chats' and isinstance(row['ms'], int) and isinstance(row['pid'], int), row
+print('RUNTIME_PUBLICATION_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 30000 }), /RUNTIME_PUBLICATION_OK/);
+});
+
 test('retained-history recovery targets the owned HWND without stealing typing focus', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);

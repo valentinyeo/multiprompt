@@ -24,14 +24,14 @@ def state():
     return value
 
 
-def record(file, **values):
+def record(log_name, **values):
     row = dict(ms=time.time_ns() // 1000000, pid=os.getpid(), case=state()["name"], **values)
     data = (json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8")
-    if file == "invocations.jsonl" and values.get("kind") == "reader" and "--watch" in values.get("argv", []):
+    if log_name == "invocations.jsonl" and values.get("kind") == "reader" and "--watch" in values.get("argv", []):
         witnesses = ROOT / "reader-subscriptions"
         witnesses.mkdir(exist_ok=True)
         (witnesses / (uuid.uuid4().hex + ".json")).write_bytes(data)
-    with (ROOT / file).open("ab", buffering=0) as output:
+    with (ROOT / log_name).open("ab", buffering=0) as output:
         output.write(data)
 
 
