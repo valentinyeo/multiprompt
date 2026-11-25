@@ -1,5 +1,31 @@
 
             $script:browserShellId = (Read-Inbox).shells[0].sid
+            function Assert-ConnectedPaneRedocks([string]$Step, [long]$ConnectionId) {
+                Record "MUBO-232 ${Step}: drift a connected pane off its dock and require a redock, never Opening browser"
+                $pane = Read-BrowserPane
+                if ($pane.browser_state -ne 'connected' -or $pane.browser_connection_id -ne $ConnectionId) { throw 'Redock proof needs the connected pane under test' }
+                $browser = [VerifyNative]::DockedPaneWindow($script:window)
+                if ($browser -eq [IntPtr]::Zero) { throw 'Redock proof needs a docked pane window' }
+                $dock = New-Object VerifyNative+Rect
+                if (-not [VerifyNative]::GetWindowRect($browser, [ref]$dock)) { throw 'Docked pane rectangle unavailable' }
+                $width = $dock.Right - $dock.Left
+                $height = $dock.Bottom - $dock.Top
+                if (-not [VerifyNative]::MoveWindow($browser, $dock.Left + 240, $dock.Top + 120, $width, $height, $true)) { throw 'Could not drift the docked pane off its slot' }
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                Wait-Until {
+                    $now = New-Object VerifyNative+Rect
+                    [VerifyNative]::GetWindowRect($browser, [ref]$now) -and
+                        [math]::Abs($now.Left - $dock.Left) -le 2 -and [math]::Abs($now.Top - $dock.Top) -le 2 -and
+                        ($now.Right - $now.Left) -eq $width -and ($now.Bottom - $now.Top) -eq $height
+                } "browser-pane-stuck ${Step}: a connected pane re-docks within three seconds instead of showing Opening browser" 3 -PollMilliseconds 25
+                $watch.Stop()
+                $after = Read-BrowserPane
+                if ($after.browser_state -ne 'connected' -or $after.browser_connection_id -ne $ConnectionId) { throw 'Redock relaunched the connected pane' }
+                Save-Json @{ step = $Step; connection_id = $ConnectionId; drifted = $true; redocked_ms = $watch.ElapsedMilliseconds; state = $after.browser_state; placeholder_budget_ms = 3000 } 'browser-pane-redock.json'
+                $result.checks += @{ name = "browser-pane-stuck ${Step} redock"; redockedMs = $watch.ElapsedMilliseconds; connectionId = $ConnectionId }
+                Snapshot "redock-$Step"
+                Write-Host "browser-pane-stuck ${Step} redock PASS"
+            }
             if (Test-Path (Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension/manifest.json')) { throw 'Expected no browser extension in the isolated profile' }
             Press @(0x12, 0x43) 'Alt+C: open Chat View'
             Wait-Until { @((Read-Session).tabs | Where-Object { $_.cv -eq $true }).Count -eq 1 } 'Chat View saved for the initial session'
@@ -57,6 +83,7 @@
             $fourth = Open-BrowserPane 'reopen-after-close-pane' $second.browser_connection_id
             if ($fourth.browser_connection_id -le $second.browser_connection_id + 1) { throw 'Palette batch did not open and cancel an intermediate connection' }
             Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
+            Assert-ConnectedPaneRedocks 'connected-stays-visible' $fourth.browser_connection_id
             Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
             $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
