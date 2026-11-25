@@ -1225,6 +1225,8 @@ function Stage-FooterUpdate([string]$Target, [string]$Version, [string]$Root) {
 
 function Invoke-ComputerSsh([string]$Exe, [string[]]$Arguments, [string]$InputText = '') {
     $errorFile = Join-Path $env:RUNNER_TEMP ('computer-ssh-' + [guid]::NewGuid().ToString('N') + '.log')
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         if ($InputText) { $out = $InputText | & $Exe @Arguments 2> $errorFile } else { $out = '' | & $Exe @Arguments 2> $errorFile }
         $code = $LASTEXITCODE
@@ -1232,6 +1234,7 @@ function Invoke-ComputerSsh([string]$Exe, [string[]]$Arguments, [string]$InputTe
         if (Test-Path -LiteralPath $errorFile) { $err = [IO.File]::ReadAllText($errorFile) }
         return [pscustomobject]@{ exit = $code; out = (@($out) -join "`n").TrimEnd("`r", "`n"); err = $err }
     } finally {
+        $ErrorActionPreference = $previousPreference
         Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
     }
 }
@@ -1299,10 +1302,16 @@ function Resolve-ComputerHost {
     Write-Host "Computer host: the disposable desktop answers on $($address):$port"
     $knownHosts = Join-Path $env:RUNNER_TEMP 'computer-host-known_hosts'
     $scanned = @()
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $scanned = @(& $scanExe -p $port -T 8 -t ed25519 $address 2>$null | Where-Object { $_ -match ('^\[' + [regex]::Escape($address) + '\]:' + $port + ' ssh-ed25519 ') })
-        if ($scanned.Count -eq 1) { break }
-        Start-Sleep -Seconds 2
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $scanned = @(& $scanExe -p $port -T 8 -t ed25519 $address 2>$null | Where-Object { $_ -match ('^\[' + [regex]::Escape($address) + '\]:' + $port + ' ssh-ed25519 ') })
+            if ($scanned.Count -eq 1) { break }
+            Start-Sleep -Seconds 2
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
     }
     if ($scanned.Count -ne 1) { throw "ssh-keyscan did not publish exactly one host key for ${address}:$port" }
     [IO.File]::WriteAllText($knownHosts, ($scanned[0] + "`n"), (New-Object Text.UTF8Encoding($false)))
