@@ -1,0 +1,1 @@
+An idle chat no longer keeps a processor core busy on the server.

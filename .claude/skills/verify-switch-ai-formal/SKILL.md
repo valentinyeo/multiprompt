@@ -77,6 +77,8 @@ MUBO-135 keeps one row per hax server reply in the reader's conversation and hos
 
 MUBO-528 makes `start_message_worker` ask the store whether a message is due before it forks, and hands its locked descriptor to the child so a poll during the child's startup reaches that lock. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
+MUBO-525 changes only the reader's event push: a synced live snapshot now reads the store read-only, the minute retention sweep probes read-only before it writes, the folder watch drops `IN_CLOSE_WRITE`, and the push loop wakes only for `store.sqlite3` or its `-wal`. The twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, including `host_switch_follow`, so only the reader's whole-file hash and the sync commit move. Bounds, decisions, probes and mutations stay the same. Merging master `2d3eeee17` carries MUBO-452's fresh-start queue hold, MUBO-304's ready tab wait and MUBO-528's due-check before a message worker forks, all outside every covered switch function.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |

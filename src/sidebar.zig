@@ -1953,6 +1953,23 @@ fn invalidateJumpBadges() void {
     }
 }
 
+pub fn invalidateDraftMarker(shell_idx: u32) void {
+    if (app_state.g_main_hwnd == null or app_state.g_hide_sidebar or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    var client_rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client_rc);
+    const floor = @max(@as(i32, 0), client_rc.bottom - sidebarStickyCardSpan());
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRows(&rows);
+    for (rows[0..count]) |row| {
+        if (row.kind != .tab or row.shell_idx != shell_idx) continue;
+        const top = row.y - app_state.g_sidebar_scroll;
+        const rc = RECT{ .left = 0, .top = @max(@as(i32, 0), top), .right = SIDEBAR_W(), .bottom = @min(floor, top + rowTotalHeight(row)) };
+        if (rc.bottom <= rc.top) return;
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+        return;
+    }
+}
+
 fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
     const g = badge.geometry(rect.right, rect.bottom, uiScaled);
