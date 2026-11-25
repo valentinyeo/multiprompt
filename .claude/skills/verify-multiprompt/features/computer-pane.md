@@ -33,7 +33,7 @@ Journey: computer-pane covers the live pane. computer-menu covers menu selection
 | `SEARCH_COMPUTER_WIDTH_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use Ctrl+Shift+F instead. |
 | `SEARCH_TABCTX_COMPUTER` | Right-click the intended tab, then choose **Computer: Show or hide**. Follow `computer` above. |
 
-## Driving it with control.ps1
+## Driving it with drive.ps1
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=computer-pane`. The `computer-host` job
 runs a throwaway Linux desktop on a GitHub runner and publishes its SSH port through the free
