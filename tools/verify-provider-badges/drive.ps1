@@ -97,17 +97,15 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
     try {
         $rgb = Colour $Hex
         $area = $bitmap.Width * $bitmap.Height
-        $match = 0; $glyph = 0
+        $match = 0
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
             for ($x = 0; $x -lt $bitmap.Width; $x++) {
-                $p = $bitmap.GetPixel($x, $y)
-                if (Near $p $rgb[0] $rgb[1] $rgb[2] 26) { $match++ }
-                if ($p.R -ge 225 -and $p.G -ge 225 -and $p.B -ge 225) { $glyph++ }
+                if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $match++ }
             }
         }
         if ($match -lt $area * .20) { throw "Provider colour absent: $Name match=$match area=$area" }
         if ($match -gt $area * .85) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
-        $inside = 0; $outside = 0; $missing = 0; $leaked = 0
+        $inside = 0; $outside = 0; $missing = 0; $leaked = 0; $glyph = 0
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
             for ($x = 0; $x -lt $bitmap.Width; $x++) {
                 $class = Badge-Coverage $x $y $b.side $b.radius
@@ -117,6 +115,10 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 } elseif ($class -eq 'outside') {
                     $outside++
                     if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
+                }
+                if ($class -ne 'outside') {
+                    $pixel = $bitmap.GetPixel($x, $y)
+                    if ($pixel.R -ge 225 -and $pixel.G -ge 225 -and $pixel.B -ge 225) { $glyph++ }
                 }
             }
         }
