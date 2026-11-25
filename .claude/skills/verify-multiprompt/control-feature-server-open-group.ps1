@@ -29,8 +29,17 @@ foreach ($envName in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIP
 }
 function Read-ServerGroupText([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { return '' }
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-    try { return (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+    $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    while ($true) {
+        try {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+            try { return (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+        } catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 100
+        }
+    }
 }
 function Get-ServerGroupSession {
     $text = Read-ServerGroupText (Join-Path $settings 'session-server-group.json')

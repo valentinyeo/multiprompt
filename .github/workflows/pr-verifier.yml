@@ -66,6 +66,7 @@ jobs:
       head_sha: ${{ steps.pr.outputs.head_sha }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
+      base_tip_sha: ${{ steps.pr.outputs.base_tip_sha }}
       engine: ${{ steps.pr.outputs.engine }}
       author_model_problem: ${{ steps.pr.outputs.author_model_problem }}
     steps:
@@ -130,6 +131,16 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  before:
+    needs: [resolve, select]
+    if: always() && !cancelled() && needs.select.result == 'success' && needs.select.outputs.features != '[]'
+    uses: ./.github/workflows/verify.yml
+    with:
+      features: ${{ needs.select.outputs.features }}
+      revision: ${{ needs.resolve.outputs.head_sha }}
+      app_revision: ${{ needs.resolve.outputs.base_tip_sha }}
+      video_label: before
+
   head:
     needs: [resolve, select]
     if: always() && !cancelled() && needs.select.result == 'success' && needs.select.outputs.features != '[]'
@@ -138,13 +149,14 @@ jobs:
     with:
       features: ${{ needs.select.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
+      video_label: after
 
   verdict:
     name: pstack-verifier report
     concurrency:
       group: pstack-verdict-${{ format('verify PR {0}', inputs.pr || github.event.pull_request.number) }}
       cancel-in-progress: false
-    needs: [tests, resolve, select, head]
+    needs: [tests, resolve, select, head, before]
     if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 30
