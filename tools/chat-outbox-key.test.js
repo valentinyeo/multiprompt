@@ -212,6 +212,7 @@ fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 {
     @memcpy(buf[0..id.len], id);
     return buf[0..id.len];
 }
+fn copyQueuedWrite(_: []const u8, _: []u8) ?usize { return null; }
 fn readFileAllocWin32(p: []const u8, _: usize) ?[]u8 {
     const text: []const u8 = if (std.mem.indexOf(u8, p, ":#") != null)
         (if (new_draft) "new" else return null)
@@ -225,7 +226,7 @@ fn win32WidePath(out: []u16, p: []const u8) ?[:0]u16 {
 }
 fn GetFileAttributesW(_: [*:0]const u16) u32 { return if (unreadable) 0 else 0xFFFF_FFFF; }
 fn DeleteFileW(_: [*:0]const u16) i32 { deleted += 1; return 1; }
-` + body('chatDraftKeyForShell') + '\n' + body('chatDraftLoad') + '\n' + body('chatDraftBindToActive') + `
+` + body('chatDraftKeyForShell') + '\n' + body('chatDraftLoad') + '\n' + (source.includes('fn chatDraftReadAll(') ? body('chatDraftReadAll') + '\n' : '') + body('chatDraftBindToActive') + `
 test "legacy draft migration" {
     chatDraftBindToActive();
     try std.testing.expectEqual(@as(usize, 0), composer_len);
