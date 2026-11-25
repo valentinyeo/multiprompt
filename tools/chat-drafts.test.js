@@ -93,8 +93,35 @@ fn layoutChatControls() void {}
 fn chatReplyRefreshPreview() void {}
 fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 { @memcpy(buf[0..id.len], id); return buf[0..id.len]; }
 var fail_write = false;
-fn chatDraftWriteFile(id: []const u8, bytes: []const u8) bool { if (fail_write) return false; files.put(std.heap.page_allocator.dupe(u8, id) catch unreachable, std.heap.page_allocator.dupe(u8, bytes) catch unreachable) catch unreachable; return true; }
+var inline_flushes: usize = 0;
+var queued_draft_writes: usize = 0;
+var open_tmp: ?[]u8 = null;
+const DWORD = u32;
+const GENERIC_WRITE: u32 = 0x4000_0000;
+const CREATE_ALWAYS: u32 = 2;
+const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+const INVALID_HANDLE_VALUE_PTR: ?usize = null;
+fn writeFileAtomicW(id: []const u8, bytes: []const u8) bool {
+    if (fail_write) return false;
+    queued_draft_writes += 1;
+    files.put(std.heap.page_allocator.dupe(u8, id) catch unreachable, std.heap.page_allocator.dupe(u8, bytes) catch unreachable) catch unreachable;
+    return true;
+}
+fn writeFileAtomicSync(id: []const u8, bytes: []const u8) bool { return writeFileAtomicW(id, bytes); }
+fn win32MakePath(_: []const u8) void {}
+fn CreateFileW(_: [*:0]const u16, _: u32, _: u32, _: ?*anyopaque, _: u32, _: u32, _: ?usize) ?usize { return if (fail_write) INVALID_HANDLE_VALUE_PTR else 1; }
+fn WriteFile(_: ?usize, bytes: [*]const u8, len: u32, written: *u32, _: ?*anyopaque) i32 { written.* = len; open_tmp = std.heap.page_allocator.dupe(u8, bytes[0..len]) catch unreachable; return 1; }
+fn FlushFileBuffers(_: ?usize) i32 { inline_flushes += 1; return 1; }
+fn CloseHandle(_: ?usize) i32 { return 1; }
+fn win32MoveReplace(_: []const u8, path: []const u8) bool {
+    if (open_tmp) |bytes| {
+        files.put(std.heap.page_allocator.dupe(u8, path) catch unreachable, bytes) catch unreachable;
+        open_tmp = null;
+    }
+    return true;
+}
 fn readFileAllocWin32(id: []const u8, _: usize) ?[]u8 { return if (files.get(id)) |v| std.heap.page_allocator.dupe(u8, v) catch unreachable else null; }
+fn copyQueuedWrite(_: []const u8, _: []u8) ?usize { return null; }
 fn win32WidePath(out: []u16, id: []const u8) ?[:0]u16 { for (id, 0..) |c,i| out[i] = c; out[id.len] = 0; return out[0..id.len :0]; }
 fn GetFileAttributesW(_: [*:0]const u16) u32 { return 0xFFFF_FFFF; }
 fn DeleteFileW(id: [*:0]const u16) i32 { var b: [560]u8 = undefined; const s = std.mem.span(id); for(s, 0..) |c,i| b[i] = @intCast(c); _ = files.remove(b[0..s.len]); return 1; }
@@ -107,8 +134,11 @@ fn expectText(value: []const u16) !void { try std.testing.expectEqualSlices(u16,
 function production() {
   const current = source.includes('fn chatDraftKeyForShell(');
   const globals = current ? '\nconst draft_model = @import("chat_drafts.zig");\nvar chat_drafts = draft_model.Store.init(std.heap.page_allocator);\nvar chat_draft_loading = false;\n' : '';
-  const names = ['chatOutboxKeyForShell', 'chatDraftFlush', 'chatDraftNoteEdit', 'chatDraftBindToActive'];
+  const names = ['chatOutboxKeyForShell', 'chatDraftFlush', 'chatDraftNoteEdit', 'chatDraftBindToActive', 'chatDraftWriteFile'];
   if (current) names.push('chatDraftKeyForShell', 'chatDraftLoad', 'chatDraftHasForShell', 'chatDraftAppend', 'chatDraftCloseForShell');
+  if (source.includes('fn chatDraftEnsureDir(')) names.push('chatDraftEnsureDir');
+  if (source.includes('fn chatDraftReadAll(')) names.push('chatDraftReadAll');
+  if (source.includes('fn chatDraftWriteFileInline(')) names.push('chatDraftWriteFileInline');
   let code = prelude + globals + names.map(body).join('\n');
   if (!current) code = code.replace('    chatDraftWriteFile(path, utf8);', '    _ = chatDraftWriteFile(path, utf8);');
   const switchBody = body('switchToShell');
@@ -133,6 +163,22 @@ test "ISSUE-498 typed and pasted drafts follow stable sessions across reordering
     std.mem.swap(@TypeOf(shells[0]), &shells[0], &shells[1]);
     switchToShell(active_shell); try expectText(std.unicode.utf8ToUtf16LeStringLiteral("draft A"));
     switchToShell(0); try expectText(std.unicode.utf8ToUtf16LeStringLiteral("pasted B"));
+}
+`);
+});
+
+test('SOFT-3163 switching tabs saves an unsent draft without flushing the disk inline', () => {
+  execute(production() + `
+test "SOFT-3163 a tab switch does not wait for a draft disk flush" {
+    switchToShell(0);
+    edit(L("unsent on the first chat"));
+    inline_flushes = 0;
+    queued_draft_writes = 0;
+    switchToShell(1);
+    try std.testing.expectEqual(@as(usize, 0), inline_flushes);
+    try std.testing.expect(queued_draft_writes >= 1);
+    switchToShell(0);
+    try expectText(L("unsent on the first chat"));
 }
 `);
 });

@@ -9079,6 +9079,112 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class MUBO_293_SlashCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.path = self.home / '.claude/projects/-work-demo/sid.jsonl'
+        self.path.parent.mkdir(parents=True)
+        self.query = dict(id=7, codex=False, sid='sid', tmux='term-1', cwd='/work/demo',
+                          cached_sid='', inode=0, offset=0)
+        for cache in (reader.TAIL_CACHE, reader.STATUS_CACHE, reader.QUEUE_CACHE):
+            cache.clear()
+
+    def read(self, fixture, **extra):
+        self.path.write_text((ROOT / 'tools/fixtures/MUBO-293' / fixture).read_text())
+        wire = reader.response(dict(self.query, **extra))
+        lines = wire.splitlines()
+        self.assertEqual(lines[0].split('\t')[:4], ['@mp', '7', 'history', 'ok'], wire)
+        return [json.loads(line) for line in lines[1:-1]]
+
+    def test_a_slash_command_turn_shows_its_command_and_reply(self):
+        rows = self.read('slash-command-reply.jsonl')
+        shown = [(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')]
+        self.assertEqual(shown, [('user', '/teach what is the launch playbook'),
+                                 ('assistant', 'The launch playbook is one page.')])
+
+    def test_an_unknown_slash_command_answer_is_a_send_failure_fact(self):
+        rows = self.read('unknown-slash-command.jsonl', settlement=True)
+        facts = [row['settlement'] for row in rows if row.get('settlement')]
+        self.assertEqual(facts, [dict(operation='rejected', content='Unknown command: /teach')])
+
+    def test_the_host_marks_an_unknown_slash_command_not_sent(self):
+        events = [
+            dict(type='user', uuid='local', timestamp='2026-11-24T18:20:01.000Z',
+                 message=dict(role='user', content='<local-command-stdout>Unknown command: /teach</local-command-stdout>')),
+            dict(type='system', subtype='informational', level='warning', timestamp='2026-11-24T18:20:01.000Z',
+                 content='Unknown command: /teach'),
+        ]
+        for event in events:
+            with self.subTest(kind=event['type']):
+                session = dict(state={}, sends=[dict(id='message_fixture_293', attempt='a1', epoch=1,
+                                                     accepted=False, text='/teach what is the launch playbook')])
+                with patch.object(reader, 'host_apply', return_value=True) as apply, \
+                        patch.object(reader, 'host_state_write'), patch.object(reader, 'host_log'):
+                    reader.host_claude_event('claude', 'sid', 'fixture', session, event)
+                fact = apply.call_args.args[3][0]
+                self.assertEqual((fact['kind'], fact['id'], fact['reason']),
+                                 ('not_sent', 'message_fixture_293', 'unknown_command'))
+                self.assertEqual(session['sends'], [])
+
+
+class MUBO135_ServerReplyOnceTest(unittest.TestCase):
+    provider = 'hax'
+    sid = 'a1b2c3d4-0135-4000-8000-000000000135'
+    tmux = 'mubo-135-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.session = dict(state=dict(display_history=True))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=io.BytesIO()))
+        self.session['turn'] = 't-135'
+        reader.host_hax_open(self.provider, self.sid, self.tmux, self.session)
+
+    def records(self, name):
+        path = Path(__file__).resolve().parent / 'fixtures/MUBO-135' / name
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def drive(self, name):
+        for record in self.records(name):
+            reader.host_hax_record(self.provider, self.sid, self.tmux, self.session, record)
+
+    def snapshot_texts(self):
+        snapshot = reader.live_snapshot(self.provider, self.sid)['live_snapshot']
+        return [event['payload']['text'] for event in snapshot['events'] if event.get('kind') == 'text.done']
+
+    def history_rows(self):
+        path = reader.host_paths(self.provider, self.sid)['history']
+        if not path.is_file():
+            return []
+        return [json.loads(line)['row'] for line in path.read_text().splitlines() if line.strip()]
+
+    def assert_once(self, labelled):
+        records = self.records('hax-reply.jsonl')
+        full = records[1]['text']
+        status = records[2]['text']
+        self.assertEqual(self.snapshot_texts(), [full, status])
+        rows = [row for row in self.history_rows() if row['role'] == 'assistant']
+        self.assertEqual([row['text'] for row in rows], [full, status])
+        self.assertEqual(len({row['id'] for row in rows}), 2)
+        if labelled:
+            self.assertEqual([row['id'].split(':text:')[0] for row in rows],
+                             ['hax-msg-mubo-135', 'hax-msg-mubo-136'])
+
+    def test_a_cut_hax_reply_and_its_full_copy_show_once(self):
+        self.drive('hax-reply.jsonl')
+        self.assert_once(False)
+
+    def test_a_labelled_hax_reply_keeps_one_row_per_message_id(self):
+        self.drive('hax-reply-ids.jsonl')
+        self.assert_once(True)
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:

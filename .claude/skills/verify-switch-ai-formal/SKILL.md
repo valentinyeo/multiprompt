@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `9d974f31047f8b72e94307da6c6b41f094b8c0fa`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `90f504e13fabf89b998e070a98c7feab9f41057c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-533 makes desktop rooms reliable. In `src/chat_history_reader.py` it adds `host_room_sweep` and `host_room_tick`, calls the tick once at the top of `host_loop`'s poll loop, adds a `room_features` list to the handshake reply in `host_handle_request` and adds the `--rooms` flag to `host_cli` status. All twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, as are the recorded provider events, probes, decisions and mutations, because a room sweep carries no turn end, no usage-limit text and moves no chat. Only the reader's whole-file hash and the sync commit move.
 
@@ -55,9 +55,15 @@ MUBO-286 adds the owner browser relay endpoint, the hosted-session registration 
 
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns, while a hosted hax chat still answers from the host history only. hax is not a switch target and no covered switch, usage-limit or auto-switch function calls that resolver, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
+MUBO-293 rebuilds the typed slash command in the reader's command path and records a refused slash command's settlement. No covered switch, usage-limit, auto-switch or dispatch function calls that path, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
+
 MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish` for `~/.local/state/multiprompt/chat-names.json`. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash moves; the sync commit names the merged master tip.
 
 MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
+MUBO-293 merges master `5baddb613`. The optional `workspace` and `group` strings in `chat_names_publish` sit outside every covered switch function, and the MUBO-293 command rebuild and refused-command settlement sit outside them too. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
+MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |

@@ -462,6 +462,36 @@ class BoardFeedbackTest(unittest.TestCase):
                 self.assertIsNone(re.search(r'[A-Z][A-Z0-9]*-\d+', line), line)
         self.assertIsNone(re.search(r'[A-Z][A-Z0-9]*-\d+', description.split('Why:')[0]))
 
+    def test_description_leaves_fix_to_be_written(self):
+        want = 'tab drag between workspaces keeps the picked order'
+        why = 'Every drag reorders the sidebar and I lose the tab I was reading'
+
+        def sections(description):
+            blocks = {}
+            current = None
+            for line in description.splitlines():
+                if line.endswith(':') and not line.startswith('> '):
+                    current = line[:-1]
+                    blocks[current] = []
+                elif line.startswith('> ') and current:
+                    blocks[current].append(line[2:])
+            return blocks
+
+        cases = [
+            ('with a reason', (want, '--why', why), want, why),
+            ('without a reason', ('screenshot button sits beside the composer',), 'screenshot button sits beside the composer', 'No reason given.'),
+        ]
+        for index, (name, args, expected_problem, expected_why) in enumerate(cases):
+            with self.subTest(name):
+                result = self.run_cli(*args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('filed ', result.stdout)
+                blocks = sections(self.read_board()['tasks'][index]['description'])
+                self.assertEqual(blocks['Problem'], [expected_problem])
+                self.assertEqual(blocks['Why'], [expected_why])
+                self.assertEqual(blocks['Fix'], ['to be written'])
+                self.assertNotIn(expected_problem, ' '.join(blocks['Fix']))
+
     def test_description_escapes_deliberate_input(self):
         result = self.run_cli('capture <screen>', '--why', 'Less <work> & time')
         self.assertIn('filed ', result.stdout)
@@ -469,6 +499,7 @@ class BoardFeedbackTest(unittest.TestCase):
         self.assertEqual(len(tasks), 1)
         self.assertIn('capture &lt;screen&gt;', tasks[0]['description'])
         self.assertIn('Less &lt;work&gt; &amp; time', tasks[0]['description'])
+        self.assertIn('Fix:\n\n> to be written', tasks[0]['description'])
 
 
 if __name__ == '__main__':

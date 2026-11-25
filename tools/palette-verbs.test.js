@@ -34,6 +34,16 @@ test('a new palette row with no verb fails the check', async () => {
   assert.deepEqual(result.missing, ['SEARCH_NOT_A_REAL_OFFSET']);
 });
 
+test('archive is a command-line verb, not a screen-only mark', async () => {
+  const { verbs, screen, screenOnly } = await map();
+  assert.equal(verbs.SEARCH_TABCTX_ARCHIVE, 'archive');
+  assert.equal(screen.SEARCH_TABCTX_ARCHIVE, undefined);
+  assert.doesNotMatch(screenOnly.local, /\barchive\b/);
+  assert.match(usage, /^  archive /m);
+  assert.match(usage, /^  unarchive /m);
+  assert.ok(claude.split('\n').length < 80);
+});
+
 test('pin is a command-line verb, not a screen-only mark', async () => {
   const { verbs, screen, screenOnly } = await map();
   assert.equal(verbs.SEARCH_TABCTX_PIN_TOP, 'pin');

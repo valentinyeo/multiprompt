@@ -8,7 +8,7 @@ const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\u
 const json = name => JSON.parse(text(name));
 const result = json('result.json');
 assert.equal(result.status, 'passed');
-assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
+assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true], ['reload', true]]);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.ok(Array.isArray(json('video.json').streams) && json('video.json').streams.length === 1);
@@ -18,6 +18,11 @@ for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
   assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));
   assert.ok(fs.statSync(path.join(root, `${name}.png`)).size > 1000);
+}
+assert.ok(fs.statSync(path.join(root, 'reloaded.png')).size > 1000);
+for (const reply of ['server seed', 'windows send proof', '/clear', 'windows after clear']) {
+  const copied = text('reloaded-copied.txt').split(`Server received: ${reply}`).length - 1;
+  assert.equal(copied, 1, `Reloaded transcript showed ${reply} ${copied} times`);
 }
 const acl = json('key-acl.json');
 assert.equal(acl.protected, true);
