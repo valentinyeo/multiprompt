@@ -204,9 +204,12 @@ if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity 
     (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
 Shot 'antigravity-new-session'
-$launchRows = @((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
-$launch = @($launchRows | Where-Object { $_.kind -ceq 'reader' -and (($_.argv -join ' ') -match 'host enable antigravity') })[-1]
-if (-not $launch) { throw 'The fresh Antigravity chat never ran a host enable launch' }
+$launch = Wait-For 'the fresh Antigravity chat ran its host enable launch' {
+    $found = @((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object {
+        try { $_ | ConvertFrom-Json } catch { $null }
+    } | Where-Object { $_ -and $_.kind -ceq 'reader' -and (($_.argv -join ' ') -match 'host enable antigravity') })
+    if ($found.Count -gt 0) { $found[$found.Count - 1] }
+} 30
 $launchText = $launch.argv -join ' '
 $pinned = [regex]::Match($launchText, '\.multiprompt-runtime/([0-9a-f]{64})\.py')
 if (-not $pinned.Success) { throw ('The fresh Antigravity chat launched the shared pointer instead of its own published runtime: ' + $launchText) }

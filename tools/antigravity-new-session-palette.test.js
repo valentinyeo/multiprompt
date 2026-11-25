@@ -65,3 +65,9 @@ test('SOFT-3050 the journey hands the app the workspace folder the row needs', (
   assert.match(drive, /if \(\$isAntigravity\) \{ \$savedSession\.tabs\[0\]\.ccwd = '\/verify\/work' \}/, 'the Antigravity journey must seed the chat folder the palette and the launch use');
   assert.match(journey, new RegExp(`Palette-Choose 'new antigravity sessions' ${offsetOf(ROW)}\\b`), 'the journey picks the Antigravity row by its offset');
 });
+
+test('MUBO-221 the fresh launch is read through a wait for that launch, not a snapshot of the file', () => {
+  assert.match(journey, /\$launch = Wait-For 'the fresh Antigravity chat ran its host enable launch' \{/, 'the launch row must be waited for');
+  assert.match(journey, /kind -ceq 'reader' -and \(\(\$_\.argv -join ' '\) -match 'host enable antigravity'\)/, 'the wait must name the launch it needs');
+  assert.doesNotMatch(journey, /\$launchRows = @\(/, 'a snapshot of the invocation file races the launch that has not run yet');
+});
