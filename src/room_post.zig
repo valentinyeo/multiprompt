@@ -12,6 +12,24 @@ pub fn validText(value: []const u8) bool {
     return value.len > 0 and value.len <= max_text and std.unicode.utf8ValidateSlice(value) and std.mem.indexOfScalar(u8, value, 0) == null and !blank(value);
 }
 
+pub const AcceptedHuman = struct { id: []const u8, seq: u64, text: []const u8 };
+
+pub fn acceptedHuman(payload: std.json.Value) ?AcceptedHuman {
+    if (payload != .object) return null;
+    const event = payload.object.get("event") orelse return null;
+    if (event != .object) return null;
+    const kind = event.object.get("type") orelse return null;
+    const id = event.object.get("id") orelse return null;
+    const room = event.object.get("room_id") orelse return null;
+    const seq = event.object.get("seq") orelse return null;
+    const text = event.object.get("text") orelse return null;
+    if (kind != .string or !std.mem.eql(u8, kind.string, "human")) return null;
+    if (id != .string or id.string.len != 36 or room != .string or room.string.len != 36) return null;
+    if (seq != .integer or seq.integer <= 0 or seq.integer > std.math.maxInt(u32)) return null;
+    if (text != .string or !validText(text.string)) return null;
+    return .{ .id = id.string, .seq = @intCast(seq.integer), .text = text.string };
+}
+
 fn aliasByte(ch: u8) bool {
     return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or (ch >= '0' and ch <= '9') or ch == '_' or ch == '-';
 }

@@ -10,3 +10,6 @@ Room messages send after creating a room or changing its members, and failures e
 A chat that was already running picks up the room helper the app published, so a room send no longer calls the helper old.
 After the room refuses a message, the next message sends instead of being blocked by the failed one.
 A message that was still being confirmed is sent once before your rewritten message, so nothing is lost or sent twice.
+A message you send appears in the room straight away instead of after the room reloads.
+Sending while a room is still opening waits for it instead of refusing your message.
+A room that is still opening says it is loading rather than reporting that it could not load.

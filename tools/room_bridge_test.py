@@ -277,6 +277,7 @@ finally:
 
     def test_a_second_room_request_reuses_the_published_helper(self):
         import io
+        import json
         import os
         from contextlib import redirect_stderr, redirect_stdout
         from unittest import mock
@@ -289,18 +290,25 @@ finally:
                 bridge_module.STORE_DIRECTORY = self.temp.name
                 try:
                     self.assertTrue(bridge_module.publish_runtime(), 'the first request publishes the helper')
+                    published = Path(home, '.multiprompt-runtime', 'active.json').read_bytes()
                     bridge_module.RUNTIME_SOURCE = b''
                     stdin = mock.MagicMock()
                     stdin.buffer.readline.side_effect = [b'{"op":"capabilities","room_messages":1}\n', b'']
+                    out = io.StringIO()
                     errors = io.StringIO()
-                    with mock.patch.object(sys, 'stdin', stdin), mock.patch.object(bridge_module.subprocess, 'run') as install, redirect_stdout(io.StringIO()), redirect_stderr(errors):
+                    with mock.patch.object(sys, 'stdin', stdin), redirect_stdout(out), redirect_stderr(errors):
                         bridge_module.serve(str(store), b'', fingerprint)
-                    install.assert_not_called()
+                    response = json.loads(out.getvalue())
+                    unchanged = Path(home, '.multiprompt-runtime', 'active.json').read_bytes()
                 finally:
                     bridge_module.RUNTIME_SOURCE = b''
                     bridge_module.RUNTIME_FINGERPRINT = ''
                     bridge_module.STORE_DIRECTORY = None
         self.assertIn('[room_bridge] runtime already published', errors.getvalue())
+        self.assertNotIn('[room_bridge] published runtime', errors.getvalue(), 'a second request never publishes the helper again')
+        self.assertEqual(published, unchanged)
+        self.assertTrue(response['ok'], response)
+        self.assertTrue(response['result']['live_send'], 'the published helper answers the second request')
 
     def test_a_publish_that_fails_says_the_room_host_could_not_start(self):
         import io
@@ -318,7 +326,7 @@ finally:
                 try:
                     bridge_module.PUBLISH_FAILED = False
                     stdin = mock.MagicMock()
-                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities"}\n', b'']
+                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities","room_messages":1}\n', b'']
                     out = io.StringIO()
                     errors = io.StringIO()
                     with mock.patch.object(sys, 'stdin', stdin), mock.patch.object(bridge_module.subprocess, 'run', side_effect=OSError('no runtime')), redirect_stdout(out), redirect_stderr(errors):

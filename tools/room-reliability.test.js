@@ -175,7 +175,7 @@ test "a send that never reached the room is resent with its own body instead of 
 }
 test "a definite refusal lets the next message start a fresh command" {
     defer reset();
-    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "refused", .bindings = &.{}, .state = .rejected, .evidence = "{\"error\":\"room_host_upgrade_required\"}" };
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "refused", .bindings = &.{}, .state = .rejected, .evidence = "{\\"error\\":\\"room_host_upgrade_required\\"}" };
     try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
     try std.testing.expectEqual(@as(usize, 0), abandoned);
     try std.testing.expectEqual(journal.Kind.post, sent_kind.?);
@@ -206,6 +206,15 @@ test "retrying the same draft keeps its original command id" {
   const unresolved = run(replaced, files, 1);
   assert.match(unresolved, /a send the room may have accepted is confirmed before a changed draft replaces it\.\.\.[\s\S]*FAIL/);
   assert.match(unresolved, /a send that never reached the room is resent with its own body instead of the changed draft\.\.\.[\s\S]*FAIL/);
+});
+
+test('a saved room send is shown before the room is read again', () => {
+  const frontend = read('room_frontend.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/accepted-post.zig'), 'utf8');
+  run(`${fixture}\n${declaration(frontend, 'fn applyAcceptedPost(')}\n${declaration(frontend, 'fn wide(')}`, { 'room_post.zig': read('room_post.zig') });
+  const hidden = frontend.replace('    loaded.value.messages = loaded.messages.items;\n', '');
+  assert.notEqual(hidden, frontend);
+  assert.match(run(`${fixture}\n${declaration(hidden, 'fn applyAcceptedPost(')}\n${declaration(hidden, 'fn wide(')}`, { 'room_post.zig': read('room_post.zig') }, 1), /a saved send is shown in the room before the room is read again[\s\S]*FAIL/);
 });
 
 test('a saved room send keeps the command identity the room store deduplicates on', () => {

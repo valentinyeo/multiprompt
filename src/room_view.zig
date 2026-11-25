@@ -109,6 +109,8 @@ pub const View = struct {
     too_small: bool = false,
     result: ?ActionResult = null,
     start_failed: bool = false,
+    loading: bool = false,
+    deferred_submit: bool = false,
     error_text: [1024]u16 = undefined,
     error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
@@ -206,10 +208,25 @@ pub const View = struct {
         self.showError("Could not load this room. Check the server connection and try again.");
     }
 
+    pub fn showLoading(self: *View) void {
+        self.loading = true;
+        self.result = null;
+        self.error_len = 0;
+        self.invalidate();
+    }
+
     pub fn showError(self: *View, message: []const u8) void {
+        self.loading = false;
+        self.deferred_submit = false;
         self.error_len = std.unicode.utf8ToUtf16Le(&self.error_text, message) catch 0;
         self.result = .failed;
         self.invalidate();
+    }
+
+    pub fn flushDeferred(self: *View) void {
+        if (!self.deferred_submit or self.presented_revision == 0 or self.pending != null) return;
+        self.deferred_submit = false;
+        self.submit();
     }
 
     pub fn showHostStartError(self: *View, message: []const u8) void {
@@ -252,6 +269,8 @@ pub const View = struct {
             self.picker = false;
         }
         self.model = model;
+        self.loading = false;
+        self.presented_revision = if (self.mode == .room) model.revision else 0;
         self.layout();
         if (focus_composer) self.setFocus(self.composer);
         return true;
@@ -407,12 +426,15 @@ pub const View = struct {
         self.pending = null;
         self.result = null;
         self.start_failed = false;
+        self.loading = false;
+        self.deferred_submit = false;
         self.clearHits();
     }
 
     fn token(self: *View, kind: ActionKind) ActionToken {
         self.error_len = 0;
         self.start_failed = false;
+        self.loading = false;
         self.serial +%= 1;
         return .{ .generation = self.generation, .serial = self.serial, .kind = kind };
     }
@@ -487,7 +509,11 @@ pub const View = struct {
     fn submit(self: *View) void {
         if (self.pending != null) { self.rejectSubmit("command_pending", "Wait for the current room action to finish, then try again."); return; }
         if (self.too_small) { self.rejectSubmit("window_too_small", "Make this window larger before sending."); return; }
-        if (self.presented_revision == 0) { self.rejectSubmit("revision_not_presented", "Wait for the room to load before sending."); return; }
+        if (self.presented_revision == 0) {
+            self.deferred_submit = true;
+            self.invalidate();
+            return;
+        }
         var buffer: [65537]u16 = undefined;
         const value = self.draft(&buffer) orelse { self.rejectSubmit("draft_unavailable", "Could not read your draft. Shorten it and try again."); return; };
         if (value.len == 0) { self.rejectSubmit("empty_draft", "Write a message before sending."); return; }
@@ -639,7 +665,11 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         _ = w.SelectObject(dc, heading);
         text(dc, view.model.name, .{ .left = left, .top = mid - view.px(12), .right = right, .bottom = mid + view.px(18) }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_END_ELLIPSIS);
         _ = w.SelectObject(dc, body);
-        text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        if (view.loading) {
+            text(dc, L("Loading this room"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        } else {
+            text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        }
     }
     for (view.model.messages) |message| {
         const member = message.author;
@@ -681,7 +711,9 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.loading) {
+        text(dc, L("Loading saved room messages"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0x8a8a8a, w.DT_SINGLELINE);
+    } else if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {

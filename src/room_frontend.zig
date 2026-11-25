@@ -601,7 +601,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         if (route == null or !std.mem.eql(u8, &key, &route_key)) {
             if (!flushUi()) {
                 account_generation +%= 1;
-                if (created and front == .selected) view.showUnavailable();
+                if (created and front == .selected) view.showLoading();
                 return false;
             }
             clearModels();
@@ -610,7 +610,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
             candidate_count = 0;
             account_generation +%= 1;
             if (controller) |*c| if (c.job == null) { controller = null; };
-            if (created and front == .selected) view.showUnavailable();
+            if (created and front == .selected) view.showLoading();
         }
     }
     return true;
@@ -1465,7 +1465,23 @@ fn publishModel() bool {
     owned_model = item;
     building_model = null;
     armReplyWatch();
+    view.flushDeferred();
     return true;
+}
+
+fn applyAcceptedPost(item: *const PendingCommand, payload: std.json.Value) void {
+    const accepted = room_post.acceptedHuman(payload) orelse return;
+    const loaded = owned_model orelse return;
+    if (front != .selected or !std.mem.eql(u8, &front.selected.room_id, &item.room_id)) return;
+    if (!std.mem.eql(u8, loaded.value.room_id, &item.room_id) or accepted.seq <= loaded.highwater) return;
+    for (loaded.messages.items) |message| if (std.mem.eql(u8, message.question_id, accepted.id)) return;
+    const a = loaded.arena.allocator();
+    const body = wide(a, accepted.text) orelse return;
+    const question = a.dupe(u8, accepted.id) catch return;
+    loaded.messages.append(a, .{ .text = body, .author = null, .time = &.{}, .question_id = question }) catch return;
+    loaded.value.messages = loaded.messages.items;
+    loaded.highwater = accepted.seq;
+    _ = view.setModel(&loaded.value);
 }
 
 fn finishMetadata(c: *rooms.Controller, fresh: bool, payload: ?std.json.Value) void {
@@ -1593,6 +1609,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
                 if (validReceiptBindings(item, payload)) {
                     evidence = std.json.Stringify.valueAlloc(item.arena.allocator(), payload, .{}) catch null;
                     if (evidence != null) state = .accepted;
+                    if (state == .accepted and item.kind == .post) applyAcceptedPost(item, payload);
                     if (payload == .object) if (payload.object.get("event")) |event| {
                         if (textField(event, "room_id")) |id| if (id.len == 36) { var copy: [36]u8 = undefined; @memcpy(&copy, id); room_id = copy; };
                     };
@@ -2441,7 +2458,7 @@ pub fn select(location: RoomLocation) void {
     @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
-    view.showUnavailable();
+    view.showLoading();
     view.focus();
     if (!found) return;
     selection_waiting = true;
