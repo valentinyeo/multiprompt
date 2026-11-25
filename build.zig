@@ -210,6 +210,7 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = if (b.option([]const u8, "test-filter", "Run matching desktop module tests")) |filter| &.{filter} else &.{},
     });
 
     const listener_helper = b.addTest(.{

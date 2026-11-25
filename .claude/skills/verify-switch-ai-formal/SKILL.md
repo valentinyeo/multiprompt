@@ -53,6 +53,10 @@ MUBO-286 adds the owner browser relay endpoint, the hosted-session registration 
 
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns, while a hosted hax chat still answers from the host history only. hax is not a switch target and no covered switch, usage-limit or auto-switch function calls that resolver, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
+MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish` for `~/.local/state/multiprompt/chat-names.json`. The covered `host_switch_*`, `host_usage_limit` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash moves; the sync commit names the merged master tip.
+
+MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |

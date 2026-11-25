@@ -38,7 +38,8 @@ test('periodic update never invokes restart and explicit restart uses the verifi
   assert.match(read('src/sidebar.zig'), /Restart to update/);
   const card = read('src/update_card.zig');
   assert.match(card, /else "Update ready"/);
-  assert.match(card, /"v\{s\} \\xc2\\xb7 takes a few seconds"/);
+  assert.match(card, /"v\{s\}"/);
+  assert.doesNotMatch(card, /takes a few seconds|seconds?\b/i);
 });
 
 test('Windows behavioral update tests stay nightly while source checks run on PRs', () => {
