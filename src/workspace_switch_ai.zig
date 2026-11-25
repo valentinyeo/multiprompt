@@ -13,6 +13,23 @@ pub const antigravity_agent: u8 = 8;
 pub const busy_wait_ms: u32 = 2000;
 pub const max_busy_attempts: u8 = 61;
 
+pub const ReasonText = struct {
+    buf: [96]u8 = std.mem.zeroes([96]u8),
+    len: u8 = 0,
+
+    pub fn text(self: ReasonText) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
+
+pub fn reasonText(reason: []const u8) ReasonText {
+    var owned: ReasonText = .{};
+    const len = @min(reason.len, owned.buf.len);
+    @memcpy(owned.buf[0..len], reason[0..len]);
+    owned.len = @intCast(len);
+    return owned;
+}
+
 pub const SwitchOutcome = union(enum) {
     switched: struct {
         agent: u8,
@@ -22,7 +39,7 @@ pub const SwitchOutcome = union(enum) {
     },
     already: u8,
     busy,
-    refused: []const u8,
+    refused: ReasonText,
     failed: []const u8,
 };
 
@@ -217,7 +234,7 @@ pub fn parseSwitchReply(allocator: std.mem.Allocator, body: []const u8) SwitchOu
         return .{ .switched = .{ .agent = agent, .sid = sid, .sid_len = @intCast(fields.sid.len) } };
     }
     if (std.mem.eql(u8, fields.status, "busy")) return .busy;
-    if (std.mem.eql(u8, fields.status, "refused")) return .{ .refused = fields.reason };
+    if (std.mem.eql(u8, fields.status, "refused")) return .{ .refused = reasonText(if (fields.reason.len == 0) "the server refused this switch" else fields.reason) };
     return .{ .failed = switchFailureReason(fields.reason) };
 }
 
@@ -410,21 +427,22 @@ pub fn formatStartNotice(buf: []u8, workspace: u8, target: u8, count: u32, alrea
 pub fn formatSummary(buf: []u8, target: u8, total_chats: u32, switched: u32, already: u32, busy: u32, refused: u32, failed: u32) []const u8 {
     const ai = targetDisplayName(target);
     if (total_chats == 0) return "No live chats in this workspace";
-    if (switched == 0 and busy == 0 and refused == 0 and failed == 0) {
+    const incomplete = switchIncomplete(busy, refused, failed);
+    if (!incomplete and switched == 0) {
         return std.fmt.bufPrint(buf, "Every chat in this workspace is already on {s}", .{ai}) catch "Already on target AI";
     }
-    if (switched > 0 and already == 0 and busy == 0 and refused == 0 and failed == 0) {
+    if (!incomplete) {
         return std.fmt.bufPrint(buf, "Switched {d} {s} to {s}", .{ switched, if (switched == 1) "chat" else "chats", ai }) catch "Workspace chats switched";
     }
+    const busy_only = switched == 0 and busy > 0 and already == 0 and refused == 0 and failed == 0;
     var pos: usize = 0;
     const head = if (switched > 0)
-        std.fmt.bufPrint(buf, "Switched {d} to {s} (", .{ switched, ai }) catch return "Workspace switch finished"
-    else if (busy > 0 and refused == 0 and failed == 0)
-        std.fmt.bufPrint(buf, "Wait for the current reply first (", .{}) catch return "Wait for the current reply first"
+        std.fmt.bufPrint(buf, "Switched {d} to {s} (", .{ switched, ai }) catch return "Workspace switch not finished"
+    else if (busy_only)
+        std.fmt.bufPrint(buf, "Workspace switch not finished: wait for the current reply first (", .{}) catch return "Workspace switch not finished"
     else
-        std.fmt.bufPrint(buf, "Workspace switch to {s}: ", .{ai}) catch return "Workspace switch failed";
+        std.fmt.bufPrint(buf, "Workspace switch to {s} not finished: ", .{ai}) catch return "Workspace switch not finished";
     pos = head.len;
-    const parens = switched > 0 or (busy > 0 and refused == 0 and failed == 0);
     var first = true;
     const parts = [_]struct { count: u32, label: []const u8 }{
         .{ .count = already, .label = "already" },
@@ -438,11 +456,15 @@ pub fn formatSummary(buf: []u8, target: u8, total_chats: u32, switched: u32, alr
         pos += chunk.len;
         first = false;
     }
-    if (parens and pos < buf.len) {
+    if ((switched > 0 or busy_only) and pos < buf.len) {
         buf[pos] = ')';
         pos += 1;
     }
     return buf[0..pos];
+}
+
+pub fn switchIncomplete(busy: u32, refused: u32, failed: u32) bool {
+    return busy != 0 or refused != 0 or failed != 0;
 }
 
 pub fn switchOneTab(tab: u32, target: u8, wait_event: win32.HANDLE) SwitchOutcome {
@@ -625,7 +647,7 @@ test "MUBO-535 switch transport uses the switch_ai protocol and classifies switc
 
     Fake.reply = "{\"status\":\"refused\",\"reason\":\"unsupported_provider\"}";
     switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
-        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason),
+        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason.text()),
         else => return error.TestUnexpectedResult,
     }
 
@@ -646,8 +668,32 @@ test "MUBO-535 switch transport uses the switch_ai protocol and classifies switc
     try std.testing.expectEqualStrings("Every chat in this workspace is already on Antigravity", formatSummary(&buf, antigravity_agent, 2, 0, 2, 0, 0, 0));
     try std.testing.expectEqualStrings("Switched 2 chats to Antigravity", formatSummary(&buf, antigravity_agent, 2, 2, 0, 0, 0, 0));
     try std.testing.expectEqualStrings("Switched 1 to Antigravity (1 already, 1 busy)", formatSummary(&buf, antigravity_agent, 3, 1, 1, 1, 0, 0));
-    try std.testing.expectEqualStrings("Wait for the current reply first (2 busy)", formatSummary(&buf, antigravity_agent, 2, 0, 0, 2, 0, 0));
-    try std.testing.expectEqualStrings("Workspace switch to Antigravity: 1 refused, 1 failed", formatSummary(&buf, antigravity_agent, 2, 0, 0, 0, 1, 1));
+    try std.testing.expectEqualStrings("Workspace switch not finished: wait for the current reply first (2 busy)", formatSummary(&buf, antigravity_agent, 2, 0, 0, 2, 0, 0));
+    try std.testing.expectEqualStrings("Workspace switch to Antigravity not finished: 1 refused, 1 failed", formatSummary(&buf, antigravity_agent, 2, 0, 0, 0, 1, 1));
+    try std.testing.expectEqualStrings("Switched 1 to Antigravity (1 busy)", formatSummary(&buf, antigravity_agent, 2, 1, 0, 1, 0, 0));
+}
+
+test "MUBO-535 a refused reason is owned and survives the freed switch reply buffers" {
+    const allocator = std.testing.allocator;
+    const reply = "{\"status\":\"refused\",\"reason\":\"unsupported_provider\"}";
+    const body = try allocator.dupe(u8, reply);
+    const outcome = parseSwitchReply(allocator, body);
+    allocator.free(body);
+    const scratch = try allocator.alloc(u8, reply.len * 4);
+    @memset(scratch, 'X');
+    allocator.free(scratch);
+    switch (outcome) {
+        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason.text()),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "MUBO-535 a refused reply with no reason still reports one" {
+    const outcome = parseSwitchReply(std.testing.allocator, "{\"status\":\"refused\"}");
+    switch (outcome) {
+        .refused => |reason| try std.testing.expectEqualStrings("the server refused this switch", reason.text()),
+        else => return error.TestUnexpectedResult,
+    }
 }
 
 test "MUBO-535 a refused switch leaves the chat on its old AI and a later run switches it" {

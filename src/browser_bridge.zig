@@ -2828,7 +2828,7 @@ fn zsbSessionSwitchAi(argv: []const []const u8, out: []u8, comptime ops: type) u
                     const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
                     return text.len;
                 },
-                .refused => |reason| return zsbSwitchAiOutcome(out, "refused", reason, args.tab, current_name),
+                .refused => |reason| return zsbSwitchAiOutcome(out, "refused", reason.text(), args.tab, current_name),
                 .failed => |reason| return zsbSwitchAiOutcome(out, "failed", reason, args.tab, current_name),
             }
         },
@@ -3713,7 +3713,7 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
                     break :blk .{ .switched = .{ .agent = target, .sid = sid, .sid_len = new_sid.len, .model_applied = model_applied } };
                 },
                 .busy => .busy,
-                .refused => .{ .refused = "unsupported_provider" },
+                .refused => .{ .refused = ws_switch.reasonText("unsupported_provider") },
                 .failed => .{ .failed = "the new AI could not start" },
             };
         }

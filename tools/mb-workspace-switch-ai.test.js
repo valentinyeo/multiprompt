@@ -204,21 +204,23 @@ test('workspace switch-ai reports a chat still busy when the wait runs out and n
   const h = harness(listing);
   t.after(() => rmSync(h.dir, { recursive: true, force: true }));
   const result = await h.calls(['workspace', 'switch-ai', 'Work', 'antigravity', '--timeout', '0']);
-  assert.equal(result.code, 0, result.errors.join('\n'));
+  assert.equal(result.code, 1, result.errors.join('\n'));
   assert.deepEqual(result.lines, [
     'switching 2 of 3 chats in Work to antigravity (1 already there), one at a time',
     'still busy Alpha Chat: Wait for the current reply first',
     'already Already Antigravity (antigravity)',
     'switched Grouped Pi -> antigravity',
-    'workspace Work: 1 switched, 1 already, 1 busy, 0 refused, 0 failed'
+    'workspace Work: 1 switched, 1 already, 1 busy, 0 refused, 0 failed',
+    'workspace switch incomplete: 1 chat not on antigravity'
   ]);
   const saved = h.state();
   assert.equal(saved.workspaces[0].tabs[2].provider, 'claude');
   assert.equal(saved.workspaces[0].tabs[2].messages, 2);
   const json = await h.calls(['workspace', 'switch-ai', 'Work', 'antigravity', '--timeout', '0', '--json']);
-  assert.equal(json.code, 0, json.errors.join('\n'));
+  assert.equal(json.code, 1, json.errors.join('\n'));
   const body = JSON.parse(json.lines[0]);
-  assert.equal(body.ok, true);
+  assert.equal(body.ok, false);
+  assert.equal(body.status, 'incomplete');
   assert.equal(body.busy, 1);
   assert.equal(body.already, 2);
   assert.equal(body.chats[0].outcome, 'busy');

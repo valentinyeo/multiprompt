@@ -794,11 +794,13 @@ async function workspaceSwitchAi(ctx, flags) {
       }
     }
     if (totals.switched === 0) writeAgentProvidersFile(ctx, collectAgentProviders(ctx, { host: flags.host, listing }));
-    const ok = totals.failed === 0 && totals.refused === 0;
+    const ok = totals.failed === 0 && totals.refused === 0 && totals.busy === 0;
+    const status = ok ? 'complete' : 'incomplete';
     if (flags.json) {
-      ctx.out(JSON.stringify({ ok, verb: 'workspace switch-ai', workspace: workspace.name, target, total: chats.length, to_switch: pending.length, ...totals, chats: results }));
+      ctx.out(JSON.stringify({ ok, status, verb: 'workspace switch-ai', workspace: workspace.name, target, total: chats.length, to_switch: pending.length, ...totals, chats: results }));
     } else if (chats.length > 0) {
       ctx.out(`workspace ${workspace.name}: ${totals.switched} switched, ${totals.already} already, ${totals.busy} busy, ${totals.refused} refused, ${totals.failed} failed`);
+      if (!ok) ctx.out(`workspace switch incomplete: ${totals.busy + totals.refused + totals.failed} ${totals.busy + totals.refused + totals.failed === 1 ? 'chat' : 'chats'} not on ${target}`);
     }
     return ok ? 0 : 1;
   } finally {
