@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `f6d470f18`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `ee643caf5`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-136 merges master `ee643caf5` (MUBO-558's helper version pinning, MUBO-525's read-only event push and folder watch, MUBO-452's pending fresh-start hold, MUBO-528's idle-poll worker gate and MUBO-560's Zig download retry) with its hosted clear control and other-user empty-history stream pin. All twelve covered reader functions are unchanged from master, as are the other covered files, model, bounds, decisions, probes and mutations. Clear and provider restart are outside the switch model. Only the reader hash and sync commit move on top of master; GitHub Actions reruns the self-test and replay.
 
 MUBO-558 reviewed merged source at `f6d470f18`, which carries MUBO-525's read-only event push. It records the app version that published each runtime helper in `tools.json` and refuses to move a helper back to an older version. The publish step runs in the reader's bootstrap before any request, outside every covered switch, usage-limit and auto-switch function. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 

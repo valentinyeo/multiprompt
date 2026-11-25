@@ -126,6 +126,8 @@ jobs:
         run: node tools/check-update-card-time-wording.mjs
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
+      - name: Clear a hosted chat and send into its new conversation
+        run: python3 tools/clear-server-chat-test.py -v
       - name: Verify shared reader engine startup
         run: python3 tools/chat-shared-runtime.test.py -v
       - name: Prove a second user's hosted chat reaches its own browser pane

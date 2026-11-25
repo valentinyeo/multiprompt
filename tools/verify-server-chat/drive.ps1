@@ -14,7 +14,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 $profile = Join-Path $env:RUNNER_TEMP ('server-chat-' + [guid]::NewGuid().ToString('N'))
 $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
-$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
+$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves a new provider conversation, an empty view after reload and a subsequent reply without Not sent; paid Claude internals are outside this fixture.' }
 $job = $null
 Start-Transcript "$Evidence/driver.log"
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
@@ -63,6 +63,7 @@ function Copy-Chat([string]$Name) {
     Type-Text 'chat view select all'
     [void](Wait-For 'select all messages command' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=20 count=\d+ target=6364(?:\s|$)' })
     Press @(0x0D) 'Enter: select rendered messages'
+    [Windows.Forms.Clipboard]::Clear()
     Press @(0x11, 0x43) 'Ctrl+C: copy rendered messages'
     $text = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
@@ -115,12 +116,36 @@ try {
     $replies = @('Server received: server seed')
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
-        $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
-        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
-        [void](Wait-For ('painted reply for ' + $case.name) { (Reply-Count (Copy-Chat ($case.name + '-copied')) ('Server received: ' + $case.text)) -eq 1 } 30)
-        Shot $case.name
-        $replies += 'Server received: ' + $case.text
-        $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
+        if ($case.name -eq 'clear') {
+            [void](Wait-For 'new empty server conversation' {
+                $snapshot = Server-Snapshot 'clear-server'
+                $snapshot.host.state.context_session -and $snapshot.host.state.context_session -ne 'a1b2c3d4-2567-4000-8000-000000002567' -and
+                    $snapshot.host.state.native_session -eq $snapshot.host.state.context_session -and
+                    @($snapshot.inputs | Where-Object { $_.text.Trim() -eq '/clear' }).Count -eq 0
+            })
+            [void](Wait-For 'empty Chat View after clear' { (Copy-Chat 'clear-copied').Trim() -eq '' } 30)
+            Shot 'clear'
+            $offset = (Log-Text).Length
+            Press @(0x11, 0x4B) 'Ctrl+K: reload chat'
+            [void](Wait-For 'reload palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            Type-Text 'resync'
+            [void](Wait-For 'reload command ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=6 count=\d+ target=6493(?:\s|$)' })
+            Press @(0x0D) 'Enter: reload messages from the server'
+            [void](Wait-For 'server reload requested' { (Log-Text).Substring($offset).Contains('[chat] resync requested') })
+            [void](Wait-For 'empty Chat View after reload' { (Copy-Chat 'clear-reloaded-copied').Trim() -eq '' } 30)
+            Shot 'clear-reloaded'
+            $replies = @()
+        } else {
+            [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
+            [void](Wait-For ('painted reply for ' + $case.name) {
+                $copied = Copy-Chat ($case.name + '-copied')
+                (Reply-Count $copied ('Server received: ' + $case.text)) -eq 1 -and -not $copied.Contains('Not sent')
+            } 30)
+            if ($case.name -eq 'after-clear' -and ((Copy-Chat 'after-clear-copied').Contains('server seed') -or (Copy-Chat 'after-clear-copied').Contains('windows send proof'))) { throw 'Old messages returned after clear' }
+            Shot $case.name
+            $replies += 'Server received: ' + $case.text
+        }
+        $result.cases += @{ name = $case.name; passed = $true; detail = 'Clear leaves an empty view after reload; ordinary sends reach the provider once with no Not sent' }
     }
     $reloadOffset = (Log-Text).Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
@@ -135,6 +160,7 @@ try {
         $count = Reply-Count $reloaded $reply
         if ($count -ne 1) { throw ('Reloaded Chat View showed ' + $reply + ' ' + $count + ' times') }
     }
+    if ($reloaded -match 'server seed|windows send proof|Not sent') { throw 'Old messages or a failed send returned after reload' }
     Shot 'reloaded'
     $result.cases += @{ name = 'reload'; passed = $true; detail = 'Resyncing the transcript from the server shows every server reply once' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"

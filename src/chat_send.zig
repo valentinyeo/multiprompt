@@ -720,6 +720,12 @@ fn selectMidSentenceSkill(text: []const u16) void {
 }
 
 pub fn sendChatPrompt() void {
+    if (app_state.g_chat_tmux_send_job) |job| {
+        if (job.clear_context and app_state.active_shell < app_state.shell_count and job.key.shell_id == app_state.shells[app_state.active_shell].shell_id) {
+            showHeaderNoticeAscii("Wait for this chat to clear", 3000, false);
+            return;
+        }
+    }
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
         showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
         return;
@@ -750,6 +756,12 @@ pub fn sendChatPrompt() void {
         const text = text_buf[0..@intCast(text_len_i)];
         const shell = &app_state.shells[app_state.active_shell];
         const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
+        if (live and shell.kind == .tmux and shell.ai_agent == 1 and chatBareClear(text)) {
+            if (!chatTmuxSendEligible(app_state.active_shell) or !chatTmuxSendStart(app_state.active_shell, text, 0, false, false, false)) {
+                showHeaderNoticeAscii("Could not clear this chat. Try again", 4000, true);
+            }
+            return;
+        }
         const selected_skill = app_state.g_chat_ac_skill_shell_id == shell.shell_id and app_state.g_chat_ac_skill_command_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len]);
         const interactive = app_state.g_chat_ac_dialog_shell_id == shell.shell_id and app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]);
         const route = @import("chat_slash.zig").decide(live, text, selected_skill, interactive);
@@ -4000,6 +4012,18 @@ test "IGSH-1266 a submit that never landed is typeable again on the next tick" {
     try std.testing.expect(!patch.retryable);
 }
 
+fn chatBareClear(text: []const u16) bool {
+    return std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), std.unicode.utf8ToUtf16LeStringLiteral("/clear"));
+}
+
+test "MUBO-136 only a bare clear uses the host control" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expect(chatBareClear(w("/clear")));
+    try std.testing.expect(chatBareClear(w(" /clear \r\n")));
+    try std.testing.expect(!chatBareClear(w("/clear keep notes")));
+    try std.testing.expect(!chatBareClear(w("please /clear")));
+}
+
 fn chatTmuxSendEligible(idx: u32) bool {
     if (!ISSUE_349_TMUX_SEND or idx >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(idx);
@@ -4014,6 +4038,7 @@ fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool, sta
         a.destroy(job);
         return false;
     }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0 };
+    job.clear_context = echo_id == 0 and app_state.shells[idx].ai_agent == 1 and chatBareClear(text);
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = app_state.g_chat_outbox.items[ei];
         if (!entry.message_v1 and app_state.shells[idx].ai_agent >= 2) { a.free(job.text); a.destroy(job); return false; }
@@ -4054,6 +4079,16 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     const text = std.unicode.utf16LeToUtf8Alloc(a, job.text) catch return;
     defer a.free(text);
     const id: u32 = @truncate(job.echo_id);
+    if (job.clear_context) {
+        const query = std.json.Stringify.valueAlloc(a, .{ .op = "clear", .id = id, .provider = job.key.provider(), .sid = std.mem.sliceTo(&job.key.sid, 0) }, .{}) catch return;
+        defer a.free(query);
+        var response: std.ArrayList(u8) = .empty;
+        defer response.deinit(a);
+        if (@import("chat_session.zig").chatHistoryPersistent(job.key.checked() orelse return, query, 4096, &response, null)) {
+            if (@import("chat_slash.zig").modeReplyOk(a, response.items)) job.message_state[0] = '1';
+        }
+        return;
+    }
     var message_id: [48]u8 = undefined;
     const token = if (job.message_v1)
         std.mem.sliceTo(&job.message_wire_id, 0)
@@ -4367,6 +4402,26 @@ fn chatTmuxSendFinish() void {
         std.heap.page_allocator.destroy(job);
     }
     const idx = @import("inbox.zig").findShellById(job.key.shell_id) orelse return;
+    if (job.clear_context) {
+        if (!std.meta.eql(chatFileIdentityForShell(idx), job.key)) return;
+        if (job.message_state[0] != '1') {
+            showHeaderNoticeAscii("Could not clear this chat. Wait for its reply, then try again", 5000, true);
+            return;
+        }
+        @import("chat_session.zig").chatLiveStreamStop();
+        @import("chat_live.zig").release(job.key.shell_id);
+        if (idx == app_state.active_shell) {
+            var draft: [CHAT_OUTBOX_MSG_CAP]u16 = undefined;
+            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &draft, draft.len);
+            if (len > 0 and chatBareClear(draft[0..@intCast(len)])) {
+                _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+                app_state.g_chat_draft_dirty = true;
+                chatDraftFlush();
+            }
+        }
+        chatResetLocalForShell(idx);
+        return;
+    }
     if (job.message_reset) {
         const current = chatFileIdentityForShell(idx);
         const pending_reset = app_state.g_chat_pending_reset orelse return;

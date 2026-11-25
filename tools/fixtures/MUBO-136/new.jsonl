@@ -1,0 +1,2 @@
+{"type":"assistant","session_id":"66666666-7777-4888-8999-aaaaaaaaaaaa","message":{"id":"new-reply","role":"assistant","content":[{"type":"text","text":"new conversation reply"}]}}
+{"type":"result","subtype":"success","session_id":"66666666-7777-4888-8999-aaaaaaaaaaaa","result":"new conversation reply"}
