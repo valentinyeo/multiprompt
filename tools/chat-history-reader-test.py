@@ -5400,8 +5400,10 @@ def track_fixture_hosts(test):
     test.host_children = []
     spawn = reader.host_spawn
 
-    def tracked(provider, sid, *args, **kwargs):
-        child = spawn(provider, sid, *args, **kwargs)
+    def tracked(provider, sid, source=None):
+        if source is None:
+            source = getattr(test, 'host_source', None)
+        child = spawn(provider, sid, source)
         if child is not None and provider == test.provider and sid == test.sid:
             test.host_children.append(child)
         return child
@@ -5449,6 +5451,7 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
         patch.dict(os.environ, dict(HOME=str(self.home))).start()
         self.sid = str(uuid.uuid4())
+        self.host_source = None
         self.host_children = []
         track_fixture_hosts(self)
         self.agent = self.home / 'agy-stand-in.py'
@@ -5530,6 +5533,16 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
     def messages(self, rows):
         return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
 
+    def pre_fix_source(self):
+        path = ROOT / 'tools/fixtures/MUBO-221/reader-before-host-history-claim.py'
+        scope = dict(__name__='mubo221_prefix_reader')
+        exec(compile(path.read_text(encoding='utf-8'), str(path), 'exec'), scope)
+        return scope['READER_SOURCE']
+
+    def start(self):
+        started = reader.host_cli(['start', self.provider, self.sid])
+        self.assertIn(started.get('status'), ('started', 'already'), started)
+
     def test_a_fresh_antigravity_chat_keeps_its_reply_across_full_reloads(self):
         self.enable()
         token = self.send()
@@ -5556,8 +5569,7 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         state.pop('display_history', None)
         reader.host_write(self.paths()['state'], state)
         self.assertEqual(self.fetch()[0][3], 'missing')
-        started = reader.host_cli(['start', self.provider, self.sid])
-        self.assertIn(started.get('status'), ('started', 'already'), started)
+        self.start()
         self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
         messages = self.messages(self.read()[1])
         self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
@@ -5565,6 +5577,25 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
         self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
         self.assertEqual(len([event for event in self.events() if event.get('kind') == 'text.done']), 1)
+
+    def test_a_fresh_chat_without_the_host_claim_serves_no_history_and_the_claim_restores_it(self):
+        self.enable()
+        self.host_source = self.pre_fix_source()
+        token = self.send()
+        fields, rows, wire = self.fetch()
+        self.assertIn(fields[3], ('missing', 'ok'), wire)
+        self.assertEqual(self.messages(rows), [], wire)
+        self.assertFalse(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertFalse(self.paths()['history'].is_file())
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
+        self.host_source = None
+        self.start()
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
 
 
 class FixtureLifecycleTest(unittest.TestCase):
