@@ -6,3 +6,4 @@ Opening a room no longer fails on Windows, and a room host that cannot start say
 Room creation lists server chats by the names shown in your account, even after you close their tabs.
 Rooms work on a server where you never sent a chat from the app.
 Room screens no longer re-send the server helper on every refresh, so they open faster.
+Room messages send after creating a room or changing its members, and failures explain what went wrong without blaming your connection.

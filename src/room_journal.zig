@@ -125,7 +125,9 @@ fn validAlias(alias: []const u8) bool {
 }
 
 fn validPostRequest(r: Record, obj: std.json.Value) bool {
-    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    const features = field(obj, "room_features");
+    if (obj.object.count() != (if (features != null) @as(usize, 8) else 7) or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    if (features != null and (number(obj, "room_features") orelse 0) != 1) return false;
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
     const host = text(obj, "host_uuid") orelse return false;
@@ -411,6 +413,14 @@ test "post journal record keeps the exact request through the envelope" {
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .uncertain, "")));
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .accepted, test_receipt)));
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"invalid_mentions\"}")));
+}
+
+test "capability-gated room posts keep their exact request and receipt through the journal" {
+    const scope = testScope();
+    const request = "{\"room_features\":1," ++ test_request[1..];
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .prepared, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .uncertain, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .accepted, test_receipt)));
 }
 
 test "post journal request refuses a body that does not match the record" {

@@ -75,6 +75,63 @@ test "restart refreshes all stored unanswered questions without a recent send" {
 `);
 });
 
+test('freshly created rooms send posts through the journal, including capability-gated requests', () => {
+  const frontend = read('room_frontend.zig');
+  const journal = read('room_journal.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/room-send.zig'), 'utf8');
+  const declarations = ['pub const StoreLocation = struct {', 'pub const RoomLocation = struct {', 'pub const Front = union(enum) {', 'const PendingCommand = struct {'];
+  const source = `${fixture}
+${declarations.map(marker => declaration(frontend, marker)).join('\n')}
+const PendingBinding = journal.Binding;
+var front: Front = .{ .selected = .{ .store = .{ .account = @splat(0), .account_len = 0, .store_uuid = test_store.* }, .room_id = test_room.* } };
+const journal = struct {
+    ${['pub const Kind = enum', 'pub const State = enum', 'pub const Scope = struct', 'pub const Binding = struct'].map(marker => journal.slice(journal.indexOf(marker), journal.indexOf('\n', journal.indexOf(marker)))).join('\n')}
+    ${declaration(journal, 'pub const Record = struct {')}
+    ${['fn field(', 'fn text(', 'fn number(', 'fn uuidValid(', 'fn validText(', 'fn validAlias(', 'fn validPostRequest('].map(marker => declaration(journal, marker)).join('\n')}
+    const Entry = struct {
+        value: Record,
+        fn record(self: *const Entry) *const Record { return &self.value; }
+        fn deinit(_: *Entry) void {}
+    };
+    fn newCommandId() ?[36]u8 { return test_command.*; }
+    fn load(_: Scope) !?Entry {
+        return Entry{ .value = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .create, .command_id = test_room, .room_id = "", .revision = 0, .request = "", .bindings = &.{}, .state = .accepted, .evidence = "" } };
+    }
+    fn prepare(_: Scope, kind: Kind, id: []const u8, room: []const u8, revision: u64, request: []const u8, bindings: []const Binding) !void {
+        const record = Record{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = kind, .command_id = id, .room_id = room, .revision = revision, .request = request, .bindings = bindings, .state = .prepared, .evidence = "" };
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, request, .{});
+        defer parsed.deinit();
+        if (fail_prepare or !validPostRequest(record, parsed.value)) return error.InvalidJournal;
+        staged_record = record;
+    }
+};
+${frontend.includes('fn rejectPost(') ? declaration(frontend, 'fn rejectPost(') : ''}
+${['fn postRequest(', 'fn beginPost('].map(marker => declaration(frontend, marker)).join('\n')}
+test "legacy requests remain valid and unknown capabilities or extra fields are rejected" {
+    defer reset();
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    const record = staged_record.?;
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, record.request, .{});
+    defer parsed.deinit();
+    try std.testing.expect(journal.validPostRequest(record, parsed.value));
+    parsed.value.object.getPtr("room_features").?.* = .{ .integer = 2 };
+    try std.testing.expect(!journal.validPostRequest(record, parsed.value));
+    parsed.value.object.getPtr("room_features").?.* = .null;
+    try std.testing.expect(!journal.validPostRequest(record, parsed.value));
+    _ = parsed.value.object.swapRemove("room_features");
+    try std.testing.expect(journal.validPostRequest(record, parsed.value));
+    try parsed.value.object.put(std.testing.allocator, "unexpected", .{ .integer = 1 });
+    defer _ = parsed.value.object.swapRemove("unexpected");
+    try std.testing.expect(!journal.validPostRequest(record, parsed.value));
+}
+`;
+  const files = { 'room_post.zig': read('room_post.zig') };
+  run(source, files);
+  const before = source.replace(/    const features = field\(obj, "room_features"\);[\s\S]*?    const op = text\(obj, "op"\) orelse return false;/, '    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;\n    const op = text(obj, "op") orelse return false;');
+  assert.notEqual(before, source);
+  assert.match(run(before, files, 1), /a freshly created room with events loaded sends kind post through the saved command validator\.\.\.[\s\S]*FAIL \(TestExpectedEqual\)/);
+});
+
 test('shown-name mentions support spaces, case, legacy aliases and reject ambiguous names', () => {
   run(`
 const std = @import("std");

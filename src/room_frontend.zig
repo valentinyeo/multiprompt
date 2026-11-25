@@ -1719,7 +1719,11 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
     const item = pending_command orelse return false;
     if (!item.awaiting_launch or completion == .pending) return false;
     if (!fresh or commandScope(item.location) == null) {
-        if (commandVisible(item)) view.completeAction(item.token, .failed);
+        if (item.kind == .post) diagnostics.syncLog("[rooms] post rejected reason=queued_account_or_host_changed");
+        if (commandVisible(item)) {
+            if (item.kind == .post) view.showError("The room account or server changed before sending. Your draft is kept. Reopen the room and try again.");
+            view.completeAction(item.token, .failed);
+        }
         freePending(item);
         return false;
     }
@@ -1749,8 +1753,15 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
     if (kind == .members and status_generation == candidate_generation and candidate_scan > 0) candidate_scan -= 1;
     if (front == .selected) selection_waiting = true;
     item.awaiting_launch = false;
-    c.launchPrepared(item.kind, &item.id, if (item.kind == .create) "" else &item.room_id, item.revision) catch {
-        if (commandVisible(item)) view.completeAction(item.token, .failed);
+    c.launchPrepared(item.kind, &item.id, if (item.kind == .create) "" else &item.room_id, item.revision) catch |err| {
+        if (item.kind == .post) {
+            var log: [256]u8 = undefined;
+            diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] post rejected reason=queued_launch error={s}", .{@errorName(err)}) catch unreachable);
+        }
+        if (commandVisible(item)) {
+            if (item.kind == .post) view.showError("Could not start this room send. Your draft is kept. Reopen the room and try again.");
+            view.completeAction(item.token, .failed);
+        }
         freePending(item);
         journal_checked_generation = null;
         scheduleDiscovery(c);
@@ -2174,62 +2185,77 @@ fn postRequest(a: std.mem.Allocator, store_uuid: *const [36]u8, id: *const [36]u
     return std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .room_features = 1, .host_uuid = store_uuid[0..], .command_id = id[0..], .room_id = room_id, .expected_revision = revision, .text = text, .recipients = recipients }, .{});
 }
 
+fn rejectPost(reason: []const u8, message: []const u8) room_view.ActionResult {
+    var log: [256]u8 = undefined;
+    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] post rejected reason={s}", .{reason}) catch unreachable);
+    if (created) view.showError(message);
+    return .failed;
+}
+
 fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, value: []const u16) room_view.ActionResult {
-    if (!enabled or !created or front != .selected or room_id.len != 36 or revision == 0) return .failed;
-    const c = if (controller) |*active| active else return .failed;
+    if (!enabled or !created) return rejectPost("view_unavailable", "Rooms are not ready. Reopen the room and try again.");
+    if (front != .selected or room_id.len != 36) return rejectPost("room_not_selected", "Open the room before sending.");
+    if (revision == 0) return rejectPost("revision_missing", "This room has not loaded yet. Reopen it and try again.");
+    const c = if (controller) |*active| active else return rejectPost("controller_missing", "The room host is not ready. Reopen the room and try again.");
     if (!c.live_send or !c.room_features) {
-        view.showError("The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
-        return .failed;
+        return rejectPost("helper_unavailable", "The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
     }
-    const current = owned_model orelse return .failed;
-    if (!std.mem.eql(u8, room_id, &front.selected.room_id) or !std.mem.eql(u8, current.value.room_id, room_id) or current.value.revision != revision) return .failed;
+    const current = owned_model orelse return rejectPost("model_missing", "This room has not loaded yet. Reopen it and try again.");
+    if (!std.mem.eql(u8, room_id, &front.selected.room_id) or !std.mem.eql(u8, current.value.room_id, room_id)) return rejectPost("room_changed", "The selected room changed. Check the room and try again.");
+    if (current.value.revision != revision) {
+        var log: [128]u8 = undefined;
+        diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] post revision mismatch shown={d} loaded={d}", .{ revision, current.value.revision }) catch unreachable);
+        return rejectPost("revision_changed", "The room members changed. Check them and send again.");
+    }
     var text_buf: [196608]u8 = undefined;
-    const text_len = std.unicode.utf16LeToUtf8(&text_buf, value) catch return .failed;
+    const text_len = std.unicode.utf16LeToUtf8(&text_buf, value) catch |err| return rejectPost(@errorName(err), "This message could not be read. Edit it and try again.");
     const text = text_buf[0..text_len];
-    if (!room_post.validText(text) or current.bindings.items.len > room_post.max_recipients) return .failed;
+    if (!room_post.validText(text)) return rejectPost("invalid_text", "Write a message of at most 65536 bytes before sending.");
+    if (current.bindings.items.len > room_post.max_recipients) return rejectPost("too_many_members", "This room has too many members to send a message.");
     var names: [room_post.max_recipients]room_post.Recipient = undefined;
     for (current.bindings.items, 0..) |binding, index| names[index] = .{ .alias = binding.member.alias, .display_name = binding.member.display_name };
     var picked: [room_post.max_recipients][]const u8 = undefined;
     const count = room_post.namedRecipients(text, names[0..current.bindings.items.len], &picked) orelse 0;
     if (pending_command) |item| {
-        if (item.evidence == null or item.kind != .post) return .failed;
-        const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch return .failed;
+        if (item.evidence == null or item.kind != .post) return rejectPost("command_pending", "Wait for the current room action to finish, then try again.");
+        const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
         defer std.heap.page_allocator.free(bytes);
         const matches = revision == item.revision and std.mem.eql(u8, room_id, &item.room_id) and commandScope(item.location) != null and selection_generation == item.generation and sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id }) and std.mem.eql(u8, bytes, item.request);
         const accepted = item.evidence_state == .accepted;
         if (accepted and matches) dropDraft(.{ .store = item.location, .room_id = item.room_id }, text);
-        retryCommandEvidence() catch return .failed;
-        if (!matches) return .failed;
+        retryCommandEvidence() catch |err| return rejectPost(@errorName(err), "Could not save the previous send result on this computer. Try again.");
+        if (!matches) return rejectPost("pending_message_changed", "The previous room action needs to finish before sending this message. Reopen the room and try again.");
         if (!accepted) {
             selection_waiting = true;
             _ = startSnapshot(c);
         }
-        return if (accepted) .accepted else .failed;
+        return if (accepted) .accepted else rejectPost("command_rejected", "The room did not accept the previous message. Review it and try again.");
     }
-    if (c.journal_lock != null or !c.has_host_uuid) return .failed;
+    if (c.journal_lock != null) return rejectPost("journal_busy", "Wait for the current room action to finish, then try again.");
+    if (!c.has_host_uuid) return rejectPost("host_identity_missing", "The room host is not ready. Reopen the room and try again.");
     var location = StoreLocation{ .account = @splat(0), .account_len = account_len, .store_uuid = c.host_uuid };
     @memcpy(location.account[0..account_len], account[0..account_len]);
-    const scope = commandScope(location) orelse return .failed;
-    if (!sameLocation(front.selected, .{ .store = location, .room_id = front.selected.room_id })) return .failed;
-    const item = std.heap.page_allocator.create(PendingCommand) catch return .failed;
+    const scope = commandScope(location) orelse return rejectPost("account_or_host_changed", "The room account or server changed. Reopen the room and try again.");
+    if (!sameLocation(front.selected, .{ .store = location, .room_id = front.selected.room_id })) return rejectPost("store_changed", "The room server changed. Reopen the room and try again.");
+    const item = std.heap.page_allocator.create(PendingCommand) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
     item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = .post, .id = undefined, .revision = revision, .request = "", .token = token, .generation = selection_generation, .bindings = &.{} };
     var retained = false;
     defer if (!retained) { item.arena.deinit(); std.heap.page_allocator.destroy(item); };
     const a = item.arena.allocator();
     @memcpy(&item.room_id, room_id);
-    var existing = (journal.load(scope) catch return .failed);
+    var existing = (journal.load(scope) catch |err| return rejectPost(@errorName(err), "Could not read the saved room action on this computer. Reopen the room and try again."));
     defer if (existing) |*entry| entry.deinit();
     if (existing) |*entry| {
         const record = entry.record();
         if (record.state == .prepared or record.state == .uncertain) {
-            if (record.kind != .post or record.revision != revision or !std.mem.eql(u8, record.room_id, room_id)) return .failed;
+            if (record.kind != .post or record.revision != revision or !std.mem.eql(u8, record.room_id, room_id)) return rejectPost("unresolved_command", "The previous room action needs to finish. Reopen the room to retry it.");
             @memcpy(&item.id, record.command_id);
-        } else item.id = journal.newCommandId() orelse return .failed;
-    } else item.id = journal.newCommandId() orelse return .failed;
-    item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch return .failed;
-    journal.prepare(scope, .post, &item.id, room_id, revision, item.request, item.bindings) catch return .failed;
+        } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
+    } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
+    item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
+    journal.prepare(scope, .post, &item.id, room_id, revision, item.request, item.bindings) catch |err| return rejectPost(@errorName(err), "Could not save this message on this computer. Your draft is kept. Try again.");
     item.awaiting_launch = c.job != null;
-    if (!item.awaiting_launch) c.launchPrepared(.post, &item.id, room_id, revision) catch return .failed;
+    if (!item.awaiting_launch) c.launchPrepared(.post, &item.id, room_id, revision) catch |err| return rejectPost(@errorName(err), "Could not start this room send. Your draft is kept. Reopen the room and try again.");
     pending_command = item;
     retained = true;
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);

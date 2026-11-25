@@ -44,6 +44,11 @@ var discarded: usize = 0;
 var refresh_failed: usize = 0;
 var refresh_queued: usize = 0;
 var action_failed: usize = 0;
+var error_shown: usize = 0;
+var rejection_logged: usize = 0;
+const diagnostics = struct {
+    fn syncLog(_: []const u8) void { rejection_logged += 1; }
+};
 var scope_valid = true;
 var visible = true;
 var journal_checked_generation: ?u64 = 1;
@@ -61,6 +66,7 @@ var metadata_read: ?struct { room_id: [36]u8 = @splat('r'), catalog_generation: 
 fn commandScope(_: u8) ?u8 { return if (scope_valid) 1 else null; }
 fn commandVisible(_: *Pending) bool { return visible; }
 const view = struct {
+    fn showError(_: []const u8) void { error_shown += 1; }
     fn completeAction(_: u8, _: enum { failed }) void { action_failed += 1; }
 };
 fn freePending(_: *Pending) void { pending_command = null; }
@@ -82,6 +88,8 @@ fn reset(item: *Pending) void {
     refresh_failed = 0;
     refresh_queued = 0;
     action_failed = 0;
+    error_shown = 0;
+    rejection_logged = 0;
     scope_valid = true;
     visible = true;
     discovery = 0;
@@ -130,6 +138,8 @@ test "stale route or account never launches queued command" {
         try std.testing.expectEqual(@as(usize, 0), controller.?.launches);
         try std.testing.expectEqual(@as(usize, 0), disposed);
         try std.testing.expect(pending_command == null);
+        try std.testing.expectEqual(@as(usize, 1), rejection_logged);
+        try std.testing.expectEqual(@as(usize, 1), error_shown);
     }
 }
 test "queued creation keeps empty room identity" {
@@ -150,6 +160,8 @@ test "launch failure frees pending action and schedules durable recovery" {
     try std.testing.expect(journal_checked_generation == null);
     try std.testing.expectEqual(@as(usize, 1), discovery);
     try std.testing.expectEqual(@as(usize, 1), action_failed);
+    try std.testing.expectEqual(@as(usize, 1), rejection_logged);
+    try std.testing.expectEqual(@as(usize, 1), error_shown);
     try std.testing.expectEqual(@as(usize, 1), disposed);
 }
 test "interrupted metadata and member reads remain eligible for refresh" {

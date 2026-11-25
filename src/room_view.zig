@@ -485,17 +485,25 @@ pub const View = struct {
     }
 
     fn submit(self: *View) void {
-        if (self.pending != null or self.too_small or self.presented_revision == 0) return;
+        if (self.pending != null) { self.rejectSubmit("command_pending", "Wait for the current room action to finish, then try again."); return; }
+        if (self.too_small) { self.rejectSubmit("window_too_small", "Make this window larger before sending."); return; }
+        if (self.presented_revision == 0) { self.rejectSubmit("revision_not_presented", "Wait for the room to load before sending."); return; }
         var buffer: [65537]u16 = undefined;
-        const value = self.draft(&buffer) orelse { self.result = .failed; self.invalidate(); return; };
-        if (value.len == 0) return;
+        const value = self.draft(&buffer) orelse { self.rejectSubmit("draft_unavailable", "Could not read your draft. Shorten it and try again."); return; };
+        if (value.len == 0) { self.rejectSubmit("empty_draft", "Write a message before sending."); return; }
         var utf8: [196608]u8 = undefined;
         const bytes = std.unicode.utf16LeToUtf8(&utf8, value) catch 0;
-        if (bytes == 0 or bytes > 65536) { self.result = .failed; self.invalidate(); return; }
+        if (bytes == 0 or bytes > 65536) { self.rejectSubmit("invalid_draft", "Shorten this message to at most 65536 bytes and try again."); return; }
         const action = self.token(.submit);
         self.pending = action;
         const result = self.callbacks.submit(self.callbacks.context, action, self.model.room_id, self.presented_revision, value);
         self.completeAction(action, result);
+    }
+
+    fn rejectSubmit(self: *View, reason: []const u8, message: []const u8) void {
+        var log: [256]u8 = undefined;
+        @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] post rejected reason={s}", .{reason}) catch unreachable);
+        self.showError(message);
     }
 };
 
@@ -673,7 +681,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Check the server connection and try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {
