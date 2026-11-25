@@ -1,6 +1,6 @@
 # Antigravity chats
 
-Source files: src/session.zig, src/json_reader.zig, src/vps.zig, src/agent_host.zig, src/capacity.zig, src/archive.zig, src/notifications.zig, src/shell_poll.zig, src/workspaces.zig, src/chat_mention.zig, src/chat_transcript.zig, src/command_palette.zig, src/shortcuts.zig, tools/fixtures/SOFT-3050/*, tools/verify-chat-delivery/boundary.py, tools/verify-chat-delivery/antigravity-chats.ps1, tools/chat-antigravity-proof.cjs
+Source files: src/session.zig, src/json_reader.zig, src/vps.zig, src/agent_host.zig, src/capacity.zig, src/archive.zig, src/notifications.zig, src/shell_poll.zig, src/workspaces.zig, src/chat_mention.zig, src/chat_transcript.zig, src/command_palette.zig, src/shortcuts.zig, tools/fixtures/SOFT-3050/*, tools/verify-chat-delivery/boundary.py, tools/verify-chat-delivery/antigravity-chats.ps1, tools/chat-antigravity-proof.cjs, tools/pi-codex-continuity.py
 
 ## Sub-features
 
@@ -31,6 +31,16 @@ The journey fails unless the tab actions menu opens from a real right-click on t
 Inspect `antigravity-chat-before.png`, `antigravity-switch-palette.png`, `antigravity-tab-menu-switch.png`, `antigravity-switch-while-replying.png`, `antigravity-switched-chat.png`, `antigravity-switch-back-claude.png`, `antigravity-new-session-palette.png`, `antigravity-new-session.png`, `antigravity/host/` config and history files, `antigravity/session-after-switch.json`, `antigravity/session-after-switch-back.json`, `antigravity/session-new-session.json`, `antigravity/tab-menu.json`, `antigravity/switch-while-replying.json`, `antigravity/switch-back.json`, `antigravity/claude-back-config.json`, `antigravity/claude-back-history.jsonl`, `antigravity/agy-pane-agent.json`, `actions.json`, `doctor.json`, `build.json`, `cleanup.json`, and the stand-in `agy-agent.jsonl`, `agy-received.jsonl`, `antigravity-hold.jsonl` and `antigravity-switch.jsonl`.
 
 `result.json` carries one line per case: `antigravity-chats`, `switch-back-to-claude`, `tab-menu-switch-ai` and `switch-while-replying`. Its `cleanup` field records what the owned job stopped and what scratch was removed. The notice that refuses a switch during a reply is painted in the app header, so only `antigravity-switch-while-replying.png` shows its exact wording; the same refusal is written as text in `switch-while-replying.json` and `antigravity-switch.jsonl`.
+
+### Pi Codex plan proof first
+
+Run `gh workflow run chat-auto-switch.yml --ref <branch> -f real_pi_codex=true`. Its optional `real-pi-codex` job runs only on public GitHub-hosted Ubuntu. The normal recorded auto-switch journey remains unchanged and still runs independently.
+
+The real job reuses the existing `CODEX_AUTH_JSON` plan secret inside the runner. It creates no key, login, account or SSH access. An absent, unsupported or soon-expiring OAuth session fails before a model call; the job never refreshes it or chooses an API-key substitute. Only the runner consumes the existing secret; no secret value enters the model transcript or retained artifact. Pi and Codex client versions and the real valentin-mode skill source are pinned in the workflow.
+
+The production host creates a disposable Pi chat on `openai-codex/gpt-6.1-sol`. A real reply remembers a fresh marker. `/valentin-mode` must cause an actual skill-file read in that Pi session, followed by a real reply recalling the marker. The production Switch AI request moves the same chat to the real Codex connector and back to Pi. Pi's existing model-selection request selects Codex Sol again, with its real acknowledgement and native model-tagged reply required. Earlier records must remain byte prefixes of their original files, and every original user/assistant history row must remain in order. The saved face, login, tmux address and working directory must remain unchanged; automatic fallback stays off. A final continued reply and owned-host cleanup are required.
+
+Inspect `real-pi-codex/summary.json` for the exact HEAD, actual prompts/replies, model/catalog evidence, native transcript hashes, both switches, skill-read assertion and owned cleanup. Missing credentials, unavailable skill checkout, provider errors or failed recall leave the job red. This is real reader/provider proof, not Windows keyboard, visible-history, AgY, DeepSeek or deployment proof. The desktop journey and its copied/rendered-history assertions remain mandatory. Returning to Pi currently starts its normal default before the model-selection request; the proof does not replace that with a test-only model override.
 
 ### Real-provider continuity proof
 

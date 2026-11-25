@@ -18,6 +18,11 @@ on:
       - '.claude/skills/verify-multiprompt/features/chat-auto-switch.md'
       - '.github/workflows/chat-auto-switch.yml'
   workflow_dispatch:
+    inputs:
+      real_pi_codex:
+        description: Run the real Pi Codex plan continuity proof without new credentials
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,4 +55,40 @@ jobs:
         with:
           name: chat-auto-switch
           path: evidence/
+          if-no-files-found: error
+
+  real-pi-codex:
+    if: github.event_name == 'workflow_dispatch' && inputs.real_pi_codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: valentinyeo/vstack
+          ref: 65cf9d41428d43905cf059fe5ad61ba5d5ffb8c1
+          path: proof-skills
+          sparse-checkout: skills/valentin-mode
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Install the pinned real clients
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tmux
+          npm install --prefix "$RUNNER_TEMP/proof-clients" --no-audit --no-fund @openai/codex@0.169.0 @earendil-works/pi-coding-agent@1.5.0
+          echo "$RUNNER_TEMP/proof-clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Continue a real Codex plan through Pi and back
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: timeout --signal=INT --kill-after=45s 1200 python3 tools/pi-codex-continuity.py --skills proof-skills/skills/valentin-mode --evidence evidence/real-pi-codex
+      - name: Retain sanitized real-provider proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-pi-codex
+          path: evidence/real-pi-codex/
           if-no-files-found: error
