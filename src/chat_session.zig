@@ -1693,6 +1693,9 @@ fn chatEnsureTranscriptCapacity(text_len: usize, block_count: usize) bool {
     return true;
 }
 
+var g_chat_cache_status: chat_transcript.Status = .{};
+var g_chat_cache_working = false;
+
 fn refreshChatBlockCache(force: bool) bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     chatLiveSyncCard();
@@ -1738,6 +1741,23 @@ fn refreshChatBlockCache(force: bool) bool {
     }
     const total = len + live_tail.text_len;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
+    if (!force and from_file and app_state.g_chat_blocks_from_file and !app_state.g_chat_layout_dirty and
+        app_state.g_chat_cache_shell_id == shell_id and generation == app_state.g_chat_cache_generation and
+        live_tail.blocks == 0 and live_tail.text_len == 0 and len == app_state.g_chat_last_len and count == app_state.g_chat_block_count and
+        g_chat_cache_working == app_state.g_chat_screen_working and std.meta.eql(g_chat_cache_status, entry.?.history.status) and
+        std.mem.eql(u16, source, app_state.g_chat_capture[0..len]))
+    {
+        const same_blocks = for (entry.?.history.blocks.items, app_state.g_chat_blocks[0..count]) |incoming, cached| {
+            var shown = incoming;
+            shown.tool_open = cached.tool_open;
+            shown.note_open = cached.note_open;
+            if (!std.meta.eql(shown, cached)) break false;
+        } else true;
+        if (same_blocks) {
+            app_state.g_chat_last_hash = hash;
+            return false;
+        }
+    }
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
     if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
         chatTableRefresh(entry.?.history.blocks.items, source);
@@ -1763,6 +1783,8 @@ fn refreshChatBlockCache(force: bool) bool {
     app_state.g_chat_last_len = total;
     app_state.g_chat_last_hash = hash;
     app_state.g_chat_cache_generation = generation;
+    g_chat_cache_status = if (from_file) entry.?.history.status else .{};
+    g_chat_cache_working = app_state.g_chat_screen_working;
     app_state.g_chat_hover_copy = null;
     app_state.g_chat_hover_link = null;
     if (!keep_selection) {
@@ -1922,10 +1944,13 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_screen_status_len = 0;
     app_state.g_chat_screen_working = false;
     app_state.g_chat_working_applied_len = 0;
+    g_chat_cache_status = .{};
+    g_chat_cache_working = false;
     app_state.g_chat_cache_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     if (cached) |entry| {
         chatLoadSaved(entry);
         const history = &entry.history;
+        g_chat_cache_status = history.status;
         if (chatEnsureTranscriptCapacity(history.text.items.len, history.blocks.items.len)) {
             app_state.g_chat_last_hash = history.revision;
             app_state.g_chat_cache_generation = if (history.rows.items.len > 0) entry.generation else 0;
@@ -2799,4 +2824,107 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
+}
+
+test "SOFT-3163 unchanged history refresh keeps its measured layout" {
+    const a = std.heap.page_allocator;
+    const live = @import("chat_live.zig");
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("layout regression"), 0, 0, 0, 800, 600, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const saved = .{
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .main = app_state.g_main_hwnd,
+        .transcript = app_state.g_chat_transcript_hwnd,
+        .histories = app_state.g_chat_histories,
+        .font = app_state.g_chat_font_pt,
+        .zoom = app_state.g_ui_scale,
+        .status = g_chat_cache_status,
+        .working = g_chat_cache_working,
+        .drawn = g_chat_live_drawn_revision,
+    };
+    app_state.g_chat_histories = .empty;
+    defer {
+        live.release(316301);
+        chatHistoryForget(316301);
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_transcript_hwnd = saved.transcript;
+        app_state.g_chat_font_pt = saved.font;
+        app_state.g_ui_scale = saved.zoom;
+        g_chat_cache_status = saved.status;
+        g_chat_cache_working = saved.working;
+        g_chat_live_drawn_revision = saved.drawn;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = 316301;
+    @memcpy(app_state.shells[0].tmux_session[0..9], "term-3163");
+    app_state.shells[0].tmux_session_len = 9;
+    const key = chatFileIdentity();
+    const entry = chatHistoryEntry(key) orelse return error.TestUnexpectedResult;
+    var wire = try perfWire(a, "term-3163", 8 * 1024, 1, 0);
+    defer wire.deinit(a);
+    try entry.history.apply(a, wire.items, 1, key);
+    _ = live.begin(316301, 0, "sid");
+    try std.testing.expect(live.applyPage(316301, "sid", "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"ready\"}}}]}}"));
+    try std.testing.expect(live.revision(316301) != 0 and !live.running(316301));
+    chatDeferTranscriptLoad();
+    chatRelayout(800);
+    const layouts = app_state.g_chat_layout_count;
+    const height = app_state.g_chat_content_h;
+    const scroll = app_state.g_chat_scroll_y;
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(layouts, app_state.g_chat_layout_count);
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(layouts, app_state.g_chat_layout_count);
+    try std.testing.expectEqual(height, app_state.g_chat_content_h);
+    try std.testing.expectEqual(scroll, app_state.g_chat_scroll_y);
+    try std.testing.expectEqual(entry.history.revision +% (live.revision(316301) *% 0x9E3779B97F4A7C15), app_state.g_chat_last_hash);
+    entry.history.status.total += 1;
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expect(app_state.g_chat_layout_count > layouts);
+    const status_layouts = app_state.g_chat_layout_count;
+    entry.history.blocks.items[0].level +%= 1;
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expect(app_state.g_chat_layout_count > status_layouts);
+    const block_layouts = app_state.g_chat_layout_count;
+    entry.history.text.items[0] = 'X';
+    entry.history.revision +%= 1;
+    refreshChatTranscript(false);
+    try std.testing.expect(app_state.g_chat_layout_count > block_layouts);
+    try std.testing.expectEqual(@as(u16, 'X'), app_state.g_chat_capture[0]);
+    const content_layouts = app_state.g_chat_layout_count;
+    chatRelayoutPreservingScroll(600, 600);
+    try std.testing.expect(app_state.g_chat_layout_count > content_layouts);
+    try std.testing.expectEqual(@as(i32, 600), app_state.g_chat_layout_width);
+    const width_layouts = app_state.g_chat_layout_count;
+    app_state.g_chat_font_pt += 1;
+    chatRefreshAfterFontChange();
+    try std.testing.expect(app_state.g_chat_layout_count > width_layouts);
+    try std.testing.expectEqual(app_state.g_chat_font_pt, app_state.g_chat_layout_font_pt);
+    const font_layouts = app_state.g_chat_layout_count;
+    app_state.g_ui_scale += 10;
+    chatRefreshAfterFontChange();
+    try std.testing.expect(app_state.g_chat_layout_count > font_layouts);
+    try std.testing.expectEqual(@import("drawing.zig").uiScaled(1024), app_state.g_chat_layout_scale);
 }

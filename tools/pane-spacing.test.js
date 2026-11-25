@@ -126,7 +126,7 @@ fn chatPermissionVisible() bool { return test_permission_visible; }
 ${fn(layout, 'chatWorkingIndicatorH')}
 var test_stop_visible = false;
 var test_composer_text = false;
-var chat_dictation_state: enum { idle, listening, finishing } = .idle;
+var chat_dictation_state: enum { idle, listening } = .idle;
 const DictationState = @TypeOf(chat_dictation_state);
 fn chatStopVisible() bool { return test_stop_visible; }
 fn chatComposerHasText() bool { return test_composer_text; }

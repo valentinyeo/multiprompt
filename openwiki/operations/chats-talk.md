@@ -40,6 +40,16 @@ Both JSON outputs add `in_layout`, `visible`, `hidden_reason`, `waiting`, `pinne
 
 Each row has the session link, AI, state (`busy` while a turn runs, otherwise `idle`), terminal session, session id and folder. The link looks like `Poteto{live-8bc7bac}`. A name with a space looks like `@Alpha Lead{live-alpha}`. `--json` also has a `link` field with that token. In Chat View the token shows the name, and a click opens that session. A click works when that session is open. An unknown session stays plain text. A chat counts as live when its host process runs or its terminal session exists, so a hosted chat needs no terminal and a terminal chat with a stopped host still appears, as `stopped`. A chat whose name has not been published yet uses its terminal session as the name inside the link, and can still be reached by that session.
 
+## Start a chat
+
+```sh
+mp-sessions start --name "Late Lead" --folder ~/projects/app --workspace "Studio" --provider claude
+```
+
+`start` creates a hosted chat on this server, or reuses the chat with the same name and folder, so a second run reports `already`. Reusing a name that was started with another folder fails and names the chat.
+
+`--workspace` names an existing workspace. When the desktop app is reachable the name is checked against its live sidebar list; when it is closed the name is matched against the synced layout and published chat names, so the chat records that workspace and opens there on its next start or restart. A name in neither place stops with `no workspace named <name>`. With the desktop closed the chat still starts and reports `"visible":false` with `visible_error` `desktop_offline`; no tab opens until the desktop is back.
+
 ## Identify your own chat
 
 ```sh

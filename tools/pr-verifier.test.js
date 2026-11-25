@@ -36,6 +36,7 @@ function evidenceDir(entries) {
   for (const [name, result] of Object.entries(entries)) {
     fs.mkdirSync(path.join(dir, name), { recursive: true });
     fs.writeFileSync(path.join(dir, name, 'after.png'), 'png');
+    fs.writeFileSync(path.join(dir, name, 'journey.mp4'), 'mp4');
     if (result) fs.writeFileSync(path.join(dir, name, 'result.json'), JSON.stringify(result));
   }
   return dir;
@@ -77,7 +78,7 @@ test('evidence folders keep one head run per journey without mixing similar feat
   const summary = verifier.summarize(dir, ['chat-view', 'title-bar']);
   assert.deepEqual(summary.head['chat-view'].map(run => run.artifact), ['verify-chat-view']);
   assert.equal(summary.head['chat-view'][0].checks, 2);
-  assert.deepEqual(Object.keys(summary), ['head', 'downloadFailures']);
+  assert.deepEqual(Object.keys(summary), ['head', 'before', 'downloadFailures']);
   assert.deepEqual(summary.head['title-bar'].map(run => run.artifact), ['verify-title-bar-96-light']);
   assert.deepEqual(summary.head['chat-view'][0].screenshots, ['after.png']);
 });
@@ -157,7 +158,7 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
   assert.match(workflow, /select:\n    needs: resolve/);
   assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
-  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, before\]/);
   assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache/);
   assert.match(workflow, /head_sha="\$HEAD_SHA"/);
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
@@ -272,10 +273,12 @@ test('Claude output reaches scripts through environment variables, never inline'
   for (const block of runBlocks) assert.doesNotMatch(block, /structured_output|pull_request\.(?:title|body|head\.ref)/);
 });
 
-test('the verifier reuses verify.yml for the head build only', () => {
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
-  assert.match(workflow, /features: \$\{\{ needs\.select\.outputs\.features \}\}\n      revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/);
-  assert.doesNotMatch(workflow, /app_revision|base_cache|harness_version/);
+test('the verifier reuses verify.yml and the head harness for matching before and after journeys', () => {
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.equal([...workflow.matchAll(/features: \$\{\{ needs\.select\.outputs\.features \}\}\n      revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/g)].length, 2);
+  assert.match(workflow, /app_revision: \$\{\{ needs\.resolve\.outputs\.base_tip_sha \}\}\n      video_label: before/);
+  assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      video_label: after/);
+  assert.doesNotMatch(workflow, /base_cache|harness_version/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
   assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
   assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
@@ -442,7 +445,7 @@ test('selection is deterministic and ladder keys are always available to the fir
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
   assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_families: \$\{\{ steps\.pr\.outputs\.author_families \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
-  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, before\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {
@@ -574,6 +577,20 @@ test('losing every screenshot blocks a supposedly passing result', () => {
   fs.unlinkSync(path.join(dir, 'verify-appearance', 'after.png'));
   const summary = verifier.summarize(dir, ['appearance']);
   assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('missing or empty journey.mp4 blocks a journey run and names the artifact', () => {
+  for (const mode of ['missing', 'empty']) {
+    const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
+    const video = path.join(dir, 'verify-appearance', 'journey.mp4');
+    if (mode === 'missing') fs.unlinkSync(video);
+    else fs.writeFileSync(video, '');
+    const summary = verifier.summarize(dir, ['appearance']);
+    assert.deepEqual(summary.head.appearance[0].videos, []);
+    const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
+    assert.equal(result.final, 'BLOCKED');
+    assert.match(result.body, /Missing journey\.mp4 in evidence: verify-appearance/);
+  }
 });
 
 test('selected journeys absent from a partial summary cannot pass', () => {
@@ -796,4 +813,24 @@ test('MUBO-247 an unmapped Zig test fixture under src/testdata is not a user-fac
   assert.equal(final, 'PASS');
   assert.doesNotMatch(body, /Changed user-facing files have no journey/);
   assert.deepEqual(verifier.userFacingUnmapped(['src/testdata/mubo-247-cases.json', 'src/chat_mention.zig']), ['src/chat_mention.zig']);
+});
+
+
+test('comparison evidence needs paired non-empty base and head clips without judging base failures as regressions', () => {
+  const dir = evidenceDir({
+    'verify-appearance': { status: 'passed' },
+    [`verify-appearance-${base}`]: { status: 'failed', error: 'old behavior' },
+  });
+  const evaluate = () => verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: [] }, headSha: head,
+    summary: verifier.summarize(dir, ['appearance']), selection: selection(['appearance']),
+    jobs: { before: { result: 'success' } }, runUrl: 'u',
+  });
+  assert.equal(evaluate().final, 'BLOCKED');
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'after.mp4'), 'video');
+  fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, 'before.mp4'), 'video');
+  assert.equal(evaluate().final, 'PASS');
+  fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, 'before.mp4'), '');
+  assert.equal(evaluate().final, 'BLOCKED');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

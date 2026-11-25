@@ -884,6 +884,7 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
         if (out.blocks >= blocks.len) break;
         if (item.text.items.len == 0) continue;
         if (!chat_markdown.drawnOnce(item.key, seen)) continue;
+        if (!chat_markdown.replyDrawn(item.key, seen)) continue;
         if (finishedTextMatchesLanded(item, landed, seen)) continue;
         if (out.text_len > 0) {
             if (out.text_len >= text.len) break;
@@ -912,6 +913,7 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
             .markdown = true,
             .first = out.blocks == 0,
             .row_key = item.key,
+            .reply_key = item.key,
             .tool_status = switch (item.status) {
                 .running => .running,
                 .failed => .@"error",

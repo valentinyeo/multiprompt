@@ -29,10 +29,12 @@ HOME = Path.home()
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
+_COMMAND_MESSAGE = re.compile(r"<command-message>\s*(.*?)\s*</command-message>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 _MENTION_WIRE_NOTE = re.compile(r"\n\n\((?:This line is addressed to .*? or relay it unless you are also asked|Valentin wrote this to you\. It also mentions .*? or relay it)\.\)\s*\Z", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
+_LOCAL_COMMAND_OUTPUT = re.compile(r"<local-command-(stdout|stderr)>(.*?)</local-command-\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
 SEARCH_ASCII_FOLDS = "ßİŉſǰẖẗẘẙẚẞKﬀﬁﬂﬃﬄﬅﬆ"
 END = "@@MP_END@@"
@@ -224,18 +226,17 @@ def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
         text = re.sub(r"^[ \t]*</?pasted_content\b[^>]*>[ \t]*\r?\n?", "", text, flags=re.I | re.M)
         text = re.sub(r"</?pasted_content\b[^>]*>", " ", text, flags=re.I).strip()
-    if "<command-name>" in text:
-        name = _COMMAND_NAME.search(text)
-        if name:
-            args = _COMMAND_ARGS.search(text)
-            command = name.group(1).strip()
-            if command and not command.startswith("/"):
-                command = "/" + command
-            arguments = args.group(1).strip() if args else ""
-            arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
-            if not command:
-                return arguments
-            return command_reply(command, arguments)
+    name = _COMMAND_NAME.search(text) if "<command-name>" in text else _COMMAND_MESSAGE.search(text) if "<command-message>" in text else None
+    if name:
+        args = _COMMAND_ARGS.search(text)
+        command = name.group(1).strip()
+        if command and not command.startswith("/"):
+            command = "/" + command
+        arguments = args.group(1).strip() if args else ""
+        arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
+        if not command:
+            return arguments
+        return command_reply(command, arguments)
     if "<local-command-" in text:
         text = _LOCAL_COMMAND.sub("", text)
     return text
@@ -822,10 +823,15 @@ def conversation_event(event, agent):
         text = visible_prompt(clean_command_markup(text))
     if not text.strip():
         return None
-    identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
+    if event.get("kind") in ("user", "assistant"):
+        identity = event.get("message_id") or event.get("id") or event.get("uuid") or ""
+    else:
+        identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
+    if isinstance(identity, str) and identity and role == "assistant":
+        result["reply_id"] = ("hax-" + identity) if event.get("kind") == "assistant" else identity
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -1097,6 +1103,31 @@ def blocked_prompt(event):
     return text or None
 
 
+def unknown_command(event):
+    if not isinstance(event, dict) or event.get("isSidechain"):
+        return None
+    kind = event.get("type")
+    content = event.get("content")
+    if (kind == "system" and event.get("subtype") == "informational" and
+            event.get("level") in ("warning", "error") and isinstance(content, str) and
+            content.startswith(("Unknown command: /", "Args from unknown skill: "))):
+        return content.splitlines()[0].strip()
+    if kind != "user" or event.get("isMeta"):
+        return None
+    message = event.get("message")
+    text = message.get("content") if isinstance(message, dict) else None
+    if isinstance(text, list):
+        text = "\n".join(part.get("text", "") for part in text
+                         if isinstance(part, dict) and isinstance(part.get("text"), str))
+    if not isinstance(text, str):
+        return None
+    for match in _LOCAL_COMMAND_OUTPUT.finditer(text):
+        output = html.unescape(match.group(2)).strip()
+        if output.startswith(("Unknown command: /", "Args from unknown skill: ")):
+            return output
+    return None
+
+
 def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
@@ -1104,14 +1135,13 @@ def settlement_event(event, agent, blocked_settlement=False):
     operation = event.get("operation")
     content = event.get("content", "")
     blocked = blocked_prompt(event) if blocked_settlement else None
+    rejected = unknown_command(event)
     if blocked is not None:
         fact = dict(operation="blocked", content=blocked)
+    elif rejected is not None:
+        fact = dict(operation="rejected", content=rejected)
     elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
         fact = dict(operation=operation, content=content if isinstance(content, str) else "")
-    elif (kind == "system" and event.get("subtype") == "informational" and
-          event.get("level") in ("warning", "error") and isinstance(content, str) and
-          content.startswith(("Unknown command: /", "Args from unknown skill: "))):
-        fact = dict(operation="rejected", content=content)
     else:
         return None
     timestamp = event.get("timestamp", "")
@@ -4110,10 +4140,23 @@ def host_history_append(provider, sid, session, row):
                timestamp=row.get("timestamp") or datetime.now().isoformat())
     path = host_paths(provider, sid)["history"]
     data = (json.dumps(dict(type="multiprompt_history", row=row), separators=(",", ":")) + "\n").encode("utf-8")
+    tail = session.get("history_tail") if isinstance(session.get("history_tail"), dict) else None
+    if (row.get("role") == "assistant" and isinstance(tail, dict) and tail.get("id") == row["id"] and isinstance(tail.get("start"), int) and
+            isinstance(tail.get("end"), int) and path.is_file() and path.stat().st_size == tail["end"]):
+        with path.open("r+b") as stream:
+            stream.truncate(tail["start"])
+            stream.seek(tail["start"])
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        session["history_tail"] = dict(id=row["id"], start=tail["start"], end=tail["start"] + len(data))
+        return
+    start = path.stat().st_size if path.is_file() else 0
     with path.open("ab") as stream:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+    session["history_tail"] = dict(id=row["id"], start=start, end=start + len(data))
 
 
 @contextmanager
@@ -4189,6 +4232,7 @@ def host_fresh_archive(provider, sid, tmux, session):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        session["history_tail"] = None
         session["state"]["display_history"] = True
         host_state_write(provider, sid, session["state"])
     finally:
@@ -4979,7 +5023,7 @@ def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
-                   control_wait={})
+                   control_wait={}, hax_reply=None, history_tail=None)
 
 
 def host_db(provider, sid, tmux, session):
@@ -5182,6 +5226,20 @@ def host_turn_started(provider, sid, tmux, session, entry):
                turn=entry["turn"])
 
 
+def host_rejected_command(provider, sid, tmux, session, event):
+    output = unknown_command(event)
+    if output is None or not output.startswith("Unknown command: /"):
+        return
+    wanted = " ".join(output.split(":", 1)[1].split())
+    for item in session.get("sends") or []:
+        if item.get("accepted") or not item.get("text"):
+            continue
+        sent = " ".join(item["text"].split())
+        if sent == wanted or sent.startswith(wanted + " "):
+            host_unsent(provider, sid, tmux, session, item["id"], "unknown_command")
+            return
+
+
 def host_user_event(provider, sid, tmux, session, event):
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     for block in message.get("content") if isinstance(message.get("content"), list) else []:
@@ -5190,6 +5248,7 @@ def host_user_event(provider, sid, tmux, session, event):
             host_event(provider, sid, tmux, session, "item.done",
                        dict(status="failed" if failed else "completed", output=host_tool_output(block.get("content")),
                             is_error=failed), block["tool_use_id"])
+    host_rejected_command(provider, sid, tmux, session, event)
     host_bind_uuid(provider, sid, tmux, session, event)
 
 
@@ -5724,6 +5783,7 @@ def host_claude_event(provider, sid, tmux, session, event):
     if kind == "system":
         if event.get("subtype") == "informational":
             host_blocked_prompt(provider, sid, tmux, session, event)
+            host_rejected_command(provider, sid, tmux, session, event)
             return
         if event.get("subtype") == "init":
             session["ready"] = True
@@ -6436,6 +6496,7 @@ def host_pi_set_model(provider, sid, tmux, session, request):
 def host_hax_open(provider, sid, tmux, session):
     session["ready"] = True
     session["hax_message"] = 0
+    session["hax_reply"] = None
     host_log(provider, sid, "init", dict(session=session["state"].get("native_session")))
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
@@ -6444,13 +6505,34 @@ def host_hax_write(provider, sid, session, token, text):
     return host_control_send(session, dict(type="prompt", id=token, message=text))
 
 
+def host_hax_message_id(record):
+    for key in ("message_id", "id", "uuid"):
+        value = record.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def host_hax_record(provider, sid, tmux, session, record):
     kind = record.get("kind")
     if kind == "assistant" and isinstance(record.get("text"), str) and record["text"]:
-        session["hax_message"] += 1
-        block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
-        host_complete(provider, sid, tmux, session, block, record["text"])
+        text = record["text"]
+        ident = host_hax_message_id(record)
+        current = session.get("hax_reply") if isinstance(session.get("hax_reply"), dict) else None
+        grows = (isinstance(current, dict) and current.get("block") is not None and
+                 (not ident or not current.get("id") or ident == current.get("id")) and
+                 text.startswith(current.get("text") or "\x00"))
+        if grows:
+            block = current["block"]
+        elif ident:
+            block = host_stream_block(session, "hax-" + ident, "text", 0)
+        else:
+            session["hax_message"] += 1
+            block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
+        host_complete(provider, sid, tmux, session, block, text)
+        session["hax_reply"] = dict(block=block, text=text, id=ident)
     elif kind == "tool_call" and isinstance(record.get("call_id"), str):
+        session["hax_reply"] = None
         tool = record.get("tool_name") if isinstance(record.get("tool_name"), str) else "tool"
         try:
             arguments = json.loads(record.get("arguments") or "{}")
@@ -7205,7 +7287,18 @@ def chat_names_publish(entries):
         if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
             continue
         sid = entry.get("sid")
-        known[tmux] = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
+        record = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
+        workspace = entry.get("workspace")
+        if isinstance(workspace, str):
+            workspace = workspace.strip()
+            if workspace and len(workspace) <= 64 and not any(ord(c) < 32 for c in workspace):
+                record["workspace"] = workspace
+        group = entry.get("group")
+        if isinstance(group, str):
+            group = group.strip()
+            if group and len(group) <= 64 and not any(ord(c) < 32 for c in group):
+                record["group"] = group
+        known[tmux] = record
         count += 1
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")

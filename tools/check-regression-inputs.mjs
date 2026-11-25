@@ -72,16 +72,16 @@ export function findHistoryInputs(file, source, added) {
   const operations = [];
   const ranges = nonCodeRanges(source);
   const shell = /\bgit\s+(show|cat-file|archive)\s+([^\n;"'`]+)/g;
-  const array = /(['"`])(show|cat-file|archive)\1\s*,\s*(['"`])((?:\\.|(?!\3)[^\n])*)\3/g;
+  const array = /(['"`])git\1\s*,\s*(?:\[\s*)?(['"`])(show|cat-file|archive)\2\s*,\s*(['"`])((?:\\.|(?!\4)[^\n])*)\4/g;
   for (const match of source.matchAll(shell)) operations.push({ start: match.index, end: match.index + match[0].length, command: match[1], argument: match[2].trim(), shell: true });
   for (const match of source.matchAll(array)) {
-    let argument = match[4];
+    let argument = match[5];
     let end = match.index + match[0].length;
     if (argument.startsWith('-')) {
       const next = /^\s*,\s*(['"`])((?:\\.|(?!\1)[^\n])*)\1/.exec(source.slice(end));
       if (next) { argument = next[2]; end += next[0].length; }
     }
-    operations.push({ start: match.index, end, command: match[2], argument });
+    operations.push({ start: match.index + match[0].indexOf(match[2] + match[3]), end, command: match[3], argument });
   }
   const errors = [];
   const reported = new Set();

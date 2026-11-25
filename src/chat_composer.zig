@@ -103,13 +103,7 @@ const CloseHandle = @import("win32.zig").CloseHandle;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const DeleteFileW = @import("win32.zig").DeleteFileW;
-const CreateFileW = @import("win32.zig").CreateFileW;
 const FlushFileBuffers = @import("win32.zig").FlushFileBuffers;
-const WriteFile = @import("win32.zig").WriteFile;
-const GENERIC_WRITE = @import("win32.zig").GENERIC_WRITE;
-const CREATE_ALWAYS = @import("win32.zig").CREATE_ALWAYS;
-const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
-const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
 const CallWindowProcW = @import("win32.zig").CallWindowProcW;
@@ -138,8 +132,10 @@ const CHAT_AC_ENTER_SENDS = @import("app_state.zig").CHAT_AC_ENTER_SENDS;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
-const win32MoveReplace = @import("file_io.zig").win32MoveReplace;
 const win32MakePath = @import("file_io.zig").win32MakePath;
+const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
+const writeFileAtomicSync = @import("file_io.zig").writeFileAtomicSync;
+const copyQueuedWrite = @import("file_io.zig").copyQueuedWrite;
 const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const debugLog = @import("diagnostics.zig").debugLog;
@@ -219,7 +215,7 @@ fn chatComposerMaxEditH() i32 {
     return chatComposerBaseEditH() * CHAT_COMPOSER_MAX_LINES;
 }
 
-pub const DictationState = enum { idle, listening, finishing };
+pub const DictationState = enum { idle, listening };
 pub var chat_dictation_state: DictationState = .idle;
 var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
 
@@ -267,22 +263,19 @@ fn chatDictationMicFit(wanted: i32, room: i32) i32 {
 }
 
 pub fn chatDictationSync() void {
-    const next: DictationState = if (app_state.g_dictation_draft_owner_len == 0 or !app_state.g_dictation_running.load(.acquire))
-        .idle
-    else if (app_state.g_dictation_recording.load(.acquire))
-        .listening
-    else
-        .finishing;
+    const listening = app_state.g_dictation_draft_owner_len > 0 and
+        app_state.g_dictation_running.load(.acquire) and app_state.g_dictation_recording.load(.acquire);
+    const next: DictationState = if (listening) .listening else .idle;
     if (next == chat_dictation_state) return;
-    const was_idle = chat_dictation_state == .idle;
     chat_dictation_state = next;
-    if (was_idle and next != .idle) {
-        chat_dictation_started_ms = @import("win32.zig").GetTickCount64();
-        chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
-        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
-    } else if (next == .idle) {
-        chat_dictation_started_ms = 0;
-        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+    chat_dictation_started_ms = if (listening) @import("win32.zig").GetTickCount64() else 0;
+    chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+    if (app_state.g_main_hwnd != null) {
+        if (listening) {
+            _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
+        } else {
+            _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+        }
     }
     chatComposerButtonsRefresh();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -303,10 +296,7 @@ pub fn chatSendOrFinishDictation() void {
         @import("chat_send.zig").sendChatPrompt();
         return;
     }
-    if (app_state.g_dictation_recording.load(.acquire)) {
-        chatDictationToggle();
-        if (app_state.g_dictation_recording.load(.acquire)) return;
-    }
+    @import("voice.zig").dictationStopRecording();
     app_state.g_dictation_send_queued.store(true, .release);
 }
 
@@ -474,7 +464,7 @@ test "IGSH-909 send and stop share one slot so the composer never shows more tha
     }
 }
 
-test "IGSH-965 send while dictating stops the recording and queues one send" {
+test "IGSH-965 send while dictating stops the recording at once and queues one send" {
     const Engine = struct {
         var toggles: u32 = 0;
         fn toggle() void {
@@ -517,22 +507,19 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     app_state.g_dictation_running.store(true, .release);
     app_state.g_dictation_recording.store(true, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
     try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
     app_state.g_chat_draft_owner[0] = 'a';
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_running.store(false, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
 }
 
 pub fn chatComposerHasText() bool {
@@ -2302,21 +2289,20 @@ fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 {
     return buf[0 .. n + ext.len];
 }
 
-fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
+fn chatDraftEnsureDir(path: []const u8) void {
     var dir_end: usize = path.len;
     while (dir_end > 0 and path[dir_end - 1] != '\\') dir_end -= 1;
     if (dir_end > 1) win32MakePath(path[0 .. dir_end - 1]);
-    var tmp_buf: [580]u8 = undefined;
-    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
-    var wbuf: [600]u16 = undefined;
-    const tmp_w = win32WidePath(&wbuf, tmp) orelse return false;
-    const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-    if (h == INVALID_HANDLE_VALUE_PTR) return false;
-    var written: DWORD = 0;
-    const complete = WriteFile(h, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
-    const flushed = FlushFileBuffers(h) != 0;
-    _ = CloseHandle(h);
-    return complete and flushed and win32MoveReplace(tmp, path);
+}
+
+fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
+    chatDraftEnsureDir(path);
+    return writeFileAtomicW(path, bytes);
+}
+
+fn chatDraftWriteFileInline(path: []const u8, bytes: []const u8) bool {
+    chatDraftEnsureDir(path);
+    return writeFileAtomicSync(path, bytes);
 }
 
 pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
@@ -2334,6 +2320,12 @@ pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "session:#{x:0>16}", .{sh.chat_id}) catch buf[0..0];
 }
 
+fn chatDraftReadAll(path: []const u8) ?[]u8 {
+    var queued: [65536]u8 = undefined;
+    if (copyQueuedWrite(path, &queued)) |n| return std.heap.page_allocator.dupe(u8, queued[0..n]) catch null;
+    return readFileAllocWin32(path, 65536);
+}
+
 fn chatDraftLoad(id: []const u8) void {
     if (id.len == 0 or chat_drafts.entries.contains(id)) return;
     var text: [16384]u16 = undefined;
@@ -2341,7 +2333,7 @@ fn chatDraftLoad(id: []const u8) void {
     var dirty = false;
     var path_buf: [560]u8 = undefined;
     const path = getChatDraftPath(id, &path_buf) orelse return;
-    if (readFileAllocWin32(path, 65536)) |bytes| {
+    if (chatDraftReadAll(path)) |bytes| {
         defer std.heap.page_allocator.free(bytes);
         len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch return;
     } else {
@@ -2369,7 +2361,7 @@ fn chatDraftLoad(id: []const u8) void {
                 const bytes = readFileAllocWin32(old_path, 65536) orelse continue;
                 defer std.heap.page_allocator.free(bytes);
                 len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch continue;
-                dirty = !chatDraftWriteFile(path, bytes);
+                dirty = !chatDraftWriteFileInline(path, bytes);
                 if (!dirty) {
                     if (win32WidePath(&wbuf, old_path)) |old_w| _ = DeleteFileW(old_w.ptr);
                 }
@@ -2701,7 +2693,7 @@ pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
 
 pub fn chatDictationLiveDiscard() void {
     if (!live_draft.active) return;
-    live_draft.active = false;
+    chatLiveStripFromStore();
     live_draft.sealed = false;
     live_draft.shown_len = 0;
     live_draft.baseline_len = 0;
@@ -3225,7 +3217,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
     } else {
         try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
     }
-    try std.testing.expectEqual(DictationState.finishing, chat_dictation_state);
+    try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
     try std.testing.expect(app_state.g_dictation_running.load(.acquire));
     const before = GetWindowTextW(edit, &text, text.len);
@@ -3578,7 +3570,6 @@ test "IGSH-887 the elapsed timer counts up as minutes and seconds" {
 test "IGSH-887 the mic is a round button when idle and a wide pill while dictating" {
     try std.testing.expectEqual(uiScaled(32), chatDictationMicWidth(.idle));
     try std.testing.expect(chatDictationMicWidth(.listening) > chatDictationMicWidth(.idle) * 3);
-    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicWidth(.finishing));
     const saved = chat_dictation_state;
     defer chat_dictation_state = saved;
     chat_dictation_state = .idle;

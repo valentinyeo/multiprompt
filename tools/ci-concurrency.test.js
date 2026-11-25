@@ -6,7 +6,9 @@ const { followDecision } = require('./release-follow.cjs');
 
 const workflowDir = path.join(__dirname, '..', '.github', 'workflows');
 const group = 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
-const cancel = "cancel-in-progress: true";
+const cancel = 'cancel-in-progress: true';
+const cancelPullRequestOnly = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}";
+const toCancel = text => text.replace(/^  cancel-in-progress: .+$/m, `  ${cancel}`);
 
 function read(name) {
   return fs.readFileSync(path.join(workflowDir, name), 'utf8');
@@ -42,6 +44,37 @@ function triggersPullRequest(text) {
   return onBlock(text).split('\n').some(line => /^[ \t]*pull_request\s*:?[ \t]*$/.test(line) || /^on:\s*\[.*\bpull_request\b/.test(line));
 }
 
+function eventBody(text, event) {
+  const lines = onBlock(text).split(/\r?\n/);
+  const start = lines.findIndex(line => new RegExp(`^[ \\t]+${event}:\\s*$`).test(line));
+  if (start < 0) return null;
+  const body = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].trim() !== '' && !/^[ \t]{4,}/.test(lines[index])) break;
+    body.push(lines[index]);
+  }
+  return body.join('\n');
+}
+
+function pushBranches(text) {
+  const body = eventBody(text, 'push');
+  if (body === null) return null;
+  const inline = body.match(/^[ \t]+branches: \[(.*)\]$/m);
+  if (inline) return inline[1].split(',').map(entry => entry.trim().replace(/^['"]|['"]$/g, ''));
+  const listed = body.match(/^[ \t]+branches:\s*\n((?:[ \t]+- .*\n?)+)/m);
+  if (listed) return listed[1].split('\n').map(entry => entry.trim()).filter(Boolean).map(entry => entry.replace(/^- /, '').replace(/^['"]|['"]$/g, ''));
+  return [];
+}
+
+function triggersMasterPush(text) {
+  const branches = pushBranches(text);
+  return branches !== null && (branches.length === 0 || branches.includes('master'));
+}
+
+function masterPushCancellations(files) {
+  return files.filter(([, text]) => triggersMasterPush(text) && topConcurrency(text).includes(cancel)).map(([name]) => name);
+}
+
 test('every pull_request workflow cancels only a superseded pull request run', () => {
   const names = fs.readdirSync(workflowDir).filter(name => name.endsWith('.yml')).sort();
   const triggered = names.filter(name => name !== 'release.yml' && name !== 'auto-release.yml' && triggersPullRequest(read(name)));
@@ -51,15 +84,15 @@ test('every pull_request workflow cancels only a superseded pull request run', (
     const concurrency = topConcurrency(read(name));
     if (name === 'pr-verifier.yml') {
       assert.ok(concurrency.includes('group: ${{ github.workflow }}-${{ inputs.pr || github.event.pull_request.number }}'), `${name} group`);
-      assert.ok(concurrency.includes('cancel-in-progress: true'), `${name} cancel-in-progress`);
-    } else {
-      assert.ok(concurrency.includes(group) || concurrency.includes("github.event.pull_request.number || github.ref }}"), `${name} group`);
       assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
+    } else {
+      assert.ok(concurrency.includes(group) || concurrency.includes('github.event.pull_request.number || github.ref }}'), `${name} group`);
+      assert.ok(concurrency.includes(cancel) || concurrency.includes(cancelPullRequestOnly), `${name} cancel-in-progress`);
     }
   }
 });
 
-test('every workflow cancels superseded work except a release that is already publishing', () => {
+test('every workflow cancels superseded work except a release that is already publishing and a master push', () => {
   for (const name of fs.readdirSync(workflowDir).filter(name => /\.ya?ml$/.test(name))) {
     const concurrency = topConcurrency(read(name));
     assert.match(concurrency, /^  group: .+$/m, name);
@@ -67,10 +100,33 @@ test('every workflow cancels superseded work except a release that is already pu
       assert.match(concurrency, /^  cancel-in-progress: false$/m, name);
       continue;
     }
-    assert.match(concurrency, /^  cancel-in-progress: true$/m, name);
+    assert.match(concurrency, triggersMasterPush(read(name)) ? /^  cancel-in-progress: (?:false|\$\{\{ github\.event_name == 'pull_request' \}\})$/m : /^  cancel-in-progress: true$/m, name);
   }
   assert.doesNotMatch(onBlock(read('release.yml')), /pull_request/);
   assert.doesNotMatch(onBlock(read('auto-release.yml')), /pull_request/);
+});
+
+test('a master push never cancels the master run before it', () => {
+  const files = fs.readdirSync(workflowDir).filter(name => name.endsWith('.yml')).sort().map(name => [name, read(name)]);
+  const masters = files.filter(([, text]) => triggersMasterPush(text)).map(([name]) => name);
+  for (const name of ['auto-release.yml', 'dev-build.yml', 'gitleaks.yml', 'test.yml']) assert.ok(masters.includes(name), name);
+  assert.ok(masters.length > 1, 'master push workflows are found');
+  assert.deepEqual(masterPushCancellations(files), []);
+  for (const [name, cancelValue] of [
+    ['test.yml', cancelPullRequestOnly],
+    ['gitleaks.yml', cancelPullRequestOnly],
+    ['chat-auto-switch.yml', cancelPullRequestOnly],
+    ['chat-delivery-formal.yml', cancelPullRequestOnly],
+    ['chat-switch-ai-formal.yml', cancelPullRequestOnly],
+    ['dev-build.yml', 'cancel-in-progress: false'],
+  ]) {
+    assert.ok(topConcurrency(read(name)).includes(cancelValue), name);
+  }
+  for (const name of masters) {
+    const text = read(name);
+    assert.notEqual(toCancel(text), text, name);
+    assert.deepEqual(masterPushCancellations([[name, toCancel(text)]]), [name], `${name} is caught when it cancels push runs`);
+  }
 });
 
 test('a newer master commit still gets a release when this run is not the tip', () => {

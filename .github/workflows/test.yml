@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   reader-tests:
@@ -77,6 +77,8 @@ jobs:
         run: node --test tools/chat-send-now.test.js
       - name: Preserve slash skill positions in agent input
         run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
+      - name: Start a skill that arrives above a quote in a hosted chat
+        run: node --test tools/chat-skill-quote.test.js
       - name: Guard the reader runtime fingerprint
         env:
           BASE: ${{ github.event.before || '' }}
@@ -94,10 +96,16 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the done-video evidence fetcher
+        run: node --test tools/done-video.test.mjs
       - name: Test the FFmpeg install guard
         run: node --test tools/check-ffmpeg-install.test.js
       - name: Require a cached, retried FFmpeg install
         run: node tools/check-ffmpeg-install.mjs
+      - name: Test the Zig download guard
+        run: node --test tools/check-zig-download.test.js
+      - name: Require the time-limited Zig install
+        run: node tools/check-zig-download.mjs
       - name: Test the servers slot guard
         run: node --test tools/check-servers-slots.test.js
       - name: Require a slot per server in every servers file
@@ -112,6 +120,10 @@ jobs:
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes
         run: node tools/check-timer-ratchet.mjs
+      - name: Test the update card time estimate check
+        run: node --test tools/check-update-card-time-wording.test.js
+      - name: Keep time estimates off the update card
+        run: node tools/check-update-card-time-wording.mjs
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup
@@ -195,17 +207,7 @@ jobs:
             ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
-            $zip = "$env:RUNNER_TEMP\zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-            tar -xf $zip -C $env:RUNNER_TEMP
-            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
-          }
-          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Test chat performance reporting
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node --test tools/chat-perf-reporting.test.js
@@ -353,13 +355,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true'
-        run: |
-          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
-            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          fi
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Reject placeholder release signing key
         if: steps.paths.outputs.heavy == 'true'
         run: |
@@ -513,17 +509,11 @@ jobs:
             ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: |
-          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
-            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          fi
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Guard chat stillness before accepting chat changes
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         env:
-          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || (github.event_name == 'workflow_dispatch' && 'origin/master') || '' }}
         run: |
           if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
             bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output "$RUNNER_TEMP/chat-still-formal.json"
@@ -593,13 +583,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: |
-          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
-            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          fi
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Build the account Worker
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         working-directory: service
@@ -610,7 +594,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-archive.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -656,16 +640,13 @@ jobs:
             ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true'
-        run: |
-          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
-            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          fi
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js
+      - name: Test a reply shows once beside its history row
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 180 node --test tools/chat-live-once.test.js
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs
@@ -747,16 +728,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
-            $zip = "$env:RUNNER_TEMP/zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-            tar -xf $zip -C $env:RUNNER_TEMP
-            if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
-          }
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Build baseline
         shell: pwsh
         env:
@@ -854,16 +826,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
-            $zip = "$env:RUNNER_TEMP/zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-            tar -xf $zip -C $env:RUNNER_TEMP
-            if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
-          }
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Build candidate
         shell: pwsh
         run: |
