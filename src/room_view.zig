@@ -213,9 +213,8 @@ pub const View = struct {
     }
 
     pub fn showHostStartError(self: *View, message: []const u8) void {
-        self.showError(message);
         self.start_failed = true;
-        self.invalidate();
+        self.showError(message);
     }
 
     pub fn setDpi(self: *View, dpi: u32) bool {
