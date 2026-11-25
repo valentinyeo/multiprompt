@@ -727,6 +727,34 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(stored["live-3333cccc"]["workspace"], "Studio")
         self.assertNotIn("group", stored["live-3333cccc"])
 
+    def test_MUBO_566_start_names_the_hop_that_could_not_reach_the_desktop(self):
+        fixture = ROOT / "tools" / "fixtures" / "MUBO-566"
+        conflict = json.loads((fixture / "port-conflict.json").read_text(encoding="utf-8"))
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text(encoding="utf-8"))
+        self.assertEqual(desktop["hosts"], ["vps-de", "vps-uk", "vps-inne"])
+        self.assertTrue(desktop["workspaces"][0]["groups"][0]["tabs"][0]["visible"])
+        started = self.parsed(self.run_sessions("start", "--name", "Valentin Test Codex", "--folder", str(self.work),
+                                               "--workspace", "Multiprompt", "--provider", "codex",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(conflict)))
+        self.assertEqual(started["status"], "started")
+        self.assertFalse(started["visible"])
+        self.assertEqual(started["visible_error"], "desktop_offline")
+        detail = started.get("visible_error_detail")
+        self.assertIsInstance(detail, str)
+        self.assertIn("port_conflict", detail)
+        self.assertIn("19548", detail)
+        self.assertIn("mp_notify_relay.py", detail)
+        self.assertIn("4211", detail)
+        self.assertNotIn("session-open", [call[0] for call in self.events("zsb")])
+
+    def test_MUBO_566_start_names_a_dead_tunnel_rather_than_only_offline(self):
+        down = json.loads((ROOT / "tools" / "fixtures" / "MUBO-566" / "tunnel-down.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Valentin Test Codex", "--folder", str(self.work),
+                                               "--workspace", "Multiprompt", "--provider", "codex",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(down)))
+        self.assertFalse(started["visible"])
+        self.assertIn("tunnel_down", started.get("visible_error_detail") or "")
+
 
 if __name__ == "__main__":
     unittest.main()

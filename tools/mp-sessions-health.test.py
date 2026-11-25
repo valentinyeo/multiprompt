@@ -275,6 +275,40 @@ class MpSessionsHealthTest(unittest.TestCase):
         self.assertFalse(row["in_layout"])
         self.assertFalse(row["visible"])
         self.assertEqual(row["hidden_reason"], "not in layout")
+    def run_with_reply(self, reply, command="health", *flags, **extra):
+        env = self.env("listing-healthy.json", **extra)
+        zsb = self.bin / "zsb"
+        zsb.write_text("#!" + sys.executable + "\nprint(" + repr(json.dumps(reply)) + ")\n", encoding="utf-8")
+        zsb.chmod(0o755)
+        return subprocess.run([sys.executable, str(MP_SESSIONS), command, *flags],
+                              capture_output=True, text=True, env=env, cwd=str(self.work), timeout=60)
+
+    def test_MUBO_566_health_names_the_port_holder_instead_of_a_bare_offline(self):
+        extra = self.seed_chat("live-healthy", "healthy-sid", "listing-healthy.json")
+        conflict = json.loads((ROOT / "tools/fixtures/MUBO-566/port-conflict.json").read_text(encoding="utf-8"))
+        done = self.run_with_reply(conflict, "health", "--json", **extra)
+        self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
+        row = json.loads(done.stdout)[0]
+        self.assertEqual(row["status"], "BROKEN UNKNOWN desktop offline")
+        self.assertTrue(row["offline_detail"].startswith("port_conflict: "))
+        self.assertIn("19548", row["offline_detail"])
+        self.assertIn("mp_notify_relay.py", row["offline_detail"])
+        text = self.run_with_reply(conflict, "health", **extra)
+        self.assertEqual(text.returncode, 1, text.stderr + text.stdout)
+        self.assertIn("unreachable: port_conflict", text.stdout)
+        self.assertIn("pid 4211", text.stdout)
+
+    def test_MUBO_566_a_reachable_desktop_stays_ok_and_reports_no_offline_detail(self):
+        extra = self.seed_chat("live-healthy", "healthy-sid", "listing-healthy.json")
+        healthy = json.loads((ROOT / "tools/fixtures/MUBO-566/listing-current-desktop.json").read_text(encoding="utf-8"))
+        tab = healthy["workspaces"][0]["groups"][0]["tabs"][0]
+        tab["tmux"] = "live-healthy"
+        tab["title"] = "Healthy chat"
+        tab["host"] = healthy["hosts"][0]
+        done = self.run_with_reply(healthy, "health", "--json", **extra)
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        row = json.loads(done.stdout)[0]
+        self.assertIsNone(row["offline_detail"])
 
 
 if __name__ == "__main__":

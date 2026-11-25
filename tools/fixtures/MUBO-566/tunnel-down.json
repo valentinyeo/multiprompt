@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": "tunnel_down",
+  "message": "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.",
+  "session": "workspace",
+  "port": 19548
+}
