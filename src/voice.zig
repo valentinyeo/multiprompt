@@ -2255,6 +2255,14 @@ pub fn cancelDictation() void {
     showDictationStatus("Dictation cancelled", 2200);
 }
 
+pub fn cancelDictationOnTabSwitch() void {
+    if (!app_state.g_dictation_running.load(.acquire)) return;
+    if (app_state.g_voice_listening_active.load(.acquire)) return;
+    app_state.g_dictation_cancelled.store(true, .release);
+    cancelDictation();
+    dictationAudit("chat-switch", 0);
+}
+
 pub fn handleDictationReady() void {
     @import("chat_composer.zig").chatDictationSync();
     defer @import("chat_composer.zig").chatDictationSync();

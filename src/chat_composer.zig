@@ -2701,7 +2701,7 @@ pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
 
 pub fn chatDictationLiveDiscard() void {
     if (!live_draft.active) return;
-    live_draft.active = false;
+    chatLiveStripFromStore();
     live_draft.sealed = false;
     live_draft.shown_len = 0;
     live_draft.baseline_len = 0;
