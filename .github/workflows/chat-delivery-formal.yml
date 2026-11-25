@@ -64,7 +64,10 @@ jobs:
   comment-review:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -76,59 +79,73 @@ jobs:
           ref: 2f87c854fe3e2fcda44ca86b46ede35aad3c46b7
           path: pstack
           persist-credentials: false
-      - name: Run pstack no-comments
-        id: comments
-        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
-          plugin_marketplaces: ${{ github.workspace }}/pstack
-          plugins: pstack@cursor-plugins
+          repository: valentinyeo/token-ladder
+          ref: 496860909aae1692948589cf94c915d58018b774
+          path: token-ladder
+          persist-credentials: false
+      - name: Read the author model family this run must exclude
+        id: author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          body="${PR_BODY:-}"
+          if [ -z "$body" ]; then
+            pr="$(gh api "repos/$REPO/pulls?state=open&per_page=100" --jq "[.[] | select(.head.ref == \"${GITHUB_REF_NAME}\")][0].number // empty")"
+            if [ -n "$pr" ]; then
+              body="$(gh api "repos/$REPO/pulls/$pr" --jq '.body')"
+            fi
+          fi
+          printf '%s' "$body" | jq -Rs '{pull_request: {body: .}}' > "$RUNNER_TEMP/event.json"
+          families=""
+          if ! families="$(python3 token-ladder/ci/model_families.py "$RUNNER_TEMP/event.json" 2>"$RUNNER_TEMP/families.err")"; then
+            families=""
+            echo "::warning::No author model family to exclude: $(tail -n 1 "$RUNNER_TEMP/families.err")"
+          fi
+          echo "families=$families" >> "$GITHUB_OUTPUT"
+      - name: Run pstack no-comments through the token ladder
+        id: comments
+        uses: valentinyeo/token-ladder/.github/actions/ladder-agent@496860909aae1692948589cf94c915d58018b774
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
           prompt: |
             Read pstack/pstack/skills/poteto-mode/worker.md before anything else.
             Goal: desktop chat breaks too much. Review only this verification change.
-            Shared worker rules: report Hypertask faults with hypertask feedback; report our rules/scripts faults on board 2060 with label Poteto before workarounds. If unavailable, retain the fault in your report for the orchestrator.
-            Follow pstack/pstack/skills/no-comments/SKILL.md in full, including spawning Comment Sicko.
-            Scope is the diff origin/master...HEAD, not the checked-out pstack plugin.
-            This is a report-only check. Do not edit application code or commit.
-            Run Comment Sicko in the foreground with run_in_background=false and wait for its final report.
-            Inspect that report before returning structured output. A launched or unfinished agent is not a completed review.
-            Set completed_review=true only after completing that inspection.
-            Report deletion candidates, MUST KILL flags, suppressions, and constraint keeps with evidence.
-            No findings is valid. The author will apply accepted findings before the independent pstack-verifier.
-          claude_args: |
-            --model sonnet
-            --max-turns 25
-            --allowedTools "Read,Glob,Grep,Task,Agent,Skill,Bash(git diff:*),Bash(git show:*),Bash(git log:*)"
-            --json-schema '{"type":"object","properties":{"completed_review":{"type":"boolean"},"deletion_count":{"type":"integer"},"restored_comments":{"type":"integer"},"must_kill":{"type":"array","items":{"type":"string"}},"report":{"type":"string"}},"required":["completed_review","deletion_count","restored_comments","must_kill","report"]}'
-      - name: Retain the review and prove Comment Sicko ran
+            Shared worker rules: report Hypertask faults with hypertask feedback; report our rules and scripts faults on board 2060 with label Poteto before workarounds. If unavailable, retain the fault in your report for the orchestrator.
+            Follow pstack/pstack/skills/no-comments/SKILL.md and the Comment Sicko rules in pstack/pstack/agents/comment-sicko.md.
+            This run has no subagent tool, so carry out the Comment Sicko review yourself, in the foreground, in this conversation. A review that has not read the diff has not happened.
+            Scope is the diff origin/master...HEAD, not the checked-out pstack or token-ladder trees. Read every changed file.
+            This is a report-only check. Do not edit application code, do not commit and do not push.
+            Report deletion candidates, MUST KILL flags, suppressions and constraint keeps with evidence. No findings is valid.
+            The author applies accepted findings before the independent pstack-verifier.
+            Write comment-review.json in the working directory as one JSON object with completed_review set true, deletion_count, restored_comments, must_kill and report. Print the same object as your final answer.
+          working-directory: .
+          exclude-families: ${{ steps.author.outputs.families }}
+          timeout-seconds: '900'
+      - name: Retain the review and prove the ladder run answered it
         env:
-          REVIEW: ${{ steps.comments.outputs.structured_output }}
-          EXECUTION: ${{ steps.comments.outputs.execution_file }}
+          ANSWER_FILE: ${{ steps.comments.outputs.answer-file }}
+          LANE: ${{ steps.comments.outputs.lane }}
+          MODEL: ${{ steps.comments.outputs.model }}
         run: |
           python3 - <<'PYTHON'
           import json, os, pathlib
-          execution = json.loads(pathlib.Path(os.environ['EXECUTION']).read_text())
-          calls, completed = {}, set()
-          def walk(value):
-              if isinstance(value, dict):
-                  if value.get('type') == 'tool_use' and value.get('name') in ('Agent', 'Task'):
-                      role = value.get('input', {}).get('subagent_type', '')
-                      if role.split(':')[-1] == 'comment-sicko' and not value.get('input', {}).get('run_in_background', False):
-                          calls[value['id']] = role
-                  if value.get('type') == 'tool_result' and not value.get('is_error', False):
-                      completed.add(value.get('tool_use_id'))
-                  for child in value.values():
-                      walk(child)
-              elif isinstance(value, list):
-                  for child in value:
-                      walk(child)
-          walk(execution)
-          agents = [role for call, role in calls.items() if call in completed]
-          assert agents, 'pstack no-comments did not complete a foreground Comment Sicko review'
-          review = json.loads(os.environ['REVIEW'])
-          assert review.get('completed_review') is True, 'Comment Sicko report was not inspected'
-          review['agents'] = agents
+          answer = pathlib.Path(os.environ['ANSWER_FILE'])
+          assert answer.is_file() and answer.stat().st_size, 'the ladder agent left no answer'
+          print(answer.read_text(encoding='utf-8', errors='replace'))
+          review = json.loads(pathlib.Path('comment-review.json').read_text(encoding='utf-8'))
+          assert review.get('completed_review') is True, 'the Comment Sicko review was not completed'
+          for field in ('deletion_count', 'restored_comments', 'must_kill', 'report'):
+              assert field in review, f'the review is missing {field}'
+          review['lane'] = os.environ.get('LANE', '')
+          review['model'] = os.environ.get('MODEL', '')
           pathlib.Path('comment-review.json').write_text(json.dumps(review, indent=2))
           print(json.dumps(review, indent=2))
           PYTHON
