@@ -197,6 +197,7 @@ var unreadable = false;
 var malformed = false;
 fn chatDraftFlush() void {}
 fn chatDraftWriteFile(_: []const u8, _: []const u8) bool { return true; }
+fn chatDraftWriteFileInline(p: []const u8, bytes: []const u8) bool { return chatDraftWriteFile(p, bytes); }
 fn chatComposerAutoGrow() void {}
 fn chatLiveStripFromStore() void {}
 fn SetWindowTextW(_: HANDLE, text: [*:0]const u16) i32 {
