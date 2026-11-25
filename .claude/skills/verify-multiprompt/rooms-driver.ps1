@@ -17,8 +17,8 @@ $actions = [Collections.Generic.List[object]]::new()
 $planned = [ordered]@{
     '1' = 'a: Create a room on a fresh profile'
     'private' = 'Both member chats reply through the real composer'
-    '2' = 'b: Add two chats, including a closed chat'
-    '2-open' = 'Diagnostic: add both reopened chats'
+    '2' = 'b: Add two chats'
+    '2-closed' = 'b2: A closed member chat stays usable'
     '3' = 'Persist a plain send'
     '4' = 'c: Exactly two broadcast replies'
     '5' = 'd: Mention the displayed name'
@@ -530,7 +530,6 @@ Host remote-1
         }
         Save @{ status = 'PASS'; detail = 'Both chats replied through the real desktop composer, SSH, host, provider and transcript before sending a room question' } "$Evidence/preflight.json"
     }
-    $closedBravo = $false
     $hasRoom = (Room-Data (Snapshot 'after-create')).Count -eq 1
     $result.observations += @{ fact = 'fresh-profile create reached the room service'; store_created = (@((Snapshot 'after-create').rooms).Count -gt 0) }
     if (-not $hasRoom) {
@@ -544,22 +543,13 @@ Host remote-1
     }
     Case 2 'Add two member chats' $(if (-not $hasRoom) { 'No saved Rooms534 room was created' } else { '' }) {
         Open-Member 'Bravo'
-        [void](Wait-For 'Bravo is the visible chat before closing it' {
+        [void](Wait-For 'Bravo is the visible chat before the room edit' {
             $saved = Session-Saved
             $tabs = Saved-Tabs $saved
             if ($null -eq $saved -or -not $saved.PSObject.Properties['active_tab']) { return $false }
             $index = [int]$saved.active_tab
             $index -ge 0 -and $index -lt $tabs.Count -and $tabs[$index].name -ceq 'Bravo' -and -not (Room-Window)
         })
-        $bravoGone = { @(Saved-Tabs (Session-Saved) | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 }
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            if (& $bravoGone) { break }
-            Press @(0x11, 0x10, 0x57) "Ctrl+Shift+W: close Bravo before the room picker (attempt $attempt)"
-            try { [void](Wait-For 'Bravo no longer an open tab' $bravoGone 15) } catch { if ($attempt -eq 3) { throw } }
-        }
-        [void](Shot 'bravo-closed')
-        [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'tmux has-session -t rooms-bravo') -Evidence $Evidence -Name 'closed-bravo-still-on-server')
-        $script:closedBravo = $true
         Invoke-JourneyCommand -Text 'Rooms534'
         Invoke-JourneyCommand 'Edit room'
         $room = Wait-For 'room editor' { Room-Window }
@@ -577,31 +567,6 @@ Host remote-1
         [void](Wait-For 'both saved members' { $s = Snapshot 'members-poll'; @($s.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
         $visible = Shot 'members-after'
         if ($visible -notmatch 'Rooms534') { throw 'Room did not reopen after saving members' }
-    }
-    Case '2-open' '' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
-        $edits = { $room = Room-Window; if ($room) { @(Visible-Children 'Edit' $room).Count } else { 0 } }
-        for ($attempt = 0; $attempt -lt 3 -and (& $edits) -gt 1; $attempt++) {
-            Press @(0x1B) 'Escape: close the room editor before the palette reopen'
-            [void](Wait-For 'room editor closed' { (& $edits) -le 1 } 10)
-        }
-        if ((& $edits) -gt 1) { throw 'The room editor stayed open, so the reopened chat cannot be reached' }
-        if ($closedBravo) { Invoke-JourneyCommand 'Reopen closed tab' }
-        Open-Member 'Bravo'
-        Send-Text 'PRIVATE534'
-        [void](Wait-For 'reopened Bravo real private reply' { (Copy-Chat 'Bravo-reopened').Contains('Bravo says PRIVATE534') })
-        Invoke-JourneyCommand -Text 'Rooms534'
-        Invoke-JourneyCommand 'Edit room'
-        [void](Wait-For 'room editor' { Room-Window })
-        Press @(0x09) 'Tab: member search'
-        foreach ($name in @('Alpha', 'Bravo')) {
-            Clear-Member-Search
-            Type-Text $name
-            [void](Wait-For "$name listed" { (Picker-Shot "reopened-picker-$name") -match ([regex]::Escape($name)) })
-            $members = @((Snapshot 'reopened-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 -and $_.display_name -ceq $name })
-            if ($members.Count -eq 0) { Press @(0x0D) "Enter: select $name" }
-        }
-        Press @(0x11, 0x0D) 'Ctrl+Enter: save reopened members'
-        [void](Wait-For 'two members after reopening' { @((Snapshot 'reopened-poll').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
     }
     $hasMembers = @((Snapshot 'after-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2
     Case 3 'Send a room message' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
@@ -710,12 +675,28 @@ Host remote-1
         Open-Room 'Rooms534'
         Send-Text 'FAIL534' -Room
         [void](Wait-For 'both provider failure receipts' { @((Snapshot 'failed-turn').inputs | Where-Object { $_.marker -ceq 'FAIL534' }).Count -eq 2 })
-        [void](Wait-For 'visible failed member turn' { (Shot 'failed-turn') -match 'Restart|failed|unavailable|error' })
-        Press @(0x10, 0x09) 'Shift+Tab: focus failed member Restart'
-        Press @(0x0D) 'Enter: restart failed member'
-        Await-Replies 'FAIL534'
+        $failure = @(Wait-For 'one saved failed member turn' {
+            $failed = @(Room-Events (Snapshot 'failed-turn-saved') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like 'No answer*' })
+            if ($failed.Count -eq 1) { $failed } else { $null }
+        })
+        $members = @((Snapshot 'failed-turn-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 })
+        $failedMember = @($members | Where-Object { $_.id -eq $failure[0].member_id })[0]
+        if ($null -eq $failedMember) { throw 'The failed member is missing from the saved room' }
+        $failedName = [string]$failedMember.display_name
+        [void](Wait-For 'the other member answered FAIL534 once' {
+            $replies = @(Room-Events (Snapshot 'failed-turn-answers') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says FAIL534' })
+            $replies.Count -eq 1 -and $replies[0].member_id -ne $failure[0].member_id
+        } 30)
+        Send-Text "@$failedName FAIL534" -Room
+        [void](Wait-For 'saved retry for the failed member only' { @(Room-Events (Snapshot 'retry-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq "@$failedName FAIL534" }).Count -eq 1 } 20)
+        [void](Wait-For 'two saved FAIL534 answers from two members' {
+            $replies = @(Room-Events (Snapshot 'recovered-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says FAIL534' })
+            $replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2
+        } 60)
         $visible = Shot-Room 'failed-turn-recovered'
-        if ($visible -notmatch 'Alpha says FAIL534' -or $visible -notmatch 'Bravo says FAIL534') { throw 'Failed room question remains unanswered after using Restart' }
+        foreach ($member in $members) {
+            if ($visible -notmatch ([regex]::Escape("$($member.display_name) says FAIL534"))) { throw "The retried room question is missing $($member.display_name)'s answer on screen" }
+        }
     }
     Case 13 '' 'No controllable lost-acknowledgement boundary in the desktop harness; retry safety is not proven by an ordinary send' {}
     $historyReplies = @(Room-Events (Snapshot 'before-history') | Where-Object { $_.type -eq 'agent_reply' })
@@ -730,6 +711,40 @@ Host remote-1
         }
         $after = @(Room-Events (Snapshot 'history-after') | Where-Object { $_.type -eq 'agent_reply' })
         if (($before.id -join ',') -cne ($after.id -join ',')) { throw 'Saved reply identities or order changed after history load' }
+    }
+    Case '2-closed' '' $missingMembers {
+        Open-Member 'Bravo'
+        $bravoGone = { @(Saved-Tabs (Session-Saved) | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if (& $bravoGone) { break }
+            Press @(0x11, 0x10, 0x57) "Ctrl+Shift+W: close Bravo before the closed-chat check (attempt $attempt)"
+            try { [void](Wait-For 'Bravo no longer an open tab' $bravoGone 15) } catch { if ($attempt -eq 3) { throw } }
+        }
+        [void](Wait-For 'Bravo is closed before the room adds it again' $bravoGone 5)
+        [void](Shot 'closed-bravo-gone')
+        Invoke-JourneyCommand -Text 'Rooms534'
+        Invoke-JourneyCommand 'Edit room'
+        [void](Wait-For 'room editor' { Room-Window })
+        Press @(0x09) 'Tab: search member chats'
+        Clear-Member-Search
+        Type-Text 'Bravo'
+        if ((Picker-Shot 'closed-bravo') -notmatch '\bBravo\b') { throw 'A chat whose tab is closed is missing from the room member list' }
+        Press @(0x0D) 'Enter: deselect Bravo before adding it back'
+        Press @(0x11, 0x0D) 'Ctrl+Enter: save the room without Bravo'
+        [void](Wait-For 'one member after removing the closed chat' { @((Snapshot 'closed-removed').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 1 })
+        Invoke-JourneyCommand 'Edit room'
+        [void](Wait-For 'room editor for the closed-chat add' { Room-Window })
+        Press @(0x09) 'Tab: search member chats'
+        Clear-Member-Search
+        Type-Text 'Bravo'
+        if ((Picker-Shot 'closed-bravo-add') -notmatch '\bBravo\b') { throw 'A chat whose tab is closed is missing from the room member list when it is added' }
+        Press @(0x0D) 'Enter: select the closed chat'
+        Press @(0x11, 0x0D) 'Ctrl+Enter: save room members'
+        [void](Wait-For 'two members after adding the closed chat' { @((Snapshot 'closed-added').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
+        Send-Text '@Bravo CLOSED534' -Room
+        [void](Wait-For 'saved answer from the closed member chat' { @(Room-Events (Snapshot 'closed-reply-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -ceq 'Bravo says CLOSED534' }).Count -eq 1 } 60)
+        $visible = Shot-Room 'closed-member-reply'
+        if ($visible -notmatch 'Bravo says CLOSED534') { throw 'The room did not show the closed member chat answer' }
     }
     Case 11 '' $(if (-not $hasRoom) { 'No existing saved room to discover' } else { '' }) {
         $fresh = "$profile/fresh"
