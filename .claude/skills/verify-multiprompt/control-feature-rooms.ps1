@@ -46,7 +46,7 @@ function Read-Shared([string]$Path) {
     $stream = [IO.File]::Open($Path, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     try { $reader = [IO.StreamReader]::new($stream); try { $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
 }
-function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 45) {
+function Wait-For([string]$ConditionName, [scriptblock]$Check, [int]$Seconds = 45) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         $value = & $Check
@@ -54,7 +54,7 @@ function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 45) {
         if ($null -ne $app -and $app.HasExited) { throw 'Owned desktop exited' }
         [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
     } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
-    throw "Timed out: $Name"
+    throw "Timed out: $ConditionName"
 }
 function Doctor {
     $app.Refresh()
@@ -84,6 +84,7 @@ function Palette([string]$Query) {
     Type-Text $Query
     [void](Wait-For "palette query $Query" { (Read-Shared "$settings/debug.log").Substring($offset) -match ("\[palette\] ready chars=" + $Query.Length + ' count=[1-9]\d* target=\d+') })
     Press @(0x0D) "Enter: $Query"
+    [void](Wait-For "palette confirms $Query" { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] confirm target=\d+' })
 }
 function Visible-Children([string]$Class, $Parent = $main) {
     $element = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Parent)
@@ -108,8 +109,7 @@ function Shot([string]$Name) {
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $graphics.Dispose(); $bitmap.Dispose() }
-    $text = & $ocr "$Evidence/$Name.png" stdout --psm 11 2> "$Evidence/$Name-ocr.log"
-    if ($LASTEXITCODE -ne 0) { throw 'Screenshot OCR failed' }
+    $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-ocr")
     $text = ($text -join ' ') -replace '\s+', ' '
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
     return $text
@@ -147,10 +147,10 @@ function Case([string]$Step, [string]$Name, [string]$Missing, [scriptblock]$Body
     Write-Host ("STEP $Step $Name $($case.status): $($case.symptom)")
 }
 function Copy-Chat([string]$Name) {
-    [Windows.Forms.Clipboard]::Clear()
+    [void](Wait-For 'clipboard available for this copy' { try { [Windows.Forms.Clipboard]::Clear(); $true } catch { $false } } 10)
     Palette 'chat view select all'
     Press @(0x11, 0x43) 'Ctrl+C: copy visible chat messages'
-    $text = Wait-For 'copied chat text' { $value = [Windows.Forms.Clipboard]::GetText(); if ($value) { $value } }
+    $text = Wait-For 'copied chat text' { try { $value = [Windows.Forms.Clipboard]::GetText(); if ($value) { $value } } catch { $null } } 10
     [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
     Press @(0x1B) 'Escape: return to composer'
     return $text
@@ -159,11 +159,19 @@ function Open-Member([string]$Name) {
     Palette $Name
     if (-not @(Visible-Children 'ZigShellChatTranscript').Count) { Press @(0x12, 0x43) 'Alt+C: open member Chat View' }
     [void](Wait-For 'member composer' { $windows = @(Visible-Children 'Edit'); if ($windows.Count -eq 1) { $windows[0] } })
+    [void](Wait-For "$Name hosted chat identity hydrated" {
+        $saved = (Read-Shared "$settings/session.json") | ConvertFrom-Json
+        $tab = $saved.tabs[$saved.active_tab]
+        $tab.name -ceq $Name -and $tab.PSObject.Properties['ai_agent'] -and $tab.ai_agent -eq 1 -and $tab.PSObject.Properties['csid'] -and $tab.csid -like 'a1b2c3d4-0534-*'
+    })
 }
 function Send-Text([string]$Text, [switch]$Room) {
     $parent = if ($Room) { Room-Window } else { $main }
     $edit = Wait-For 'one visible composer' { $windows = @(Visible-Children 'Edit' $parent); if ($windows.Count -eq 1) { $windows[0] } }
     Focus-Control $edit
+    Press @(0x11, 0x41) 'Ctrl+A: replace any earlier unsent draft'
+    Press @(0x08) 'Backspace: clear earlier draft before this independent send'
+    [void](Wait-For 'empty composer before typing' { [ChatDeliveryDesktop]::Text($edit) -ceq '' })
     Type-Text $Text
     [void](Wait-For 'exact typed composer text' { [ChatDeliveryDesktop]::Text($edit) -ceq $Text })
     Press @(0x1B) 'Escape: dismiss mention suggestions'
@@ -238,7 +246,7 @@ try {
     $main = Wait-For 'owned desktop window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ChatDeliveryDesktop]::MoveWindow($main, 0, 0, [ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1), $true)
     [void](Wait-For 'two account-owned chats imported' { $saved = Read-Shared "$settings/session.json"; $saved.Contains('rooms-alpha') -and $saved.Contains('rooms-bravo') } 90)
-    Case 1 'Create a room' '' {
+    $createRoom = {
         Palette 'New room'
         $room = Wait-For 'new room view' { Room-Window }
         $edit = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
@@ -250,6 +258,7 @@ try {
         [void](Wait-For 'room persisted' { (Room-Data (Snapshot 'create-poll')).Count -eq 1 })
         if ((Shot 'create-after') -notmatch 'Rooms534') { throw 'Saved room is not shown in its room view' }
     }
+    Case 1 '' '' $createRoom
     Case 'private' '' '' {
         foreach ($name in @('Alpha', 'Bravo')) {
             Open-Member $name
@@ -261,10 +270,15 @@ try {
     }
     $closedBravo = $false
     $hasRoom = (Room-Data (Snapshot 'after-create')).Count -eq 1
+    if (-not $hasRoom) {
+        $planned['1-warm'] = 'Diagnostic: retry creation after private chat use'
+        Case '1-warm' '' '' $createRoom
+        $hasRoom = (Room-Data (Snapshot 'after-warm-create')).Count -eq 1
+    }
     Case 2 'Add two member chats' $(if (-not $hasRoom) { 'No saved Rooms534 room was created' } else { '' }) {
         Open-Member 'Bravo'
         Press @(0x11, 0x57) 'Ctrl+W: close Bravo before the room picker'
-        [void](Wait-For 'Bravo no longer an open tab' { $state = (Read-Shared "$settings/session.json") | ConvertFrom-Json; @($state.tabs | Where-Object { $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 })
+        [void](Wait-For 'Bravo no longer an open tab' { $state = (Read-Shared "$settings/session.json") | ConvertFrom-Json; @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 })
         [void](Shot 'bravo-closed')
         [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'tmux has-session -t rooms-bravo') -Evidence $Evidence -Name 'closed-bravo-still-on-server')
         $script:closedBravo = $true
@@ -329,7 +343,8 @@ try {
         $visible = Shot-Room 'mention-after'
         if ($visible -notmatch 'Alpha says TARGET534' -or $visible -match 'Bravo says TARGET534') { throw 'The room does not show only the mentioned member replying' }
     }
-    Case 6 'Same replies in room and both member views' $(if (-not $sent) { 'No saved room message whose replies can be compared' } else { '' }) {
+    $savedReplies = @(Room-Events (Snapshot 'before-order') | Where-Object { $_.type -eq 'agent_reply' })
+    Case 6 'Same replies in room and both member views' $(if (-not $sent) { 'No saved room question' } elseif ($savedReplies.Count -lt 2) { 'Fewer than two saved replies; shared reply order cannot be compared' } else { '' }) {
         $state = Snapshot 'order-before'
         $replies = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' })
         if ($replies.Count -lt 2) { throw 'Saved room contains fewer than two member replies; there is no shared reply order' }
@@ -338,6 +353,17 @@ try {
             Open-Member $name
             $copied = Copy-Chat "$name-room-history"
             [void](Shot "$name-room-history")
+            $sid = if ($name -ceq 'Alpha') { 'a1b2c3d4-0534-4000-8000-000000000001' } else { 'a1b2c3d4-0534-4000-8000-000000000002' }
+            $canonical = @($state.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$sid.jsonl" } | ForEach-Object { $_.Value } | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text })
+            Save $canonical "$Evidence/$name-canonical-replies.json"
+            $canonicalPosition = -1
+            foreach ($reply in $replies) {
+                $next = -1
+                for ($index = $canonicalPosition + 1; $index -lt $canonical.Count; $index++) {
+                    if ($canonical[$index] -ceq $reply.text) { $next = $index; break }
+                }
+                if ($next -lt 0) { $problems += "$name saved transcript is missing or reorders assistant reply '$($reply.text)'" } else { $canonicalPosition = $next }
+            }
             $position = -1
             foreach ($reply in $replies) {
                 $next = $copied.IndexOf($reply.text, [Math]::Max(0, $position + 1), [StringComparison]::Ordinal)
@@ -384,8 +410,8 @@ try {
         $visible = Shot-Room 'restart-return'
         if ($visible -notmatch 'Alpha says RESTART534' -or $visible -notmatch 'Bravo says RESTART534') { throw 'Restarted desktop lost answers to the unanswered room question' }
     }
-    Case 9 '' 'No Android Rooms client harness on this GitHub desktop runner; paired ticket MUBO-536' {}
-    Case 10 '' 'No Android Rooms retry harness on this GitHub desktop runner; paired ticket MUBO-536' {}
+    Case 9 '' 'The existing Android photo harness needs a companion checkout and has no Rooms read action; this Windows job has no Android client. Paired ticket MUBO-536' {}
+    Case 10 '' 'The existing Android photo harness has no Rooms retry action; this Windows job has no Android client. Paired ticket MUBO-536' {}
     Case 12 '' $missingMembers {
         Palette 'Rooms534'
         Send-Text 'FAIL534' -Room
@@ -398,7 +424,8 @@ try {
         if ($visible -notmatch 'Alpha says FAIL534' -or $visible -notmatch 'Bravo says FAIL534') { throw 'Failed room question remains unanswered after using Restart' }
     }
     Case 13 '' 'No controllable lost-acknowledgement boundary in the desktop harness; retry safety is not proven by an ordinary send' {}
-    Case 14 '' $(if (-not $sent) { 'No saved room question to reload' } else { '' }) {
+    $historyReplies = @(Room-Events (Snapshot 'before-history') | Where-Object { $_.type -eq 'agent_reply' })
+    Case 14 '' $(if (-not $sent) { 'No saved room question to reload' } elseif ($historyReplies.Count -eq 0) { 'No saved replies to check for stale or missing history' } else { '' }) {
         $before = @(Room-Events (Snapshot 'history-before') | Where-Object { $_.type -eq 'agent_reply' })
         if ($before.Count -eq 0) { throw 'No saved replies exist to check for stale or missing history' }
         Open-Member 'Alpha'

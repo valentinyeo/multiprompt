@@ -21,7 +21,7 @@ First try Ctrl+K New room on the fresh profile, before private chat driving can 
 | Step | Action and observable proof |
 | --- | --- |
 | 1 / a | On the fresh profile, create Rooms534 with no members through Ctrl+K. Require the named native room view, screenshot/OCR, and exactly one room in the read-only server snapshot. |
-| private | Both private chats must reply through the desktop composer. A failure here is a precondition failure, not proof that room replies broke. |
+| private | Both private chats must reply through the desktop composer. A failure here is a precondition failure, not proof that room replies broke. If fresh creation failed, a separately reported warm retry tries the same UI path so independent later checks can still run. The fresh-profile result never changes. |
 | 2 / b | Close Bravo's tab, prove its absence in saved tabs, edit the room, select Alpha and Bravo using real search/Enter, save. Require two active persisted members and the reopened room screenshot. |
 | 2-open | Independently reopen Bravo through the palette and try adding both open chats. This lets later checks proceed when the closed-chat picker fails; it never changes step b's result. |
 | 3 | Send BROADCAST534. Require a cleared composer, one saved human event, and visible message text. |
@@ -46,5 +46,7 @@ Download with `gh run download <id> -n verify-rooms -D <directory>`. Inspect the
 - Room text is custom-painted and has no copy-all action. Tesseract reads actual desktop screenshots; saved room events independently prove what persisted. OCR failures need visual review before being called product bugs.
 - Display names and the app's generated mention aliases are different. This journey deliberately checks the requested `@<name>` user path; do not replace it with a private generated ID to hide a failed name mention.
 - A failed broadcast reply does not prevent testing a targeted send or opening both member views. No reply order can be proven when no replies exist; report that missing prerequisite explicitly.
-- This proves one desktop plus both member chat views and saved server state, not a second authenticated physical desktop or Android.
+- This checks one desktop plus both member chat views and saved server state, not a second physical desktop or Android. `tools/verify-account-photos/android.sh` is a photo-only companion instrumentation harness; it has no Rooms read/retry actions and cannot run in this Windows job. Cases g/h name that missing prerequisite.
+- Assistant replies must exist in each member's saved transcript as assistant messages in the same order. A reply's text appearing only inside quoted room context in a user message is not shared reply proof.
+- Before each independent send, the driver clears any earlier unsent draft through Ctrl+A and Backspace. A refused display-name mention must not contaminate later away/restart messages.
 - The journey is allowed to fail on master. Do not add it to unrelated PR smoke gates or change product code to make this verification PR green.
