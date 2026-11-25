@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import importlib.util
 import sys
+import traceback
 
 if os.environ.get('GITHUB_ACTIONS') != 'true' or os.name != 'nt':
     raise RuntimeError('Hosted Windows only')
@@ -63,4 +64,8 @@ if base.MODE == 'ssh' and 'tmux new-session -d -s ' in command and 'claude --res
     base.record('resumed.jsonl', session=target, original=original, sid=sid_match[1], boundary='synthetic resume transport; original transcript unchanged')
     base.attach_fake(target)
     sys.exit(0)
-sys.exit(base.tmux(base.ARGS, sys.stdin.buffer, sys.stdout) if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())
+try:
+    sys.exit(base.tmux(base.ARGS, sys.stdin.buffer, sys.stdout) if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())
+except Exception:
+    (root / f'boundary-{os.getpid()}.stderr.log').write_text(traceback.format_exc(), encoding='utf-8')
+    raise
