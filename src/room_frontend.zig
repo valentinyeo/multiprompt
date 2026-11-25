@@ -72,11 +72,12 @@ var discovered_count: usize = 0;
 var candidate_scan: usize = 0;
 var candidate_generation: u64 = 0;
 var status_generation: u64 = 0;
-var candidates: [app_state.MAX_SHELLS]Candidate = undefined;
+var candidates: [768]Candidate = undefined;
 var candidate_count: usize = 0;
 var last_failure: ?rooms.Failure = null;
 pub const MetadataState = enum { idle, queued, loading, ready, failed };
 pub const CatalogRow = struct {
+    store_uuid: [36]u8 = @splat(0),
     id: []const u8,
     name: []const u8,
     revision: u64,
@@ -94,6 +95,18 @@ var catalog_after: u64 = 0;
 var catalog_through: ?u64 = null;
 var catalog_complete = false;
 var catalog_store_uuid: ?[36]u8 = null;
+const StoreDiscovery = struct {
+    controller: rooms.Controller,
+    key: [64]u8,
+    generation: u64,
+    arena: std.heap.ArenaAllocator,
+    rows: std.ArrayList(CatalogRow) = .empty,
+    after: u64 = 0,
+    through: ?u64 = null,
+    complete: bool = false,
+};
+var store_discovery: [3]?*StoreDiscovery = @splat(null);
+var visible_catalog: [12288]CatalogRow = undefined;
 var palette_hits: [app_state.MAX_ROOM_PALETTE_ROWS]?app_state.HitTarget = @splat(null);
 var palette_edit_hit: ?app_state.HitTarget = null;
 var catalog_generation: u64 = 0;
@@ -321,17 +334,36 @@ fn clearModels() void {
 }
 
 pub fn catalog() []const CatalogRow {
-    if (!enabled or !catalog_complete or request_generation != account_generation) return &.{};
-    const route = configuredRoute(route_slot) orelse return &.{};
-    const key = routeKey(route);
-    if (!std.mem.eql(u8, &key, &route_key)) return &.{};
-    return catalog_rows.items;
+    if (!enabled or !ui_ready or scope_blocked or account_len == 0) return &.{};
+    var count: usize = 0;
+    if (catalog_complete and request_generation == account_generation) if (configuredRoute(route_slot)) |route| {
+        const key = routeKey(route);
+        if (std.mem.eql(u8, &key, &route_key)) for (catalog_rows.items) |row| {
+            visible_catalog[count] = row;
+            count += 1;
+        };
+    };
+    for (store_discovery, 0..) |maybe_probe, slot| {
+        const probe = maybe_probe orelse continue;
+        if (!probe.complete or probe.generation != account_generation) continue;
+        const route = configuredRoute(@intCast(slot)) orelse continue;
+        const key = routeKeyFor(@intCast(slot), route);
+        if (!std.mem.eql(u8, &key, &probe.key)) continue;
+        for (probe.rows.items) |row| {
+            var duplicate = false;
+            for (visible_catalog[0..count]) |existing| if (std.mem.eql(u8, existing.id, row.id) and std.mem.eql(u8, &existing.store_uuid, &row.store_uuid)) { duplicate = true; break; };
+            if (duplicate or count == visible_catalog.len) continue;
+            visible_catalog[count] = row;
+            count += 1;
+        }
+    }
+    return visible_catalog[0..count];
 }
 
 pub fn roomHit(index: usize) ?app_state.HitTarget {
     const rows = catalog();
     if (index >= rows.len) return null;
-    const store = catalog_store_uuid orelse return null;
+    const store = rows[index].store_uuid;
     if (rows[index].id.len != 36) return null;
     var id: [36]u8 = undefined;
     @memcpy(&id, rows[index].id);
@@ -386,8 +418,7 @@ pub fn selectHit(hit: app_state.HitTarget) void {
 
 pub fn selectedRoom(id: []const u8) bool {
     if (!isActive() or front != .selected) return false;
-    const store = catalog_store_uuid orelse return false;
-    return std.mem.eql(u8, &store, &front.selected.store.store_uuid) and std.mem.eql(u8, id, &front.selected.room_id);
+    return std.mem.eql(u8, id, &front.selected.room_id);
 }
 
 pub fn requestCatalogRow(id: []const u8) ?*const CatalogRow {
@@ -400,6 +431,11 @@ pub fn requestCatalogRow(id: []const u8) ?*const CatalogRow {
         }
         return row;
     }
+    for (store_discovery) |maybe_probe| if (maybe_probe) |probe| {
+        if (probe.complete and probe.generation == account_generation) for (probe.rows.items) |*row| {
+            if (std.mem.eql(u8, row.id, id)) return row;
+        };
+    };
     return null;
 }
 
@@ -458,6 +494,7 @@ pub fn setAccount(id: ?[]const u8) void {
     clearDrafts();
     clearModels();
     clearCatalog();
+    clearStoreDiscovery();
     candidate_count = 0;
     if (controller) |*c| if (c.job == null) { controller = null; };
     discovery_attempts = 0;
@@ -493,6 +530,7 @@ fn accountReadyInternal() void {
         return;
     }
     if (!ui_ready) return;
+    discoverStores();
     if (controller == null) {
         if (!discovery_waiting and discovery_attempts < 3) beginDiscovery(false);
     } else if (controller) |*c| {
@@ -570,6 +608,97 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
     return true;
 }
 
+fn armPoll() void {
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+}
+
+fn clearStoreDiscovery() void {
+    for (&store_discovery) |*entry| if (entry.*) |probe| {
+        probe.controller.shutdown();
+        probe.arena.deinit();
+        std.heap.page_allocator.destroy(probe);
+        entry.* = null;
+    };
+}
+
+fn discoverStores() void {
+    if (account_len == 0) return;
+    for (applied_routes, 0..) |maybe_route, slot| {
+        const route = maybe_route orelse continue;
+        const key = routeKeyFor(@intCast(slot), route);
+        if (store_discovery[slot]) |probe| {
+            if (probe.generation == account_generation and std.mem.eql(u8, &probe.key, &key) and (probe.complete or probe.controller.job != null)) continue;
+            probe.controller.shutdown();
+            probe.arena.deinit();
+            std.heap.page_allocator.destroy(probe);
+            store_discovery[slot] = null;
+        }
+        const probe = std.heap.page_allocator.create(StoreDiscovery) catch continue;
+        probe.* = .{ .controller = rooms.Controller.init(@intCast(slot)), .key = key, .generation = account_generation, .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
+        var keep = false;
+        defer if (!keep) { probe.arena.deinit(); std.heap.page_allocator.destroy(probe); };
+        if (!probe.controller.bindAccount(account[0..account_len]) or !probe.controller.bindRoute(route.hostname[0..route.hostname_len], route.user[0..route.user_len], route.port)) continue;
+        var path_buf: [600]u8 = undefined;
+        if (pinPathFor(&path_buf, &key)) |path| if (file_io.readFileAllocWin32(path, 64)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            if (!probe.controller.bindHost(bytes)) continue;
+        };
+        if (!probe.controller.capabilities()) continue;
+        store_discovery[slot] = probe;
+        keep = true;
+        armPoll();
+    }
+}
+
+fn storeDiscoveryPending() bool {
+    for (store_discovery) |entry| if (entry) |probe| {
+        if (probe.controller.job != null) return true;
+    };
+    return false;
+}
+
+fn pollStoreDiscovery() void {
+    for (store_discovery, 0..) |entry, slot| {
+        const probe = entry orelse continue;
+        const route = configuredRoute(@intCast(slot));
+        const key = if (route) |value| routeKeyFor(@intCast(slot), value) else @as([64]u8, @splat(0));
+        if (probe.generation != account_generation or route == null or !std.mem.eql(u8, &key, &probe.key)) {
+            probe.controller.shutdown();
+            probe.arena.deinit();
+            std.heap.page_allocator.destroy(probe);
+            store_discovery[slot] = null;
+            continue;
+        }
+        const completion = probe.controller.poll() orelse continue;
+        switch (completion) {
+            .pending => {},
+            .failed => |failure| {
+                if (catalog().len == 0) showFailure(failure);
+            },
+            .finished => |finished| {
+                var result = finished;
+                defer result.deinit();
+                const payload = if (result.value.value == .object) result.value.value.object.get("result") orelse .null else .null;
+                if (payload != .object) continue;
+                if (result.kind == .capabilities) {
+                    const uuid = textField(payload, "host_uuid") orelse continue;
+                    if ((numberField(payload, "room_protocol") orelse 0) != 1 or !probe.controller.bindHost(uuid) or !savePin(&probe.key, uuid)) continue;
+                    _ = probe.controller.catalog(0, null);
+                } else if (result.kind == .catalog) {
+                    if (!appendCatalogPage(payload, probe.arena.allocator(), &probe.rows, &probe.after, &probe.through, probe.controller.host_uuid)) continue;
+                    if (probe.after < probe.through.?) {
+                        _ = probe.controller.catalog(probe.after, probe.through);
+                    } else {
+                        probe.complete = true;
+                        catalog_generation +%= 1;
+                        _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
+                    }
+                }
+            },
+        }
+    }
+}
+
 fn configuredRoute(slot: u8) ?@import("room_transport.zig").Route {
     if (slot >= applied_routes.len) return null;
     return applied_routes[slot];
@@ -616,9 +745,9 @@ fn loadPin(c: *rooms.Controller) bool {
     return w.GetLastError() == 2;
 }
 
-fn savePin(uuid: []const u8) bool {
+fn savePin(key: *const [64]u8, uuid: []const u8) bool {
     var buf: [600]u8 = undefined;
-    const path = pinPath(&buf) orelse return false;
+    const path = pinPathFor(&buf, key) orelse return false;
     var path_wide: [640]u16 = undefined;
     const path_w = file_io.win32WidePath(&path_wide, path) orelse return false;
     var temp_buf: [640]u8 = undefined;
@@ -717,6 +846,9 @@ fn beginDiscovery(retry: bool) void {
             break;
         }
     }
+    if (chosen == null and wanted == null) {
+        for (applied_routes, 0..) |route, index| if (route != null) { chosen = @intCast(index); break; };
+    }
     if (retry) {
         if (discovery_generation != account_generation) return;
         const retry_route = configuredRoute(discovery_slot) orelse return;
@@ -736,7 +868,6 @@ fn beginDiscovery(retry: bool) void {
     if (retry) if (wanted) |intent| {
         if (!c.has_host_uuid or !std.mem.eql(u8, &c.host_uuid, &intent.store.store_uuid)) return;
     };
-    if (front != .create and !c.has_host_uuid) return;
     if (restore_pending) if (restore_intent) |intent| {
         if (!c.has_host_uuid or !std.mem.eql(u8, &c.host_uuid, &intent.store.store_uuid)) return;
     };
@@ -820,14 +951,19 @@ fn textField(value: std.json.Value, name: []const u8) ?[]const u8 {
 }
 
 fn applyCatalogPage(payload: std.json.Value) bool {
+    const c = controller orelse return false;
+    if (catalog_arena == null) catalog_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const a = if (catalog_arena) |*arena| arena.allocator() else unreachable;
+    return appendCatalogPage(payload, a, &catalog_rows, &catalog_after, &catalog_through, c.host_uuid);
+}
+
+fn appendCatalogPage(payload: std.json.Value, a: std.mem.Allocator, rows: *std.ArrayList(CatalogRow), after: *u64, through_cursor: *?u64, store_uuid: [36]u8) bool {
     const through = numberField(payload, "through") orelse return false;
     const next = numberField(payload, "next_after") orelse return false;
     const field = payload.object.get("rooms") orelse return false;
-    if (field != .array or field.array.items.len > 100 or next > through or next < catalog_after) return false;
-    if (catalog_through) |expected| { if (through != expected) return false; } else catalog_through = through;
-    if (catalog_arena == null) catalog_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const a = if (catalog_arena) |*arena| arena.allocator() else unreachable;
-    var last = catalog_after;
+    if (field != .array or field.array.items.len > 100 or next > through or next < after.*) return false;
+    if (through_cursor.*) |expected| { if (through != expected) return false; } else through_cursor.* = through;
+    var last = after.*;
     for (field.array.items) |row| {
         const seq = numberField(row, "creation_seq") orelse return false;
         const id = textField(row, "id") orelse return false;
@@ -835,15 +971,15 @@ fn applyCatalogPage(payload: std.json.Value) bool {
         const revision = numberField(row, "revision") orelse return false;
         const message_seq = numberField(row, "seq") orelse return false;
         var validate = rooms.Controller.init(0);
-        if (seq <= last or seq > through or !validate.bindHost(id) or revision == 0 or name.len == 0 or name.len > 256 or !std.unicode.utf8ValidateSlice(name) or std.mem.indexOfScalar(u8, name, 0) != null or catalog_rows.items.len >= 4096) return false;
-        for (catalog_rows.items) |existing| if (std.mem.eql(u8, existing.id, id)) return false;
+        if (seq <= last or seq > through or !validate.bindHost(id) or revision == 0 or name.len == 0 or name.len > 256 or !std.unicode.utf8ValidateSlice(name) or std.mem.indexOfScalar(u8, name, 0) != null or rows.*.items.len >= 4096) return false;
+        for (rows.*.items) |existing| if (std.mem.eql(u8, existing.id, id)) return false;
         const id_copy = a.dupe(u8, id) catch return false;
         const name_copy = a.dupe(u8, name) catch return false;
-        catalog_rows.append(a, .{ .id = id_copy, .name = name_copy, .revision = revision, .sequence = message_seq }) catch return false;
+        rows.*.append(a, .{ .store_uuid = store_uuid, .id = id_copy, .name = name_copy, .revision = revision, .sequence = message_seq }) catch return false;
         last = seq;
     }
-    if (next != last or (next == catalog_after and next != through)) return false;
-    catalog_after = next;
+    if (next != last or (next == after.* and next != through)) return false;
+    after.* = next;
     return true;
 }
 
@@ -1142,8 +1278,7 @@ fn acceptEvents(payload: std.json.Value) bool {
             var question_id = id;
             var insertion_index = item.messages.items.len;
             if (std.mem.eql(u8, kind, "human")) {
-                if (event.object.count() != (if (event.object.contains("room_features")) @as(usize, 8) else 7) or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
-                if (event.object.contains("room_features") and (numberField(event, "room_features") orelse 0) != 1) return false;
+                if (event.object.count() != 7 or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
                 const recipients = event.object.get("recipients") orelse return false;
                 if (recipients != .array or recipients.array.items.len > 64) return false;
                 const saved = a.alloc([]const u8, recipients.array.items.len) catch return false;
@@ -1604,6 +1739,8 @@ pub fn pollTimer(id: usize) bool {
         return true;
     }
     if (id != TIMER_ROOM) return false;
+    pollStoreDiscovery();
+    defer if (storeDiscoveryPending()) armPoll();
     const c = if (controller) |*value| value else { _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     const completion = c.poll() orelse { if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     if (completion == .pending) return true;
@@ -1703,7 +1840,7 @@ pub fn pollTimer(id: usize) bool {
                 const reply = payload.object.get("room_reply_protocol") orelse .null;
                 const uuid = payload.object.get("host_uuid") orelse .null;
                 const modes_agree = store == .bool and live == .bool and store.bool == !live.bool and (if (live == .bool and live.bool) (reply == .integer and reply.integer == 1) else reply == .null);
-                if (version != .integer or version.integer != 1 or !modes_agree or uuid != .string or !c.bindHost(uuid.string) or !savePin(uuid.string)) {
+                if (version != .integer or version.integer != 1 or !modes_agree or uuid != .string or !c.bindHost(uuid.string) or !savePin(&route_key, uuid.string)) {
                     scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
                 const features = payload.object.get("room_features") orelse .null;
@@ -1976,10 +2113,7 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     var names: [room_post.max_recipients]room_post.Recipient = undefined;
     for (current.bindings.items, 0..) |binding, index| names[index] = .{ .alias = binding.member.alias, .display_name = binding.member.display_name };
     var picked: [room_post.max_recipients][]const u8 = undefined;
-    const count = room_post.namedRecipients(text, names[0..current.bindings.items.len], &picked) orelse {
-        view.showError("Choose a unique member name from the @ picker, then try again.");
-        return .failed;
-    };
+    const count = room_post.namedRecipients(text, names[0..current.bindings.items.len], &picked) orelse 0;
     if (pending_command) |item| {
         if (item.evidence == null or item.kind != .post) return .failed;
         const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch return .failed;
@@ -2111,7 +2245,22 @@ pub fn openCreate() void {
     }
     discovery_attempts = 0;
     beginDiscovery(false);
-    if (controller) |*c| if (c.job == null and nextStatus(c)) { _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null); };
+    if (controller) |*c| if (c.job == null and nextStatus(c)) armPoll();
+}
+
+fn beginSelectedStore() void {
+    if (pending_command != null) {
+        view.showError("Wait for the current room action to finish, then open this room again.");
+        return;
+    }
+    if (controller) |*c| c.shutdown();
+    controller = null;
+    discardBuilding();
+    clearCatalog();
+    scanCandidates();
+    discovery_attempts = 0;
+    discovery_waiting = false;
+    beginDiscovery(false);
 }
 
 pub fn select(location: RoomLocation) void {
@@ -2154,7 +2303,7 @@ pub fn select(location: RoomLocation) void {
     if (found and front == .selected and sameLocation(front.selected, location)) {
         selection_generation +%= 1;
         selection_waiting = true;
-        if (c) |value| _ = startSnapshot(value);
+        if (c) |value| { _ = startSnapshot(value); } else beginSelectedStore();
         return;
     }
     if (!saveDraft()) return;
@@ -2172,7 +2321,7 @@ pub fn select(location: RoomLocation) void {
     view.focus();
     if (!found) return;
     selection_waiting = true;
-    if (c) |value| _ = startSnapshot(value);
+    if (c) |value| { _ = startSnapshot(value); } else beginSelectedStore();
 }
 
 pub fn cancelRestoreForUser() void {
@@ -2272,6 +2421,7 @@ pub fn deinit() void {
     clearDrafts();
     clearModels();
     clearCatalog();
+    clearStoreDiscovery();
     refresh_intents.deinit(std.heap.page_allocator);
     refresh_intents = .empty;
     candidate_count = 0;

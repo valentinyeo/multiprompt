@@ -12,7 +12,7 @@ function declaration(source, marker) {
   assert.notEqual(start, -1, marker);
   const end = source.indexOf('\n}', start);
   assert.notEqual(end, -1, marker);
-  return source.slice(start, end + 2);
+  return source.slice(start, end + 2) + (source[end + 2] === ';' ? ';' : '');
 }
 function run(source, files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-reliability-'));
@@ -90,6 +90,12 @@ test "names resolve to stable aliases" {
     try std.testing.expectEqual(@as(?usize, null), post.namedRecipients("@same hello", &ambiguous, &out));
 }
 `, { 'room_post.zig': read('room_post.zig') });
+});
+
+test('fresh-profile room discovery probes configured hosts without local pins or tabs', () => {
+  const source = read('room_frontend.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/store-discovery.zig'), 'utf8');
+  run(`${fixture}\n${declaration(source, 'const StoreDiscovery = struct {')}\nvar store_discovery: [3]?*StoreDiscovery = @splat(null);\n${declaration(source, 'fn discoverStores(')}\n${declaration(source, 'fn clearStoreDiscovery(')}\n${declaration(source, 'pub fn catalog(')}`);
 });
 
 test('unavailable creation reports a reason instead of silently returning', () => {
