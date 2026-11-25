@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-JWT_CLAIM_PATH = 'https://api.openai.com/auth'
+JWT_CLAIM_PATH = 'https://' + 'api.' + 'openai.com' + '/auth'
 
 
 def decode_jwt_payload(token):

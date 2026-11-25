@@ -33,7 +33,7 @@ if [[ "$actual_pi" != "$pi_version" ]]; then
     echo "Unexpected Pi version: $actual_pi" >&2
     exit 1
 fi
-install -d -m 755 -o mpverify -g mpverify /home/mpverify/.local/share/zigshell
+install -d -m 755 -o mpverify -g mpverify /home/mpverify/.local /home/mpverify/.local/share /home/mpverify/.local/share/zigshell
 install -m 644 -o mpverify -g mpverify "$repo/src/mp_complete.py" /home/mpverify/.local/share/zigshell/mp_complete.py
 rm -rf /home/mpverify/.local/share/vstack
 runuser -u mpverify -- env -i HOME=/home/mpverify USER=mpverify LOGNAME=mpverify PATH=/usr/local/bin:/usr/bin:/bin \

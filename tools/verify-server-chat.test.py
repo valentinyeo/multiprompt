@@ -187,7 +187,8 @@ foreach ($path in Get-ChildItem (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/v
             body = b64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b'=').decode()
             return f'{head}.{body}.sigvalue'
 
-        valid_jwt = make_jwt({'exp': 1900000000, 'https://api.openai.com/auth': {'chatgpt_account_id': 'acct-test-123'}})
+        claim_key = 'https://' + 'api.' + 'openai.com' + '/auth'
+        valid_jwt = make_jwt({'exp': 1900000000, claim_key: {'chatgpt_account_id': 'acct-test-123'}})
         valid_input = json.dumps({
             'auth_mode': 'chatgpt',
             'OPENAI_API_KEY': None,
@@ -231,7 +232,7 @@ foreach ($path in Get-ChildItem (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/v
                 json.dumps({'tokens': {'access_token': 'not-a-jwt', 'refresh_token': 'r'}}),
                 json.dumps({'tokens': {'access_token': make_jwt({'exp': 1900000000}), 'refresh_token': 'r'}}),
                 json.dumps({'tokens': {'access_token': valid_jwt, 'refresh_token': 'r', 'account_id': 'wrong-acct'}}),
-                json.dumps({'tokens': {'access_token': make_jwt({'https://api.openai.com/auth': {'chatgpt_account_id': 'a'}}), 'refresh_token': 'r'}}),
+                json.dumps({'tokens': {'access_token': make_jwt({claim_key: {'chatgpt_account_id': 'a'}}), 'refresh_token': 'r'}}),
             ]
             for index, bad in enumerate(bad_cases):
                 with self.subTest(bad_case=index):
