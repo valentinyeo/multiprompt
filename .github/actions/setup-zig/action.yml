@@ -1,5 +1,5 @@
 name: Set up Zig
-description: Install pinned Zig from verified cached archives, with a time-limited registry fallback when the official download stalls.
+description: Restore the pinned Zig toolchain from the shared cache, otherwise download it from the official source or a community mirror inside a time budget, check its checksum and add Zig to PATH.
 
 inputs:
   version:
@@ -10,62 +10,33 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Restore the Zig archive
+    - name: Restore the Zig toolchain
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
-        path: ${{ runner.temp }}/zig-archive-${{ inputs.version }}
-        key: ${{ runner.os }}-zig-archive-${{ inputs.version }}
-    - name: Restore verified registry archives
-      if: runner.os != 'Windows'
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ${{ runner.temp }}/zig-registry-${{ inputs.version }}
-        key: ${{ runner.os }}-zig-registry-${{ inputs.version }}-1
+        path: ${{ runner.temp }}/zig-x86_64-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-${{ inputs.version }}
+        key: ${{ runner.os }}-zig-toolchain-${{ inputs.version }}
     - name: Install Zig
       if: runner.os != 'Windows'
       shell: bash
       env:
         ZIG_VERSION: ${{ inputs.version }}
-        ZIG_ARCHIVE: ${{ runner.temp }}/zig-archive-${{ inputs.version }}/zig.tar.xz
+        ZIG_DOWNLOAD: ${{ runner.temp }}/zig-download-${{ inputs.version }}/zig.tar.xz
       run: |
         set -euo pipefail
-        archive="$ZIG_ARCHIVE"
+        archive="$ZIG_DOWNLOAD"
         toolchain="$RUNNER_TEMP/zig-x86_64-linux-$ZIG_VERSION"
         case "$ZIG_VERSION" in
           0.16.0) expected=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 ;;
           *) echo "No pinned Zig checksum for $ZIG_VERSION" >&2; exit 1 ;;
         esac
-        mkdir -p "$(dirname "$archive")"
         echo "$toolchain" >> "$GITHUB_PATH"
-        if [ -x "$toolchain/zig" ] && [ -f "$toolchain/lib/std/std.zig" ]; then
-          echo "Zig $ZIG_VERSION already installed at $toolchain"
+        if [ -x "$toolchain/zig" ] && "$toolchain/zig" version | grep -qx "$ZIG_VERSION"; then
+          echo "Restored Zig $ZIG_VERSION from the shared cache at $toolchain"
           exit 0
         fi
-        if [ -f "$archive" ] && ! echo "$expected  $archive" | sha256sum -c - >/dev/null 2>&1; then
-          echo "Discarding a cached Zig archive that does not match its checksum"
-          rm -f "$archive"
-        fi
-        if [ ! -f "$archive" ]; then
-          registry="$RUNNER_TEMP/zig-registry-$ZIG_VERSION"
-          if [ -f "$registry/compiler.tgz" ] || ! curl -fsSL --connect-timeout 15 --max-time 60 --speed-limit 2048 --speed-time 30 --retry 1 --retry-max-time 65 "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" -o "$archive"; then
-            rm -f "$archive"
-            mkdir -p "$registry" "$toolchain/lib"
-            fetch_package() {
-              local name="$1" expected="$2" file="$3"
-              if [ ! -f "$file" ] || [ "$(openssl dgst -sha512 -binary "$file" | openssl base64 -A)" != "$expected" ]; then
-                curl -fsSL --connect-timeout 15 --max-time 90 --retry 1 --retry-max-time 100 "https://registry.npmjs.org/@zigc/$name/-/$name-$ZIG_VERSION.tgz" -o "$file"
-              fi
-              [ "$(openssl dgst -sha512 -binary "$file" | openssl base64 -A)" = "$expected" ]
-            }
-            fetch_package linux-x64 'zVSGKmIZb5w+ot3eDdoF7GzvICN1e6mwGIAgavDiQR0stXnJu9UgOMppcIKqP5fG5ecsH6jsIf9rThd3ZI/dlQ==' "$registry/compiler.tgz"
-            fetch_package lib 'btxgqPJy93rwlcypaMHLLGjvtj/t1km+KUKjlCCxKV+UpayeI1v6ybXt4/jFI3ufDKoLe9GLKTpsX8bavMEygA==' "$registry/lib.tgz"
-            tar -xzf "$registry/compiler.tgz" -C "$toolchain" --strip-components=2 package/bin/zig
-            tar -xzf "$registry/lib.tgz" -C "$toolchain/lib" --strip-components=1
-            test "$("$toolchain/zig" version)" = "$ZIG_VERSION"
-            exit 0
-          fi
-        fi
-        echo "$expected  $archive" | sha256sum -c -
+        rm -rf "$toolchain"
+        mkdir -p "$(dirname "$archive")"
+        node tools/zig-download.mjs --version "$ZIG_VERSION" --target x86_64-linux --sha256 "$expected" --dest "$archive" --budget-seconds 240 --per-source-seconds 75
         tar -xf "$archive" -C "$RUNNER_TEMP"
         "$toolchain/zig" version
     - name: Install Zig
@@ -73,43 +44,29 @@ runs:
       shell: pwsh
       env:
         ZIG_VERSION: ${{ inputs.version }}
-        ZIG_ARCHIVE: ${{ runner.temp }}/zig-archive-${{ inputs.version }}/zig.zip
+        ZIG_DOWNLOAD: ${{ runner.temp }}/zig-download-${{ inputs.version }}/zig.zip
       run: |
         $ErrorActionPreference = 'Stop'
         $pinned = $env:ZIG_VERSION
-        $archive = $env:ZIG_ARCHIVE
+        $archive = $env:ZIG_DOWNLOAD
         $toolchain = Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-$pinned"
         switch ($pinned) {
           '0.16.0' { $expected = '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e' }
           default { throw "No pinned Zig checksum for $pinned" }
         }
-        New-Item -ItemType Directory -Force -Path (Split-Path $archive) | Out-Null
         $toolchain | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
         $zig = Join-Path $toolchain 'zig.exe'
         if (Test-Path $zig) {
-          Write-Host "Zig $pinned already installed at $toolchain"
-          exit 0
-        }
-        $limit = 4
-        $deadline = (Get-Date).AddMinutes(5)
-        for ($attempt = 1; $attempt -le $limit; $attempt++) {
-          if (Test-Path $archive) {
-            if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected) { break }
-            Write-Host 'Discarding a Zig archive that does not match its checksum'
-            Remove-Item -Force $archive
-          }
-          if ((Get-Date) -gt $deadline) { break }
-          Write-Host "Zig $pinned download attempt $attempt of $limit"
-          try {
-            Invoke-WebRequest "https://ziglang.org/download/$pinned/zig-x86_64-windows-$pinned.zip" -OutFile $archive -TimeoutSec 180
-          } catch {
-            Write-Host "Zig $pinned download attempt $attempt failed: $_"
-            Remove-Item -Force -ErrorAction SilentlyContinue $archive
+          $restored = & $zig version 2>$null
+          if ($LASTEXITCODE -eq 0 -and "$restored".Trim() -eq $pinned) {
+            Write-Host "Restored Zig $pinned from the shared cache at $toolchain"
+            exit 0
           }
         }
-        if (-not (Test-Path $archive)) { throw "Zig $pinned download failed after $limit attempts" }
-        $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($hash -ne $expected) { throw "Zig checksum mismatch: $hash" }
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $toolchain
+        New-Item -ItemType Directory -Force -Path (Split-Path $archive) | Out-Null
+        node tools/zig-download.mjs --version $pinned --target x86_64-windows --sha256 $expected --dest $archive --budget-seconds 240 --per-source-seconds 75
+        if ($LASTEXITCODE -ne 0) { throw "Zig $pinned download failed" }
         Expand-Archive -Path $archive -DestinationPath $env:RUNNER_TEMP -Force
         if (-not (Test-Path $zig)) { throw "Zig $pinned did not extract to $toolchain" }
         & $zig version
