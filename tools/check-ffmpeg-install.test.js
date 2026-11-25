@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { actionFile, checkFfmpegInstall, installFile, probeFile, readAction, readWorkflows } from './check-ffmpeg-install.mjs';
+import { actionFile, checkFfmpegInstall, installFile, probeFile, probeTestFile, readAction, readWorkflows } from './check-ffmpeg-install.mjs';
 
 const action = () => readAction();
 const probe = () => fs.readFileSync(probeFile, 'utf8');
@@ -145,4 +145,19 @@ test('a journey that pipes a program into a truncated pipeline fails', () => {
 test('the action reads its version through the shared process probe', () => {
   assert.match(fs.readFileSync(installFile, 'utf8'), /probe-native-version\.ps1/);
   assert.match(fs.readFileSync(actionFile, 'utf8'), /run: \.\/\.github\/actions\/install-ffmpeg\/install\.ps1/);
+});
+
+test('a probe test that leaves a deliberate failure as the step result fails', () => {
+  const broken = fs.readFileSync(probeTestFile, 'utf8').replace(/\nexit 0\s*$/, '\n');
+  assert.match(broken, /Write-Host 'The FFmpeg version probe/, 'the probe test moved; update this control');
+  assert.doesNotMatch(broken, /\nexit 0\s*$/, 'the explicit exit moved; update this control');
+  const problems = checkFfmpegInstall({}, action(), probe(), broken);
+  assert.match(problems.join('\n'), /does not end with an explicit exit code/);
+});
+
+test('a probe test that stops checking nonzero exits fails', () => {
+  const broken = fs.readFileSync(probeTestFile, 'utf8').replace(/ExitCode -ne 3/g, 'ExitCode -ne 0');
+  assert.doesNotMatch(broken, /ExitCode -ne 3/, 'the nonzero control moved; update this control');
+  const problems = checkFfmpegInstall({}, action(), probe(), broken);
+  assert.match(problems.join('\n'), /no longer proves a nonzero program exit is reported as nonzero/);
 });

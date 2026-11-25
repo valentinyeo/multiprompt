@@ -8,6 +8,7 @@ export const actionDirectory = path.join(root, '.github/actions/install-ffmpeg')
 export const actionFile = path.join(actionDirectory, 'action.yml');
 export const installFile = path.join(actionDirectory, 'install.ps1');
 export const probeFile = path.join(root, 'tools/probe-native-version.ps1');
+export const probeTestFile = path.join(root, 'tools/probe-native-version.test.ps1');
 export const actionUse = './.github/actions/install-ffmpeg';
 
 const directInstall = /(?:choco\s+install\s+ffmpeg\b|apt-get\s+[^\n]*install[^\n]*\bffmpeg\b|apt\s+install[^\n]*\bffmpeg\b|brew\s+install\s+ffmpeg\b|winget\s+install[^\n]*ffmpeg\b|scoop\s+install[^\n]*ffmpeg\b)/i;
@@ -116,6 +117,19 @@ export function probeProblems(source) {
   return problems;
 }
 
+export function probeTestProblems(source) {
+  const problems = [];
+  const lines = source.split(/\r?\n/).filter(line => line.trim().length > 0);
+  const last = lines.length ? lines[lines.length - 1].trim() : '';
+  if (!/^exit\s+\d+$/.test(last)) {
+    problems.push(`${probeTestFile}: does not end with an explicit exit code, so the nonzero exit of the programs it deliberately runs becomes the step result`);
+  }
+  if (!/ExitCode -ne 3/.test(source)) {
+    problems.push(`${probeTestFile}: no longer proves a nonzero program exit is reported as nonzero`);
+  }
+  return problems;
+}
+
 export function readWorkflows(directory = workflowsDirectory) {
   const files = {};
   for (const name of fs.readdirSync(directory).sort()) {
@@ -132,7 +146,7 @@ export function readAction() {
   };
 }
 
-export function checkFfmpegInstall(files, action = readAction(), probe = fs.readFileSync(probeFile, 'utf8')) {
+export function checkFfmpegInstall(files, action = readAction(), probe = fs.readFileSync(probeFile, 'utf8'), probeTest = fs.readFileSync(probeTestFile, 'utf8')) {
   const sources = { ...files, ...Object.fromEntries(Object.entries(action).map(([name, source]) => [`.github/actions/install-ffmpeg/${name}`, source])) };
   return [
     ...directInstalls(files),
@@ -140,6 +154,7 @@ export function checkFfmpegInstall(files, action = readAction(), probe = fs.read
     ...nativeFirstLineProblems(sources),
     ...actionProblems(action),
     ...probeProblems(probe),
+    ...probeTestProblems(probeTest),
   ];
 }
 
@@ -149,6 +164,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(problems.join('\n'));
     process.exitCode = 1;
   } else {
-    console.log('Every journey installs the pinned FFmpeg through the cached, retried action and reads its version from the real process');
+    console.log('Every journey installs the pinned FFmpeg through the cached, retried action, reads its version from the real process, and owns its own exit code');
   }
 }

@@ -28,3 +28,4 @@ Write-Host "The truncated pipeline reported '$naiveCode' for a program that exit
 if ($null -ne $naiveCode -and $naiveCode -eq 3) { throw 'The truncated pipeline now reports the real exit code; the install scripts no longer need this control' }
 
 Write-Host 'The FFmpeg version probe reports the real exit code, every line and the stderr of the program it runs'
+exit 0
