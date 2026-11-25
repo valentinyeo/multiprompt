@@ -35,12 +35,13 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-533 round 8 merges master `2d3eeee17b4fe6dd433b110577c42df91b96be9c` (`MUBO-528` idle chat worker). Every covered reader function is unchanged from that master and all other covered files match it. The model, decisions, bounds and probes remain unchanged. Hashes describe the merged source; hosted CI must supply the execution proof.
+
 MUBO-533 round 5 merges master `8474aabb7a55a11595ab33e008c32c00624ce1b5`. The reader contains both master’s fresh-start work and the existing room sweep. Every covered reader function is unchanged from that master; all other covered files match master. The model, decisions, bounds and probes remain unchanged. The room creation/name fix changes only files outside these coverage maps. Hashes describe the merged source; hosted CI must supply the execution proof.
 
-Last reviewed source/model sync commit is `f499f639f0bc66fd412de0ae66adced7335b58f3`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `2d3eeee17b4fe6dd433b110577c42df91b96be9c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-533 makes desktop rooms reliable. In `src/chat_history_reader.py` it adds `host_room_sweep` and `host_room_tick`, calls the tick once at the top of `host_loop`'s poll loop, adds a `room_features` list to the handshake reply in `host_handle_request` and adds the `--rooms` flag to `host_cli` status. All twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, as are the recorded provider events, probes, decisions and mutations, because a room sweep carries no turn end, no usage-limit text and moves no chat. After merging master `94f30f841fdff94eaf7ac8d6009d7a4ebc278b36`, those twelve functions are still byte-identical to that master tip. Only the reader's whole-file hash and the sync commit move, and the sync commit names the merge that carries the room source.
-
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
 SOFT-3097 changes only the reader's command reconstruction: `clean_command_markup` drops the mention wire note from `<command-args>` before `command_reply`. The covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions, the recorded provider events, the probes and the decision table are unchanged. Only the reader hash and the sync commit move.
@@ -68,6 +69,8 @@ MUBO-293 merges master `5baddb613`. The optional `workspace` and `group` strings
 MUBO-452 holds a queued message through a pending fresh start in `message_expire` and `message_worker`. `host_fresh_phase_wait` and `host_fresh_pending` read the host session state and are new; no covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` or `host_dispatch_switch` function calls them, so the model, bounds, decisions, probes and mutations are unchanged. Merging master `9db3f9b5a` carries MUBO-293's command rebuild and MUBO-135's once-only server reply row in the reader; both sit outside every covered switch function, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
+
+MUBO-528 makes `start_message_worker` ask the store whether a message is due before it forks, and hands its locked descriptor to the child so a poll during the child's startup reaches that lock. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |

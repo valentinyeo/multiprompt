@@ -39,7 +39,9 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-Last reviewed merged source/model sync commit is `f499f639f0bc66fd412de0ae66adced7335b58f3`.
+Last reviewed merged source/model sync commit is `2d3eeee17b4fe6dd433b110577c42df91b96be9c`.
+
+MUBO-533 round 8 merges master `2d3eeee17b4fe6dd433b110577c42df91b96be9c` (`MUBO-528` idle chat worker). `message_store_transaction`, `message_poll`, `message_poll_locked`, `IGSH_1266_SharedMessageHostTest` and every other covered file match that master; the room sweep still writes only the room store. The model, decisions, bounds and probes remain unchanged. Only the reader whole-file hash and the sync commit move. Hosted CI must rerun the full self-test and native replay.
 
 MUBO-533 round 5 merges master `8474aabb7a55a11595ab33e008c32c00624ce1b5`. The reader contains both master’s fresh-start work and the existing room sweep. Every covered reader function is unchanged from that master; all other covered files match master. The model, decisions, bounds and probes remain unchanged. The room creation/name fix changes only files outside these coverage maps. Hashes describe the merged source; hosted CI must supply the execution proof.
 
@@ -112,6 +114,8 @@ MUBO-135 keeps one row for a server chat reply. A repeated hax assistant record 
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns; a hosted hax chat still answers from the host history only. `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged, so only the reader and reader-test hashes move, on top of master 158ebc74.
 
 MUBO-57 moves the agent feedback board to 13734 and adds its queue cutoff and description shape cases. `tools/multibot-feedback-test.py` is covered here only as the import dependency of `tools/chat-history-reader-test.py`, and its module-level code is still constants and function definitions, so the synthetic transcript, temporary home and terminal-send stand-in the reader test loads are the same. The edited cases send wishes to a board; none of them touch the echo, outbox, send, connector or pending-row path, and `src/chat_echo.zig`, `src/chat_send.zig`, `src/chat_render.zig`, `src/chat_history_reader.py`, `src/app_state.zig`, `src/chat_connectors/claude.py`, `tools/chat-history-reader-test.py`, the native probes, `decisions.json`, the bounds, the properties and both planted mutations are unchanged. Only that test file's whole-file hash and the sync commit move. Merging master `b4f6f6a22`, which carries the sidebar split, the mention delivery change and the offline chat identity, keeps master's reviewed hash for every other covered file, so the record names sync commit `b4f6f6a22`.
+
+MUBO-528 makes `start_message_worker` ask the store whether a message is due before it forks, and hands its locked descriptor to the child, so a poll that finds no queued work starts nothing and a poll during the child's startup reaches the lock. That sits beside `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector apply path, native probes and `decisions.json`, all unchanged. The delivery behaviour the model covers is the same; only the reader and reader-test whole-file hashes and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |
