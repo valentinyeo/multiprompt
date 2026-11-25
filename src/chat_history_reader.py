@@ -2589,11 +2589,43 @@ def live_state_sync(db, provider, sid):
     return after
 
 
+def message_store_ro(path=None):
+    target = message_store_path() if path is None else path
+    return sqlite3.connect(target.as_uri() + '?mode=ro', uri=True, timeout=2, isolation_level=None)
+
+
+def live_snapshot_read(db, provider, sid):
+    db.execute('BEGIN')
+    try:
+        names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('live_state','live_cursors','message_chats','message_events')")}
+        if not {'message_chats', 'message_events'} <= names:
+            return dict(live_snapshot=dict(seq=0, events=[], requests=[]), events=[], next_after=0)
+        if not {'live_state', 'live_cursors'} <= names:
+            return None
+        head = db.execute('SELECT seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+        saved = db.execute('SELECT seq FROM live_cursors WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+        if saved is None or (head is not None and saved[0] < head[0]):
+            return None
+        after = saved[0]
+        events = [json.loads(body) for (body,) in db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot NOT LIKE 'request:%' ORDER BY seq, slot LIKE '%:start' DESC", (provider, sid))]
+        requests = [json.loads(body) for (body,) in db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'request:%' ORDER BY seq", (provider, sid))]
+        return dict(live_snapshot=dict(seq=after, events=events, requests=requests), events=[], next_after=after)
+    finally:
+        db.execute('ROLLBACK')
+
+
 def live_snapshot(provider, sid):
     from contextlib import closing
     path = message_store_path()
     if not path.is_file():
         return dict(live_snapshot=dict(seq=0, events=[], requests=[]), events=[], next_after=0)
+    try:
+        with closing(message_store_ro(path)) as db:
+            cached = live_snapshot_read(db, provider, sid)
+        if cached is not None:
+            return cached
+    except sqlite3.Error:
+        pass
     with closing(sqlite3.connect(path, timeout=2)) as db, db:
         db.execute('BEGIN IMMEDIATE')
         live_state_schema(db)
@@ -2603,12 +2635,26 @@ def live_snapshot(provider, sid):
         return dict(live_snapshot=dict(seq=after, events=events, requests=requests), events=[], next_after=after)
 
 
+def message_events_trim_due(path, day):
+    from contextlib import closing
+    with closing(message_store_ro(path)) as db:
+        names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('message_chats','message_event_retention')")}
+        if len(names) != 2:
+            return True
+        return db.execute('SELECT 1 FROM message_chats c LEFT JOIN message_event_retention r ON r.provider=c.provider AND r.sid=c.sid WHERE r.day IS NULL OR r.day<? LIMIT 1', (day,)).fetchone() is not None
+
+
 def message_events_trim(now=None):
     from contextlib import closing
     path = message_store_path()
     if not path.is_file():
         return
     day = int(time.time() if now is None else now) // 86400
+    try:
+        if not message_events_trim_due(path, day):
+            return
+    except sqlite3.Error:
+        pass
     with closing(sqlite3.connect(path, timeout=2)) as db, db:
         db.execute('BEGIN IMMEDIATE')
         live_state_schema(db)
@@ -2648,7 +2694,7 @@ def message_events_page(provider, sid, after, snapshot=False):
     if not path.is_file():
         return dict(events=[], next_after=after)
     try:
-        with closing(sqlite3.connect(path, timeout=2)) as db:
+        with closing(message_store_ro(path)) as db:
             if snapshot:
                 db.execute('BEGIN')
                 if after < message_events_floor(db, provider, sid):
@@ -8946,19 +8992,33 @@ def events_wake():
     libc = ctypes.CDLL(None, use_errno=True)
     libc.inotify_init1.argtypes = [ctypes.c_int]
     libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-    fd = libc.inotify_init1(os.O_CLOEXEC)
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
     if fd < 0:
         return None
     folder = message_store_path().parent
     try:
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if libc.inotify_add_watch(fd, os.fsencode(folder), 0x00000002 | 0x00000008 | 0x00000080 | 0x00000100) < 0:
+        if libc.inotify_add_watch(fd, os.fsencode(folder), 0x00000002 | 0x00000080 | 0x00000100) < 0:
             os.close(fd)
             return None
     except OSError:
         os.close(fd)
         return None
     return fd
+
+
+def inotify_store_changed(data, store_name):
+    import struct
+    offset = 0
+    while offset + 16 <= len(data):
+        _wd, mask, _cookie, length = struct.unpack_from('=iIII', data, offset)
+        offset += 16
+        if mask & 0x00004000:
+            return True
+        if data[offset:offset + length].split(b'\0', 1)[0] in (store_name, store_name + b'-wal'):
+            return True
+        offset += length
+    return False
 
 
 def events_subscription(query):
@@ -9004,6 +9064,7 @@ def serve_retire(interval=2.0):
 
 def serve_push(subscriptions, lock, wake):
     import selectors
+    store_name = os.fsencode(message_store_path().name)
     next_trim = 0
     with selectors.DefaultSelector() as selector:
         if wake is not None:
@@ -9015,13 +9076,22 @@ def serve_push(subscriptions, lock, wake):
                 except (OSError, ValueError, sqlite3.Error):
                     pass
                 next_trim = time.monotonic() + 60
+            changed = False
             if wake is None:
                 time.sleep(1.0)
             elif selector.select(timeout=60):
-                try:
-                    os.read(wake, 65536)
-                except OSError:
-                    return
+                while True:
+                    try:
+                        chunk = os.read(wake, 65536)
+                    except BlockingIOError:
+                        break
+                    except OSError:
+                        return
+                    if not chunk:
+                        return
+                    changed = changed or inotify_store_changed(chunk, store_name)
+                if not changed:
+                    continue
             with lock:
                 events_push(subscriptions)
 
