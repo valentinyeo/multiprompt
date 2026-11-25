@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -34,7 +34,7 @@ commands:
   workspace rename <old> <new>
   workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
-  workspace switch-ai <workspace> <claude|codex|pi> [--json]
+  workspace switch-ai <workspace> <claude|codex|antigravity> [--json] [--timeout SECONDS]
   group list
   group create <name>
   group rename <old> <new>
@@ -73,7 +73,7 @@ const REFUSALS = {
 
 function parse(argv) {
   const flags = { _: [] };
-  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to']);
+  const withValue = new Set(['kind', 'tmux', 'group', 'workspace', 'title', 'host', 'folder', 'provider', 'model', 'face', 'color', 'photo', 'move-to', 'timeout']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
@@ -480,74 +480,146 @@ async function archiveSession(ctx, flags, archived) {
   else ctx.out(`${word} ${target.title}`);
 }
 
-const SWITCH_AI_TARGETS = new Set(['claude', 'codex', 'pi']);
+const SWITCH_AI_TARGETS = new Set(['claude', 'codex', 'antigravity']);
+const SWITCH_AI_CHAT_PROVIDERS = new Set(['claude', 'codex', 'pi', 'antigravity']);
+const SWITCH_AI_POLL_MS = 2000;
+const SWITCH_AI_TIMEOUT_S = 120;
 
-async function workspaceSwitchAi(ctx, flags) {
-  if (flags._.length !== 2) throw new Failure('workspace switch-ai needs <workspace> <claude|codex|pi>');
-  const wsInput = workspaceName(flags._[0]);
-  const target = clean(String(flags._[1] || '')).toLowerCase();
-  if (!SWITCH_AI_TARGETS.has(target)) throw new Failure('target AI must be claude, codex or pi');
-  const listing = zsbCall(ctx, ['workspace-list']);
-  const workspace = (listing.workspaces || []).find(item => item.name === wsInput);
-  if (!workspace) throw new Failure(`no workspace named '${wsInput}'`);
+function switchAiLockPath(ctx) {
+  const home = ctx.env.HOME || '';
+  if (!home) throw new Failure('HOME is required');
+  return join(home, '.local/state/multiprompt/switch-ai.lock');
+}
+
+function takeSwitchAiLock(ctx) {
+  const lockPath = switchAiLockPath(ctx);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
+      return lockPath;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const age = Date.now() - statSync(lockPath).mtimeMs;
+      if (attempt === 0 && age > 30 * 60 * 1000) {
+        try { unlinkSync(lockPath); } catch {}
+        continue;
+      }
+      throw new Failure('another workspace switch-ai is already running');
+    }
+  }
+  throw new Failure('another workspace switch-ai is already running');
+}
+
+function releaseSwitchAiLock(lockPath) {
+  if (!lockPath) return;
+  try { unlinkSync(lockPath); } catch {}
+}
+
+function switchAiChats(workspace) {
   const tabs = [
     ...(workspace.tabs || []),
     ...(workspace.groups || []).flatMap(group => group.tabs || [])
   ];
-  const isChatTab = tab => tab.chat === true || (tab.chat !== false && typeof tab.provider === 'string' && tab.provider.length > 0);
-  const results = [];
-  let switched = 0;
-  let already = 0;
-  let busy = 0;
-  let failed = 0;
-  let ignored = 0;
-  for (const tab of tabs) {
-    if (!isChatTab(tab)) {
-      ignored += 1;
-      continue;
+  return tabs.filter(tab => tab.chat === true && SWITCH_AI_CHAT_PROVIDERS.has(String(tab.provider || '').toLowerCase()));
+}
+
+function switchAiProvider(ctx, tabId) {
+  try {
+    const listing = zsbCall(ctx, ['workspace-list']);
+    for (const workspace of listing.workspaces || []) {
+      const tabs = [...(workspace.tabs || []), ...(workspace.groups || []).flatMap(group => group.tabs || [])];
+      const tab = tabs.find(item => item.id === tabId);
+      if (tab && typeof tab.provider === 'string') return tab.provider.toLowerCase();
     }
-    const title = tab.title || tab.tmux || String(tab.id);
-    const current = typeof tab.provider === 'string' ? tab.provider.toLowerCase() : null;
-    if (current === target) {
-      already += 1;
-      results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'already', provider: target });
-      continue;
-    }
+  } catch { return null; }
+  return null;
+}
+
+async function switchOneChat(ctx, tab, target, waitMs) {
+  const title = tab.title || tab.tmux || String(tab.id);
+  const started = Date.now();
+  let listed = String(tab.provider || '').toLowerCase();
+  while (true) {
+    const provider = switchAiProvider(ctx, tab.id) || listed;
+    listed = provider;
+    if (provider === target) return { tab: tab.id, title, outcome: 'already', provider: target };
+    let reply;
     try {
-      const reply = zsbCall(ctx, ['session-switch-ai', '--tab', String(tab.id), '--to', target]);
-      if (reply.status === 'switched') {
-        switched += 1;
-        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'switched', from: current, provider: reply.provider || target, sid: reply.sid || null });
-      } else if (reply.status === 'already') {
-        already += 1;
-        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'already', provider: reply.provider || target });
-      } else if (reply.status === 'busy') {
-        busy += 1;
-        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'busy', reason: reply.reason || 'Wait for the current reply first', provider: reply.provider || current });
-      } else {
-        failed += 1;
-        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'failed', reason: reply.reason || reply.message || reply.error || 'switch failed', provider: reply.provider || current });
-      }
+      reply = zsbCall(ctx, ['session-switch-ai', '--tab', String(tab.id), '--to', target]);
     } catch (error) {
-      failed += 1;
-      results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'failed', reason: error.message || 'switch failed', provider: current });
+      return { tab: tab.id, title, outcome: 'failed', reason: error.message || 'switch failed', provider };
     }
-  }
-  const ok = failed === 0;
-  if (flags.json) {
-    ctx.out(JSON.stringify({ ok, verb: 'workspace switch-ai', workspace: workspace.name, target, switched, already, busy, failed, ignored, chats: results }));
-  } else if (results.length === 0) {
-    ctx.out(`no chats in workspace ${workspace.name}`);
-  } else {
-    for (const item of results) {
-      if (item.outcome === 'switched') ctx.out(`switched ${item.title} -> ${item.provider}`);
-      else if (item.outcome === 'already') ctx.out(`already ${item.title} (${item.provider})`);
-      else if (item.outcome === 'busy') ctx.out(`skipped ${item.title} (busy: ${item.reason})`);
-      else ctx.out(`failed ${item.title}: ${item.reason}`);
+    if (reply.status === 'switched') return { tab: tab.id, title, outcome: 'switched', from: provider, provider: reply.provider || target, sid: reply.sid || null };
+    if (reply.status === 'already') return { tab: tab.id, title, outcome: 'already', provider: reply.provider || target };
+    if (reply.status === 'refused') return { tab: tab.id, title, outcome: 'refused', reason: reply.reason || 'the server refused this switch', provider };
+    if (reply.status === 'busy') {
+      const reason = reply.message || 'Wait for the current reply first';
+      if (Date.now() - started >= waitMs) return { tab: tab.id, title, outcome: 'busy', reason, provider };
+      await ctx.delay(Math.min(SWITCH_AI_POLL_MS, Math.max(0, waitMs - (Date.now() - started))));
+      continue;
     }
-    ctx.out(`workspace ${workspace.name}: ${switched} switched, ${already} already, ${busy} busy, ${failed} failed`);
+    return { tab: tab.id, title, outcome: 'failed', reason: reply.reason || reply.message || reply.error || 'switch failed', provider };
   }
-  return ok ? 0 : 1;
+}
+
+async function workspaceSwitchAi(ctx, flags) {
+  if (flags._.length !== 2) throw new Failure('workspace switch-ai needs <workspace> <claude|codex|antigravity>');
+  const wsInput = workspaceName(flags._[0]);
+  const target = clean(String(flags._[1] || '')).toLowerCase();
+  if (!SWITCH_AI_TARGETS.has(target)) throw new Failure('target AI must be claude, codex or antigravity');
+  let waitMs = SWITCH_AI_TIMEOUT_S * 1000;
+  if (flags.timeout !== undefined) {
+    const seconds = Number(flags.timeout);
+    if (!Number.isInteger(seconds) || seconds < 0) throw new Failure('--timeout must be whole seconds');
+    waitMs = seconds * 1000;
+  }
+  const lock = takeSwitchAiLock(ctx);
+  try {
+    const listing = zsbCall(ctx, ['workspace-list']);
+    const workspace = (listing.workspaces || []).find(item => item.name === wsInput);
+    if (!workspace) throw new Failure(`no workspace named '${wsInput}'`);
+    const chats = switchAiChats(workspace);
+    const already = chats.filter(tab => String(tab.provider || '').toLowerCase() === target).length;
+    const pending = chats.filter(tab => String(tab.provider || '').toLowerCase() !== target);
+    const results = [];
+    const totals = { switched: 0, already, busy: 0, refused: 0, failed: 0 };
+    if (chats.length === 0) {
+      if (!flags.json) ctx.out(`no agent chats in workspace ${workspace.name}`);
+    } else if (!flags.json) {
+      const again = already ? ` (${already} already there)` : '';
+      ctx.out(`switching ${pending.length} of ${chats.length} chats in ${workspace.name} to ${target}${again}, one at a time`);
+    }
+    for (const tab of chats) {
+      if (String(tab.provider || '').toLowerCase() === target) {
+        results.push({ tab: tab.id, title: tab.title || tab.tmux || String(tab.id), outcome: 'already', provider: target });
+        continue;
+      }
+      const result = await switchOneChat(ctx, tab, target, waitMs);
+      if (result.outcome === 'switched') totals.switched += 1;
+      else if (result.outcome === 'already') totals.already += 1;
+      else if (result.outcome === 'busy') totals.busy += 1;
+      else if (result.outcome === 'refused') totals.refused += 1;
+      else totals.failed += 1;
+      results.push(result);
+      if (!flags.json) {
+        if (result.outcome === 'switched') ctx.out(`switched ${result.title} -> ${result.provider}`);
+        else if (result.outcome === 'already') ctx.out(`already ${result.title} (${result.provider})`);
+        else if (result.outcome === 'busy') ctx.out(`still busy ${result.title}: ${result.reason}`);
+        else if (result.outcome === 'refused') ctx.out(`refused ${result.title}: ${result.reason}`);
+        else ctx.out(`failed ${result.title}: ${result.reason}`);
+      }
+    }
+    const ok = totals.failed === 0 && totals.refused === 0;
+    if (flags.json) {
+      ctx.out(JSON.stringify({ ok, verb: 'workspace switch-ai', workspace: workspace.name, target, total: chats.length, to_switch: pending.length, ...totals, chats: results }));
+    } else if (chats.length > 0) {
+      ctx.out(`workspace ${workspace.name}: ${totals.switched} switched, ${totals.already} already, ${totals.busy} busy, ${totals.refused} refused, ${totals.failed} failed`);
+    }
+    return ok ? 0 : 1;
+  } finally {
+    releaseSwitchAiLock(lock);
+  }
 }
 
 async function waitSession(ctx, flags) {
@@ -1122,7 +1194,7 @@ export async function run(argv, overrides = {}) {
     }
     if (command === 'workspace' && rest[0] === 'switch-ai') {
       const flags = parse(rest.slice(1));
-      return await workspaceSwitchAi({ env, out, err }, flags);
+      return await workspaceSwitchAi({ env, out, err, ownerPath: overrides.ownerPath, delay: overrides.delay || (ms => new Promise(done => setTimeout(done, ms))) }, flags);
     }
     if (command === 'move') {
       const flags = parse(rest);

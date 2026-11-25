@@ -81,9 +81,10 @@ print_help() {
         echo '  Puts one background terminal tab in Waiting until it needs attention, and changes nothing when it already waits.'
         echo '  The active tab is refused with active_tab; an unknown tab with unknown_tab.'
         ;;
-      session-switch-ai) echo 'usage: zsb session-switch-ai --tab <id> --to <claude|codex|pi>'
+      session-switch-ai) echo 'usage: zsb session-switch-ai --tab <id> --to <claude|codex|antigravity>'
         echo '  Switches one live chat tab to another AI through the host handover, keeping its name, picture, place and history.'
         echo '  Already on target returns status=already; a busy chat returns status=busy without interrupting it.'
+        echo '  A target the host does not support yet returns status=refused with the host reason.'
         ;;
       session-move) echo 'usage: zsb session-move --tab <id> [--workspace <name>] [--group <name> | --ungrouped]'
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
@@ -190,7 +191,7 @@ Commands and flags:
                                     Reopen one archived session as a tab
   session-wait --tab ID             Put a background tab in Waiting until it needs attention
   session-switch-ai --tab ID --to AI
-                                    Switch one live chat tab to claude, codex or pi
+                                    Switch one live chat tab to claude, codex or antigravity
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -659,8 +660,8 @@ elif args[0] in {"session-close", "session-wait", "session-switch-ai", "session-
             raise ValueError()
     except ValueError:
         fail("bad_args", f"{args[0]} --tab must be a positive tab id")
-    if args[0] == "session-switch-ai" and values["--to"] not in {"claude", "codex", "pi"}:
-        fail("bad_args", "session-switch-ai --to must be claude, codex or pi")
+    if args[0] == "session-switch-ai" and values["--to"] not in {"claude", "codex", "antigravity"}:
+        fail("bad_args", "session-switch-ai --to must be claude, codex or antigravity")
     if args[0] == "session-move":
         if not (values.keys() & {"--workspace", "--group"}) and not ungrouped:
             fail("bad_args", "session-move needs --workspace, --group or --ungrouped")

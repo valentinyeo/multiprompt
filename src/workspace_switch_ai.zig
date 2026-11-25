@@ -5,13 +5,23 @@ const command_palette = @import("command_palette.zig");
 const chat_session = @import("chat_session.zig");
 const SessionIdentity = @import("session_identity.zig").Session;
 
+pub const claude_agent: u8 = 1;
+pub const codex_agent: u8 = 2;
+pub const pi_agent: u8 = 3;
+pub const antigravity_agent: u8 = 8;
+
+pub const busy_wait_ms: u32 = 2000;
+pub const max_busy_attempts: u8 = 61;
+
 pub const SwitchOutcome = union(enum) {
     switched: struct {
         agent: u8,
         sid: [40]u8 = std.mem.zeroes([40]u8),
         sid_len: u8 = 0,
     },
+    already: u8,
     busy,
+    refused: []const u8,
     failed: []const u8,
 };
 
@@ -30,7 +40,7 @@ pub const WorkspaceSwitchPlan = struct {
     total_chats: u32 = 0,
     already: u32 = 0,
     count: u32 = 0,
-    identities: [app_state.MAX_SHELLS]SessionIdentity = undefined,
+    tabs: [app_state.MAX_SHELLS]u32 = undefined,
 };
 
 const SwitchEnvelope = struct {
@@ -66,42 +76,53 @@ const WorkspaceSwitchJob = struct {
     total_chats: u32,
     already: u32,
     count: u32,
-    identities: [app_state.MAX_SHELLS]SessionIdentity = undefined,
+    tabs: [app_state.MAX_SHELLS]u32 = undefined,
 };
 
+var g_running = std.atomic.Value(bool).init(false);
+
 pub fn targetAgentId(name: []const u8) ?u8 {
-    if (std.mem.eql(u8, name, "claude")) return 1;
-    if (std.mem.eql(u8, name, "codex")) return 2;
-    if (std.mem.eql(u8, name, "pi")) return 3;
+    if (std.mem.eql(u8, name, "claude")) return claude_agent;
+    if (std.mem.eql(u8, name, "codex")) return codex_agent;
+    if (std.mem.eql(u8, name, "antigravity")) return antigravity_agent;
     return null;
 }
 
 pub fn targetName(target: u8) []const u8 {
     return switch (target) {
-        1 => "claude",
-        2 => "codex",
-        3 => "pi",
+        claude_agent => "claude",
+        codex_agent => "codex",
+        antigravity_agent => "antigravity",
         else => "",
     };
 }
 
 pub fn targetDisplayName(target: u8) []const u8 {
     return switch (target) {
-        1 => "Claude",
-        2 => "Codex",
-        3 => "Pi",
+        claude_agent => "Claude",
+        codex_agent => "Codex",
+        antigravity_agent => "Antigravity",
         else => "",
     };
 }
 
+pub fn isTarget(target: u8) bool {
+    return switch (target) {
+        claude_agent, codex_agent, antigravity_agent => true,
+        else => false,
+    };
+}
+
+pub fn isAgentChat(agent: u8) bool {
+    return agent == claude_agent or agent == codex_agent or agent == pi_agent or agent == antigravity_agent;
+}
+
 pub fn agentProviderName(agent: u8) ?[]const u8 {
     return switch (agent) {
-        1 => "claude",
-        2 => "codex",
-        3 => "pi",
-        5 => "hax",
-        6 => "grok",
-        7 => "cursor",
+        claude_agent => "claude",
+        codex_agent => "codex",
+        pi_agent => "pi",
+        antigravity_agent => "antigravity",
         else => null,
     };
 }
@@ -111,14 +132,14 @@ pub fn isLiveChatShell(shell: *const app_state.Shell) bool {
 }
 
 pub fn isSwitchableChatShell(shell: *const app_state.Shell) bool {
-    return isLiveChatShell(shell) and shell.ai_agent >= 1 and shell.ai_agent <= 3;
+    return isLiveChatShell(shell) and isAgentChat(shell.ai_agent);
 }
 
 pub fn paletteTargetFor(row: usize) ?u8 {
     return switch (row) {
-        app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET => 1,
-        app_state.SEARCH_WS_SWITCH_CODEX_OFFSET => 2,
-        app_state.SEARCH_WS_SWITCH_PI_OFFSET => 3,
+        app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET => claude_agent,
+        app_state.SEARCH_WS_SWITCH_CODEX_OFFSET => codex_agent,
+        app_state.SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET => antigravity_agent,
         else => null,
     };
 }
@@ -127,7 +148,7 @@ pub fn paletteLabel(row: usize) []const u8 {
     return switch (row) {
         app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET => "Workspace: Switch every chat to Claude",
         app_state.SEARCH_WS_SWITCH_CODEX_OFFSET => "Workspace: Switch every chat to Codex",
-        app_state.SEARCH_WS_SWITCH_PI_OFFSET => "Workspace: Switch every chat to Pi",
+        app_state.SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET => "Workspace: Switch every chat to Antigravity",
         else => "",
     };
 }
@@ -178,6 +199,7 @@ pub fn parseSwitchReply(allocator: std.mem.Allocator, body: []const u8) SwitchOu
         return .{ .switched = .{ .agent = agent, .sid = sid, .sid_len = @intCast(fields.sid.len) } };
     }
     if (std.mem.eql(u8, fields.status, "busy")) return .busy;
+    if (std.mem.eql(u8, fields.status, "refused")) return .{ .refused = fields.reason };
     return .{ .failed = switchFailureReason(fields.reason) };
 }
 
@@ -209,11 +231,20 @@ pub fn snapshotTabOnUi(tab: u32, target: u8) SnapshotResult {
     return .{ .ready = .{ .identity = identity, .current_agent = shell.ai_agent } };
 }
 
+fn applyAgentOnUi(shell: *app_state.Shell, agent: u8, sid: []const u8) bool {
+    if (!isAgentChat(agent) or !switchSidOk(sid) or sid.len > shell.claude_sid.len) return false;
+    shell.ai_agent = agent;
+    @memset(shell.claude_sid[0..], 0);
+    @memcpy(shell.claude_sid[0..sid.len], sid);
+    shell.claude_sid_len = @intCast(sid.len);
+    shell.hook_capable = true;
+    return true;
+}
+
 pub fn adoptChatOnUiWithPersist(shell_id: u32, agent: u8, sid: []const u8, comptime persist_fn: fn () void) bool {
     const index = @import("inbox.zig").findShellById(shell_id) orelse return false;
     const shell = &app_state.shells[index];
-    if (!command_palette.adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, agent, sid)) return false;
-    shell.hook_capable = true;
+    if (!applyAgentOnUi(shell, agent, sid)) return false;
     persist_fn();
     if (app_state.g_chat_active and index == app_state.active_shell) chat_session.chatFileRequest(chat_session.chatFileIdentityForShell(index));
     return true;
@@ -288,18 +319,6 @@ pub fn adoptTabFromWorker(tab: u32, agent: u8, sid: []const u8) bool {
     return adopted;
 }
 
-fn postAsyncAdopt(tab: u32, agent: u8, sid: []const u8) bool {
-    if (!switchSidOk(sid)) return false;
-    const task = std.heap.page_allocator.create(UiTask) catch return false;
-    task.* = .{ .kind = .adopt, .tab = tab, .agent = agent, .sid_len = @intCast(sid.len) };
-    @memcpy(task.sid[0..sid.len], sid);
-    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_WORKSPACE_SWITCH_AI, 0, @bitCast(@intFromPtr(task))) == 0) {
-        std.heap.page_allocator.destroy(task);
-        return false;
-    }
-    return true;
-}
-
 fn postNotice(text: []const u8) void {
     const a = std.heap.page_allocator;
     const notice = a.dupeZ(u8, text) catch return;
@@ -308,7 +327,7 @@ fn postNotice(text: []const u8) void {
 
 pub fn planWorkspaceSwitch(workspace: u8, target: u8) WorkspaceSwitchPlan {
     var plan: WorkspaceSwitchPlan = .{};
-    if (target < 1 or target > 3) return plan;
+    if (!isTarget(target)) return plan;
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.workspace != workspace) continue;
@@ -319,36 +338,46 @@ pub fn planWorkspaceSwitch(workspace: u8, target: u8) WorkspaceSwitchPlan {
             continue;
         }
         const key = chat_session.chatFileIdentityForShell(@intCast(i));
-        const identity = key.checked() orelse continue;
-        if (key.sid[0] == 0 or key.tmux[0] == 0) continue;
-        plan.identities[plan.count] = identity;
+        if (key.checked() == null or key.sid[0] == 0 or key.tmux[0] == 0) continue;
+        plan.tabs[plan.count] = shell.shell_id;
         plan.count += 1;
     }
     return plan;
 }
 
-pub fn formatSummary(buf: []u8, target: u8, total_chats: u32, switched: u32, already: u32, busy: u32, failed: u32) []const u8 {
+pub fn formatStartNotice(buf: []u8, workspace: u8, target: u8, count: u32, already: u32) []const u8 {
+    var name_buf: [32]u8 = undefined;
+    const name = @import("workspaces.zig").workspaceDisplayName(workspace, &name_buf);
+    const ai = targetDisplayName(target);
+    if (already == 0) {
+        return std.fmt.bufPrint(buf, "Switching {d} {s} in {s} to {s}, one at a time", .{ count, if (count == 1) "chat" else "chats", name, ai }) catch "Switching chats one at a time";
+    }
+    return std.fmt.bufPrint(buf, "Switching {d} {s} in {s} to {s} ({d} already there), one at a time", .{ count, if (count == 1) "chat" else "chats", name, ai, already }) catch "Switching chats one at a time";
+}
+
+pub fn formatSummary(buf: []u8, target: u8, total_chats: u32, switched: u32, already: u32, busy: u32, refused: u32, failed: u32) []const u8 {
     const ai = targetDisplayName(target);
     if (total_chats == 0) return "No live chats in this workspace";
-    if (switched == 0 and busy == 0 and failed == 0) {
+    if (switched == 0 and busy == 0 and refused == 0 and failed == 0) {
         return std.fmt.bufPrint(buf, "Every chat in this workspace is already on {s}", .{ai}) catch "Already on target AI";
     }
-    if (switched > 0 and already == 0 and busy == 0 and failed == 0) {
+    if (switched > 0 and already == 0 and busy == 0 and refused == 0 and failed == 0) {
         return std.fmt.bufPrint(buf, "Switched {d} {s} to {s}", .{ switched, if (switched == 1) "chat" else "chats", ai }) catch "Workspace chats switched";
     }
     var pos: usize = 0;
     const head = if (switched > 0)
         std.fmt.bufPrint(buf, "Switched {d} to {s} (", .{ switched, ai }) catch return "Workspace switch finished"
-    else if (busy > 0 and failed == 0)
+    else if (busy > 0 and refused == 0 and failed == 0)
         std.fmt.bufPrint(buf, "Wait for the current reply first (", .{}) catch return "Wait for the current reply first"
     else
         std.fmt.bufPrint(buf, "Workspace switch to {s}: ", .{ai}) catch return "Workspace switch failed";
     pos = head.len;
-    const parens = switched > 0 or (busy > 0 and failed == 0);
+    const parens = switched > 0 or (busy > 0 and refused == 0 and failed == 0);
     var first = true;
     const parts = [_]struct { count: u32, label: []const u8 }{
         .{ .count = already, .label = "already" },
         .{ .count = busy, .label = "busy" },
+        .{ .count = refused, .label = "refused" },
         .{ .count = failed, .label = "failed" },
     };
     for (parts) |part| {
@@ -364,38 +393,78 @@ pub fn formatSummary(buf: []u8, target: u8, total_chats: u32, switched: u32, alr
     return buf[0..pos];
 }
 
+pub fn switchOneTab(tab: u32, target: u8, wait_event: win32.HANDLE) SwitchOutcome {
+    var attempt: u8 = 0;
+    while (true) : (attempt += 1) {
+        switch (snapshotTabFromWorker(tab, target)) {
+            .already => |agent| return .{ .already = agent },
+            .unknown_tab => return .{ .failed = "this tab is gone" },
+            .not_chat_tab => return .{ .failed = "this tab is not a live chat" },
+            .failed => |code| return .{ .failed = code },
+            .ready => |info| switch (switchChatLive(info.identity, target)) {
+                .switched => |done| return .{ .switched = done },
+                .already => |agent| return .{ .already = agent },
+                .refused => |reason| return .{ .refused = reason },
+                .failed => |reason| return .{ .failed = reason },
+                .busy => {
+                    if (attempt + 1 >= max_busy_attempts) return .busy;
+                    if (wait_event != null) _ = win32.WaitForSingleObject(wait_event, busy_wait_ms);
+                },
+            },
+        }
+    }
+}
+
 fn workspaceSwitchThread(job: *WorkspaceSwitchJob) void {
     defer std.heap.page_allocator.destroy(job);
+    defer g_running.store(false, .release);
+    const wait_event = win32.CreateEventW(null, 1, 0, null);
+    defer {
+        if (wait_event != null) _ = win32.CloseHandle(wait_event);
+    }
     var switched: u32 = 0;
     var busy: u32 = 0;
+    var refused: u32 = 0;
     var failed: u32 = 0;
-    for (job.identities[0..job.count]) |identity| {
-        switch (switchChatLive(identity, job.target)) {
-            .switched => |result| {
-                _ = postAsyncAdopt(identity.owner, result.agent, result.sid[0..result.sid_len]);
-                switched += 1;
+    for (job.tabs[0..job.count]) |tab| {
+        switch (switchOneTab(tab, job.target, wait_event)) {
+            .switched => |done| {
+                if (adoptTabFromWorker(tab, done.agent, done.sid[0..done.sid_len])) switched += 1 else failed += 1;
             },
+            .already => {},
             .busy => busy += 1,
+            .refused => refused += 1,
             .failed => failed += 1,
         }
     }
-    var notice_buf: [160]u8 = undefined;
-    postNotice(formatSummary(&notice_buf, job.target, job.total_chats, switched, job.already, busy, failed));
+    var notice_buf: [192]u8 = undefined;
+    postNotice(formatSummary(&notice_buf, job.target, job.total_chats, switched, job.already, busy, refused, failed));
 }
 
 pub fn startWorkspaceSwitch(workspace: u8, target: u8) bool {
-    if (target < 1 or target > 3) return false;
-    const plan = planWorkspaceSwitch(workspace, target);
-    if (plan.count == 0) {
-        var notice_buf: [160]u8 = undefined;
-        postNotice(formatSummary(&notice_buf, target, plan.total_chats, 0, plan.already, 0, 0));
+    if (!isTarget(target)) return false;
+    if (g_running.swap(true, .acq_rel)) {
+        postNotice("Workspace switch is already running");
         return true;
     }
-    const job = std.heap.page_allocator.create(WorkspaceSwitchJob) catch return false;
+    const plan = planWorkspaceSwitch(workspace, target);
+    if (plan.count == 0) {
+        g_running.store(false, .release);
+        var notice_buf: [192]u8 = undefined;
+        postNotice(formatSummary(&notice_buf, target, plan.total_chats, 0, plan.already, 0, 0, 0));
+        return true;
+    }
+    var start_buf: [192]u8 = undefined;
+    postNotice(formatStartNotice(&start_buf, workspace, target, plan.count, plan.already));
+    const job = std.heap.page_allocator.create(WorkspaceSwitchJob) catch {
+        g_running.store(false, .release);
+        return false;
+    };
     job.* = .{ .target = target, .total_chats = plan.total_chats, .already = plan.already, .count = plan.count };
-    @memcpy(job.identities[0..plan.count], plan.identities[0..plan.count]);
+    @memcpy(job.tabs[0..plan.count], plan.tabs[0..plan.count]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, workspaceSwitchThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
+        g_running.store(false, .release);
         return false;
     };
     thread.detach();
@@ -429,7 +498,7 @@ fn makeTestLiveShell(id: u32, workspace: u8, agent: u8, tmux: []const u8, sid: [
     return shell;
 }
 
-test "MUBO-535 workspace switch plan selects only non-target live chats in the chosen workspace" {
+test "MUBO-535 workspace switch plan selects only non-target agent chats in the chosen workspace" {
     const saved_shells = try std.testing.allocator.dupe(app_state.Shell, app_state.shells[0..6]);
     defer {
         @memcpy(app_state.shells[0..saved_shells.len], saved_shells);
@@ -438,9 +507,9 @@ test "MUBO-535 workspace switch plan selects only non-target live chats in the c
     const saved_count = app_state.shell_count;
     defer app_state.shell_count = saved_count;
     app_state.shell_count = 6;
-    app_state.shells[0] = makeTestLiveShell(10, 1, 1, "live-a", "11111111-1111-4111-8111-111111111111");
-    app_state.shells[1] = makeTestLiveShell(11, 1, 2, "live-b", "22222222-2222-4222-8222-222222222222");
-    app_state.shells[2] = makeTestLiveShell(12, 1, 3, "live-c", "33333333-3333-4333-8333-333333333333");
+    app_state.shells[0] = makeTestLiveShell(10, 1, claude_agent, "live-a", "11111111-1111-4111-8111-111111111111");
+    app_state.shells[1] = makeTestLiveShell(11, 1, codex_agent, "live-b", "22222222-2222-4222-8222-222222222222");
+    app_state.shells[2] = makeTestLiveShell(12, 1, pi_agent, "live-c", "33333333-3333-4333-8333-333333333333");
     app_state.shells[3] = app_state.empty_shell;
     app_state.shells[3].shell_id = 13;
     app_state.shells[3].workspace = 1;
@@ -451,23 +520,25 @@ test "MUBO-535 workspace switch plan selects only non-target live chats in the c
     app_state.shells[4].shell_id = 14;
     app_state.shells[4].workspace = 1;
     app_state.shells[4].kind = .cmd;
-    app_state.shells[5] = makeTestLiveShell(15, 2, 1, "live-other", "55555555-5555-4555-8555-555555555555");
+    app_state.shells[5] = makeTestLiveShell(15, 2, claude_agent, "live-other", "55555555-5555-4555-8555-555555555555");
 
-    const plan = planWorkspaceSwitch(1, 2);
+    const plan = planWorkspaceSwitch(1, antigravity_agent);
     try std.testing.expectEqual(@as(u32, 3), plan.total_chats);
-    try std.testing.expectEqual(@as(u32, 1), plan.already);
-    try std.testing.expectEqual(@as(u32, 2), plan.count);
-    try std.testing.expectEqual(@as(u32, 10), plan.identities[0].owner);
-    try std.testing.expectEqualStrings("claude", plan.identities[0].provider());
-    try std.testing.expectEqual(@as(u32, 12), plan.identities[1].owner);
-    try std.testing.expectEqualStrings("pi", plan.identities[1].provider());
+    try std.testing.expectEqual(@as(u32, 0), plan.already);
+    try std.testing.expectEqual(@as(u32, 3), plan.count);
+    try std.testing.expectEqual(@as(u32, 10), plan.tabs[0]);
+    try std.testing.expectEqual(@as(u32, 12), plan.tabs[2]);
 
-    const empty_plan = planWorkspaceSwitch(3, 2);
+    const codex_plan = planWorkspaceSwitch(1, codex_agent);
+    try std.testing.expectEqual(@as(u32, 1), codex_plan.already);
+    try std.testing.expectEqual(@as(u32, 2), codex_plan.count);
+
+    const empty_plan = planWorkspaceSwitch(3, codex_agent);
     try std.testing.expectEqual(@as(u32, 0), empty_plan.total_chats);
     try std.testing.expectEqual(@as(u32, 0), empty_plan.count);
 }
 
-test "MUBO-535 switch transport uses switch_ai protocol and classifies switched busy and failed replies" {
+test "MUBO-535 switch transport uses the switch_ai protocol and classifies switched already busy refused and failed replies" {
     const Fake = struct {
         var last_request: [512]u8 = undefined;
         var last_len: usize = 0;
@@ -486,36 +557,84 @@ test "MUBO-535 switch transport uses switch_ai protocol and classifies switched 
     identity.owner = 42;
 
     Fake.ok = true;
-    Fake.reply = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}";
-    switch (switchChatWithTransport(identity, 2, Fake.send)) {
+    Fake.reply = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"antigravity\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}}";
+    switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
         .switched => |done| {
-            try std.testing.expectEqual(@as(u8, 2), done.agent);
+            try std.testing.expectEqual(antigravity_agent, done.agent);
             try std.testing.expectEqualStrings("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", done.sid[0..done.sid_len]);
         },
         else => return error.TestUnexpectedResult,
     }
     const req = Fake.last_request[0..Fake.last_len];
-    try std.testing.expectEqualStrings("{\"op\":\"switch_ai\",\"id\":42,\"host\":0,\"provider\":\"claude\",\"sid\":\"11111111-1111-4111-8111-111111111111\",\"to\":\"codex\"}", req);
+    try std.testing.expectEqualStrings("{\"op\":\"switch_ai\",\"id\":42,\"host\":0,\"provider\":\"claude\",\"sid\":\"11111111-1111-4111-8111-111111111111\",\"to\":\"antigravity\"}", req);
 
     Fake.reply = "{\"status\":\"busy\",\"reason\":\"chat_busy\"}";
-    try std.testing.expect(switchChatWithTransport(identity, 2, Fake.send) == .busy);
+    try std.testing.expect(std.meta.activeTag(switchChatWithTransport(identity, antigravity_agent, Fake.send)) == .busy);
+
+    Fake.reply = "{\"status\":\"refused\",\"reason\":\"unsupported_provider\"}";
+    switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
+        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason),
+        else => return error.TestUnexpectedResult,
+    }
 
     Fake.reply = "{\"status\":\"error\",\"reason\":\"switch_start_failed\"}";
-    switch (switchChatWithTransport(identity, 2, Fake.send)) {
+    switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
         .failed => |reason| try std.testing.expectEqualStrings("the new AI could not start", reason),
         else => return error.TestUnexpectedResult,
     }
 
     Fake.ok = false;
-    switch (switchChatWithTransport(identity, 2, Fake.send)) {
+    switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
         .failed => |reason| try std.testing.expectEqualStrings("the server did not answer", reason),
         else => return error.TestUnexpectedResult,
     }
 
-    var buf: [160]u8 = undefined;
-    try std.testing.expectEqualStrings("No live chats in this workspace", formatSummary(&buf, 2, 0, 0, 0, 0, 0));
-    try std.testing.expectEqualStrings("Every chat in this workspace is already on Codex", formatSummary(&buf, 2, 2, 0, 2, 0, 0));
-    try std.testing.expectEqualStrings("Switched 2 chats to Codex", formatSummary(&buf, 2, 2, 2, 0, 0, 0));
-    try std.testing.expectEqualStrings("Switched 1 to Codex (1 already, 1 busy)", formatSummary(&buf, 2, 3, 1, 1, 1, 0));
-    try std.testing.expectEqualStrings("Wait for the current reply first (2 busy)", formatSummary(&buf, 2, 2, 0, 0, 2, 0));
+    var buf: [192]u8 = undefined;
+    try std.testing.expectEqualStrings("No live chats in this workspace", formatSummary(&buf, antigravity_agent, 0, 0, 0, 0, 0, 0));
+    try std.testing.expectEqualStrings("Every chat in this workspace is already on Antigravity", formatSummary(&buf, antigravity_agent, 2, 0, 2, 0, 0, 0));
+    try std.testing.expectEqualStrings("Switched 2 chats to Antigravity", formatSummary(&buf, antigravity_agent, 2, 2, 0, 0, 0, 0));
+    try std.testing.expectEqualStrings("Switched 1 to Antigravity (1 already, 1 busy)", formatSummary(&buf, antigravity_agent, 3, 1, 1, 1, 0, 0));
+    try std.testing.expectEqualStrings("Wait for the current reply first (2 busy)", formatSummary(&buf, antigravity_agent, 2, 0, 0, 2, 0, 0));
+    try std.testing.expectEqualStrings("Workspace switch to Antigravity: 1 refused, 1 failed", formatSummary(&buf, antigravity_agent, 2, 0, 0, 0, 1, 1));
+}
+
+test "MUBO-535 a refused switch leaves the chat on its old AI and a later run switches it" {
+    const saved = try std.testing.allocator.dupe(app_state.Shell, app_state.shells[0..1]);
+    defer {
+        @memcpy(app_state.shells[0..saved.len], saved);
+        std.testing.allocator.free(saved);
+    }
+    const saved_count = app_state.shell_count;
+    defer app_state.shell_count = saved_count;
+    app_state.shell_count = 1;
+    const sid = "11111111-1111-4111-8111-111111111111";
+    app_state.shells[0] = makeTestLiveShell(10, 1, claude_agent, "live-a", sid);
+
+    const Fake = struct {
+        var reply: []const u8 = "";
+        fn send(_: SessionIdentity, _: []const u8, out: *std.ArrayList(u8)) bool {
+            out.appendSlice(std.heap.page_allocator, reply) catch return false;
+            return true;
+        }
+    };
+    const identity = chat_session.chatFileIdentityForShell(0).checked() orelse return error.TestUnexpectedResult;
+
+    Fake.reply = "{\"status\":\"refused\",\"reason\":\"unsupported_provider\"}";
+    switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
+        .refused => {},
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expectEqual(claude_agent, app_state.shells[0].ai_agent);
+    try std.testing.expectEqualStrings(sid, app_state.shells[0].claude_sid[0..app_state.shells[0].claude_sid_len]);
+
+    Fake.reply = "{\"status\":\"switched\",\"provider\":\"antigravity\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}";
+    const outcome = switchChatWithTransport(identity, antigravity_agent, Fake.send);
+    switch (outcome) {
+        .switched => |done| {
+            try std.testing.expect(applyAgentOnUi(&app_state.shells[0], done.agent, done.sid[0..done.sid_len]));
+        },
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expectEqual(antigravity_agent, app_state.shells[0].ai_agent);
+    try std.testing.expectEqualStrings("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", app_state.shells[0].claude_sid[0..app_state.shells[0].claude_sid_len]);
 }

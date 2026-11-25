@@ -2588,7 +2588,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_restart_all = result_idx == SEARCH_CHAT_RESTART_ALL_OFFSET;
                     const is_chat_fresh_start = result_idx == app_state.SEARCH_CHAT_FRESH_START_OFFSET;
                     const is_chat_switch_ai = result_idx == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET;
-                    const is_ws_switch_ai = result_idx == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET or result_idx == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET or result_idx == app_state.SEARCH_WS_SWITCH_PI_OFFSET;
+                    const is_ws_switch_ai = result_idx == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET or result_idx == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET or result_idx == app_state.SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET;
                     const is_chat_auto_switch = result_idx == SEARCH_CHAT_AUTO_SWITCH_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
@@ -3593,7 +3593,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var ws_sw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (result_idx == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET) L("Workspace: Switch every chat to Claude") else if (result_idx == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET) L("Workspace: Switch every chat to Codex") else L("Workspace: Switch every chat to Pi"), -1, &ws_sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (result_idx == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET) L("Workspace: Switch every chat to Claude") else if (result_idx == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET) L("Workspace: Switch every chat to Codex") else L("Workspace: Switch every chat to Antigravity"), -1, &ws_sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all or is_chat_fresh_start or is_chat_switch_ai or is_chat_auto_switch) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

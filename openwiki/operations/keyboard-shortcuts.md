@@ -150,7 +150,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+Y | Snooze this workspace until a chosen time |
 | Ctrl+K -&gt; Workspace: Wake &lt;name&gt; | Wake a snoozed workspace now and switch to it |
 | Ctrl+K -&gt; Workspace: Bring Back All Sessions | Reopen every recorded tmux session of this workspace |
-| Ctrl+K -&gt; Workspace: Switch every chat to Codex (Claude, Pi) | Move every live chat in this workspace to another AI and keep each chat's name, picture, place and readable history; busy chats wait |
+| Ctrl+K -&gt; Workspace: Switch every chat to Antigravity (Codex, Claude) | Move every live chat in this workspace to another AI, keeping each chat's name, picture, place and readable history; a chat still replying switches once its reply ends |
 | Alt+Left / Alt+Right | Cycle prev / next workspace |
 | Ctrl+N / Alt+N pill | New workspace |
 

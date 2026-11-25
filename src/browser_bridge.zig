@@ -2800,36 +2800,42 @@ fn zsbSessionSwitchAi(argv: []const []const u8, out: []u8, comptime ops: type) u
         .not_chat_tab => return zsbWorkspaceError(out, "not_chat_tab"),
         .failed => |code| return zsbWorkspaceError(out, code),
         .already => |agent| {
-            const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"already\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, ws_switch.targetName(agent) }) catch return 0;
+            const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"already\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(agent) orelse "" }) catch return 0;
             return text.len;
         },
         .ready => |info| {
-            const current_name = ws_switch.targetName(info.current_agent);
+            const current_name = ws_switch.agentProviderName(info.current_agent) orelse "";
             switch (ops.switchChat(info.identity, args.target)) {
                 .switched => |done| {
-                    const sid = done.sid[0..done.sid_len];
-                    if (!ops.adopt(args.tab, done.agent, sid)) {
+                    if (!ops.adopt(args.tab, done.agent, done.sid[0..done.sid_len])) {
                         const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"failed\",\"reason\":\"adopt failed\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
                         return text.len;
                     }
-                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, ws_switch.targetName(done.agent), sid }) catch return 0;
+                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(done.agent) orelse "", done.sid[0..done.sid_len] }) catch return 0;
+                    return text.len;
+                },
+                .already => |agent| {
+                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"already\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(agent) orelse "" }) catch return 0;
                     return text.len;
                 },
                 .busy => {
-                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"busy\",\"reason\":\"Wait for the current reply first\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
+                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
                     return text.len;
                 },
-                .failed => |reason| {
-                    var pos: usize = 0;
-                    const head = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"failed\",\"reason\":", .{}) catch return 0;
-                    pos = head.len;
-                    if (!zsbAppendJsonString(out, &pos, reason)) return 0;
-                    const tail = std.fmt.bufPrint(out[pos..], ",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
-                    return pos + tail.len;
-                },
+                .refused => |reason| return zsbSwitchAiOutcome(out, "refused", reason, args.tab, current_name),
+                .failed => |reason| return zsbSwitchAiOutcome(out, "failed", reason, args.tab, current_name),
             }
         },
     }
+}
+
+fn zsbSwitchAiOutcome(out: []u8, status: []const u8, reason: []const u8, tab: u32, provider: []const u8) usize {
+    var pos: usize = 0;
+    const head = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"{s}\",\"reason\":", .{status}) catch return 0;
+    pos = head.len;
+    if (!zsbAppendJsonString(out, &pos, reason)) return 0;
+    const tail = std.fmt.bufPrint(out[pos..], ",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ tab, provider }) catch return 0;
+    return pos + tail.len;
 }
 
 const ZsbSwitchAiLiveOps = struct {
@@ -3687,7 +3693,7 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
     const FakeSwitchOps = struct {
         const ws_switch = @import("workspace_switch_ai.zig");
         var calls: usize = 0;
-        var mode: enum { switched, busy, failed } = .switched;
+        var mode: enum { switched, busy, failed, refused } = .switched;
         fn snapshot(tab: u32, target: u8) ws_switch.SnapshotResult {
             return ws_switch.snapshotTabOnUi(tab, target);
         }
@@ -3700,6 +3706,7 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
                     break :blk .{ .switched = .{ .agent = target, .sid = sid, .sid_len = new_sid.len } };
                 },
                 .busy => .busy,
+                .refused => .{ .refused = "unsupported_provider" },
                 .failed => .{ .failed = "the new AI could not start" },
             };
         }
@@ -3716,11 +3723,15 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
     try std.testing.expectEqual(@as(usize, 0), FakeSwitchOps.calls);
 
     FakeSwitchOps.mode = .busy;
-    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"busy\",\"reason\":\"Wait for the current reply first\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
     try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
 
     FakeSwitchOps.mode = .failed;
     try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"failed\",\"reason\":\"the new AI could not start\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+
+    FakeSwitchOps.mode = .refused;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"refused\",\"reason\":\"unsupported_provider\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "antigravity" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
     try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
 
     FakeSwitchOps.mode = .switched;

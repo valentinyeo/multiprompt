@@ -47,7 +47,7 @@ export const verbs = {
   "SEARCH_WORKSPACE_COLOR_OFFSET": "workspace",
   "SEARCH_WS_SWITCH_CLAUDE_OFFSET": "workspace",
   "SEARCH_WS_SWITCH_CODEX_OFFSET": "workspace",
-  "SEARCH_WS_SWITCH_PI_OFFSET": "workspace",
+  "SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET": "workspace",
   "SEARCH_WSMOVE_NEW_OFFSET": "workspace",
   "SEARCH_WSMOVE_OFFSET": "move",
   "SEARCH_MOVE_WORKSPACE_SERVER_OFFSET": "workspace",

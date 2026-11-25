@@ -5518,7 +5518,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_WS_SWITCH_PI_OFFSET) {
+                if (target == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET) {
                     if (@import("workspace_switch_ai.zig").activatePalette(hwnd, target)) return 0;
                 }
                 if (target == SEARCH_CHAT_RESTART_OFFSET or target == SEARCH_CHAT_RESTART_ALL_OFFSET) {
