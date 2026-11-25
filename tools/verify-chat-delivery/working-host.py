@@ -141,9 +141,9 @@ def install(namespace, root, record, steady=False, fresh=False):
         threading.Thread(target=reply, daemon=True).start()
         return {'status': 'sent'}
 
-    def worker(query, source, only_if_work=False):
+    def worker(query, source):
         if not matches(query.get('provider'), query.get('sid')):
-            return previous_worker(query, source, only_if_work=only_if_work)
+            return previous_worker(query, source)
         if query.get('op') != 'message_submit':
             return
         if started.is_set():
