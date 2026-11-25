@@ -21,7 +21,7 @@ def wait_for(name, check, seconds=240):
     raise RuntimeError(name)
 
 
-def credentials(home):
+def credentials(home, proof):
     raw = os.environ.pop('CODEX_AUTH_JSON', '')
     if not raw:
         raise RuntimeError('existing_codex_plan_secret_missing')
@@ -33,15 +33,23 @@ def credentials(home):
     payload = access.split('.')[1]
     claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
     expires = claims.get('exp')
-    account = tokens.get('account_id')
-    if not isinstance(account, str) or not account or type(expires) not in (int, float) or expires < time.time() + 1200:
-        raise RuntimeError('existing_codex_plan_session_needs_owner_refresh')
+    account = tokens.get('account_id') or (claims.get('https://api.openai.com/auth') or {}).get('chatgpt_account_id')
+    proof['credential_preflight'] = dict(account_id_present=isinstance(account, str) and bool(account),
+                                        expiry_present=type(expires) in (int, float),
+                                        access_token_current=type(expires) in (int, float) and expires > time.time())
+    if not proof['credential_preflight']['account_id_present']:
+        raise RuntimeError('existing_codex_plan_account_identity_missing')
+    if not proof['credential_preflight']['expiry_present']:
+        raise RuntimeError('existing_codex_plan_access_expiry_missing')
+    if not proof['credential_preflight']['access_token_current']:
+        raise RuntimeError('existing_codex_plan_access_token_expired')
     codex = home / '.codex'
     pi = home / '.pi/agent'
     for directory in (codex, pi):
         directory.mkdir(parents=True, mode=0o700)
     auth = codex / 'auth.json'
-    auth.write_text(raw)
+    auth.write_text(json.dumps(dict(saved, auth_mode='chatgpt', OPENAI_API_KEY=None,
+                                    tokens=dict(tokens, account_id=account, refresh_token=''))))
     auth.chmod(0o600)
     (codex / 'config.toml').write_text('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "low"\n')
     auth = pi / 'auth.json'
@@ -96,7 +104,7 @@ def run(args, proof):
         raise RuntimeError('real_valentin_mode_skill_missing')
     with tempfile.TemporaryDirectory(prefix='pi-codex-proof-', dir=os.environ['RUNNER_TEMP']) as directory:
         home = Path(directory)
-        credentials(home)
+        credentials(home, proof)
         os.environ['HOME'] = str(home)
         (home / '.pi/agent/skills').mkdir()
         (home / '.pi/agent/skills/valentin-mode').symlink_to(skill, target_is_directory=True)
@@ -136,7 +144,7 @@ def run(args, proof):
                     raise RuntimeError('original_history_missing_or_reordered')
                 cursor = found + 1
             prior_rows[:] = [row for row in rows if row.get('role') in ('user', 'assistant') and row.get('text')]
-            proof['preserved_records'] = len(preserved)
+            proof['preserved_transcript_files'] = len(preserved)
             proof['history_rows'] = len(prior_rows)
 
         def events_after(sequence):
