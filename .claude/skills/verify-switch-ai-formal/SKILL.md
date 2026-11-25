@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `69c9957bd`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `793597b04`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-221 adds `HOST_HISTORY_OWNERS` and `host_history_claim`, called once from `host_loop`, so a fresh Antigravity host owns its canonical history file and replays committed rows from the shared message events when the file is missing. None of the twelve covered switch, history, usage-limit or auto-switch functions changed, and the claim neither starts a switch nor edits the decision table. The reader's whole-file hash and the sync commit move; the model, bounds, decisions, probes and mutations are unchanged. Hosted CI must rerun the full self-test and native replay; Antigravity remains outside the formal provider set.
 
 MUBO-243 adds a name-resolution path for published chat names and publishes a new Claude conversation to the account layout and the name entry on init. All twelve covered reader functions are unchanged from the prior sync, as is every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to conversation changes.
 

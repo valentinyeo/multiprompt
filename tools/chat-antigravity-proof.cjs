@@ -31,7 +31,8 @@ function verify(root) {
   assert.equal(cleanup.evidence_preserved, true);
   for (const name of ['antigravity-chat-before', 'antigravity-switch-palette', 'antigravity-switched-chat',
     'antigravity-new-session-palette', 'antigravity-new-session', 'antigravity-tab-menu-switch',
-    'antigravity-switch-while-replying', 'antigravity-switch-back-claude']) shot(name);
+    'antigravity-switch-while-replying', 'antigravity-switch-back-claude',
+    'antigravity-fresh-before-reload', 'antigravity-fresh-after-reload']) shot(name);
   const config = json('antigravity-config.json');
   assert.equal(config.provider, 'antigravity');
   assert.equal(config.enabled, true);
@@ -57,6 +58,20 @@ function verify(root) {
   assert.ok(fresh, 'the new row is not named Antigravity');
   assert.equal(fresh.cv, true, 'the new Antigravity row did not open in Chat View');
   assert.match(fresh.tmux_session, /^live-/);
+  const freshReload = json('fresh-reload.json');
+  const freshReply = freshReload.reply;
+  assert.equal(freshReload.reload, 'Chat View Resync chat');
+  assert.ok(Number.isSafeInteger(freshReload.blocksBefore) && freshReload.blocksBefore >= 2, 'the fresh Antigravity history painted too few blocks before the reload');
+  assert.equal(freshReload.blocksAfter, freshReload.blocksBefore, 'the full reload changed the painted Antigravity row count');
+  const freshCopiedBefore = read('fresh-copied-before.txt');
+  const freshCopiedAfter = read('fresh-copied-after.txt');
+  for (const text of [freshReload.firstMessage, freshReply]) {
+    assert.ok(freshCopiedBefore.includes(text), `the fresh Antigravity copy before the reload lost ${text}`);
+    assert.ok(freshCopiedAfter.includes(text), `the fresh Antigravity copy after the reload lost ${text}`);
+  }
+  assert.equal(freshCopiedAfter.split(freshReload.firstMessage).length, 2, 'the reload duplicated the first Antigravity message');
+  assert.equal(freshCopiedAfter.split(freshReply).length, 2, 'the reload duplicated the Antigravity reply');
+  assert.equal(freshCopiedAfter.trim(), freshCopiedBefore.trim(), 'the full reload changed the visible Antigravity transcript');
   const doctor = json('doctor.json');
   assert.ok(Number.isSafeInteger(doctor.pid) && doctor.pid > 0, 'doctor identity missing');
   assert.equal(doctor.hwnd > 0, true);
@@ -142,6 +157,11 @@ function verify(root) {
         name: 'switch-while-replying',
         passed: true,
         detail: { refused: 'busy', reason: busy.reason, notice: refused.notice, providerAfter: refused.providerAfter, screenshot: refused.screenshot },
+      },
+      {
+        name: 'fresh-antigravity-reload',
+        passed: true,
+        detail: { blocksBefore: freshReload.blocksBefore, blocksAfter: freshReload.blocksAfter, before: 'fresh-copied-before.txt', after: 'fresh-copied-after.txt', reply: freshReply, screenshot: 'antigravity-fresh-after-reload.png' },
       },
     ],
   };
