@@ -95,7 +95,7 @@ test('MUBO-291 one tab switch stops the recording and drops the words from the s
   switchContract(files);
   for (const [field, from, to] of [
     ['console', '        @import("voice.zig").cancelDictationOnTabSwitch();\n', ''],
-    ['voice', '    cancelDictation();\n', ''],
+    ['voice', '    cancelDictation();\n    dictationAudit("chat-switch", 0);', '    dictationAudit("chat-switch", 0);'],
     ['composer', '    chatLiveStripFromStore();\n    live_draft.sealed = false;', '    live_draft.sealed = false;'],
   ]) {
     const broken = { ...files };
@@ -107,7 +107,8 @@ test('MUBO-291 one tab switch stops the recording and drops the words from the s
 
 test('MUBO-291 the journey is registered, indexed and seeded with two chats', () => {
   assert.match(driver, /ValidateSet\([^\n]*'chat-dictation-switch'/);
-  assert.match(driver, /\n        'chat-dictation-switch' \{\n            \. \(Join-Path \$PSScriptRoot 'control-feature-chat-dictation-switch\.ps1'\)\n        \}/);
+  const registration = fs.readFileSync(path.join(root, skill, 'control.ps1'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(registration, /\n        'chat-dictation-switch' \{\n            \. \(Join-Path \$PSScriptRoot 'control-feature-chat-dictation-switch\.ps1'\)\n        \}/);
   assert.match(driver, /if \(\$Feature -eq 'chat-dictation-switch'\) \{[\s\S]*?shell_id = 1; cv = \$false/);
   assert.match(driver, /shell_id = 2; cv = \$true/);
   assert.match(driver, /if \(\$Feature -in @\('chat-dictation', 'chat-dictation-switch'\)\) \{/);
