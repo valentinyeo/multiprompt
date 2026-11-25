@@ -34,6 +34,8 @@ No build, test suite or app verification ran on the shared server. These checks 
 
 `test_legacy_reader_cannot_claim_capability_gated_work` runs the original helper from the hosted baseline checkout against a new store. It checks old history reads and legacy posting without allowing the old collector to submit enhanced work. Protocol receipts and events retain their original shapes.
 
+[Run at `ab4bcfa19`](https://github.com/valentinyeo/multiprompt/actions/runs/45528029107) passed Python baseline reproduction, all current Python suites, real fixture-host completion without a reader, desktop baseline reproduction, all new desktop regression cases, source limits and timer checks. The combined run failed on a controller method name shadowing existing parameters and an older queued-command fixture missing the new request enum value. Both are corrected in the following commit; a full rerun is still required before this branch is ready to ship.
+
 The branch’s latest [Room safety run](https://github.com/valentinyeo/multiprompt/actions/workflows/room-checks.yml?query=branch%3Amubo-533-rooms-reliable) is the source of current results. Queued or incomplete checks are not a pass. No PR was opened.
 
 ## Decisions

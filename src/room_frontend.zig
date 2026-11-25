@@ -914,7 +914,7 @@ fn eligibleShell(sid: []const u8) ?*const app_state.Shell {
 fn nextStatus(c: *rooms.Controller) bool {
     if (candidate_scan >= discovered_count or !c.room_features) return false;
     status_generation = candidate_generation;
-    if (!c.members()) return false;
+    if (!c.fetchMembers()) return false;
     candidate_scan = discovered_count;
     return true;
 }

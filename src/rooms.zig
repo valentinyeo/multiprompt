@@ -167,7 +167,7 @@ pub const Controller = struct {
         return self.launch(.events, .{ .op = "events", .host_uuid = self.host_uuid[0..], .room_id = room_id, .after = after, .limit = 100 });
     }
 
-    pub fn members(self: *Controller) bool {
+    pub fn fetchMembers(self: *Controller) bool {
         if (!self.has_host_uuid or !self.room_features) return false;
         return self.launch(.members, .{ .op = "members", .host_uuid = self.host_uuid[0..], .slot = self.host });
     }

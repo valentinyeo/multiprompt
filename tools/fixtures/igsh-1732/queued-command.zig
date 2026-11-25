@@ -1,5 +1,5 @@
 const std = @import("std");
-const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status };
+const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status, members };
 const Pending = struct {
     awaiting_launch: bool = true,
     kind: Kind = .post,
