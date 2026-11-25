@@ -88,8 +88,11 @@ class RoutingTest(unittest.TestCase):
     def status(self, sid):
         return {'status': 'ok', 'provider': 'claude', 'sid': sid, 'enabled': self.enabled.get(sid, True), 'tmux': 'tmux-' + sid[:8]}
 
-    def post(self, text, recipients=()):
-        return self.bridge.execute({'op': 'post_human', 'host_uuid': self.host, 'command_id': uid(), 'room_id': self.room, 'expected_revision': self.revision, 'text': text, 'recipients': list(recipients)})
+    def post(self, text, recipients=(), features=False):
+        request = {'op': 'post_human', 'host_uuid': self.host, 'command_id': uid(), 'room_id': self.room, 'expected_revision': self.revision, 'text': text, 'recipients': list(recipients)}
+        if features:
+            request['room_features'] = 1
+        return self.bridge.execute(request)
 
     def sweep(self):
         return self.bridge.execute({'op': 'events', 'host_uuid': self.host, 'room_id': self.room, 'after': 0, 'limit': 200})
@@ -169,12 +172,61 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(before, self.runtime.submits)
         self.assertEqual(2, len([e for e in page['events'] if e['type'] == 'agent_reply']))
 
+    def test_displayed_name_selects_stable_member_and_alias_still_works(self):
+        sent = self.post('@bEtA hello', ['beta'], features=True)
+        member = next(m for m in self.bridge.store.members(self.room) if m['alias'] == 'beta')
+        self.assertEqual([member['id']], sent['event']['recipients'])
+        self.sweep()
+        self.assertEqual([], self.sent_to('alpha'))
+        self.assertEqual(['@bEtA hello'], self.sent_to('beta'))
+        self.post('@beta again', ['beta'], features=True)
+        self.sweep()
+        self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_post_admits_without_a_history_reader(self):
+        self.post('no reader')
+        self.assertEqual(['no reader'], self.sent_to('alpha'))
+        self.assertEqual(['no reader'], self.sent_to('beta'))
+
+    def test_request_to_another_room_sweeps_offline_work_once_after_restart(self):
+        self.enabled[self.sids['beta']] = False
+        self.post('offline')
+        self.bridge.close()
+        self.open()
+        self.enabled[self.sids['beta']] = True
+        for _ in range(2):
+            self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+        self.assertEqual(['offline'], self.sent_to('beta'))
+        replies = [e for e in self.bridge.store.execute({'op': 'events', 'room_id': self.room, 'after': 0, 'limit': 200})['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+
+    def test_empty_and_failed_turns_publish_no_answer_once_and_allow_resend(self):
+        self.runtime.answer = False
+        sent = self.post('question')
+        self.sweep()
+        for delivery in sent['deliveries']:
+            member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
+            scope = dict(host_uuid=self.host, room_id=self.room, parent_event_id=sent['event']['id'], member_id=member['id'])
+            self.runtime.reply(member['provider_sid'], delivery['id'], scope, '')
+            if member['alias'] == 'beta':
+                self.runtime.events[member['provider_sid']][-1]['event']['payload']['status'] = 'failed'
+        page = self.sweep()
+        self.sweep()
+        replies = [e for e in page['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+        self.assertTrue(all('No answer' in e['text'] and 'again' in e['text'] for e in replies))
+        self.runtime.answer = True
+        self.post('question')
+        self.sweep()
+        self.assertEqual(2, len(self.sent_to('alpha')))
+        self.assertEqual(2, len(self.sent_to('beta')))
+
     def test_agents_see_the_same_ordered_conversation(self):
-        self.post('first question')
+        self.post('first question', features=True)
         self.sweep()
-        self.post('@alpha private question', ['alpha'])
+        self.post('@alpha private question', ['alpha'], features=True)
         self.sweep()
-        self.post('third question')
+        self.post('third question', features=True)
         self.sweep()
         alpha, beta = self.sent_to('alpha'), self.sent_to('beta')
         self.assertEqual(3, len(alpha))
@@ -185,7 +237,8 @@ class RoutingTest(unittest.TestCase):
         self.assertNotIn('alpha: reply to first question', alpha[1])
         self.assertTrue(alpha[1].endswith('@alpha private question'))
         self.assertIn('alpha: reply to first question', beta[1])
-        self.assertNotIn('private question', beta[1])
+        self.assertIn('User: @alpha private question', beta[1])
+        self.assertIn('alpha: reply to', beta[1])
         self.assertTrue(beta[1].endswith('third question'))
         self.bridge.close()
         self.open()

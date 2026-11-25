@@ -49,6 +49,28 @@ class BridgeTest(unittest.TestCase):
         listing = self.bridge.execute({'op': 'list', 'host_uuid': self.host, 'after': 0, 'through': None, 'limit': 10})
         self.assertEqual(receipt['event']['room_id'], listing['rooms'][0]['id'])
 
+    @mock.patch.object(bridge_module.Path, 'home')
+    def test_member_catalog_includes_unopened_claude_chats_with_shown_names(self, home):
+        import hashlib
+        import json
+        home.return_value = Path(self.temp.name)
+        root = home.return_value / '.local/state/multiprompt'
+        hosts = root / 'agent-host'
+        hosts.mkdir(parents=True)
+        for provider, sid, slot in [('claude', self.sid, 1), ('codex', uid(), 1), ('claude', uid(), 2)]:
+            key = hashlib.sha256((provider + ':' + sid).encode()).hexdigest()[:32]
+            (hosts / (key + '.config.json')).write_text(json.dumps(dict(provider=provider, sid=sid, tmux='chat-' + sid, spawn_host=slot, enabled=True, spawn_display='Original')))
+        (root / 'chat-names.json').write_text(json.dumps({'chat-' + self.sid: {'sid': self.sid, 'name': 'Research Notes'}}))
+        with mock.patch.object(bridge_module, 'host_status', return_value=dict(enabled=True, alive=False, owner=None)):
+            result = self.bridge.execute({'op': 'members', 'host_uuid': self.host, 'slot': 1})
+        self.assertEqual([dict(provider='claude', sid=self.sid, display_name='Research Notes', enabled=True, alive=False, owner=None)], result['members'])
+
+    @mock.patch.object(bridge_module, 'scoped_runtime', return_value=False)
+    def test_old_runtime_explains_how_to_recover(self, runtime):
+        result = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+        self.assertEqual('runtime_upgrade_required', result['reason'])
+        self.assertIn('room_features', result)
+
     @mock.patch.object(bridge_module, 'host_status')
     def test_disabled_and_unsupported_paths_fail_closed(self, status):
         status.return_value = {'enabled': False}
