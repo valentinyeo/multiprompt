@@ -48,6 +48,7 @@ function Read-Shared([string]$Path) {
         try { $stream = [IO.File]::Open($Path, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)); break }
         catch {
             $cause = $_.Exception.GetBaseException()
+            if ($cause -is [IO.FileNotFoundException] -or $cause -is [IO.DirectoryNotFoundException]) { return '' }
             if ($cause -isnot [IO.IOException] -or ($cause.HResult -band 0xffff) -notin @(32, 33) -or $readDeadline.Elapsed.TotalSeconds -ge 5) { throw }
             [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
         }
