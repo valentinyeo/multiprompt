@@ -46,7 +46,12 @@ function Read-LogText {
 }
 function Measure-Log {
     $total = 0L
-    foreach ($file in @(Get-ChildItem $settings -Filter 'debug.log*' -ErrorAction SilentlyContinue)) { $total += $file.Length }
+    foreach ($file in @(Get-ChildItem $settings -Filter 'debug.log*' -ErrorAction SilentlyContinue)) {
+        try {
+            $stream = [IO.File]::Open($file.FullName, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            try { $total += $stream.Length } finally { $stream.Dispose() }
+        } catch { $total += $file.Length }
+    }
     return $total
 }
 function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 120, [int]$PollMs = 100) {
@@ -62,10 +67,12 @@ function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 120, [int]
 function Get-TagHistogram([string]$Text) {
     $counts = @{}
     foreach ($line in ($Text -split "`n")) {
-        $parts = $line.Trim() -split ' '
-        if ($parts.Count -lt 3) { continue }
-        $tagName = ($parts[1] -split '=')[0]
+        $trimmed = $line.Trim()
+        if (-not $trimmed) { continue }
+        $trimmed = $trimmed -replace '^(\[[a-z-]+\] )?\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} ', '$1'
+        $tagName = ($trimmed -split ' ')[0]
         if (-not $tagName) { continue }
+        if ($tagName.Length -gt 24) { $tagName = $tagName.Substring(0, 24) }
         if (-not $counts.ContainsKey($tagName)) { $counts[$tagName] = 0 }
         $counts[$tagName]++
     }

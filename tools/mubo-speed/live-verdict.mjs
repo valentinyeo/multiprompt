@@ -2,6 +2,7 @@
 // usage: node tools/mubo-speed/live-verdict.mjs <evidence-root> [report.txt]
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BAR_MB_PER_HOUR = 1;
 const MIN_WINDOWS_PER_SIDE = 3;
@@ -110,4 +111,4 @@ function main(argv) {
   return result.pass ? 0 : 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))) process.exit(main(process.argv.slice(2)));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exit(main(process.argv.slice(2)));
