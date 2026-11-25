@@ -18,11 +18,6 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
-      ssh_idle_proof:
-        description: Count real SSH logins during idle server chats and after a dropped link
-        required: false
-        default: false
-        type: boolean
       usage_pace_proof:
         description: Verify per-window pace through the existing SSH status boundary
         required: false
@@ -456,7 +451,6 @@ jobs:
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
-      SSH_IDLE_PROOF: ${{ inputs.ssh_idle_proof && '1' || '' }}
       USAGE_PACE_PROOF: ${{ inputs.usage_pace_proof && '1' || '' }}
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
@@ -707,9 +701,6 @@ jobs:
         if: env.FEATURE == 'server-chat' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'server-shell-input' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
-      - name: Build transparent SSH spawn counter
-        if: env.FEATURE == 'server-chat' && env.SSH_IDLE_PROOF == '1'
-        run: zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-server-chat/count-ssh.c -o verify-bin/count-ssh.exe
       - name: Check the deterministic provider boundary
         if: env.FEATURE == 'server-chat'
         run: python tools/verify-server-chat.test.py
