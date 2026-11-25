@@ -26,6 +26,8 @@ The PR verifier can select this map automatically. Do not dispatch another run w
 
 Require `result.json` status `passed`, all four named cases passed, zero app processes after owned-job cleanup, `keyRemoved=true`, and successful `videoExit`. Watch `journey.mp4`; inspect `open.png`, `send.png`, `clear.png`, `after-clear.png`, copied text, `*-server.json`, `key-acl.json`, `ssh-preflight.txt`, `sshd.log`, `actions.json`, `doctor.json` and `build.json` in `verify-server-chat`. The private key and profile never enter the artifact. Cleanup stops the dedicated WSL distribution and deletes the disposable Windows profile.
 
+For idle connection reuse, dispatch `.github/workflows/ssh-idle.yml`. It runs this same journey with a second ordinary server terminal, counts every SSH process through a transparent wrapper and independently counts accepted keys in the runner-owned sshd log. `idle.json` and `idle-after-reconnect.json` each cover 210 seconds, spanning the three-minute usage refresh. Neither permits a new login or SSH spawn after warmup. `reconnect.json` and the copied reply must prove delivery after killing the real, runner-owned chat SSH process. The hourly counts are extrapolated from those observation windows, not hour-long runs.
+
 ## Gotchas
 
 - This proves real server transport and that the `/clear` journey runs through the UI, host and provider. It does **not** prove paid Claude context erasure, or fix the separate server-chat clear behavior tracked by SOFT-2420. The deterministic provider echoes `/clear`; it does not fabricate a reset acknowledgement or alter the production reader.

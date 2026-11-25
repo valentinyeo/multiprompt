@@ -92,7 +92,16 @@ try {
     $env:ZIGSHELL_DEBUG = '1'
     $env:IGSH_246 = '0'
     $env:PATH = (Split-Path $ssh) + ';' + $env:PATH
-    Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 }) } "$settings/session.json"
+    $tabs = @(@{ kind = 'tmux'; name = 'Runner server chat'; manual = $true; tmux_host = 0; tmux_session = 'live-ci'; csid = 'a1b2c3d4-2567-4000-8000-000000002567'; cv = $false; pid = 0 })
+    if ($env:SSH_IDLE_PROOF -eq '1') {
+        . "$PSScriptRoot/idle.ps1"
+        $tabs += @{ kind = 'tmux'; name = 'Idle server terminal'; manual = $true; tmux_host = 0; tmux_session = 'idle-ci'; cv = $false; pid = 0 }
+        $env:MP_VERIFY_REAL_SSH = $ssh
+        $env:MP_VERIFY_SSH_LOG = "$Evidence/ssh-spawns"
+        New-Item -ItemType Directory -Force $env:MP_VERIFY_SSH_LOG | Out-Null
+        [IO.File]::WriteAllText("$settings/ssh-path.txt", (Join-Path (Split-Path $Exe) 'count-ssh.exe'))
+    }
+    Save @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $tabs } "$settings/session.json"
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
@@ -115,6 +124,11 @@ try {
         [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
         Shot $case.name
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
+    }
+    if ($env:SSH_IDLE_PROOF -eq '1') {
+        Start-Sleep -Seconds 30
+        Measure-SshIdle 'idle'
+        Verify-SshRecovery
     }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
