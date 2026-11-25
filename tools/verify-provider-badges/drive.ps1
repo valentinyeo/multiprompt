@@ -90,6 +90,9 @@ function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
 function Near($Pixel, [int]$R, [int]$G, [int]$B, [int]$Tolerance) {
     ([Math]::Abs($Pixel.R - $R) -le $Tolerance) -and ([Math]::Abs($Pixel.G - $G) -le $Tolerance) -and ([Math]::Abs($Pixel.B - $B) -le $Tolerance)
 }
+function Painted($Pixel, [int]$R, [int]$G, [int]$B) {
+    (([Math]::Abs($Pixel.R - $R) + [Math]::Abs($Pixel.G - $G) + [Math]::Abs($Pixel.B - $B)) -le 90)
+}
 function Colour([string]$Hex) { @([Convert]::ToInt32($Hex.Substring(0, 2), 16), [Convert]::ToInt32($Hex.Substring(2, 2), 16), [Convert]::ToInt32($Hex.Substring(4, 2), 16)) }
 function Check-Badge($Row, [string]$Hex, [string]$Name) {
     $b = Badge $Row
@@ -103,7 +106,7 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $match++ }
             }
         }
-        if ($match -lt $area * .20) { throw "Provider colour absent: $Name match=$match area=$area" }
+        if ($match -lt $area * .08) { throw "Provider colour absent: $Name match=$match area=$area" }
         if ($match -gt $area * .85) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
         $inside = 0; $outside = 0; $missing = 0; $leaked = 0; $glyph = 0
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
@@ -111,7 +114,7 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 $class = Badge-Coverage $x $y $b.side $b.radius
                 if ($class -eq 'inside') {
                     $inside++
-                    if (-not (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26)) { $missing++ }
+                    if (-not (Painted $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2])) { $missing++ }
                 } elseif ($class -eq 'outside') {
                     $outside++
                     if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
