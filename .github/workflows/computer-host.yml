@@ -5,9 +5,17 @@ on:
       revision:
         required: false
         type: string
+      port_offset:
+        required: false
+        type: string
+        default: '0'
 
 permissions:
   contents: read
+
+concurrency:
+  group: computer-host-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.port_offset }}
+  cancel-in-progress: true
 
 jobs:
   host:
@@ -22,7 +30,7 @@ jobs:
       - name: Run the disposable desktop host behind the free tunnels
         id: host
         timeout-minutes: 100
-        run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT"
+        run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT" "${{ inputs.port_offset || '0' }}"
       - name: Report the host identity
         if: always()
         run: |
