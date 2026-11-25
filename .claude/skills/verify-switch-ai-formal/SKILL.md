@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `5baddb61305a406e63002fe256fb65856c825fa0`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `90f504e13fabf89b998e070a98c7feab9f41057c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
@@ -60,6 +60,8 @@ MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish`
 MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 
 MUBO-293 merges master `5baddb613`. The optional `workspace` and `group` strings in `chat_names_publish` sit outside every covered switch function, and the MUBO-293 command rebuild and refused-command settlement sit outside them too. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
+MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
 | Source | Covered behavior |
 | --- | --- |
