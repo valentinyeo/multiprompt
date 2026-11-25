@@ -79,9 +79,16 @@ jobs:
         run: node --test --test-concurrency=1 tools/ssh-reconnect.test.js tools/ssh-probe-511.test.js tools/ssh-clock-standby.test.js
       - name: Server chat, idle login bound, dropped link and idle again
         shell: powershell
-        run: ./tools/verify-server-chat/drive.ps1 -Exe "$PWD/zig-out/bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$PWD/evidence"
+        run: ./.claude/skills/verify-multiprompt/drive.ps1 -Feature server-chat -Exe "$PWD/zig-out/bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$PWD/evidence"
       - name: Check receipts, video, login counts and cleanup
         run: node tools/verify-server-chat/check-evidence.cjs evidence
+      - name: Preserve the before or after recording
+        if: always()
+        shell: pwsh
+        env:
+          VIDEO_LABEL: ${{ inputs.app_revision && 'before' || 'after' }}
+        run: |
+          if (Test-Path evidence/journey.mp4) { Copy-Item evidence/journey.mp4 "evidence/$env:VIDEO_LABEL.mp4" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
