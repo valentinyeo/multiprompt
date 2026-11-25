@@ -1583,3 +1583,10 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
 });
+
+test('MUBO-221 the fresh Antigravity launch is read through a wait for that launch, not a snapshot of the file', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  assert.match(journey, /\$launch = Wait-For 'the fresh Antigravity chat ran its host enable launch' \{/, 'the launch row must be waited for');
+  assert.match(journey, /kind -ceq 'reader' -and \(\(\$_\.argv -join ' '\) -match 'host enable antigravity'\)/, 'the wait must name the launch it needs');
+  assert.doesNotMatch(journey, /\$launchRows = @\(/, 'a snapshot of the invocation file races the launch that has not run yet');
+});
