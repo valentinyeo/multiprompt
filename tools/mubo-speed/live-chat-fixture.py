@@ -43,7 +43,7 @@ for index, name in enumerate(names):
 
 seed = dict(active_tab=0, single_window=True, chat_active=True, shared_server_connection=True,
             tabs=[dict(shell_id=i + 1, kind='tmux', name=name, manual=True, tmux_host=0,
-                       tmux_session=name, cv=True) for i, name in enumerate(names)])
+                       tmux_session=name, cv=True, csid=sids[name]) for i, name in enumerate(names)])
 snapshot = dict(active=1, chat=True, single_window=True, sort_auto=False,
                 rows=[dict(id=i + 1, name=[ord(c) for c in name], kind=3) for i, name in enumerate(names)])
 (settings / 'session.json').write_text(json.dumps(seed), encoding='utf-8')
