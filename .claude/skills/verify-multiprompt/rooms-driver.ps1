@@ -12,6 +12,7 @@ $Evidence = [IO.Path]::GetFullPath($Evidence)
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $profile = Join-Path $env:RUNNER_TEMP ('rooms-' + [guid]::NewGuid().ToString('N'))
 $settings = "$profile/roaming/ZigShell"
+$mainSettings = $settings
 $actions = [Collections.Generic.List[object]]::new()
 $planned = [ordered]@{
     '1' = 'a: Create a room on a fresh profile'
@@ -41,6 +42,9 @@ $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
 $watcher = $null
 $clock = [Diagnostics.Stopwatch]::StartNew()
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 30), [Text.UTF8Encoding]::new($false)) }
+function Copy-Debug([string]$Name) {
+    if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/$Name-debug.log" -Force -ErrorAction SilentlyContinue }
+}
 function Read-Shared([string]$Path) {
     if (-not (Test-Path $Path)) { return '' }
     $readDeadline = [Diagnostics.Stopwatch]::StartNew()
@@ -132,6 +136,18 @@ function Visible-Children([string]$Class, $Parent = $main) {
     @($element.FindAll([Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen } | ForEach-Object { [IntPtr]$_.Current.NativeWindowHandle })
 }
 function Room-Window { $windows = @(Visible-Children 'MultiPromptRoomView'); if ($windows.Count -eq 1) { $windows[0] } }
+function Open-Room([string]$Name) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Invoke-JourneyCommand -Text $Name
+    $settle = [Diagnostics.Stopwatch]::StartNew()
+    while ($settle.Elapsed.TotalSeconds -lt 5) {
+        if (-not (Room-Window)) { break }
+        $state = Read-Shared "$settings/debug.log"
+        if ($state.Length -gt $offset -and $state.Substring($offset) -match '\[rooms\] bridge reply received') { break }
+        [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
+    }
+    if (-not (Room-Window)) { throw "Opening $Name did not show its room view" }
+}
 function Focus-Control([IntPtr]$Control) {
     Doctor
     if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $Control)) { throw 'Cannot focus owned control' }
@@ -154,19 +170,30 @@ function Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
     return $text
 }
-function Read-Crop([string]$Path, [string]$Name, [switch]$Light) {
-    $source = [Drawing.Bitmap]::new($Path)
-    $readable = $null
+function Save-Variant([Drawing.Bitmap]$Source, [int]$Skip, [int]$Scale, [int]$Threshold, [bool]$Light) {
+    $crop = $Source
     try {
-        $factor = [int][Math]::Min(6, [Math]::Max(1, [Math]::Ceiling(1600 / [Math]::Max(1, $source.Width))))
-        $readable = [Drawing.Bitmap]::new($source.Width * $factor, $source.Height * $factor, [Drawing.Imaging.PixelFormat]::Format24bppRgb)
-        $graphics = [Drawing.Graphics]::FromImage($readable)
+        if ($Skip -gt 0 -and $Skip -lt ($Source.Width - 8)) {
+            $crop = $Source.Clone([Drawing.Rectangle]::new($Skip, 0, $Source.Width - $Skip, $Source.Height), $Source.PixelFormat)
+        }
+        $bitmap = [Drawing.Bitmap]::new([Math]::Max(1, $crop.Width * $Scale), [Math]::Max(1, $crop.Height * $Scale), [Drawing.Imaging.PixelFormat]::Format24bppRgb)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
         $attributes = [Drawing.Imaging.ImageAttributes]::new()
         try {
             $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $matrix = [Drawing.Imaging.ColorMatrix]::new()
-            if ($Light) {
+            if ($Threshold -lt 0) {
+                $matrix.Matrix00 = 1; $matrix.Matrix11 = 1; $matrix.Matrix22 = 1; $matrix.Matrix33 = 1; $matrix.Matrix44 = 1
+            } elseif ($Threshold -gt 0) {
+                $slope = 255 / 16
+                $bias = 0.5 - $slope * $Threshold / 255
+                $weights = @(0.299, 0.587, 0.114)
+                for ($channel = 0; $channel -lt 3; $channel++) {
+                    for ($column = 0; $column -lt 3; $column++) { $matrix[$column, $channel] = $weights[$column] * $slope }
+                    $matrix[4, $channel] = $bias
+                }
+            } elseif ($Light) {
                 $matrix.Matrix00 = 2.392; $matrix.Matrix10 = 4.696; $matrix.Matrix20 = 0.912; $matrix.Matrix40 = -5.772
                 $matrix.Matrix01 = 2.392; $matrix.Matrix11 = 4.696; $matrix.Matrix21 = 0.912; $matrix.Matrix41 = -5.772
                 $matrix.Matrix02 = 2.392; $matrix.Matrix12 = 4.696; $matrix.Matrix22 = 0.912; $matrix.Matrix42 = -5.772
@@ -176,16 +203,38 @@ function Read-Crop([string]$Path, [string]$Name, [switch]$Light) {
                 $matrix.Matrix02 = -0.897; $matrix.Matrix12 = -1.761; $matrix.Matrix22 = -0.342; $matrix.Matrix42 = 2.3
             }
             $attributes.SetColorMatrix($matrix)
-            $graphics.DrawImage($source, [Drawing.Rectangle]::new(0, 0, $readable.Width, $readable.Height), 0, 0, $source.Width, $source.Height, [Drawing.GraphicsUnit]::Pixel, $attributes)
+            $graphics.DrawImage($crop, [Drawing.Rectangle]::new(0, 0, $bitmap.Width, $bitmap.Height), 0, 0, $crop.Width, $crop.Height, [Drawing.GraphicsUnit]::Pixel, $attributes)
         } finally { $attributes.Dispose(); $graphics.Dispose() }
-        $readable.Save("$Evidence/$Name-readable.png", [Drawing.Imaging.ImageFormat]::Png)
-    } finally {
-        if ($null -ne $readable) { $readable.Dispose() }
-        $source.Dispose()
-    }
-    $readableLines = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name-readable.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-readable-ocr")
-    $rawLines = Invoke-ServerNative -FilePath $ocr -Arguments @($Path, 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-raw-ocr")
-    (($rawLines -join ' ') + ' ' + ($readableLines -join ' ')) -replace '\s+', ' '
+        return $bitmap
+    } finally { if (-not [Object]::ReferenceEquals($crop, $Source)) { $crop.Dispose() } }
+}
+function Read-Crop([string]$Path, [string]$Name, [int]$Skip = 0, [switch]$Light) {
+    $source = [Drawing.Bitmap]::new($Path)
+    $variants = @()
+    try {
+        $factor = [int][Math]::Min(6, [Math]::Max(1, [Math]::Ceiling(1600 / [Math]::Max(1, ($source.Width - $Skip)))))
+        if ($Skip -gt 0) {
+            $variants += @{ skip = $Skip; scale = $factor; threshold = 160; psm = 11; light = $false; file = "$Name-readable.png" }
+            $variants += @{ skip = 0; scale = 6; threshold = 160; psm = 6; light = $false; file = "$Name-variant-2.png" }
+            $variants += @{ skip = 0; scale = 1; threshold = -1; psm = 11; light = $false; file = "$Name-variant-3.png" }
+        } else {
+            $variants += @{ skip = 0; scale = $factor; threshold = 0; psm = 11; light = $Light.IsPresent; file = "$Name-readable.png" }
+            $variants += @{ skip = 0; scale = 6; threshold = 160; psm = 6; light = $Light.IsPresent; file = "$Name-variant-2.png" }
+            $variants += @{ skip = 0; scale = 1; threshold = -1; psm = 11; light = $false; file = "$Name-variant-3.png" }
+        }
+        $readings = @()
+        foreach ($variant in $variants) {
+            $bitmap = $null
+            try {
+                $bitmap = Save-Variant $source $variant.skip $variant.scale $variant.threshold $variant.light
+                $bitmap.Save("$Evidence/$($variant.file)", [Drawing.Imaging.ImageFormat]::Png)
+            } finally { if ($null -ne $bitmap) { $bitmap.Dispose() } }
+            $lines = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$($variant.file)", 'stdout', '--psm', [string]$variant.psm) -Evidence $Evidence -Name ("$([IO.Path]::GetFileNameWithoutExtension($variant.file))-ocr")
+            $readings += @{ variant = "skip=$($variant.skip) scale=$($variant.scale) threshold=$($variant.threshold) psm=$($variant.psm)"; text = (($lines -join ' ') -replace '\s+', ' ').Trim() }
+        }
+    } finally { $source.Dispose() }
+    [IO.File]::WriteAllText("$Evidence/$Name-variants.txt", (($readings | ForEach-Object { "$($_.variant) => $($_.text)" }) -join "`n"))
+    return (($readings | ForEach-Object { $_.text }) -join ' ') -replace '\s+', ' '
 }
 function Picker-Shot([string]$Name) {
     [void](Shot $Name)
@@ -202,7 +251,7 @@ function Picker-Shot([string]$Name) {
         $crop = $source.Clone([Drawing.Rectangle]::new([int]$bounds.Left, $top, [int]$bounds.Width, $height), $source.PixelFormat)
         try { $crop.Save("$Evidence/$Name-list.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
     } finally { $source.Dispose() }
-    $text = Read-Crop "$Evidence/$Name-list.png" "$Name-list"
+    $text = Read-Crop "$Evidence/$Name-list.png" "$Name-list" -Skip ([int](44 * $scale))
     [IO.File]::WriteAllText("$Evidence/$Name-list-visible.txt", $text)
     return $text
 }
@@ -260,7 +309,7 @@ function Case([string]$Step, [string]$Name, [string]$Missing, [scriptblock]$Body
         try { & $Body; $case.status = 'PASS'; $case.symptom = 'Visible UI and saved state agree' }
         catch { $case.status = 'FAIL'; $case.symptom = $_.Exception.Message }
     }
-    try { [void](Shot "step-$Step"); [void](Snapshot "step-$Step") } catch { $result.driverErrors += $_.ToString() }
+    try { [void](Shot "step-$Step"); [void](Snapshot "step-$Step"); Copy-Debug "step-$Step" } catch { $result.driverErrors += $_.ToString() }
     $case.seconds = $clock.Elapsed.TotalSeconds
     $result.cases += $case
     Save $result "$Evidence/result.json"
@@ -304,7 +353,12 @@ function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
     Focus-Control $edit
     Press @(0x11, 0x41) 'Ctrl+A: replace any earlier unsent draft'
     Press @(0x08) 'Backspace: clear earlier draft before this independent send'
-    [void](Wait-For 'empty composer before typing' { [ChatDeliveryDesktop]::Text($edit) -ceq '' })
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $kept = [ChatDeliveryDesktop]::Text($edit)
+        if ($kept.Length -eq 0) { break }
+        for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: delete the kept draft one character at a time' }
+    }
+    [void](Wait-For 'empty composer before typing' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 10)
     Type-Text $Text
     [void](Wait-For 'exact typed composer text' { [ChatDeliveryDesktop]::Text($edit) -ceq $Text })
     Press @(0x1B) 'Escape: dismiss mention suggestions'
@@ -465,8 +519,12 @@ Host remote-1
             $index = [int]$saved.active_tab
             $index -ge 0 -and $index -lt $tabs.Count -and $tabs[$index].name -ceq 'Bravo' -and -not (Room-Window)
         })
-        Press @(0x11, 0x57) 'Ctrl+W: close Bravo before the room picker'
-        [void](Wait-For 'Bravo no longer an open tab' { @(Saved-Tabs (Session-Saved) | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 })
+        $bravoGone = { @(Saved-Tabs (Session-Saved) | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if (& $bravoGone) { break }
+            Press @(0x11, 0x10, 0x57) "Ctrl+Shift+W: close Bravo before the room picker (attempt $attempt)"
+            try { [void](Wait-For 'Bravo no longer an open tab' $bravoGone 15) } catch { if ($attempt -eq 3) { throw } }
+        }
         [void](Shot 'bravo-closed')
         [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'tmux has-session -t rooms-bravo') -Evidence $Evidence -Name 'closed-bravo-still-on-server')
         $script:closedBravo = $true
@@ -489,7 +547,12 @@ Host remote-1
         if ($visible -notmatch 'Rooms534') { throw 'Room did not reopen after saving members' }
     }
     Case '2-open' '' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
-        Press @(0x1B) 'Escape: close member editor'
+        $edits = { $room = Room-Window; if ($room) { @(Visible-Children 'Edit' $room).Count } else { 0 } }
+        for ($attempt = 0; $attempt -lt 3 -and (& $edits) -gt 1; $attempt++) {
+            Press @(0x1B) 'Escape: close the room editor before the palette reopen'
+            [void](Wait-For 'room editor closed' { (& $edits) -le 1 } 10)
+        }
+        if ((& $edits) -gt 1) { throw 'The room editor stayed open, so the reopened chat cannot be reached' }
         if ($closedBravo) { Invoke-JourneyCommand 'Reopen closed tab' }
         Open-Member 'Bravo'
         Send-Text 'PRIVATE534'
@@ -510,7 +573,7 @@ Host remote-1
     }
     $hasMembers = @((Snapshot 'after-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2
     Case 3 'Send a room message' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Send-Text 'BROADCAST534' -Room -AllowKeptDraft
         try { [void](Wait-For 'saved human room event' { @(Room-Events (Snapshot 'send-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'BROADCAST534' }).Count -eq 1 } 20) }
         catch { throw "The room did not accept a plain send; room shows: $((Shot 'send-refused'))" }
@@ -526,7 +589,7 @@ Host remote-1
         if ($visible -notmatch 'Alpha says BROADCAST534' -or $visible -notmatch 'Bravo says BROADCAST534') { throw 'Saved member replies are not both visible in the room' }
     }
     Case 5 'Mention only Alpha' $(if (-not $hasMembers) { 'The room has fewer than two saved members' } else { '' }) {
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Send-Text '@Alpha TARGET534' -Room -AllowKeptDraft
         $accepted = $true
         try { [void](Wait-For 'saved @Alpha room message' { @(Room-Events (Snapshot 'mention-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq '@Alpha TARGET534' }).Count -eq 1 } 20) }
@@ -579,7 +642,7 @@ Host remote-1
     }
     $missingMembers = if (-not $hasRoom) { 'No saved room' } elseif (-not $hasMembers) { 'Fewer than two saved members' } else { '' }
     Case 7 'e: Replies received while away' $missingMembers {
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Send-Text 'AWAY534' -Room
         [void](Wait-For 'both providers holding unanswered away question' { @((Snapshot 'away-held').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 })
         Open-Member 'Alpha'
@@ -594,7 +657,7 @@ Host remote-1
         if ($visible -notmatch 'Alpha says AWAY534' -or $visible -notmatch 'Bravo says AWAY534') { throw 'Replies that arrived while away are missing after returning to the room' }
     }
     Case 8 'f: Restart with an unanswered question' $missingMembers {
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Send-Text 'RESTART534' -Room
         [void](Wait-For 'both providers holding restart question' { @((Snapshot 'restart-held').inputs | Where-Object { $_.marker -ceq 'RESTART534' }).Count -eq 2 })
         if (@(Room-Events (Snapshot 'restart-unanswered') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says RESTART534' }).Count) { throw 'Driver gate released the restart reply too early' }
@@ -612,7 +675,7 @@ Host remote-1
     Case 9 '' 'The existing Android photo harness needs a companion checkout and has no Rooms read action; this Windows job has no Android client. Paired ticket MUBO-536' {}
     Case 10 '' 'The existing Android photo harness has no Rooms retry action; this Windows job has no Android client. Paired ticket MUBO-536' {}
     Case 12 '' $missingMembers {
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Send-Text 'FAIL534' -Room
         [void](Wait-For 'both provider failure receipts' { @((Snapshot 'failed-turn').inputs | Where-Object { $_.marker -ceq 'FAIL534' }).Count -eq 2 })
         [void](Wait-For 'visible failed member turn' { (Shot 'failed-turn') -match 'Restart|failed|unavailable|error' })
@@ -662,7 +725,8 @@ Host remote-1
 } finally {
     if ($null -ne $job) { $cleanup = $job.Stop(); $result.cleanup = @{ activeAfterStop = $cleanup.ActiveProcesses }; $job.Dispose() }
     if ($null -ne $serviceJob) { $cleanup = $serviceJob.Stop(); $result.serviceCleanup = @{ activeAfterStop = $cleanup.ActiveProcesses }; $serviceJob.Dispose() }
-    if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
+    if (Test-Path "$mainSettings/debug.log") { Copy-Item "$mainSettings/debug.log" "$Evidence/debug.log" -Force }
+    if ($settings -cne $mainSettings -and (Test-Path "$settings/debug.log")) { Copy-Item "$settings/debug.log" "$Evidence/fresh-debug.log" -Force }
     if (Test-Path $settings) {
         New-Item -ItemType Directory -Force "$Evidence/data" | Out-Null
         Get-ChildItem $settings -File | Where-Object { $_.Name -match '^(session.*\.json|room.*)$' } | Copy-Item -Destination "$Evidence/data"
