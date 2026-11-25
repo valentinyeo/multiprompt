@@ -12,6 +12,27 @@ The recipes below name the user actions, expected result and exact boundary.
 
 Use the entry paths in the action table below on a disposable owned profile.
 
+### computer: Computer viewing and control
+
+Real viewing, control and the private-screen boundary on a disposable Linux host.
+
+Open Computer from the existing three-dot menu or Ctrl+K. Use Ctrl+Shift+F to toggle full width; the
+old Computer width palette ID is not generated. Take control, give back and force a lost connection
+before Retry. Return to Browser or chat and compare the unsent draft.
+
+Observable proof: the pane shows the disposable desktop, Take control sends input only to that desktop,
+Give back stops it, Retry reconnects the same identity, and the VNC port never leaves host loopback.
+
+Journey: computer-pane covers the live pane. computer-menu covers menu selection and the draft.
+
+| Palette row or dynamic family | User reaches it |
+| --- | --- |
+| `SEARCH_COMPUTER_CONTROL_OFFSET` | Ctrl+K, type **take control**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
+| `SEARCH_COMPUTER_RETRY_OFFSET` | Ctrl+K, type **computer retry**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
+| `SEARCH_COMPUTER_TOGGLE_OFFSET` | Ctrl+K, type **computer**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
+| `SEARCH_COMPUTER_WIDTH_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use Ctrl+Shift+F instead. |
+| `SEARCH_TABCTX_COMPUTER` | Right-click the intended tab, then choose **Computer: Show or hide**. Follow `computer` above. |
+
 ## Driving it with control.ps1
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=computer-pane`. The `computer-host` job

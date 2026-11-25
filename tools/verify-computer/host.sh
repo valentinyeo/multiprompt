@@ -21,7 +21,7 @@ echo "::add-mask::$password"
 
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-    xvfb x11vnc xdotool openbox xterm x11-xserver-utils >/dev/null
+    xvfb x11vnc xdotool openbox xterm x11-xserver-utils python3-pip >/dev/null
 if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-websockify >/dev/null 2>&1; then
     sudo python3 -m pip install --break-system-packages --quiet 'websockify==0.12.0'
 fi

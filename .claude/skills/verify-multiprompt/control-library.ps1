@@ -1257,15 +1257,15 @@ function Resolve-ComputerHost {
     $candidates = @(0..15 | ForEach-Object { $base + $_ })
     $port = 0
     Write-Host ('Computer host: probing the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]))
-    $deadline = [DateTime]::UtcNow.AddSeconds(300)
+    $deadline = [DateTime]::UtcNow.AddSeconds(1200)
     do {
         foreach ($candidate in $candidates) {
             $probe = Invoke-ComputerSsh $ssh @('-F', 'none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=NUL', '-o', 'ConnectTimeout=6', '-o', 'LogLevel=ERROR', '-i', $keyPath, '-p', [string]$candidate, '-T', ($user + '@' + $address), 'echo verify-computer-host') 'echo verify-computer-host'
             if ($probe.exit -eq 0 -and $probe.out.Trim() -ceq 'verify-computer-host') { $port = $candidate; break }
         }
-        if ($port -eq 0) { Start-Sleep -Seconds 15 }
+        if ($port -eq 0) { Write-Host 'Computer host: no host yet; probing the reserved ports again in fifteen seconds'; Start-Sleep -Seconds 15 }
     } while ($port -eq 0 -and [DateTime]::UtcNow -lt $deadline)
-    if ($port -eq 0) { throw ('No disposable desktop host answered on the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]) + ' within five minutes') }
+    if ($port -eq 0) { throw ('No disposable desktop host answered on the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]) + ' within twenty minutes') }
     Write-Host "Computer host: the disposable desktop answers on $($address):$port"
     $knownHosts = Join-Path $env:RUNNER_TEMP 'computer-host-known_hosts'
     $scanned = @()
