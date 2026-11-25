@@ -1222,3 +1222,78 @@ function Stage-FooterUpdate([string]$Target, [string]$Version, [string]$Root) {
     if (-not (Test-Path -LiteralPath "$Target.update/ready.txt")) { throw 'Signed local footer update marker missing' }
 }
 
+
+function Invoke-ComputerSsh([string]$Exe, [string[]]$Arguments, [string]$InputText = '') {
+    $errorFile = Join-Path $env:RUNNER_TEMP ('computer-ssh-' + [guid]::NewGuid().ToString('N') + '.log')
+    try {
+        if ($InputText) { $out = $InputText | & $Exe @Arguments 2> $errorFile } else { $out = '' | & $Exe @Arguments 2> $errorFile }
+        $code = $LASTEXITCODE
+        $err = ''
+        if (Test-Path -LiteralPath $errorFile) { $err = [IO.File]::ReadAllText($errorFile) }
+        return [pscustomobject]@{ exit = $code; out = (@($out) -join "`n").TrimEnd("`r", "`n"); err = $err }
+    } finally {
+        Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Resolve-ComputerHost {
+    $key = $env:COMPUTER_HOST_KEY
+    if ([string]::IsNullOrWhiteSpace($key)) { throw 'The computer-pane journey needs the disposable host key from the journeys job' }
+    foreach ($line in ($key -split "`r?`n")) { if ($line.Trim()) { Write-Output ('::add-mask::' + $line.Trim()) } }
+    $address = 'bore.pub'
+    $user = 'desk'
+    $vncPort = 5900
+    $viewerPort = 6080
+    $ssh = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh.exe'
+    $scanExe = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keyscan.exe'
+    if (-not (Test-Path -LiteralPath $ssh) -or -not (Test-Path -LiteralPath $scanExe)) { throw 'The computer-pane journey needs the Windows OpenSSH client tools' }
+    $keyPath = Join-Path $env:RUNNER_TEMP 'computer-host-key'
+    [IO.File]::WriteAllText($keyPath, (($key -replace "`r", '') + "`n"), (New-Object Text.UTF8Encoding($false)))
+    & icacls $keyPath /inheritance:r /grant:r ('{0}:(R)' -f $env:USERNAME) | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'The disposable host key file could not be restricted to this runner user' }
+    $runId = 0
+    if (-not [int64]::TryParse([string]$env:GITHUB_RUN_ID, [ref]$runId) -or $runId -le 0) { throw 'The computer-pane journey needs the workflow run id for the tunnel port range' }
+    $base = 20000 + ($runId % 40000)
+    $candidates = @(0..15 | ForEach-Object { $base + $_ })
+    $port = 0
+    Write-Host ('Computer host: probing the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]))
+    $deadline = [DateTime]::UtcNow.AddSeconds(300)
+    do {
+        foreach ($candidate in $candidates) {
+            $probe = Invoke-ComputerSsh $ssh @('-F', 'none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=NUL', '-o', 'ConnectTimeout=6', '-o', 'LogLevel=ERROR', '-i', $keyPath, '-p', [string]$candidate, '-T', ($user + '@' + $address), 'echo verify-computer-host') 'echo verify-computer-host'
+            if ($probe.exit -eq 0 -and $probe.out.Trim() -ceq 'verify-computer-host') { $port = $candidate; break }
+        }
+        if ($port -eq 0) { Start-Sleep -Seconds 15 }
+    } while ($port -eq 0 -and [DateTime]::UtcNow -lt $deadline)
+    if ($port -eq 0) { throw ('No disposable desktop host answered on the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]) + ' within five minutes') }
+    Write-Host "Computer host: the disposable desktop answers on $($address):$port"
+    $knownHosts = Join-Path $env:RUNNER_TEMP 'computer-host-known_hosts'
+    $scanned = @()
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $scanned = @(& $scanExe -p $port -T 8 -t ed25519 $address 2>$null | Where-Object { $_ -match ('^\[' + [regex]::Escape($address) + '\]:' + $port + ' ssh-ed25519 ') })
+        if ($scanned.Count -eq 1) { break }
+        Start-Sleep -Seconds 2
+    }
+    if ($scanned.Count -ne 1) { throw "ssh-keyscan did not publish exactly one host key for ${address}:$port" }
+    [IO.File]::WriteAllText($knownHosts, ($scanned[0] + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $fingerprint = (& (Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keygen.exe') -l -f $knownHosts 2>$null) -join ' '
+    $aliases = 'remote-1 remote-2 remote-3'
+    $configText = "Host $aliases`n  HostName $address`n  Port $port`n  User $user`n  IdentityFile $keyPath`n  UserKnownHostsFile $knownHosts`n  IdentitiesOnly yes`n  BatchMode yes`n"
+    $configPaths = @()
+    foreach ($directory in @((Join-Path $scratch 'roaming/ZigShell/ssh-key'), (Join-Path $scratch 'profile/.ssh'))) {
+        New-Item -ItemType Directory -Force $directory | Out-Null
+        $configPath = Join-Path $directory 'config'
+        [IO.File]::WriteAllText($configPath, $configText, (New-Object Text.UTF8Encoding($false)))
+        $configPaths += $configPath
+    }
+    [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh, (New-Object Text.UTF8Encoding($false)))
+    Save-Json @{ address = $address; port = $port; user = $user; vncPort = $vncPort; viewerPort = $viewerPort; candidates = $candidates; ssh = $ssh; keyFile = 'RUNNER_TEMP/computer-host-key'; knownHosts = 'RUNNER_TEMP/computer-host-known_hosts'; hostKey = $fingerprint; appConfigs = $configPaths } 'computer-host.json'
+    return @{ address = $address; port = $port; user = $user; vncPort = $vncPort; viewerPort = $viewerPort; ssh = $ssh; key = $keyPath; knownHosts = $knownHosts }
+}
+
+function Invoke-ComputerHost([string]$Command, [string]$InputText = '') {
+    if ($null -eq $script:computerHost) { throw 'The disposable computer host is not resolved for this journey' }
+    $hostSettings = $script:computerHost
+    $arguments = @('-F', 'none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=5', '-o', 'LogLevel=ERROR', '-i', $hostSettings.key, '-o', ('UserKnownHostsFile=' + $hostSettings.knownHosts), '-p', [string]$hostSettings.port, '-T', ($hostSettings.user + '@' + $hostSettings.address), $Command)
+    return Invoke-ComputerSsh $hostSettings.ssh $arguments $InputText
+}

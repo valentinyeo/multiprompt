@@ -1,6 +1,8 @@
 # Computer pane
 
-Journeys: computer-menu
+Source files: src/computer_pane.zig, src/computer_view.cpp, src/computer/discover.py, src/computer/adapter.js, src/computer/resources.zig, src/command_palette.zig, src/shortcuts.zig, src/ui_words.zon, .claude/skills/verify-multiprompt/control-feature-computer-pane.ps1, tools/verify-computer/host.sh, tools/verify-computer/websockify-desktop.py, .github/workflows/computer-host.yml
+
+Journeys: computer-menu, computer-pane
 
 ## Sub-features
 
@@ -10,30 +12,55 @@ The recipes below name the user actions, expected result and exact boundary.
 
 Use the entry paths in the action table below on a disposable owned profile.
 
-## Driving it with drive.ps1
+## Driving it with control.ps1
 
-Preconditions: a healthy GitHub Windows instance and the selected journey prerequisites.
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=computer-pane`. The `computer-host` job
+runs a throwaway Linux desktop on a GitHub runner and publishes its SSH port through the free
+`bore.pub` tunnel, which needs no account, no paid VM and no stored secret. The Windows job reaches it
+only through that tunnel, so no shared or personal server is touched.
 
-Use `verify.yml` with the named executable journey, not this map stem. A journey is a recipe, not a claim of a live pass.
+The host creates the non-root `desk` user, `xvfb-desktop.service`, `x11vnc.service` on `127.0.0.1` with
+`-localhost`, `novnc-desktop.service` running the known literal `websockify-desktop.py` layout, and a
+plain window manager with an `xterm` filled with the marker colour `#123456`. The driver writes
+`remote-1`, `remote-2` and `remote-3` in the app's own SSH settings so the real executable, the real
+discovery script and the real loopback forward are exercised.
 
-The recipes distinguish existing focused journeys from unreachable complete paths. UNREACHABLE names the missing data, endpoint, build mode or driver action; it never means the product passed.
+Each ticket item is recorded as proven, failed or unreachable in `computer-pane-items.json`:
 
-### computer: Computer viewing and control
+1. Pane shows the server screen and starts view-only: `state live`, the app's own discovery accepted
+   display `:0`, at least half the pane samples are the host marker colour, and a click leaves the host
+   pointer untouched.
+2. Take control, then click and type: the host pointer moves, the typed marker reaches
+   `/home/desk/typed.txt`, and keys after Give back never arrive.
+3. Ctrl+Shift+F: the pane's left edge moves left and the caption controls still answer the real hit
+   areas `8,9,20`.
+4. Two chats on the one host: the viewer-forward count never grows and exactly one `ssh.exe` holds
+   `-L 127.0.0.1:`.
+5. A hidden chat logs `state sleeping` and its last picture is back within 2.5 s of returning.
+6. After `Restart-SessionRestore` the same saved choice reopens the pane with no input.
+7. The forced drop (`systemctl stop novnc-desktop.service`) makes the log carry connecting, live,
+   sleeping, reconnecting and lost, and Retry returns the same chat to live.
+8. `ss -ltn` holds 5900 and 6080 on host loopback only, the tunnel runs `bore local 22`, and the public
+   listener answers SSH, never RFB.
 
-Open Computer from the existing three-dot menu or Ctrl+K. Use Ctrl+Shift+F to toggle full width; the old Computer width palette ID is not generated. Take control, give back and force a lost connection before Retry. Return to Browser or chat and compare the unsent draft.
+The host is told to stop when the driver writes `/tmp/verify-computer-done`, so it never outlives the
+journey. Every credential is created inside the run, masked with `::add-mask::`, and the private key
+lives only in `RUNNER_TEMP`, never in the evidence artifact.
 
-Observable proof: The selected chat owns the remote view and input session. Take control sends input only to that target, Give back stops it, Retry reconnects the same identity, and draft text remains exact.
-
-Journey: computer-menu covers menu selection/draft only. UNREACHABLE for real viewing/control until WebView2, a disposable non-root SSH user with discovery-compatible x11vnc.service and novnc-desktop.service, permission to control it and a driver reading remote input receipts are available. Do not use a personal desktop.
-
-| Palette row or dynamic family | User reaches it |
-| --- | --- |
-| `SEARCH_COMPUTER_CONTROL_OFFSET` | Ctrl+K, type **take control**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
-| `SEARCH_COMPUTER_RETRY_OFFSET` | Ctrl+K, type **computer retry**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
-| `SEARCH_COMPUTER_TOGGLE_OFFSET` | Ctrl+K, type **computer**, then select the matching action with Up/Down and Enter. Follow `computer` above. |
-| `SEARCH_COMPUTER_WIDTH_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
-| `SEARCH_TABCTX_COMPUTER` | Right-click the intended tab, then choose **Computer: Show or hide**. Follow `computer` above. |
+A red run is a product symptom, not a driver gap: read `computer-pane.png`, the `[computer]` lines in
+`data/roaming/ZigShell/debug.log`, and the item table. The known released symptom is
+`viewer could not start, WebView2 unavailable`, which reaches `Lost` before any SSH starts.
 
 ## Gotchas
 
 Never treat an offline, synthetic or diagnostic check as authenticated end-to-end proof.
+
+The pane needs a real systemd host, a non-root desktop user and the exact service layout above; a
+container without systemd or a root session shows Lost.
+
+`bore.pub` is a free public tunnel, so the port range is derived from the workflow run id and a busy
+port moves to the next candidate. If every candidate is taken the run fails before the app starts.
+
+Verified product gap from the first proof run: `src/computer/adapter.js` opens `ws://127.0.0.1:<port>/`,
+while the discovery-validated `websockify-desktop.py` answers `/` with a 302 redirect to `vnc.html`, so
+the websocket handshake can be rejected even after WebView2 starts.

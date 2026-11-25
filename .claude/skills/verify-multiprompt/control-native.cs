@@ -681,6 +681,15 @@ public static class VerifyNative {
         MouseAt(point.X, point.Y, 2);
         MouseAt(point.X, point.Y, 4);
     }
+    public static void ClickOwnedContent(IntPtr owner, int x, int y) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(owner, ref point)) throw new InvalidOperationException("Pane point is unavailable");
+        IntPtr hit = WindowFromPoint(point);
+        if (hit == IntPtr.Zero || GetAncestor(hit, 2) != owner) throw new InvalidOperationException("Pane point is not in the owned window");
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 2);
+        MouseAt(point.X, point.Y, 4);
+    }
     public static void RightClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Tab row is not in the owned window");
