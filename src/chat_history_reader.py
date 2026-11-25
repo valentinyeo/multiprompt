@@ -2684,7 +2684,7 @@ def message_expire(db, provider, sid):
     def idle(rows):
         if not rows:
             return rows
-        if host_turn_busy(provider, sid):
+        if host_turn_busy(provider, sid) or host_fresh_pending(provider, sid):
             return []
         held = host_held(provider, sid)
         return [row for row in rows if row[0] not in held]
@@ -2873,6 +2873,8 @@ HOST_RESTART_STALE = 6 * 60 * 60
 HOST_RESTART_WAIT = 2.0
 HOST_FRESH_TIMEOUTS = dict(handover=300, reset=300, resume=600)
 HOST_FRESH_RETRY_WAIT = 120
+HOST_FRESH_HOLD_GRACE = 60
+HOST_FRESH_PENDING_WAITS = dict(HOST_FRESH_TIMEOUTS, resume_failed=HOST_FRESH_RETRY_WAIT)
 HOST_FRESH_CONTEXT_LIMIT = 6000
 HOST_FRESH_CONTEXT_MESSAGE_LIMIT = 1200
 HOST_FRESH_HANDOVER_NOISE = re.compile(
@@ -4281,6 +4283,24 @@ def host_fresh_note_transcript(state, transcript):
             carry = buffer[-VALENTIN_MODE_KEEP:]
     except (OSError, TypeError, AttributeError, ValueError):
         return
+
+
+def host_fresh_phase_wait(fresh):
+    if not isinstance(fresh, dict):
+        return None
+    wait = HOST_FRESH_PENDING_WAITS.get(fresh.get("phase"))
+    started = fresh.get("started")
+    if not isinstance(wait, int) or type(started) not in (int, float):
+        return None
+    if time.time() - started > wait + HOST_FRESH_HOLD_GRACE:
+        return None
+    return wait
+
+
+def host_fresh_pending(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return False
+    return host_fresh_phase_wait(host_session_state(provider, sid).get("fresh_start")) is not None
 
 
 def host_fresh_busy(session):
@@ -7892,7 +7912,8 @@ def message_worker(tmux, provider, sid):
                             return
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
-                        held = pending is not None and pending[0] in host_held(provider, sid)
+                        held = pending is not None and (pending[0] in host_held(provider, sid)
+                                                        or host_fresh_pending(provider, sid))
                         if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()
