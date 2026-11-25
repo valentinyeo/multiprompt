@@ -95,9 +95,18 @@ const journal = struct {
     };
     fn newCommandId() ?[36]u8 { return test_command.*; }
     fn load(_: Scope) !?Entry {
+        if (existing_record) |record| return Entry{ .value = record };
         return Entry{ .value = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .create, .command_id = test_room, .room_id = "", .revision = 0, .request = "", .bindings = &.{}, .state = .accepted, .evidence = "" } };
     }
+    fn abandon(_: Scope, id: []const u8) !void {
+        const record = existing_record orelse return error.NotFound;
+        if (!std.mem.eql(u8, record.command_id, id)) return error.WrongCommand;
+        existing_record = null;
+    }
     fn prepare(_: Scope, kind: Kind, id: []const u8, room: []const u8, revision: u64, request: []const u8, bindings: []const Binding) !void {
+        if (existing_record) |saved| {
+            if ((saved.state == .prepared or saved.state == .uncertain) and (!std.mem.eql(u8, saved.command_id, id) or !std.mem.eql(u8, saved.request, request))) return error.UnresolvedCommand;
+        }
         const record = Record{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = kind, .command_id = id, .room_id = room, .revision = revision, .request = request, .bindings = bindings, .state = .prepared, .evidence = "" };
         var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, request, .{});
         defer parsed.deinit();
@@ -123,6 +132,15 @@ test "legacy requests remain valid and unknown capabilities or extra fields are 
     try parsed.value.object.put(std.testing.allocator, "unexpected", .{ .integer = 1 });
     defer _ = parsed.value.object.swapRemove("unexpected");
     try std.testing.expect(!journal.validPostRequest(record, parsed.value));
+}
+test "a new message clears an unresolved send for the same room" {
+    defer reset();
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "{\"op\":\"post_human\",\"text\":\"Earlier\"}", .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    try std.testing.expect(existing_record == null);
+    try std.testing.expectEqual(journal.Kind.post, sent_kind.?);
+    try std.testing.expect(!std.mem.eql(u8, staged_record.?.command_id, "40000000-0000-4000-8000-000000000004"));
+    try std.testing.expect(std.mem.indexOf(u8, staged_record.?.request, "Hello room") != null);
 }
 `;
   const files = { 'room_post.zig': read('room_post.zig') };

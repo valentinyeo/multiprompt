@@ -56,6 +56,7 @@ const rooms = struct {
     };
 };
 var staged_record: ?journal.Record = null;
+var existing_record: ?journal.Record = null;
 const test_scope = journal.Scope{ .account_digest = @splat('a'), .store_uuid = test_store.* };
 fn commandScope(_: StoreLocation) ?journal.Scope { return test_scope; }
 fn sameLocation(a: RoomLocation, b: RoomLocation) bool { return std.meta.eql(a, b); }
@@ -69,6 +70,7 @@ fn reset() void {
     }
     pending_command = null;
     staged_record = null;
+    existing_record = null;
     sent_kind = null;
     last_error = "";
     last_log_len = 0;

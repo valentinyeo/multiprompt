@@ -277,3 +277,40 @@ test('real selected runtime and host processes produce scoped room replies', { s
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /ROOM_REAL_HOST_PROCESS_PASS/);
 });
+
+const publishedSourcesProgram = String.raw`
+import base64, hashlib, json, os, sys, tempfile, time
+from pathlib import Path
+sources = {name: base64.b64encode(Path(file).read_bytes()).decode() for name, file in [('ROOM_SERVICE_SOURCE', 'src/room_service.py'), ('ROOM_BRIDGE_SOURCE', 'src/room_bridge.py')]}
+bundled = dict(sources)
+exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), bundled)
+plain = {}
+exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), plain)
+assert not plain.get('ROOM_BRIDGE_SOURCE'), 'the host stands in for one started without the bundled room sources'
+session = dict(parked={}, state={})
+with tempfile.TemporaryDirectory() as home:
+    plain['HOME'] = Path(home)
+    before = plain['host_handle_request']('claude', 'ffffffff', 'room-chat', session, dict(op='ping'))
+    assert before['room_message_protocol'] == 1, before
+    assert before['room_features'] == [], before
+    runtime = Path(home) / '.multiprompt-runtime'
+    runtime.mkdir(mode=0o700)
+    digest = hashlib.sha256(bundled['READER_SOURCE'].encode()).hexdigest()
+    for name, data in [('reader.py', bundled['READER_SOURCE']), (digest + '.py', bundled['READER_SOURCE']), ('active.json', json.dumps(dict(protocol=1, generation=bundled['RUNTIME_GENERATION'], sha256=digest)))]:
+        file = runtime / name
+        file.write_text(data)
+        file.chmod(0o600)
+    time.sleep(1.1)
+    after = plain['host_handle_request']('claude', 'ffffffff', 'room-chat', session, dict(op='ping'))
+    assert after['room_features'] == [1], after
+    loaded = plain['host_room_sources']()
+    assert loaded['service'] == sources['ROOM_SERVICE_SOURCE'], 'the host loads the published service helper'
+    assert loaded['bridge'] == sources['ROOM_BRIDGE_SOURCE'], 'the host loads the published bridge helper'
+print('ROOM_PUBLISHED_SOURCES_PASS')
+`;
+
+test('a host started without bundled room sources advertises the published room helper', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync('python3', ['-'], { cwd: root, input: publishedSourcesProgram, encoding: 'utf8', timeout: 60000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /ROOM_PUBLISHED_SOURCES_PASS/);
+});

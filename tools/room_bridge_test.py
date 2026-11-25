@@ -100,16 +100,55 @@ class BridgeTest(unittest.TestCase):
     @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
     @mock.patch.object(bridge_module, 'host_status')
     def test_old_running_host_is_named_before_a_new_post_is_recorded(self, status, runtime):
-        status.return_value = dict(enabled=True, alive=True, owner='host', room_message_protocol=1)
+        status.return_value = dict(enabled=True, alive=True, owner='host')
         room = self.bridge.execute(self.create)['event']['room_id']
         request = dict(op='post_human', host_uuid=self.host, command_id=uid(), room_id=room, expected_revision=1, text='hello', recipients=[], room_features=1)
         self.error('room_host_upgrade_required', request)
         self.assertEqual(1, self.bridge.store.room(room)['seq'])
-        status.return_value['room_features'] = [1]
+        status.return_value['room_message_protocol'] = 1
         with mock.patch.object(self.bridge, 'sweep_pending'):
             accepted = self.bridge.execute(request)
         self.assertEqual('human', accepted['event']['type'])
         self.assertEqual(2, self.bridge.store.room(room)['seq'])
+
+    def test_two_starts_publish_the_helper_once(self):
+        import hashlib
+        import json
+        import os
+        import threading
+        import time
+        fingerprint = 'e' * 64
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'HOME': home}):
+            bridge_module.RUNTIME_FINGERPRINT = fingerprint
+            bridge_module.RUNTIME_SOURCE = (root / 'src/chat_history_reader.py').read_bytes()
+            bridge_module.STORE_DIRECTORY = self.temp.name
+            calls = []
+            def install(*args, **kwargs):
+                calls.append(time.monotonic())
+                time.sleep(0.3)
+                runtime = Path(home, '.multiprompt-runtime')
+                runtime.mkdir(mode=0o700, exist_ok=True)
+                digest = hashlib.sha256(bridge_module.RUNTIME_SOURCE).hexdigest()
+                for name, data in [('reader.py', bridge_module.RUNTIME_SOURCE), (digest + '.py', bridge_module.RUNTIME_SOURCE), ('active.json', json.dumps(dict(protocol=1, generation=1, sha256=digest)).encode())]:
+                    file = runtime / name
+                    file.write_bytes(data)
+                    file.chmod(0o600)
+                return bridge_module.subprocess.CompletedProcess(args[0], 0)
+            results = []
+            try:
+                with mock.patch.object(bridge_module.subprocess, 'run', side_effect=install):
+                    threads = [threading.Thread(target=lambda: results.append(bridge_module.publish_runtime())) for _ in range(2)]
+                    for thread in threads:
+                        thread.start()
+                    for thread in threads:
+                        thread.join(20)
+            finally:
+                bridge_module.RUNTIME_SOURCE = b''
+                bridge_module.RUNTIME_FINGERPRINT = ''
+                bridge_module.STORE_DIRECTORY = None
+        self.assertEqual(2, len(results), 'both starts finished')
+        self.assertEqual(1, len(calls), 'the second start waited and reused the published helper')
+        self.assertEqual([False, True], sorted(results))
 
     @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
     @mock.patch.object(bridge_module, 'host_status', return_value=dict(enabled=True, alive=False))
