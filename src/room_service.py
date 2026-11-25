@@ -227,7 +227,10 @@ class RoomStore:
                 event = self.event(room_id, 'members_edited', {'revision': revision, 'members': self.members(room_id)})
             return {'event': event, 'deliveries': []}
         if op == 'post_human':
-            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients'))
+            upgraded = 'room_features' in r
+            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients', 'room_features') if upgraded else ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients'))
+            if upgraded and (type(r['room_features']) is not int or r['room_features'] != 1):
+                fail('unsupported_remote_capability')
             if number(r['expected_revision'], 1) != room['revision']:
                 fail('revision_conflict')
             message = text(r['text'], 65536)
@@ -236,17 +239,40 @@ class RoomStore:
             recipients = r['recipients']
             if not isinstance(recipients, list) or len(recipients) > 64 or any(not isinstance(a, str) for a in recipients) or len(set(recipients)) != len(recipients):
                 fail('invalid_recipients')
-            mentions = []
-            for match in re.finditer(r'(?<![\w@.\\+-])@', message):
-                alias = re.match(r'[A-Za-z0-9_-]+', message[match.end():])
-                if not alias:
-                    fail('invalid_mentions')
-                mentions.append(alias.group())
             active = {m['alias']: m for m in self.members(room_id)}
+            mentions = []
+            consumed = 0
+            for match in re.finditer(r'(?<![\w@.\\+-])@', message):
+                if match.start() < consumed:
+                    continue
+                remaining = message[match.end():]
+                if upgraded:
+                    matches = []
+                    for member in active.values():
+                        for name in (member['alias'], member['display_name']):
+                            candidate = remaining[:len(name)]
+                            if candidate.casefold() == name.casefold() and (len(remaining) == len(name) or not (remaining[len(name)].isalnum() or remaining[len(name)] in '_-')):
+                                matches.append((len(name), member['alias']))
+                    if not matches:
+                        fail('invalid_mentions')
+                    length = max(size for size, alias in matches)
+                    aliases = {alias for size, alias in matches if size == length}
+                    if len(aliases) != 1:
+                        fail('ambiguous_mentions')
+                    mentions.append(aliases.pop())
+                    consumed = match.end() + length
+                else:
+                    alias = re.match(r'[A-Za-z0-9_-]+', remaining)
+                    if not alias:
+                        fail('invalid_mentions')
+                    mentions.append(alias.group())
             if any(a not in active for a in mentions) or set(mentions) != set(recipients):
                 fail('invalid_mentions')
             targets = [active[a] for a in sorted(set(mentions))] if mentions else list(active.values())
-            event = self.event(room_id, 'human', {'text': message, 'revision': room['revision'], 'recipients': [m['id'] for m in targets]})
+            payload = {'text': message, 'revision': room['revision'], 'recipients': [m['id'] for m in targets]}
+            if upgraded:
+                payload['room_features'] = 1
+            event = self.event(room_id, 'human', payload)
             deliveries = []
             for member in targets:
                 delivery = {'id': new_id(), 'room_id': room_id, 'event_id': event['id'], 'event_seq': event['seq'], 'member_id': member['id'], 'status': 'pending'}
@@ -272,11 +298,18 @@ class RoomStore:
         self.db.execute('INSERT INTO responses VALUES (?, ?, ?, ?, ?)', (room_id, r['member_id'], r['response_id'], response_body, encoded(result)))
         return result
 
-    def conversation(self, room_id, member_id, event_seq, message):
+    def conversation(self, room_id, member_id, event_seq, message, shared=False):
         previous = self.db.execute('SELECT COALESCE(MAX(event_seq), 0) FROM deliveries WHERE member_id=? AND event_seq<?', (member_id, event_seq)).fetchone()[0]
         lines = []
-        for row in self.db.execute("SELECT e.body, m.alias FROM events e JOIN members m ON m.id=json_extract(e.body, '$.member_id') WHERE e.room_id=? AND e.seq>? AND e.seq<? AND json_extract(e.body, '$.type')='agent_reply' AND m.id<>? AND EXISTS (SELECT 1 FROM deliveries d WHERE d.member_id=? AND d.event_id=json_extract(e.body, '$.parent_event_id')) ORDER BY e.seq", (room_id, previous, event_seq, member_id, member_id)):
-            lines.append(row['alias'] + ': ' + json.loads(row['body'])['text'][:REPLY_CONTEXT_CHARS])
+        for row in self.db.execute('SELECT body FROM events WHERE room_id=? AND seq>? AND seq<? ORDER BY seq', (room_id, previous, event_seq)):
+            event = json.loads(row['body'])
+            if event['type'] == 'human' and shared and member_id not in event['recipients']:
+                lines.append('User: ' + event['text'][:REPLY_CONTEXT_CHARS])
+            elif event['type'] == 'agent_reply' and event['member_id'] != member_id:
+                if not shared and not self.db.execute('SELECT 1 FROM deliveries WHERE member_id=? AND event_id=?', (member_id, event['parent_event_id'])).fetchone():
+                    continue
+                member = self.db.execute('SELECT alias FROM members WHERE id=?', (event['member_id'],)).fetchone()
+                lines.append(member['alias'] + ': ' + event['text'][:REPLY_CONTEXT_CHARS])
         kept = []
         used = 0
         budget = min(CONTEXT_BYTES, DELIVERY_BYTES - CONTEXT_FRAME_BYTES - len(message.encode('utf-8')))
@@ -339,7 +372,7 @@ class RoomStore:
             if row is None:
                 fail('invalid_scope')
             event = json.loads(row['body'])
-            return {'message_id': row['id'], 'room_id': r['room_id'], 'parent_event_id': row['event_id'], 'event_seq': row['event_seq'], 'member_id': row['member_id'], 'host_uuid': row['host_uuid'], 'provider': row['provider'], 'provider_sid': row['provider_sid'], 'session_identity': row['session_identity'], 'text': self.conversation(r['room_id'], row['member_id'], row['event_seq'], event['text'])}
+            return {'message_id': row['id'], 'room_id': r['room_id'], 'parent_event_id': row['event_id'], 'event_seq': row['event_seq'], 'member_id': row['member_id'], 'host_uuid': row['host_uuid'], 'provider': row['provider'], 'provider_sid': row['provider_sid'], 'session_identity': row['session_identity'], 'text': self.conversation(r['room_id'], row['member_id'], row['event_seq'], event['text'], shared=event.get('room_features') == 1)}
         if op == 'deliveries':
             fields(r, ('op', 'room_id', 'after', 'through', 'limit'))
             room = self.room(r['room_id'])

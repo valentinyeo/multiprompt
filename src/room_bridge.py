@@ -104,6 +104,43 @@ def scoped_runtime():
         return False
 
 
+def read_catalog_json(path):
+    try:
+        with path.open('rb') as stream:
+            data = stream.read(1048577)
+        return json.loads(data) if len(data) <= 1048576 else {}
+    except (OSError, ValueError, UnicodeError):
+        return {}
+
+
+def member_catalog(slot):
+    root = Path.home() / '.local/state/multiprompt'
+    names = read_catalog_json(root / 'chat-names.json')
+    layout = read_catalog_json(Path.home() / '.local/share/multiprompt/layout.json')
+    names = names if isinstance(names, dict) else {}
+    tabs = layout.get('tabs', []) if isinstance(layout, dict) else []
+    shown = {tab.get('tmux_session'): tab.get('name') for tab in tabs if isinstance(tab, dict) and tab.get('tmux_host') == slot and isinstance(tab.get('tmux_session'), str)}
+    members = {}
+    for path in sorted((root / 'agent-host').glob('*.config.json')):
+        config = read_catalog_json(path)
+        if not isinstance(config, dict) or config.get('helper_parent') or config.get('provider', 'claude') != 'claude' or config.get('spawn_host', slot) != slot:
+            continue
+        sid = config.get('sid')
+        if not isinstance(sid, str) or not SID.fullmatch(sid):
+            continue
+        tmux = config.get('tmux')
+        published = names.get(tmux, {}) if isinstance(tmux, str) else {}
+        name = (published.get('name') if isinstance(published, dict) else None) or shown.get(tmux) or config.get('spawn_display') or tmux or sid
+        if not isinstance(name, str) or not name.strip() or len(name.encode('utf-8')) > 256 or '\x00' in name:
+            continue
+        try:
+            status = host_status(sid)
+        except RoomError:
+            status = dict(enabled=config.get('enabled') is True, alive=False, owner=None)
+        members[sid] = dict(provider='claude', sid=sid, display_name=name, enabled=status['enabled'], alive=status.get('alive') is True, owner=status.get('owner'))
+    return sorted(members.values(), key=lambda member: (member['display_name'].casefold(), member['sid']))[:768]
+
+
 class RoomBridge:
     def __init__(self, directory):
         self.store = RoomStore(directory)
@@ -111,9 +148,20 @@ class RoomBridge:
     def close(self):
         self.store.close()
 
+    def sweep_pending(self, sid=None):
+        pending = self.store.db.execute("SELECT DISTINCT d.room_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY COALESCE(p.checked,0) LIMIT 16", (sid, sid)).fetchall()
+        if not pending or not scoped_runtime():
+            return
+        for row in pending:
+            try:
+                self.sync_replies(row['room_id'])
+            except (RoomError, OSError, TimeoutError):
+                continue
+
     def execute(self, request):
         if not isinstance(request, dict):
             fail('invalid_fields')
+        self.sweep_pending()
         op = request.get('op')
         if op == 'capabilities':
             opted_in = 'room_messages' in request
@@ -121,7 +169,7 @@ class RoomBridge:
             if opted_in and (type(request['room_messages']) is not int or request['room_messages'] != 1):
                 fail('unsupported_remote_capability')
             live = opted_in and scoped_runtime()
-            result = {'room_protocol': 1, 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'reason': None if live else 'unsupported_remote_capability'}
+            result = {'room_protocol': 1, 'room_features': [1], 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'reason': None if live else 'runtime_upgrade_required'}
             if opted_in:
                 result['room_reply_protocol'] = 1 if live else None
             return result
@@ -131,6 +179,13 @@ class RoomBridge:
                 fail('different_host')
             status = host_status(request['sid'])
             return {'provider': 'claude', 'sid': status['sid'], 'enabled': status['enabled'], 'owner': status.get('owner'), 'alive': status.get('alive')}
+        if op == 'members':
+            fields(request, ('op', 'host_uuid', 'slot'))
+            if identifier(request['host_uuid']) != self.store.host_uuid:
+                fail('different_host')
+            if type(request['slot']) is not int or not 0 <= request['slot'] <= 2:
+                fail('invalid_fields')
+            return {'members': member_catalog(request['slot'])}
         if op in ('agent_reply', 'delivery_work'):
             fail('unsupported_remote_capability')
         if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members', 'edit', 'post_human'):
@@ -162,12 +217,9 @@ class RoomBridge:
                     if member['session_identity'] != 'claude:' + member['provider_sid']:
                         fail('invalid_session')
         result = self.store.execute(command)
-        if op == 'events' and scoped_runtime():
-            try:
-                self.sync_replies(command['room_id'])
-            except RoomError as error:
-                if error.code != 'runtime_unavailable':
-                    raise
+        if op == 'post_human':
+            self.sweep_pending()
+        if op == 'events':
             result = self.store.execute(command)
         return result
 
@@ -209,7 +261,13 @@ class RoomBridge:
                     submitted = runtime_request(dict(identity, op='message_submit', message_id=work['message_id'], text=work['text'], room_scope=scope)).get('result')
                     if not isinstance(submitted, dict) or not isinstance(submitted.get('message'), dict) or submitted['message'].get('id') != work['message_id']:
                         fail('runtime_unavailable')
+                    if submitted['message'].get('state') in ('failed', 'cancelled'):
+                        response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
+                        self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text='No answer. The agent could not accept this question. Send your question again to retry.'))
+                        self.store.db.execute('UPDATE reply_progress SET done=1 WHERE delivery_id=?', (work['message_id'],))
                     self.store.db.execute('COMMIT')
+                    if submitted['message'].get('state') in ('failed', 'cancelled'):
+                        continue
                 except RoomError as error:
                     self.store.db.execute('ROLLBACK')
                     if error.code == 'invalid_scope':
@@ -224,6 +282,8 @@ class RoomBridge:
             if not isinstance(page, dict) or not isinstance(page.get('events'), list) or type(page.get('next_after')) is not int or page['next_after'] < progress['after_seq']:
                 fail('runtime_unavailable')
             self.collect_reply(work, scope, progress, page)
+            if not self.store.db.execute('SELECT done FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()['done']:
+                waiting.add(delivery['member_id'])
 
     def collect_reply(self, work, scope, progress, page):
         turn = progress['turn']
@@ -262,9 +322,10 @@ class RoomBridge:
                             fail('reply_too_large')
                 elif turn is not None and event.get('turn') == turn and event.get('kind') == 'turn.ended':
                     text = '\n\n'.join(part[1] for part in parts)
-                    if payload.get('status') == 'completed' and text.strip():
-                        response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
-                        self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
+                    if payload.get('status') != 'completed' or not text.strip():
+                        text = 'No answer. The agent did not complete a reply. Send your question again to retry.'
+                    response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
+                    self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
                     done = True
                     break
             if not done and page['next_after'] != after:
