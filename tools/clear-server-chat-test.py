@@ -87,6 +87,22 @@ class HostedClearTest(unittest.TestCase):
             self.assertNotIn('old conversation marker', wire)
         self.assertIn('old conversation marker', self.old.read_text())
 
+    def test_cleared_other_user_chat_stream_reads_host_history_not_the_old_owner_transcript(self):
+        self.clear()
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(self.query) + '\n').encode()))
+        output = io.StringIO()
+        resolved = ('claude', self.sid, self.paths['history'], None)
+        with patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output), \
+                patch.object(reader, 'conversation_owner', return_value=('secondary', self.home / 'secondary')), \
+                patch.object(reader, 'tmux_owner_process', return_value=None), \
+                patch.object(reader, 'watch_changes', return_value=iter([resolved])), \
+                patch.object(reader.subprocess, 'Popen', side_effect=AssertionError('clear history belongs to the host')):
+            reader.watch(reader.READER_SOURCE)
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(len(frames), 1)
+        self.assertIn('\thistory\tok\t' + self.sid + '\t', frames[0]['wire'])
+        self.assertNotIn('old conversation marker', frames[0]['wire'])
+
     def test_busy_clear_leaves_the_original_conversation_untouched(self):
         self.session['turn'] = 'running-turn'
         reply = reader.host_handle_request('claude', self.sid, self.tmux, self.session, dict(op='clear'))

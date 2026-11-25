@@ -8766,6 +8766,8 @@ def watch(source, as_owner=False):
         if discovered:
             owner = discovered[1]
             q = dict(q, discovery_pid=discovered[0])
+    if q.get("host_pinned") and host_session_state("claude", q["sid"]).get("display_history"):
+        owner = None
     if owner and owner[1] != HOME and not as_owner:
         bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<watch-owner>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
         child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
