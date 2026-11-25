@@ -644,6 +644,9 @@ jobs:
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js
+      - name: Test a reply shows once beside its history row
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 180 node --test tools/chat-live-once.test.js
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs

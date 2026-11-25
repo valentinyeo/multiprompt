@@ -24,6 +24,7 @@ pub const Block = struct {
     tool_id: u64 = 0,
     message_id: u64 = 0,
     row_key: u64 = 0,
+    reply_key: u64 = 0,
     reaction_reference: u64 = 0,
     detail_start: usize = 0,
     detail_len: usize = 0,
@@ -49,6 +50,14 @@ pub fn drawnOnce(key: u64, seen: []const Block) bool {
     if (key == 0) return true;
     for (seen) |block| {
         if (block.row_key == key) return false;
+    }
+    return true;
+}
+
+pub fn replyDrawn(key: u64, seen: []const Block) bool {
+    if (key == 0) return true;
+    for (seen) |block| {
+        if (block.reply_key == key) return false;
     }
     return true;
 }

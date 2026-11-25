@@ -9208,6 +9208,60 @@ class MUBO_293_SlashCommandTest(unittest.TestCase):
                 self.assertEqual(session['sends'], [])
 
 
+class MUBO135_ServerReplyOnceTest(unittest.TestCase):
+    provider = 'hax'
+    sid = 'a1b2c3d4-0135-4000-8000-000000000135'
+    tmux = 'mubo-135-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.session = dict(state=dict(display_history=True))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=io.BytesIO()))
+        self.session['turn'] = 't-135'
+        reader.host_hax_open(self.provider, self.sid, self.tmux, self.session)
+
+    def records(self, name):
+        path = Path(__file__).resolve().parent / 'fixtures/MUBO-135' / name
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def drive(self, name):
+        for record in self.records(name):
+            reader.host_hax_record(self.provider, self.sid, self.tmux, self.session, record)
+
+    def snapshot_texts(self):
+        snapshot = reader.live_snapshot(self.provider, self.sid)['live_snapshot']
+        return [event['payload']['text'] for event in snapshot['events'] if event.get('kind') == 'text.done']
+
+    def history_rows(self):
+        path = reader.host_paths(self.provider, self.sid)['history']
+        if not path.is_file():
+            return []
+        return [json.loads(line)['row'] for line in path.read_text().splitlines() if line.strip()]
+
+    def assert_once(self, labelled):
+        records = self.records('hax-reply.jsonl')
+        full = records[1]['text']
+        status = records[2]['text']
+        self.assertEqual(self.snapshot_texts(), [full, status])
+        rows = [row for row in self.history_rows() if row['role'] == 'assistant']
+        self.assertEqual([row['text'] for row in rows], [full, status])
+        self.assertEqual(len({row['id'] for row in rows}), 2)
+        if labelled:
+            self.assertEqual([row['id'].split(':text:')[0] for row in rows],
+                             ['hax-msg-mubo-135', 'hax-msg-mubo-136'])
+
+    def test_a_cut_hax_reply_and_its_full_copy_show_once(self):
+        self.drive('hax-reply.jsonl')
+        self.assert_once(False)
+
+    def test_a_labelled_hax_reply_keeps_one_row_per_message_id(self):
+        self.drive('hax-reply-ids.jsonl')
+        self.assert_once(True)
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
