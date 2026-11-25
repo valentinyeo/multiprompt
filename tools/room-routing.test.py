@@ -1,8 +1,10 @@
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
 import uuid
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -53,10 +55,14 @@ class FakeRuntime:
             return {'id': 1, 'result': {'events': page, 'next_after': rows[-1]['seq'] if rows else query['after']}}
         raise AssertionError(op)
 
-    def reply(self, sid, message_id, scope, text):
+    def reply(self, sid, message_id, scope, text, text_row=True):
         rows = self.events.setdefault(sid, [])
         turn = 'turn-' + message_id
-        for kind, payload in (('turn.started', {'message_id': message_id}), ('text.done', {'text': text}), ('turn.ended', {'status': 'completed'})):
+        steps = [('turn.started', {'message_id': message_id})]
+        if text_row:
+            steps.append(('text.done', {'text': text}))
+        steps.append(('turn.ended', {'status': 'completed'}))
+        for kind, payload in steps:
             rows.append({'seq': len(rows) + 1, 'event': {'sid': sid, 'room_scope': scope, 'message_id': message_id, 'kind': kind, 'turn': turn, 'item': 'item-' + message_id, 'payload': payload}})
 
 
@@ -226,6 +232,34 @@ class RoutingTest(unittest.TestCase):
         self.sweep()
         self.assertEqual(2, len(self.sent_to('alpha')))
         self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_no_answer_decision_records_the_turn_rows_it_read(self):
+        self.runtime.answer = False
+        sent = self.post('question')
+        self.sweep()
+        for delivery in sent['deliveries']:
+            member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
+            scope = dict(host_uuid=self.host, room_id=self.room, parent_event_id=sent['event']['id'], member_id=member['id'])
+            self.runtime.reply(member['provider_sid'], delivery['id'], scope, '', text_row=False)
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            page = self.sweep()
+        lines = [line for line in errors.getvalue().splitlines() if ' answered=0' in line]
+        self.assertEqual(2, len(lines))
+        for delivery in sent['deliveries']:
+            line = next((item for item in lines if 'delivery=' + delivery['id'] in item), None)
+            self.assertIsNotNone(line)
+            self.assertIn('turn=turn-' + delivery['id'], line)
+            self.assertIn('parts=0', line)
+            self.assertIn('status=completed', line)
+            rows = [item for item in errors.getvalue().splitlines() if 'delivery=' + delivery['id'] + ' row ' in item]
+            self.assertEqual(2, len(rows))
+            self.assertIn('kind=turn.started', rows[0])
+            self.assertIn('kind=turn.ended', rows[1])
+            self.assertIn('own=1', rows[1])
+        replies = [e for e in page['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+        self.assertTrue(all('No answer' in e['text'] for e in replies))
 
     def test_failed_admission_publishes_no_answer_and_resend_uses_a_new_identity(self):
         self.runtime.reject = True
