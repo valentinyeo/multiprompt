@@ -9477,7 +9477,10 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
 elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
     print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
-    print(json.dumps(host_cli(sys.argv[2:]), separators=(",", ":")))
+    reply = host_cli(sys.argv[2:])
+    print(json.dumps(reply, separators=(",", ":")))
+    if isinstance(reply, dict) and reply.get("status") == "refused":
+        sys.exit(1)
 elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
 elif __name__ == "__main__":

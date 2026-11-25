@@ -126,7 +126,7 @@ pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd:
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
     const mode = if (provider == .claude) " --permission-mode bypassPermissions" else "";
     const name = provider.wire();
-    return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1 && python3 {s} host start {s} {s}", .{ READER, name, sid, session, cwd, mode, READER, name, sid }) catch null;
+    return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} && python3 {s} host start {s} {s}", .{ READER, name, sid, session, cwd, mode, READER, name, sid }) catch null;
 }
 
 pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid: []const u8) ?[]const u8 {
@@ -326,7 +326,8 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
 test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude under it" {
     var out: [1024]u8 = undefined;
     const command = launchCommand(&out, "live-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff", command);
+    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff", command);
+    try std.testing.expect(std.mem.indexOf(u8, command, ">/dev/null") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "handover") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "claude --session-id") == null);
@@ -340,7 +341,7 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     var out: [1024]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
     const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
+    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
     const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host enable pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff") != null);
@@ -355,6 +356,7 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host enable antigravity ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host start antigravity ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "permission-mode") == null);
+    try std.testing.expect(std.mem.indexOf(u8, antigravity, ">/dev/null") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
     try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);

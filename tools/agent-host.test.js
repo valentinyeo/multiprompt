@@ -60,12 +60,28 @@ test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle pro
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
   const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
   assert.equal(command,
-    "python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff");
+    "python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff");
+  assert.doesNotMatch(command, />\/dev\/null/, 'the enable result must reach the launch check');
   assert.doesNotMatch(command, /new-session|tmux attach|sleep/);
   assert.ok(!command.includes('handover'), 'the terminal must never own a live chat');
   assert.ok(!command.includes('send-keys'), 'nothing is typed into a shell');
   assert.ok(!command.includes('claude --session-id'), 'Claude must not run in the terminal');
   assert.ok(!command.includes('"'), 'the command is wrapped in double quotes for ssh');
+
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-launch-'));
+  const runtime = path.join(home, '.multiprompt-runtime');
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.writeFileSync(path.join(runtime, 'reader.py'), [
+    '#!/usr/bin/env python3',
+    'import sys',
+    'print(\'{"status":"refused","reason":"unsupported_provider"}\')',
+    'sys.exit(1)',
+  ].join('\n'));
+  const launched = spawnSync('bash', ['-c', command], { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+  assert.equal(launched.status, 1, 'a refused enable must fail the launch');
+  assert.match(launched.stdout, /unsupported_provider/, 'the refused reason must reach the launch check instead of being discarded');
+  assert.doesNotMatch(launched.stdout, /"started"/, 'host start must not run when the reader refuses the provider');
 
   const palette = read('src/command_palette.zig');
   assert.match(palette, /const live_chat = host_sid != null and newTabOpensChatView\(program\);/);
