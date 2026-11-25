@@ -9,9 +9,11 @@ const root = path.join(__dirname, '..');
 const evidence = path.join(root, 'evidence');
 const windows = process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_OS === 'Windows';
 
-function run(command, args) {
-  return spawnSync(command, args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function run(command, args, options = {}) {
+  return spawnSync(command, args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...options });
 }
+
+const windows_powershell_modules = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
 
 function output(result) {
   return `${result.stdout || ''}${result.stderr || ''}`;
@@ -100,7 +102,7 @@ test('MUBO-568 native provider triangle proof', { skip: windows ? false : 'GitHu
       '-ExpectedHash', hash,
       '-Evidence', path.join(evidence, `dpi-${dpi}`),
       '-Dpi', String(dpi),
-    ]);
+    ], { env: { ...process.env, PSModulePath: windows_powershell_modules } });
     record(`drive-${dpi}.log`, result);
     const result_path = path.join(evidence, `dpi-${dpi}`, 'result.json');
     assert.equal(result.status, 0, `native provider badge drive failed at ${dpi} DPI\n${output(result)}`);

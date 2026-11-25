@@ -25,7 +25,7 @@ $env:MP_VERIFY_BOUNDARY = (Resolve-Path "$PSScriptRoot/../verify-chat-delivery/b
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
 $env:PYTHONUTF8 = '1'
 $checks = [Collections.Generic.List[object]]::new()
-$result = @{passed=$false; error=$null; checks=$checks; cleanup='pending'}
+$result = @{passed=$false; error=$null; checks=$checks; cleanup='pending'; shell=@{version="$($PSVersionTable.PSVersion)"; modulePath=$env:PSModulePath; fileHash=[bool](Get-Command Get-FileHash -ErrorAction SilentlyContinue)}}
 $job = $null
 $profile = Join-Path $env:RUNNER_TEMP "provider-badges-$PID"
 $providers = @(
@@ -41,6 +41,14 @@ function Wait-For([string]$Name, [scriptblock]$Check) {
     throw "Timed out: $Name"
 }
 function Save($Value, [string]$File) { [IO.File]::WriteAllText($File, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
+function Hash-File([string]$Path) {
+    $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $bytes = $sha.ComputeHash($stream) } finally { $sha.Dispose() }
+    } finally { $stream.Dispose() }
+    ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+}
 function Read-Log {
     if (-not (Test-Path "$settings/debug.log")) { return '' }
     $stream = [IO.File]::Open("$settings/debug.log", 'Open', 'Read', 'ReadWrite')
@@ -187,7 +195,7 @@ function Difference($First, $Second) {
 }
 try {
     [CaptionProof]::SetDpi($Dpi)
-    if ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
+    if ((Hash-File $Exe) -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
     $names = @()
     for ($i = 0; $i -lt $providers.Count; $i++) { $names += "live-badge-$i" }
