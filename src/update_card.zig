@@ -394,7 +394,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     _ = SelectObject(hdc, footerFont(3, 12, 400));
     _ = SetTextColor(hdc, RGB(138, 138, 138));
     var buf: [128]u8 = undefined;
-    const subtitle = std.fmt.bufPrint(&buf, "v{s} \xc2\xb7 takes a few seconds", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Takes a few seconds";
+    const subtitle = std.fmt.bufPrint(&buf, "v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "";
     var wide: [128]u16 = undefined;
     const length = std.unicode.utf8ToUtf16Le(&wide, subtitle) catch 0;
     var sub = RECT{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(32), .right = card.right - uiScaled(16), .bottom = card.top + uiScaled(49) };

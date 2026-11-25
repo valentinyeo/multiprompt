@@ -1,0 +1,1 @@
+Dictation stop and send do not react

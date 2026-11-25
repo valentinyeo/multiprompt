@@ -16,6 +16,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Agent feedback wishes](agent-feedback.md).
 - [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
 Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted real SSH/tmux `server-chat` journey indexed below; maps that need a real server consume it rather than duplicating it. Part A (`w-2567a`, SOFT-2567, real-size seeded data) never landed: [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070) was closed unmerged, so no real-size profile exists. A named synthetic journey is not live-server proof.
@@ -106,6 +107,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Dictation stops when the chat changes](chat-dictation-switch.md): Ctrl+Tab during dictation stops the recording on the chat that started it, the chat in front keeps an empty message box, and nothing is transcribed or delivered afterwards.
 - [Jump to newest](chat-newest.md): Shift+G twice, exact draft preservation and the renamed palette action, with direct verifier checks.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 

@@ -105,15 +105,15 @@ def main():
         agent = module.identity()
         stage = 'labels'
         module.board_labels()
-        title = module.normalized(module.PREFIX + module.normalized(WISH))
+        title = module.normalized(module.wish_title(dict(want=WISH)))
 
         def matching():
             return [(status, task) for status in ('Normal', 'Archive', 'Deleted') for task in module.tasks(status) if module.normalized(task['title']) == title]
 
         stage = 'search'
         before = matching()
-        if len(before) != 1 or before[0][0] == 'Deleted' or before[0][1]['ticketNumber'] != 'IGSH-1746':
-            raise RuntimeError('canonical existing wish missing or conflicting')
+        if (len(before) > 1 or (before and (before[0][0] == 'Deleted' or not re.fullmatch(r'[A-Z][A-Z0-9]*-\d+', before[0][1]['ticketNumber'])))):
+            raise RuntimeError('canonical wish missing or conflicting')
         before_votes = len(module.votes(before[0][1])) if before else 0
         already_voted = bool(before and agent in module.votes(before[0][1]))
         def chunk(kind, data):
@@ -129,7 +129,7 @@ def main():
         for _ in range(2):
             result = subprocess.run([sys.executable, str(tool), WISH, '--why', WHY, '--attach', str(image_path)], capture_output=True, text=True, timeout=180)
             output = result.stdout.strip()
-            if result.returncode or not re.fullmatch(r'filed https://app\.hypertask\.ai/detail/project-2060/\d+', output):
+            if result.returncode or not re.fullmatch(r'filed https://app\.hypertask\.ai/detail/project-13734/\d+', output):
                 error = RuntimeError('submission not confirmed')
                 safe_diagnose(error)
                 raise error

@@ -81,6 +81,7 @@ test('both formal CI gates compare against the event baseline after mutations an
   for (const name of ['test.yml', 'chat-still.yml']) {
     const workflow = read(`.github/workflows/${name}`);
     assert.match(workflow, /CHAT_STILL_BASE: \$\{\{ github\.event\.pull_request\.base\.sha/);
+    assert.match(workflow, /github\.event_name == 'workflow_dispatch' && 'origin\/master'/, 'manual checks compare with the unchanged master baseline');
     assert.match(workflow, /tools\/verify-chat-still --self-test --replay --inherit-from "\$CHAT_STILL_BASE"/);
   }
 });

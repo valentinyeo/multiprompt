@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-caret', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('server-chat', 'whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-caret', 'session-restore', 'tmux-binding', 'server-shell-input', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'chat-still', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'chat-dictation-switch', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -246,7 +246,7 @@ try {
         }
     }
     $env:MULTIPROMPT_DICTATION_FIXTURE = $null
-    if ($Feature -eq 'chat-dictation') {
+    if ($Feature -in @('chat-dictation', 'chat-dictation-switch')) {
         $fixture = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-812')).Path
         $audioHash = (Get-FileHash (Join-Path $fixture 'goforward.pcm') -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($audioHash -cne 'f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71') { throw 'Recorded dictation PCM checksum mismatch' }
@@ -422,6 +422,18 @@ try {
         Save-Json $seed 'seed-session.json'
         $result.seedBoundary = 'Two local CMD sessions with seeded activity times; a scripted notification simulates an update, not a cloud reply.'
     }
+    if ($Feature -eq 'chat-dictation-switch') {
+        $seedDir = Join-Path $scratch 'roaming/ZigShell'
+        New-Item -ItemType Directory -Force $seedDir | Out-Null
+        $seedTabs = @(
+            @{ kind = 'cmd'; name = 'Dictation start'; manual = $true; shell_id = 1; cv = $false },
+            @{ kind = 'cmd'; name = 'Dictation target'; manual = $true; shell_id = 2; cv = $true }
+        )
+        $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
+        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding $false))
+        Save-Json $seed 'seed-session.json'
+        $result.seedBoundary = 'The harness writes the saved-tab file once before launch: two local CMD chats, the first selected and the second already in Chat View. Nothing is edited after launch; the only inputs are Alt+C, Ctrl+D and two Ctrl+Tab presses.'
+    }
     if ($Feature -eq 'chat-browser-autoload') {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
         New-Item -ItemType Directory -Force $seedDir | Out-Null
@@ -489,7 +501,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash', 'chat-browser-autoload', 'chat-not-sent-remove')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-dictation-switch')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -598,6 +610,9 @@ try {
         }
         'chat-dictation' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-dictation.ps1')
+        }
+        'chat-dictation-switch' {
+            . (Join-Path $PSScriptRoot 'control-feature-chat-dictation-switch.ps1')
         }
         'chat-tables' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-tables.ps1')

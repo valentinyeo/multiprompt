@@ -165,6 +165,18 @@ test('IGSH-965 send sits at the far right and the queued send is armed and consu
   assert.doesNotMatch(keys, /g_dictation_send_queued/);
 });
 
+test('MUBO-290 stop and send free the microphone before the provider answers', () => {
+  for (const required of ["$stallMarker = Join-Path $scratch 'roaming/ZigShell/dictation-stall'", "New-Item -ItemType File -Force $stallMarker", '\\tfixture-provider-stall\\t0$', '\\tfixture-provider-stall-end\\t0$', "('MUBO-290 the microphone must be idle within a moment of the ' + $way) -Seconds 1 -PollMilliseconds 20", 'MUBO-290 the button waited for the background transcription', 'MUBO-290 the armed send leaves once the words are known']) {
+    assert.ok(driver.includes(required), required);
+  }
+  const stall = voice.slice(voice.indexOf('fn dictationProviderStallArmed('), voice.indexOf('fn readDictationFixture('));
+  for (const required of ['APPDATA', '\\\\ZigShell\\\\dictation-stall', 'win32OpenRead', 'CloseHandle']) assert.ok(stall.includes(required), required);
+  const transcribe = voice.slice(voice.indexOf('fn deepgramTranscribePcm('), voice.indexOf('fn dictationWorkerThread('));
+  const offline = transcribe.slice(0, transcribe.indexOf('    var key_buf:'));
+  assert.match(offline, /if \(dictationFixtureEnabled\(\)\) \{\s*if \(dictationProviderStallArmed\(\)\) \{[\s\S]*?WaitForSingleObject\(stalled, 2500\)[\s\S]*?return \.\{ \.status = 504 \};/);
+  assert.doesNotMatch(offline, /Sleep|SetTimer|std\.Thread\.sleep/);
+});
+
 function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
