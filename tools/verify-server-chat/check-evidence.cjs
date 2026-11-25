@@ -52,4 +52,30 @@ const video = JSON.parse(probe.stdout);
 assert.ok(video.streams.some(stream => stream.codec_type === 'video' && Number(stream.nb_frames) > 0));
 assert.ok(Number(video.format.duration) > 1);
 assert.equal(json('doctor.json').sha256.toLowerCase(), json('build.json').sha256.toLowerCase());
+const summary = {
+  workflow: 'ssh-idle.yml',
+  revision: json('build.json').revision,
+  version: json('build.json').version,
+  sha256: json('build.json').sha256,
+  cases: result.cases.map(row => [row.name, row.passed]),
+  active_after_stop: result.cleanup.activeAfterStop,
+  key_removed: result.keyRemoved,
+};
+if (fs.existsSync(path.join(root, 'idle.json'))) {
+  for (const name of ['idle', 'idle-after-reconnect']) {
+    const proof = json(`${name}.json`);
+    assert.ok(proof.seconds >= 200, `${name} observed less than 200 seconds`);
+    assert.equal(proof.passed, true, `${name} did not hold the idle SSH bound`);
+    assert.equal(proof.logins, 0, `${name} opened ${proof.logins} SSH logins while idle`);
+    assert.equal(proof.ssh_spawns, 0, `${name} spawned ${proof.ssh_spawns} SSH clients while idle`);
+    summary[name.replaceAll('-', '_')] = { seconds: proof.seconds, logins: proof.logins, ssh_spawns: proof.ssh_spawns, logins_per_hour: proof.logins_per_hour, callers: proof.callers };
+  }
+  const reconnect = json('reconnect.json');
+  assert.equal(reconnect.passed, true, 'Recovery after a dropped link did not pass');
+  assert.ok(reconnect.new_logins >= 1, 'No new connection replaced the dropped one');
+  assert.ok(reconnect.new_logins <= 30, `Recovery opened ${reconnect.new_logins} logins, more than a bounded reconnect`);
+  summary.reconnect = { new_logins: reconnect.new_logins, passed: reconnect.passed };
+  summary.passed = true;
+  fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
+}
 console.log('Real SSH server chat receipts, copied replies, key ACL, cleanup and video passed');

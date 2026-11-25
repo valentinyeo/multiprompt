@@ -6,8 +6,6 @@ on:
         description: Optional baseline app revision with this same counting harness
         required: false
         type: string
-  push:
-    branches: ['mubo-532-ssh-idle*']
 permissions:
   contents: read
 concurrency:
@@ -92,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: ssh-idle-${{ github.sha }}
+          name: ssh-idle
           path: evidence
           if-no-files-found: error
           retention-days: 7
