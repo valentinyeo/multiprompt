@@ -4077,6 +4077,7 @@ pub const ChatTmuxSendJob = struct {
     message_admission_epoch: ?u64 = null,
     message_status: bool = false,
     message_reset: bool = false,
+    clear_context: bool = false,
     message_dismiss: bool = false,
     reset_cutoff: u64 = 0,
     history_instance: u64 = 0,

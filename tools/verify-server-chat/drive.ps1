@@ -14,7 +14,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 $profile = Join-Path $env:RUNNER_TEMP ('server-chat-' + [guid]::NewGuid().ToString('N'))
 $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
-$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
+$result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves a new provider conversation, an empty view after reload and a subsequent reply without Not sent; paid Claude internals are outside this fixture.' }
 $job = $null
 Start-Transcript "$Evidence/driver.log"
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }

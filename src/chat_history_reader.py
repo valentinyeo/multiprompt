@@ -5004,7 +5004,37 @@ def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
-                   control_wait={})
+                   control_wait={}, clear_restart=False)
+
+
+def host_clear_context(provider, sid, tmux, session):
+    if provider != "claude":
+        return host_refuse("unsupported_provider")
+    state = session["state"]
+    if state.get("fresh_start") or state.get("fresh_start_queued") or host_fresh_busy(session) or session.get("inflight") or not session.get("ready"):
+        return host_refuse("chat_busy")
+    native = str(uuid.uuid4())
+    paths = host_paths(provider, sid)
+    history = paths["history"]
+    if history.is_file():
+        history.replace(history.with_suffix(".cleared-" + native + ".jsonl"))
+    history.touch(mode=0o600)
+    message_store_request(dict(op="message_reset", message_protocol=1, provider=provider, sid=sid,
+                               tmux=host_chat_name(provider, sid), reset_id="clear-" + native))
+    db = host_db(provider, sid, host_chat_name(provider, sid), session)
+    with db:
+        live_state_sync(db, provider, sid)
+        db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND slot<>'host.settings'", (provider, sid))
+    config = host_config(provider, sid)
+    host_write(paths["config"], dict(config, native_session=native))
+    state.update(context_session=native, display_history=True)
+    state.pop("native_session", None)
+    state.pop("fresh_start", None)
+    host_state_write(provider, sid, state)
+    session["clear_restart"] = True
+    session["ready"] = False
+    host_log(provider, sid, "clear", dict(session=native))
+    return dict(status="ok")
 
 
 def host_db(provider, sid, tmux, session):
@@ -5564,7 +5594,9 @@ def host_handle_request(provider, sid, tmux, session, request):
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
         return host_fresh_start(provider, sid, tmux, session, request.get("handover_file"))
-    if operation == "deliver" and session["state"].get("fresh_start"):
+    if operation == "clear":
+        return host_clear_context(provider, sid, tmux, session)
+    if operation == "deliver" and (session["state"].get("fresh_start") or session.get("clear_restart")):
         return dict(status="busy", reason="fresh_start_pending")
     if operation in ("approval_reply", "question_reply", "plan_reply"):
         return adapter["answer"](provider, sid, tmux, session, request)
@@ -6718,9 +6750,11 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 HOST_ADAPTERS[provider]["interrupt"](provider, sid, session)
                 host_fresh_error(provider, sid, tmux, session, "The handover timed out.")
                 fresh = None
-            if isinstance(fresh, dict) and fresh.get("phase") == "reset":
+            clearing = session.pop("clear_restart", False)
+            if clearing or isinstance(fresh, dict) and fresh.get("phase") == "reset":
                 try:
-                    host_fresh_prepare(provider, sid, session["state"])
+                    if not clearing:
+                        host_fresh_prepare(provider, sid, session["state"])
                 except (OSError, ValueError):
                     host_fresh_error(provider, sid, tmux, session, "Could not reopen the handover.")
                     continue
@@ -6739,7 +6773,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["agent_pid"] = agent.pid
                 host_state_write(provider, sid, session["state"])
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
-                host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
+                if not clearing:
+                    host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             host_fresh_retry(provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
@@ -9026,7 +9061,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "set_auto_switch", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "set_auto_switch", "interrupt", "fresh_start", "clear", "switch_ai", "login", "login_answer"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):

@@ -48,10 +48,9 @@ class HostedClearTest(unittest.TestCase):
             self.session['db'].close()
 
     def clear(self):
-        reply = reader.host_handle_request('claude', self.sid, self.tmux, self.session, dict(op='clear'))
-        self.assertEqual(reply.get('status'), 'ok', reply)
         with patch.object(reader.uuid, 'uuid4', return_value=self.native):
-            self.assertTrue(reader.host_clear_prepare('claude', self.sid, self.session))
+            reply = reader.host_handle_request('claude', self.sid, self.tmux, self.session, dict(op='clear'))
+        self.assertEqual(reply.get('status'), 'ok', reply)
 
     def test_clear_returns_only_the_new_conversation_and_accepts_the_next_send(self):
         before = reader.response(dict(self.query))
