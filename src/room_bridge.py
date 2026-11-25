@@ -16,6 +16,7 @@ from room_service import RoomError, RoomStore, encoded, fail, fields, identifier
 
 SID = re.compile(r'[A-Za-z0-9_-]{1,80}\Z')
 REPLY_DIAGNOSTIC_ROWS = 40
+REPLY_DIAGNOSTIC_ID = 64
 
 
 def reply_note(text):
@@ -486,7 +487,7 @@ class RoomBridge:
                 rows += 1
                 if len(seen) < REPLY_DIAGNOSTIC_ROWS:
                     noted = event.get('payload') if isinstance(event.get('payload'), dict) else {}
-                    seen.append('seq=%d kind=%s turn=%s own=%d message=%s bytes=%d' % (row['seq'], str(event.get('kind'))[:32], str(event.get('turn'))[:32], int(own), str(event.get('message_id'))[:8], len(noted['text'].encode('utf-8')) if isinstance(noted.get('text'), str) else 0))
+                    seen.append('seq=%d kind=%s turn=%s own=%d message=%s bytes=%d' % (row['seq'], str(event.get('kind'))[:32], str(event.get('turn'))[:REPLY_DIAGNOSTIC_ID], int(own), str(event.get('message_id'))[:8], len(noted['text'].encode('utf-8')) if isinstance(noted.get('text'), str) else 0))
                 if not own:
                     continue
                 payload = event.get('payload')
@@ -511,7 +512,7 @@ class RoomBridge:
                     text = reply if answered else 'No answer. The agent did not complete a reply. Send your question again to retry.'
                     response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
                     self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
-                    reply_note('delivery=%s turn=%s after=%s rows=%d parts=%d bytes=%d status=%s answered=%d' % (work['message_id'], str(turn)[:32], start, rows, len(parts), len(reply.encode('utf-8')), str(payload.get('status'))[:32], int(answered)))
+                    reply_note('delivery=%s turn=%s after=%s rows=%d parts=%d bytes=%d status=%s answered=%d' % (work['message_id'], str(turn)[:REPLY_DIAGNOSTIC_ID], start, rows, len(parts), len(reply.encode('utf-8')), str(payload.get('status'))[:32], int(answered)))
                     if not answered:
                         for noted in seen:
                             reply_note('delivery=%s row %s' % (work['message_id'], noted))

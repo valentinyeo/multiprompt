@@ -22,6 +22,24 @@ function line(source, marker) {
   return source.slice(start, source.indexOf('\n', start));
 }
 
+function productions(source, fixture, roots) {
+  const pulled = new Set();
+  const parts = [];
+  const declares = (text, name) => new RegExp(`^fn ${name}\\(`, 'm').test(text);
+  const pull = name => {
+    if (pulled.has(name)) return;
+    pulled.add(name);
+    parts.push(declaration(source, `fn ${name}(`));
+  };
+  roots.forEach(pull);
+  for (let index = 0; index < parts.length; index++) {
+    for (const call of parts[index].matchAll(/\b([a-z_]\w*)\(/g)) {
+      if (!pulled.has(call[1]) && declares(source, call[1]) && !declares(fixture, call[1])) pull(call[1]);
+    }
+  }
+  return parts.join('\n');
+}
+
 test('desktop replay groups reversed and paged room answers under their questions', () => {
   const frontend = read('room_frontend.zig');
   const view = read('room_view.zig');
@@ -85,14 +103,16 @@ test('queued commands retain scope and identity across background read completio
   assert.match(frontend, /if \(!item\.awaiting_launch\) c\.launchPrepared/);
   assert.ok(frontend.indexOf('if (launchQueuedCommand(c, completion, fresh))') < frontend.indexOf('if (mutation and pending_command != null)'));
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/queued-command.zig'), 'utf8');
-  const source = `${fixture}\n${declaration(frontend, 'fn launchQueuedCommand(')}`;
+  assert.ok(!/^fn releaseCommandAction\(/m.test(fixture), 'the fixture stops short of stubbing the release helper');
+  const source = `${fixture}\n${productions(frontend, fixture, ['launchQueuedCommand'])}`;
+  assert.match(source, /^fn releaseCommandAction\(/m, 'the launch path carries the release helper production calls');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-queued-command-'));
   try {
     fs.writeFileSync(path.join(dir, 'queued.zig'), source);
     const run = spawnSync(process.env.ZIG || 'zig', ['test', 'queued.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
     assert.equal(run.error, undefined, run.error?.message);
     assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
-    assert.match(run.stderr, /All 6 tests passed/);
+    assert.match(run.stderr, /All 7 tests passed/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

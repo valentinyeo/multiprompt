@@ -55,9 +55,9 @@ class FakeRuntime:
             return {'id': 1, 'result': {'events': page, 'next_after': rows[-1]['seq'] if rows else query['after']}}
         raise AssertionError(op)
 
-    def reply(self, sid, message_id, scope, text, text_row=True):
+    def reply(self, sid, message_id, scope, text, text_row=True, turn=None):
         rows = self.events.setdefault(sid, [])
-        turn = 'turn-' + message_id
+        turn = turn or 'turn-' + message_id
         steps = [('turn.started', {'message_id': message_id})]
         if text_row:
             steps.append(('text.done', {'text': text}))
@@ -257,6 +257,36 @@ class RoutingTest(unittest.TestCase):
             self.assertIn('kind=turn.started', rows[0])
             self.assertIn('kind=turn.ended', rows[1])
             self.assertIn('own=1', rows[1])
+            self.assertIn('turn=turn-' + delivery['id'], rows[0])
+            self.assertIn('turn=turn-' + delivery['id'], rows[1])
+        replies = [e for e in page['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+        self.assertTrue(all('No answer' in e['text'] for e in replies))
+
+    def test_a_no_answer_decision_bounds_a_long_turn_identifier(self):
+        self.runtime.answer = False
+        long_turn = 'turn-' + 'a' * 200
+        sent = self.post('question')
+        self.sweep()
+        for delivery in sent['deliveries']:
+            member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
+            scope = dict(host_uuid=self.host, room_id=self.room, parent_event_id=sent['event']['id'], member_id=member['id'])
+            self.runtime.reply(member['provider_sid'], delivery['id'], scope, '', text_row=False, turn=long_turn)
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            page = self.sweep()
+        bounded = long_turn[:bridge_module.REPLY_DIAGNOSTIC_ID]
+        self.assertGreater(bridge_module.REPLY_DIAGNOSTIC_ID, 36)
+        lines = [line for line in errors.getvalue().splitlines() if ' answered=0' in line]
+        self.assertEqual(2, len(lines))
+        for line in lines:
+            self.assertIn('turn=' + bounded, line)
+            self.assertNotIn(long_turn, line)
+        rows = [item for item in errors.getvalue().splitlines() if ' row ' in item]
+        self.assertEqual(4, len(rows))
+        for item in rows:
+            self.assertIn('turn=' + bounded, item)
+            self.assertNotIn(long_turn, item)
         replies = [e for e in page['events'] if e['type'] == 'agent_reply']
         self.assertEqual(2, len(replies))
         self.assertTrue(all('No answer' in e['text'] for e in replies))

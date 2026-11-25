@@ -9,6 +9,7 @@ const Pending = struct {
     location: u8 = 1,
     token: u8 = 3,
 };
+const PendingCommand = Pending;
 const rooms = struct {
     const Completion = union(enum) {
         pending,
@@ -44,6 +45,8 @@ var discarded: usize = 0;
 var refresh_failed: usize = 0;
 var refresh_queued: usize = 0;
 var action_failed: usize = 0;
+var action_accepted: usize = 0;
+var created = true;
 var error_shown: usize = 0;
 var rejection_logged: usize = 0;
 const diagnostics = struct {
@@ -67,7 +70,16 @@ fn commandScope(_: u8) ?u8 { return if (scope_valid) 1 else null; }
 fn commandVisible(_: *Pending) bool { return visible; }
 const view = struct {
     fn showError(_: []const u8) void { error_shown += 1; }
-    fn completeAction(_: u8, _: enum { failed }) void { action_failed += 1; }
+    fn completeAction(_: u8, outcome: enum { accepted, failed }) void {
+        switch (outcome) {
+            .accepted => {
+                action_accepted += 1;
+            },
+            .failed => {
+                action_failed += 1;
+            },
+        }
+    }
 };
 fn freePending(_: *Pending) void { pending_command = null; }
 fn discardBuilding() void { discarded += 1; }
@@ -88,6 +100,8 @@ fn reset(item: *Pending) void {
     refresh_failed = 0;
     refresh_queued = 0;
     action_failed = 0;
+    action_accepted = 0;
+    created = true;
     error_shown = 0;
     rejection_logged = 0;
     scope_valid = true;
@@ -163,6 +177,22 @@ test "launch failure frees pending action and schedules durable recovery" {
     try std.testing.expectEqual(@as(usize, 1), rejection_logged);
     try std.testing.expectEqual(@as(usize, 1), error_shown);
     try std.testing.expectEqual(@as(usize, 1), disposed);
+}
+test "the real release helper tells the view its token failed and respects an uncreated view" {
+    var item = Pending{};
+    reset(&item);
+    created = false;
+    scope_valid = false;
+    try std.testing.expect(!launchQueuedCommand(&controller.?, .{ .finished = .{ .kind = .catalog } }, true));
+    try std.testing.expectEqual(@as(usize, 0), action_failed);
+    try std.testing.expectEqual(@as(usize, 0), action_accepted);
+    created = true;
+    item.awaiting_launch = true;
+    pending_command = &item;
+    try std.testing.expect(!launchQueuedCommand(&controller.?, .{ .finished = .{ .kind = .catalog } }, true));
+    try std.testing.expectEqual(@as(usize, 1), action_failed);
+    try std.testing.expectEqual(@as(usize, 0), action_accepted);
+    try std.testing.expect(pending_command == null);
 }
 test "interrupted metadata and member reads remain eligible for refresh" {
     var item = Pending{};
