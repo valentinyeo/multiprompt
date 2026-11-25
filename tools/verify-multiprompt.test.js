@@ -2792,6 +2792,15 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
 });
 
+test('a transient session-file lock is retried instead of failing the server-open-group journey', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  const reader = driver.slice(driver.indexOf('function Read-ServerGroupText('), driver.indexOf('function Get-ServerGroupSession('));
+  assert.match(reader, /\[IO\.FileShare\]::Delete/, 'the reader must not block the app replacing the session file');
+  assert.match(reader, /catch \[IO\.IOException\]/, 'a sharing violation must be retried, not raised as a journey failure');
+  assert.match(reader, /AddSeconds\(3\)/, 'the retry must be bounded');
+  assert.match(reader, /if \(\[DateTime\]::UtcNow -ge \$deadline\) \{ throw \}/, 'a lock that outlasts the wait still fails the journey');
+});
+
 test('SOFT-2713 bot-photo closes its tab with the id the app routes "close tab" to', () => {
   const palette = read('src/command_palette.zig');
   const constants = new Map([...read('src/app_state.zig').matchAll(/pub const (SEARCH_[A-Z0-9_]+): usize = (\d+);/g)]

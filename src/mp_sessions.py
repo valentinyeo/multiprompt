@@ -822,32 +822,53 @@ def cmd_rename(args):
     return 0
 
 
+def placement(send, tab_id):
+    listing = send.zsb("workspace-list")
+    if listing.get("ok") is not True:
+        return None
+    for workspace, group, tab in send.iter_tabs(listing):
+        if tab.get("id") == tab_id:
+            return workspace, group
+    return None
+
+
 def cmd_move(args):
     send = load_send()
+    if args.workspace is None and args.group is None:
+        raise ValueError("move needs --workspace or --group")
     listing = send.zsb("workspace-list")
     target = pick_target(send, listing, args.name)
-    workspace = display_name(args.workspace)
+    workspace = display_name(args.workspace) if args.workspace is not None else None
+    group = display_name(args.group) if args.group is not None else None
     if not target.get("tab_id"):
         raise ValueError("chat tab is not open on the desktop; restart it first")
-    command = ["session-move", "--tab", str(target["tab_id"]), "--workspace", workspace]
-    if args.group is not None:
-        command += ["--group", display_name(args.group)]
-    else:
+    command = ["session-move", "--tab", str(target["tab_id"])]
+    if workspace is not None:
+        command += ["--workspace", workspace]
+    if group is not None:
+        command += ["--group", group]
+    elif workspace is not None:
         command += ["--ungrouped"]
     moved = send.zsb(*command)
     if moved.get("ok") is not True:
         raise ValueError("move failed: " + str(moved.get("error") or moved.get("message")))
-    path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
-    config = send.read_json(path)
-    if config:
-        config["spawn_workspace"] = workspace
-        if args.group is not None:
-            config["spawn_group"] = display_name(args.group)
-        elif "spawn_group" in config:
-            del config["spawn_group"]
-        send.write_json(path, config)
-    group = display_name(args.group) if args.group is not None else None
-    print(json.dumps(dict(ok=True, name=target.get("name"), tmux=target["tmux"], workspace=workspace, group=group), separators=(",", ":")))
+    actual = placement(send, target["tab_id"])
+    if actual is None:
+        raise ValueError("the desktop did not confirm the move; check the tab and retry")
+    if (workspace is not None and actual[0] != workspace) or (group is not None and actual[1] != group):
+        raise ValueError("the desktop did not confirm the move; check the tab and retry")
+    if target.get("provider") and target.get("sid"):
+        path = send.host_root() / (send.host_config_key(target["provider"], target["sid"]) + ".config.json")
+        config = send.read_json(path)
+        if config:
+            if actual[0] is not None:
+                config["spawn_workspace"] = actual[0]
+            if actual[1] is not None:
+                config["spawn_group"] = actual[1]
+            elif "spawn_group" in config:
+                del config["spawn_group"]
+            send.write_json(path, config)
+    print(json.dumps(dict(ok=True, name=target.get("name"), tmux=target.get("tmux"), workspace=actual[0], group=actual[1]), separators=(",", ":")))
     return 0
 
 
@@ -1093,7 +1114,7 @@ def parse(argv):
     renamed.add_argument("new_name")
     moved = commands.add_parser("move", help="move a chat tab to another workspace or group")
     moved.add_argument("name")
-    moved.add_argument("--workspace", required=True)
+    moved.add_argument("--workspace")
     moved.add_argument("--group")
     ending = commands.add_parser("close", help="stop a chat and close its tab")
     ending.add_argument("name")
