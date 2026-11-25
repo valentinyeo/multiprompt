@@ -157,6 +157,8 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
   ],
   "command_palette.zig": [
+    "finishHostLaunch: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not start the new session\",5000,true)",
+    "launchRefused: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not start chat: chat runtime unavailable.\",6000,true)",
     "showMissingWorkspaceFolder: @import(\"console.zig\").showHeaderNoticeAscii(notice,8000,true)",
     "spawnHostedChatSession: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)",
     "spawnWorkspaceSessionAt: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)"
