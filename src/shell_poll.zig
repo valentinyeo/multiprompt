@@ -1742,7 +1742,7 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
 
     const detect_agent: u8 = if (saw_grok_agent) 6 else if (saw_kimi_agent) 4 else if (saw_codex_agent) 2 else if (saw_claude_agent) 1 else 0;
     const kept_agent = app_state.shells[i].ai_agent;
-    if (detect_agent != 0 and kept_agent != detect_agent and !(kept_agent >= 1 and kept_agent <= 3 and app_state.shells[i].claude_sid_len > 0)) {
+    if (detect_agent != 0 and kept_agent != detect_agent and !(((kept_agent >= 1 and kept_agent <= 3) or kept_agent == 8) and app_state.shells[i].claude_sid_len > 0)) {
         app_state.shells[i].ai_agent = detect_agent;
         changed = true;
     }

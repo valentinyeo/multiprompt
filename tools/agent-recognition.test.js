@@ -160,3 +160,16 @@ test("Antigravity has a stable identity across tmux, text, diagnostics, and capa
   assert.match(functionBody("shellLooksLikeCodingAgent", "syncShellDisplayNameSurfaces"), /"antigravity"/);
   assert.match(source, /ai_agent == 7 or .*ai_agent == 8/);
 });
+
+test('a bound Antigravity chat ignores stale console provider text', () => {
+  const preview = functionBody('captureShellPreview', 'pollShellNames');
+  const condition = preview.match(/if \((detect_agent != 0[^\n]+)\) \{/)?.[1];
+  assert.ok(condition, 'console provider adoption condition is missing');
+  const replaceAgent = new Function('detect_agent', 'kept_agent', 'sid_len', `return ${condition
+    .replaceAll('app_state.shells[i].claude_sid_len', 'sid_len')
+    .replaceAll(' and ', ' && ').replaceAll(' or ', ' || ')};`);
+  for (const detected of [1, 2, 4, 6]) {
+    for (const bound of [1, 2, 3, 8]) assert.equal(replaceAgent(detected, bound, 36), false);
+    assert.equal(replaceAgent(detected, 8, 0), true);
+  }
+});

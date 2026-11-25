@@ -1,6 +1,6 @@
 # Antigravity chats
 
-Source files: src/vps.zig, src/agent_host.zig, src/capacity.zig, src/archive.zig, src/notifications.zig, src/shell_poll.zig, src/workspaces.zig, src/chat_mention.zig, src/chat_transcript.zig, src/command_palette.zig, src/shortcuts.zig, tools/fixtures/SOFT-3050/*, tools/verify-chat-delivery/boundary.py, tools/verify-chat-delivery/antigravity-chats.ps1, tools/chat-antigravity-proof.cjs
+Source files: src/session.zig, src/json_reader.zig, src/vps.zig, src/agent_host.zig, src/capacity.zig, src/archive.zig, src/notifications.zig, src/shell_poll.zig, src/workspaces.zig, src/chat_mention.zig, src/chat_transcript.zig, src/command_palette.zig, src/shortcuts.zig, tools/fixtures/SOFT-3050/*, tools/verify-chat-delivery/boundary.py, tools/verify-chat-delivery/antigravity-chats.ps1, tools/chat-antigravity-proof.cjs
 
 ## Sub-features
 

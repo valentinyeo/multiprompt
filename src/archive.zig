@@ -1133,7 +1133,7 @@ fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     entry.tmux_identity = app_state.shells[i].tmux_identity;
     entry.tmux_identity_len = app_state.shells[i].tmux_identity_len;
     entry.tmux_host = app_state.shells[i].tmux_host;
-    entry.ai_agent = if (app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) app_state.shells[i].ai_agent else 1;
+    entry.ai_agent = if ((app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) or app_state.shells[i].ai_agent == 8) app_state.shells[i].ai_agent else 1;
     const cs_len: u32 = @intCast(@min(app_state.shells[i].claude_sid_len, @as(u32, 39)));
     if (cs_len > 0) {
         @memcpy(entry.claude_sid[0..cs_len], app_state.shells[i].claude_sid[0..cs_len]);
