@@ -66,6 +66,9 @@ jobs:
         if: success() || failure()
         shell: pwsh
         run: ./tools/check-powershell-host-names.ps1 -Root .
+      - name: Test the Zig download fallback
+        if: success() || failure()
+        run: node --test tools/zig-download.test.js
 
   extension-version:
     name: extension-version
