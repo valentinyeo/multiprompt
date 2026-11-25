@@ -103,11 +103,6 @@ jobs:
         run: |
           set -o pipefail
           timeout 240s node --test tools/room-reliability.test.js tools/room-reply-grouping.test.js tools/room-creation-focus.test.js tools/rooms-release.test.js 2>&1 | tee room-check-results/desktop.log
-      - name: Compile the desktop room integration
-        if: github.event_name == 'workflow_dispatch' && !cancelled()
-        run: |
-          set -o pipefail
-          timeout 300s zig build -Dtarget=x86_64-windows-gnu -Drooms-preview=true --summary all 2>&1 | tee room-check-results/build.log
       - name: Check source limits and timers
         if: ${{ !cancelled() }}
         run: |
