@@ -520,8 +520,14 @@ pub fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
 var g_shared_poll_channels: [3]?*chat_transport.Channel = @splat(null);
 var g_shared_ac_channels: [3]?*chat_transport.Channel = @splat(null);
 
+pub fn captureSharedCommand(host: u8, command: []const u8, buf: []u8, sentinel: []const u8) ?usize {
+    var channel: ?*chat_transport.Channel = null;
+    defer if (channel) |item| chat_transport.close(item);
+    return sharedChannelRequest(&channel, host, command, "", buf, sentinel);
+}
+
 fn sharedChannelRequest(slot: *?*chat_transport.Channel, host: u8, command: []const u8, request: []const u8, buf: []u8, sentinel: []const u8) ?usize {
-    if (slot.* == null) slot.* = chat_transport.openCommand(host, command);
+    if (slot.* == null) slot.* = chat_transport.openCommandWait(host, command, 15_000);
     const channel = slot.* orelse return null;
     if (chat_transport.write(channel, request)) {
         const deadline = GetTickCount64() + VPS_CHANNEL_READ_TIMEOUT_MS;
