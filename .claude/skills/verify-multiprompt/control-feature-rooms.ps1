@@ -85,15 +85,46 @@ function Type-Text([string]$Text) {
     $actions.Add(@{ input = 'type'; text = $Text; seconds = $clock.Elapsed.TotalSeconds })
     foreach ($letter in $Text.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
 }
-function Palette([string]$Query) {
-    Press @(0x1B) 'Escape: dismiss overlay'
+$journeyCommands = $null
+function Invoke-JourneyCommand {
+    param([string]$Name, [string]$Text, [switch]$Session)
+    if ($null -eq $journeyCommands) {
+        $catalog = & node (Join-Path $PSScriptRoot '../../../tools/journey-commands.mjs')
+        if ($LASTEXITCODE -ne 0) { throw 'Journey command catalog failed' }
+        $journeyCommands = $catalog | ConvertFrom-Json
+    }
+    if ($Text) {
+        $query = $Text
+        $target = $null
+    } elseif ($Session) {
+        $tabs = Saved-Tabs (Session-Saved)
+        $matching = @(for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq $Name) { $i } })
+        if ($matching.Count -ne 1) { throw "Journey session name must be unique: $Name" }
+        $query = $Name
+        $target = [string]$matching[0]
+    } else {
+        $entry = $journeyCommands.PSObject.Properties[$Name.ToLowerInvariant()]
+        if ($null -eq $entry) { throw "Unknown journey command name: $Name" }
+        $query = $entry.Value.query
+        $target = [string]$entry.Value.target
+    }
+    Press @(0x1B) 'Escape: dismiss overlay before the palette command'
     $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x4B) 'Ctrl+K: open palette'
     [void](Wait-For 'empty palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    Type-Text $Query
-    [void](Wait-For "palette query $Query" { (Read-Shared "$settings/debug.log").Substring($offset) -match ("\[palette\] ready chars=" + $Query.Length + ' count=[1-9]\d* target=\d+') })
-    Press @(0x0D) "Enter: $Query"
-    [void](Wait-For "palette confirms $Query" { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] confirm target=\d+' })
+    Type-Text $query
+    $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
+    $ids = Wait-For "palette rows for $query" {
+        $rows = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), $rowsPattern)
+        if ($rows.Count -eq 0) { return $null }
+        $found = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ' | Where-Object { $_ })
+        if (-not $found.Count -or ($null -ne $target -and $found -notcontains $target)) { return $null }
+        ,$found
+    }
+    $index = if ($null -eq $target) { 0 } else { [Array]::IndexOf($ids, $target) }
+    for ($i = 0; $i -lt $index; $i++) { Press @(0x28) "Down: row for $query" }
+    Press @(0x0D) "Enter: $query"
+    [void](Wait-For "palette confirms $query" { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] confirm target=\d+' })
 }
 function Visible-Children([string]$Class, $Parent = $main) {
     $element = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Parent)
@@ -186,7 +217,7 @@ function Saved-Tabs($Saved) {
 }
 function Copy-Chat([string]$Name) {
     [void](Wait-For 'clipboard available for this copy' { try { [Windows.Forms.Clipboard]::Clear(); $true } catch { $false } } 10)
-    Palette 'chat view select all'
+    Invoke-JourneyCommand 'chat view select all'
     Press @(0x11, 0x43) 'Ctrl+C: copy visible chat messages'
     $text = Wait-For 'copied chat text' { try { $value = [Windows.Forms.Clipboard]::GetText(); if ($value) { $value } } catch { $null } } 10
     [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
@@ -194,7 +225,7 @@ function Copy-Chat([string]$Name) {
     return $text
 }
 function Open-Member([string]$Name) {
-    Palette $Name
+    Invoke-JourneyCommand $Name -Session
     if (-not @(Visible-Children 'ZigShellChatTranscript').Count) { Press @(0x12, 0x43) 'Alt+C: open member Chat View' }
     [void](Wait-For 'member composer' { $windows = @(Visible-Children 'Edit'); if ($windows.Count -eq 1) { $windows[0] } })
     [void](Wait-For "$Name hosted chat identity hydrated" {
@@ -318,7 +349,7 @@ Host remote-1
     [void][ChatDeliveryDesktop]::MoveWindow($main, 0, 0, [ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1), $true)
     [void](Wait-For 'two account-owned chats imported' { $saved = Read-Shared "$settings/session.json"; $saved.Contains('rooms-alpha') -and $saved.Contains('rooms-bravo') } 90)
     $createRoom = {
-        Palette 'New room'
+        Invoke-JourneyCommand 'New room'
         $room = Wait-For 'new room view' { Room-Window }
         $edit = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
         if ([ChatDeliveryDesktop]::Class($edit) -ne 'Edit') { throw 'New room did not focus its name field' }
@@ -364,8 +395,8 @@ Host remote-1
         [void](Shot 'bravo-closed')
         [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'tmux has-session -t rooms-bravo') -Evidence $Evidence -Name 'closed-bravo-still-on-server')
         $script:closedBravo = $true
-        Palette 'Rooms534'
-        Palette 'Edit room'
+        Invoke-JourneyCommand -Text 'Rooms534'
+        Invoke-JourneyCommand 'Edit room'
         $room = Wait-For 'room editor' { Room-Window }
         Press @(0x09) 'Tab: search member chats'
         Type-Text 'Alpha'
@@ -383,12 +414,12 @@ Host remote-1
     }
     Case '2-open' '' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
         Press @(0x1B) 'Escape: close member editor'
-        if ($closedBravo) { Palette 'reopen closed tab' }
+        if ($closedBravo) { Invoke-JourneyCommand 'Reopen closed tab' }
         Open-Member 'Bravo'
         Send-Text 'PRIVATE534'
         [void](Wait-For 'reopened Bravo real private reply' { (Copy-Chat 'Bravo-reopened').Contains('Bravo says PRIVATE534') })
-        Palette 'Rooms534'
-        Palette 'Edit room'
+        Invoke-JourneyCommand -Text 'Rooms534'
+        Invoke-JourneyCommand 'Edit room'
         Press @(0x09) 'Tab: member search'
         foreach ($name in @('Alpha', 'Bravo')) {
             Press @(0x11, 0x41) 'Ctrl+A: replace member search'
@@ -402,7 +433,7 @@ Host remote-1
     }
     $hasMembers = @((Snapshot 'after-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2
     Case 3 'Send a room message' $(if (-not $hasRoom) { 'No saved room' } else { '' }) {
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         Send-Text 'BROADCAST534' -Room -AllowKeptDraft
         try { [void](Wait-For 'saved human room event' { @(Room-Events (Snapshot 'send-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'BROADCAST534' }).Count -eq 1 } 20) }
         catch { throw "The room did not accept a plain send; room shows: $((Shot 'send-refused'))" }
@@ -418,7 +449,7 @@ Host remote-1
         if ($visible -notmatch 'Alpha says BROADCAST534' -or $visible -notmatch 'Bravo says BROADCAST534') { throw 'Saved member replies are not both visible in the room' }
     }
     Case 5 'Mention only Alpha' $(if (-not $hasMembers) { 'The room has fewer than two saved members' } else { '' }) {
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         Send-Text '@Alpha TARGET534' -Room -AllowKeptDraft
         $accepted = $true
         try { [void](Wait-For 'saved @Alpha room message' { @(Room-Events (Snapshot 'mention-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq '@Alpha TARGET534' }).Count -eq 1 } 20) }
@@ -459,7 +490,7 @@ Host remote-1
                 if ($next -lt 0) { $problems += "$name chat is missing or reorders '$($reply.text)'" } else { $position = $next }
             }
         }
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         $visible = Shot-Room 'room-order'
         $position = -1
         foreach ($reply in $replies) {
@@ -471,7 +502,7 @@ Host remote-1
     }
     $missingMembers = if (-not $hasRoom) { 'No saved room' } elseif (-not $hasMembers) { 'Fewer than two saved members' } else { '' }
     Case 7 'e: Replies received while away' $missingMembers {
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         Send-Text 'AWAY534' -Room
         [void](Wait-For 'both providers holding unanswered away question' { @((Snapshot 'away-held').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 })
         Open-Member 'Alpha'
@@ -480,13 +511,13 @@ Host remote-1
         [void](Wait-For 'both providers answered while the room was closed' { @((Snapshot 'away-answered').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 } 30)
         $savedWhileAway = @(Room-Events (Snapshot 'away-while-closed') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count
         $result.observations += @{ fact = 'saved room replies while the room was closed'; count = $savedWhileAway; expected = 2 }
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         [void](Wait-For 'both away replies saved after returning to the room' { @(Room-Events (Snapshot 'away-return-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count -eq 2 } 60)
         $visible = Shot-Room 'away-return'
         if ($visible -notmatch 'Alpha says AWAY534' -or $visible -notmatch 'Bravo says AWAY534') { throw 'Replies that arrived while away are missing after returning to the room' }
     }
     Case 8 'f: Restart with an unanswered question' $missingMembers {
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         Send-Text 'RESTART534' -Room
         [void](Wait-For 'both providers holding restart question' { @((Snapshot 'restart-held').inputs | Where-Object { $_.marker -ceq 'RESTART534' }).Count -eq 2 })
         if (@(Room-Events (Snapshot 'restart-unanswered') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says RESTART534' }).Count) { throw 'Driver gate released the restart reply too early' }
@@ -497,14 +528,14 @@ Host remote-1
         Release-Replies 'RESTART534'
         Await-Replies 'RESTART534'
         [void](Shot 'restart-replies-with-room-closed')
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         $visible = Shot-Room 'restart-return'
         if ($visible -notmatch 'Alpha says RESTART534' -or $visible -notmatch 'Bravo says RESTART534') { throw 'Restarted desktop lost answers to the unanswered room question' }
     }
     Case 9 '' 'The existing Android photo harness needs a companion checkout and has no Rooms read action; this Windows job has no Android client. Paired ticket MUBO-536' {}
     Case 10 '' 'The existing Android photo harness has no Rooms retry action; this Windows job has no Android client. Paired ticket MUBO-536' {}
     Case 12 '' $missingMembers {
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         Send-Text 'FAIL534' -Room
         [void](Wait-For 'both provider failure receipts' { @((Snapshot 'failed-turn').inputs | Where-Object { $_.marker -ceq 'FAIL534' }).Count -eq 2 })
         [void](Wait-For 'visible failed member turn' { (Shot 'failed-turn') -match 'Restart|failed|unavailable|error' })
@@ -520,7 +551,7 @@ Host remote-1
         $before = @(Room-Events (Snapshot 'history-before') | Where-Object { $_.type -eq 'agent_reply' })
         if ($before.Count -eq 0) { throw 'No saved replies exist to check for stale or missing history' }
         Open-Member 'Alpha'
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         $visible = Shot-Room 'history-reloaded'
         foreach ($reply in $before) {
             if ($visible -notmatch [regex]::Escape($reply.text)) { throw "Room history is missing saved reply '$($reply.text)' after reopening" }
@@ -541,7 +572,7 @@ Host remote-1
         Restart-Desktop
         $script:settings = "$fresh/roaming/ZigShell"
         [void](Wait-For 'account chats imported on fresh install' { (Read-Shared "$settings/session.json").Contains('rooms-alpha') } 90)
-        Palette 'Rooms534'
+        Invoke-JourneyCommand -Text 'Rooms534'
         [void](Wait-For 'discovered existing room view' { Room-Window })
         $visible = Shot-Room 'fresh-discovery'
         if ($visible -notmatch 'Rooms534') { throw 'Existing room is missing on a fresh install of the same account' }

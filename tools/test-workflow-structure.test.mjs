@@ -138,7 +138,7 @@ test('manual and nightly verification execute native appearance', async () => {
   assert.ok(matrix('workflow_dispatch', 'all').includes('appearance'));
   assert.ok(matrix('workflow_dispatch', 'all').includes('rooms'));
   assert.ok(!matrix('schedule', '').includes('rooms'));
-  const broken = script.replace(': available;', ': [];');
+  const broken = script.replace('available.filter(', '[].filter(');
   assert.notEqual(broken, script);
   assert.throws(() => matrix('schedule', '', broken));
   assert.match(verify, /runs-on: windows-latest/);
