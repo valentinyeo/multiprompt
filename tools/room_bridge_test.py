@@ -81,12 +81,19 @@ class BridgeTest(unittest.TestCase):
             runtime = Path(home) / '.multiprompt-runtime'
             self.assertTrue((runtime / 'reader.py').is_symlink())
             active = json.loads((runtime / 'active.json').read_text())
-            reader = bridge_module.selected_reader()
-            self.assertEqual(active['sha256'] + '.py', reader.name)
-            self.assertFalse(reader.is_symlink())
-            result = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
-            self.assertTrue(result['live_send'])
-            self.assertEqual(1, result['room_reply_protocol'])
+            bridge_module.RUNTIME_FINGERPRINT = 'f' * 64
+            bridge_module.STORE_DIRECTORY = self.temp.name
+            try:
+                bridge_module.remember_published(bridge_module.RUNTIME_FINGERPRINT, active['sha256'])
+                reader = bridge_module.selected_reader()
+                self.assertEqual(active['sha256'] + '.py', reader.name)
+                self.assertFalse(reader.is_symlink())
+                result = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+                self.assertTrue(result['live_send'])
+                self.assertEqual(1, result['room_reply_protocol'])
+            finally:
+                bridge_module.RUNTIME_FINGERPRINT = ''
+                bridge_module.STORE_DIRECTORY = None
 
     def test_host_stderr_is_retained_for_the_room_error(self):
         reader = Path(self.temp.name) / 'reader.py'
@@ -105,6 +112,7 @@ class BridgeTest(unittest.TestCase):
         request = dict(op='post_human', host_uuid=self.host, command_id=uid(), room_id=room, expected_revision=1, text='hello', recipients=[], room_features=1)
         self.error('room_host_upgrade_required', request)
         self.assertEqual(1, self.bridge.store.room(room)['seq'])
+        status.return_value['room_features'] = [1]
         status.return_value['room_message_protocol'] = 1
         with mock.patch.object(self.bridge, 'sweep_pending'):
             accepted = self.bridge.execute(request)
@@ -273,7 +281,7 @@ finally:
         from contextlib import redirect_stderr, redirect_stdout
         from unittest import mock
         fingerprint = 'c' * 64
-        store = Path(self.temp.name, 'serve')
+        store = Path(self.temp.name)
         with tempfile.TemporaryDirectory() as home:
             with mock.patch.dict(os.environ, {'HOME': home}):
                 bridge_module.RUNTIME_FINGERPRINT = fingerprint
@@ -283,7 +291,7 @@ finally:
                     self.assertTrue(bridge_module.publish_runtime(), 'the first request publishes the helper')
                     bridge_module.RUNTIME_SOURCE = b''
                     stdin = mock.MagicMock()
-                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities"}\n', b'']
+                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities","room_messages":1}\n', b'']
                     errors = io.StringIO()
                     with mock.patch.object(sys, 'stdin', stdin), mock.patch.object(bridge_module.subprocess, 'run') as install, redirect_stdout(io.StringIO()), redirect_stderr(errors):
                         bridge_module.serve(str(store), b'', fingerprint)

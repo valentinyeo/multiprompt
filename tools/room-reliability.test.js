@@ -135,7 +135,7 @@ test "legacy requests remain valid and unknown capabilities or extra fields are 
 }
 test "a new message clears an unresolved send for the same room" {
     defer reset();
-    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "{\"op\":\"post_human\",\"text\":\"Earlier\"}", .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "earlier", .bindings = &.{}, .state = .uncertain, .evidence = "" };
     try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
     try std.testing.expect(existing_record == null);
     try std.testing.expectEqual(journal.Kind.post, sent_kind.?);
@@ -266,7 +266,7 @@ test('room actions publish the shared chat helper on an account that never sent 
   const end = transport.indexOf('";', start);
   assert.notEqual(end, -1, 'the room transport bootstrap is a complete string');
   const bootstrap = transport.slice(start, end);
-  assert.equal(4, bootstrap.split('sys.stdin.buffer.readline()').length - 1, 'room_service, room_bridge, the reader digest and the reader each arrive on stdin');
+  assert.equal(5, bootstrap.split('sys.stdin.buffer.readline()').length - 1, 'room_service, room_bridge, the reader digest, the reader and the account key each arrive on stdin');
   assert.match(bootstrap, /f=sys\.stdin\.buffer\.readline\(\)\.decode\('ascii'\)\.strip\(\);/, 'the third stdin line names the reader the app expects');
   assert.match(bootstrap, /p=base64\.b64decode\(sys\.stdin\.buffer\.readline\(\)\);/, 'the fourth stdin line carries the reader only when the app sends it');
   assert.match(bootstrap, /b\.serve\(os\.path\.expanduser\([^)]*\),p,f\)/, 'the reader and the expected digest are handed to the bridge');

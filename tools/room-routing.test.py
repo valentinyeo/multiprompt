@@ -250,8 +250,8 @@ class RoutingTest(unittest.TestCase):
         import types
         outer = ast.parse((root / 'src/chat_history_reader.py').read_text())
         source = ast.literal_eval(next(node.value for node in outer.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'READER_SOURCE' for target in node.targets)))
-        functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in ('host_room_sweep', 'host_room_tick')]
-        self.assertEqual(2, len(functions))
+        functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in ('host_room_sources', 'host_room_sweep', 'host_room_tick')]
+        self.assertEqual(3, len(functions))
         fixture = types.ModuleType('mubo_room_runtime')
         fixture.runtime_request = self.runtime.request
         fixture.host_status = self.status
@@ -266,7 +266,7 @@ class RoutingTest(unittest.TestCase):
                 member = dict(alias='beta', display_name='Beta', host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid)
                 room = bridge.store.execute(dict(op='create', command_id=uid(), name='Offline', members=[member]))['event']['room_id']
                 bridge.store.execute(dict(op='post_human', command_id=uid(), room_id=room, expected_revision=1, text='return without a reader', recipients=[]))
-                namespace = dict(HOME=Path(home), sys=sys, re=re, sqlite3=sqlite3, time=time, ROOM_SERVICE_SOURCE=base64.b64encode((root / 'src/room_service.py').read_bytes()).decode(), ROOM_BRIDGE_SOURCE=base64.b64encode(bridge_source.encode()).decode())
+                namespace = dict(HOME=Path(home), sys=sys, re=re, sqlite3=sqlite3, time=time, HOST_ROOM_SOURCES=dict(checked=0.0, service='', bridge=''), ROOM_SERVICE_SOURCE=base64.b64encode((root / 'src/room_service.py').read_bytes()).decode(), ROOM_BRIDGE_SOURCE=base64.b64encode(bridge_source.encode()).decode())
                 exec(compile(ast.Module(body=functions, type_ignores=[]), '<room-host-schedule>', 'exec'), namespace)
                 self.enabled[sid] = False
                 namespace['host_room_sweep'](sid)

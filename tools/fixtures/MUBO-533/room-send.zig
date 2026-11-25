@@ -31,9 +31,14 @@ const account_len: usize = 0;
 const selection_generation: u64 = 1;
 var selection_waiting = false;
 const MemberBinding = struct { member: room_post.Recipient };
+const model_bindings = [_]MemberBinding{
+    .{ .member = .{ .alias = "alpha", .display_name = "Alpha" } },
+    .{ .member = .{ .alias = "bravo", .display_name = "Bravo" } },
+};
+const ModelBindings = struct { items: []const MemberBinding = &model_bindings };
 const OwnedModel = struct {
     value: struct { room_id: []const u8 = test_room, revision: u64 = 1 } = .{},
-    bindings: struct { items: []const MemberBinding = &.{ .{ .member = .{ .alias = "alpha", .display_name = "Alpha" } }, .{ .member = .{ .alias = "bravo", .display_name = "Bravo" } } } = .{},
+    bindings: ModelBindings = .{},
 };
 var loaded_model = OwnedModel{};
 var owned_model: ?*OwnedModel = &loaded_model;

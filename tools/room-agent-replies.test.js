@@ -211,6 +211,10 @@ with tempfile.TemporaryDirectory() as home:
     r = {}
     exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
     directory = Path(home) / '.local/state/multiprompt' / ('rooms-account-' + 'a' * 64)
+    directory.mkdir(mode=0o700, parents=True)
+    room_bridge.RUNTIME_FINGERPRINT = 'f' * 64
+    room_bridge.STORE_DIRECTORY = str(directory)
+    room_bridge.remember_published('f' * 64, digest)
     bridge = room_bridge.RoomBridge(directory)
     try:
         capabilities = bridge.execute(dict(op='capabilities', room_messages=1))
