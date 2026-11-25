@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" feedback "$RUNNER_TEMP/input/head.log" "$head" '^(Ran [0-9]+ tests|test_(?:existing_wish_with_any_ticket_prefix_is_reused|description_shape_keeps_long_text_inside_quote_blocks|session_token_file_is_used_when_ht_token_is_unset|drain_drops_queue_rows_saved_before_the_cutoff))'
+          node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" feedback "$RUNNER_TEMP/input/head.log" "$head" '^(Ran [0-9]+ tests|test_(?:existing_wish_with_any_ticket_prefix_is_reused|description_shape_keeps_long_text_inside_quote_blocks|description_leaves_fix_to_be_written|session_token_file_is_used_when_ht_token_is_unset|drain_drops_queue_rows_saved_before_the_cutoff))'
           echo "receipt=$?" >> "$GITHUB_ENV"
           true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
