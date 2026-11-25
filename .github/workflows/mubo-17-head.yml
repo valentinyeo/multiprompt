@@ -1,0 +1,133 @@
+name: MUBO-17 head vs base
+run-name: MUBO-17 head vs base ${{ github.run_id }}
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - proof/mubo-17-head
+permissions:
+  contents: read
+concurrency:
+  group: mubo-17-head-${{ github.run_id }}
+  cancel-in-progress: false
+env:
+  BASE_TAG: v0.28.1683
+jobs:
+  head:
+    name: build the pull request head
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
+      - name: Build the head app the way a release is built
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu -Dversion=0.28.883 -Drevision="$GITHUB_SHA" --summary all
+          mkdir -p dist
+          cp zig-out/bin/multiprompt.exe dist/multiprompt-x64.exe
+          sha256sum dist/multiprompt-x64.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mubo-17-head-exe
+          path: dist/multiprompt-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+  stream:
+    name: streaming reply window, round ${{ matrix.round }}
+    needs: head
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4, 5]
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Download the base release binary
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/mubo-speed/download-releases.ps1 -Tags @($env:BASE_TAG)
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: mubo-17-head-exe
+          path: bin/head
+      - name: Build the boundary launcher
+        shell: pwsh
+        run: ./tools/mubo-speed/build-launcher.ps1
+      - name: Measure one streaming window per build, alternating the order
+        shell: pwsh
+        env:
+          ROUND: ${{ matrix.round }}
+        run: |
+          $order = if ([int]$env:ROUND % 2 -eq 1) { @($env:BASE_TAG, 'head') } else { @('head', $env:BASE_TAG) }
+          foreach ($tag in $order) {
+            ./tools/mubo-speed/idle-log-cpu.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/round-$($env:ROUND)/$tag" -Tag $tag -Scenario stream -SshPath harness/ssh.exe -IdleSeconds 600 -SettleSeconds 60
+            Write-Host "$tag round $($env:ROUND) stream exit $LASTEXITCODE"
+          }
+          exit 0
+      - name: Summarise this round
+        if: always()
+        shell: pwsh
+        run: |
+          node tools/mubo-speed/summarize.mjs evidence
+          if (Test-Path evidence/summary.md) { Get-Content evidence/summary.md -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mubo-17-head-stream-${{ github.run_id }}-${{ matrix.round }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
+  report:
+    name: MUBO-17 head vs base verdict
+    needs: [stream]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: mubo-17-head-stream-${{ github.run_id }}-*
+          path: evidence
+      - name: Show the downloaded evidence
+        run: find evidence -name 'idle.json' | sort
+      - name: Report every window
+        run: |
+          node tools/mubo-speed/summarize.mjs evidence
+          node -e '
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const rows = [];
+          const walk = dir => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.name === "idle.json") rows.push(JSON.parse(fs.readFileSync(full, "utf8")));
+            }
+          };
+          walk("evidence");
+          const lines = ["| round | build | status | log MB/hour | CPU % of one core | transcript reads | chat paint lines |", "| --- | --- | --- | --- | --- | --- | --- |"];
+          for (const run of rows.sort((a, b) => String(a.file ?? "").localeCompare(String(b.file ?? "")))) {
+            lines.push(`| ${run.tag} | ${run.scenario} | ${run.status} | ${run.logMbPerHour} | ${run.cpuPercentOfOneCore} | ${run.windowTranscriptReads} | ${run.windowChatPaintLines} |`);
+            console.log(run.tag, run.status, run.logMbPerHour, run.cpuPercentOfOneCore, run.windowTranscriptReads, run.windowChatPaintLines, run.topLogTags?.slice(0, 5).map(t => t.tag + "=" + t.lines).join(" "), run.error ?? "");
+          }
+          fs.writeFileSync("evidence/windows.md", lines.join("\n") + "\n");
+          console.log(lines.join("\n"));
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mubo-17-head-report-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 30
