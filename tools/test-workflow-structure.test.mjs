@@ -94,9 +94,8 @@ test('red regression job installs the Zig compiler before running changed suites
   const install = red.indexOf('      - name: Install Zig 0.16.0');
   const execute = red.indexOf('      - name: Require changed tests to fail on merge-base source');
   assert.ok(install >= 0 && execute > install);
-  assert.match(red.slice(install, execute), /curl -fsSL https:\/\/ziglang\.org\/download\/0\.16\.0\/zig-x86_64-linux-0\.16\.0\.tar\.xz/);
-  assert.match(red.slice(install, execute), /tar -xf/);
-  assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+  assert.match(red.slice(install, execute), /uses: \.\/\.github\/actions\/setup-zig/);
+  assert.match(red.slice(install, execute), /ZIG=\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0\/zig/);
 });
 
 test('manual and nightly reaction proof uses the shared journey', () => {
@@ -116,7 +115,7 @@ test('manual and nightly reaction proof uses the shared journey', () => {
   for (const [requested, feature, expected] of [[true, 'chat-delivery', '1'], [false, 'chat-double-click', '1'], [false, 'chat-delivery', '']]) {
     assert.equal(vm.runInNewContext(expression, { inputs: { chat_reactions_proof: requested }, matrix: { feature } }), expected);
   }
-  assert.match(verify, /control\.ps1 -Feature \$env:FEATURE/);
+  assert.match(verify, /drive\.ps1 -Feature \$env:FEATURE/);
 });
 
 test('manual and nightly verification execute native appearance', async () => {
@@ -143,7 +142,7 @@ test('manual and nightly verification execute native appearance', async () => {
   assert.match(verify, /FEATURE: \$\{\{ matrix.feature \}\}/);
   const driver = verify.split('      - name: Launch Doctor Drive Evidence Cleanup\n')[1]?.split(/\n      - /)[0];
   assert.ok(driver);
-  assert.match(driver, /control\.ps1 -Feature \$env:FEATURE/);
+  assert.match(driver, /drive\.ps1 -Feature \$env:FEATURE/);
   assert.doesNotMatch(driver, /env\.FEATURE != 'appearance'|continue-on-error:/);
   const policy = JSON.parse(fs.readFileSync(new URL('./journey-policy.json', import.meta.url), 'utf8'));
   assert.equal(policy.quarantined.appearance, undefined);

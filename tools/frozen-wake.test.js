@@ -29,7 +29,8 @@ function earlyWake(source) {
 
 test('frozen target wake precedes all view preparation, chat paint and browser swap timer in both views', () => {
   earlyWake(consoleSource);
-  for (const before of ['idx < app_state.shell_count and ', 'app_state.shells[idx].browser_frozen', 'wakeBrowserPaneFromFreeze(idx)']) assert.throws(() => earlyWake(consoleSource.replace(before, 'false')));
+  const switching = body(consoleSource, 'switchToShell');
+  for (const before of ['idx < app_state.shell_count and ', 'app_state.shells[idx].browser_frozen', 'wakeBrowserPaneFromFreeze(idx)']) assert.throws(() => earlyWake(consoleSource.replace(switching, switching.replace(before, 'false'))));
   assert.throws(() => earlyWake(consoleSource.replace('if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen)', 'if (!defer_browser and idx < app_state.shell_count and app_state.shells[idx].browser_frozen)')));
 });
 

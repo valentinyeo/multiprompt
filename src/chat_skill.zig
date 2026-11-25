@@ -35,7 +35,7 @@ pub fn next(text: []const u16, from: usize) ?Range {
         while (start < text.len and std.ascii.isWhitespace(@intCast(@min(text[start], 127)))) : (start += 1) {}
         var end = start;
         while (end < text.len and !std.ascii.isWhitespace(@intCast(@min(text[end], 127)))) : (end += 1) {}
-        if (end > start and ((start == 0 and text[start] == '/') or text[start] == '$') and known(text[start..end])) return .{ .start = start, .end = end };
+        if (end > start and known(text[start..end])) return .{ .start = start, .end = end };
         start = end;
     }
     return null;
@@ -58,7 +58,7 @@ pub fn paint(dc: w.HANDLE, rect: w.RECT, background: u32) u32 {
     return accent;
 }
 
-test "SOFT-3086 only a leading slash skill gets a pill" {
+test "SOFT-3086 a known skill gets a pill wherever it appears" {
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
     const saved = app.g_palette_skills;
     const shells = app.shell_count;
@@ -69,14 +69,21 @@ test "SOFT-3086 only a leading slash skill gets a pill" {
     var skills = [_]@import("skills.zig").Skill{.{ .name = @constCast("pill-proof"), .description = @constCast(""), .body = @constCast(""), .source = .harness }};
     app.g_palette_skills = &skills;
     app.shell_count = 0;
-    for ([_][]const u16{ L("normal /pill-proof arguments"), L("normal /pill-proof"), L(" /pill-proof"), L("normal\n/pill-proof"), L("/pill-proof/path") }) |text| {
+    for ([_][]const u16{ L("/pill-proof arguments"), L("why is this not done via /pill-proof ?"), L("why is this not done via /pill-proof"), L(" /pill-proof"), L("why\n/pill-proof") }) |text| {
+        const at = std.mem.indexOf(u16, text, L("/pill-proof")) orelse return error.TestUnexpectedResult;
+        const found = next(text, 0) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(at, found.start);
+        try std.testing.expectEqualSlices(u16, L("/pill-proof"), text[found.start..found.end]);
+    }
+    const twice = L("/pill-proof then /pill-proof");
+    const first = next(twice, 0) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), first.start);
+    const second = next(twice, first.end) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, L("/pill-proof"), twice[second.start..second.end]);
+    try std.testing.expect(next(twice, second.end) == null);
+    for ([_][]const u16{ L("a/b"), L("https://example.com/pill-proof"), L("normal /pill arguments"), L("normal /pill-proof/path") }) |text| {
         try std.testing.expect(next(text, 0) == null);
     }
-    const text = L("/pill-proof arguments\n/pill-proof");
-    const first = next(text, 0) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@as(usize, 0), first.start);
-    try std.testing.expectEqualSlices(u16, L("/pill-proof"), text[first.start..first.end]);
-    try std.testing.expect(next(text, first.end) == null);
     try std.testing.expect(!known(L("/pill")) and !known(L("/pill-proof/path")) and !known(L("plain")));
 }
 

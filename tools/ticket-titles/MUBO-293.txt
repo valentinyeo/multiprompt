@@ -1,0 +1,1 @@
+A sent slash command shows dots, then its reply

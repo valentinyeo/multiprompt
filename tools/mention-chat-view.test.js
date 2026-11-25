@@ -13,3 +13,12 @@ test("the @ list offers every chat view tab, not only live- sessions", () => {
 test("the @ list test covers a chat with a non-live session name", () => {
   assert.match(source, /"Multi Bot Android", "multiprompt-android"/);
 });
+
+test('MUBO-454 the @ list offers the chat you are typing in', () => {
+  assert.match(source, /pub fn show\(query: \[\]const u8\)/);
+  assert.doesNotMatch(source, /pub fn currentLive\(exclude/);
+  const composer = fs.readFileSync(path.join(__dirname, '..', 'src', 'chat_composer.zig'), 'utf8');
+  assert.match(composer, /chat_mention\.zig"\)\.show\(query\)/);
+  assert.match(source, /pub fn trimWireNote\(/);
+  assert.match(source, /mention_source_mark = std\.unicode\.utf8ToUtf16LeStringLiteral\("\\n\\n\(This line is addressed to "\)/);
+});

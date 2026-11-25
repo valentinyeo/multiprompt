@@ -77,9 +77,9 @@ Run the command once per shell runner. Three runners can share one workspace and
 
 ## One roster command
 
-`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb pin` and `mb unpin` set or clear a tab's pin through the desktop's own tab bridge. `mb wait` moves a tab to Waiting through the same bridge. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
+`node tools/mb.mjs` lists, opens, closes, archives, unarchives, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb pin` and `mb unpin` set or clear a tab's pin through the desktop's own tab bridge. `mb wait` moves a tab to Waiting through the same bridge. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
 
-These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
+These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (lock, keep-alive, snooze, remind), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
 
 `mb workspace color <workspace> <color>` sets a workspace color from 0 to 7. `mb style <session> --face <0-19> --color <0-7> --photo <png>` sets the face, color, and photo the layout service already stores. A photo is a PNG file; the service keeps the image and a revision on the session.
 

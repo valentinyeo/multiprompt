@@ -91,6 +91,12 @@ print_help() {
       session-unpin) echo 'usage: zsb session-unpin --tab <id>'
         echo '  Clears the pin from a background tab. An unknown tab returns unknown_tab.'
         ;;
+      session-archive) echo 'usage: zsb session-archive --tab <id>'
+        echo '  Archives a remote tab: remembers it, ends its tmux session and removes the tab. An unknown tab returns unknown_tab.'
+        ;;
+      session-unarchive) echo 'usage: zsb session-unarchive --tmux <session> [--host <host name>]'
+        echo '  Reopens one archived session as a tab and drops it from the archive. An unknown session returns unknown_archived_session.'
+        ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
       reset) echo 'usage: zsb reset (reconnect bridge and clear stuck CDP sessions; keeps the pane open)' ;;
@@ -175,6 +181,9 @@ Commands and flags:
                                     Move a background tab to another workspace or group
   session-pin --tab ID              Pin one background tab to the top of the sidebar
   session-unpin --tab ID            Clear that pin
+  session-archive --tab ID          Archive one remote tab and end its tmux session
+  session-unarchive --tmux SESSION [--host HOST]
+                                    Reopen one archived session as a tab
   session-wait --tab ID             Put a background tab in Waiting until it needs attention
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
@@ -241,7 +250,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-wait" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-wait" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -599,7 +608,7 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-elif args[0] in {"session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin"}:
+elif args[0] in {"session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive"}:
     edit_specs = {
         "session-close": ({"--tab"}, {"--tab"}),
         "session-wait": ({"--tab"}, {"--tab"}),
@@ -608,6 +617,7 @@ elif args[0] in {"session-close", "session-wait", "session-rebind", "session-ren
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
         "session-pin": ({"--tab"}, {"--tab"}),
         "session-unpin": ({"--tab"}, {"--tab"}),
+        "session-archive": ({"--tab"}, {"--tab"}),
     }
     allowed, required = edit_specs[args[0]]
     values = {}
@@ -655,6 +665,31 @@ elif args[0] in {"session-close", "session-wait", "session-rebind", "session-ren
         fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", f"{args[0]} argument too long")
+
+elif args[0] == "session-unarchive":
+    allowed, required = {"--tmux", "--host"}, {"--tmux"}
+    values = {}
+    rest = args[1:]
+    i = 0
+    while i < len(rest):
+        if i + 1 >= len(rest):
+            fail("bad_args", f"session-unarchive flag {rest[i]} needs a value")
+        flag, value = rest[i], rest[i + 1]
+        if flag not in allowed or flag in values or not value:
+            fail("bad_args", "session-unarchive takes only its named flags once, with nonempty values")
+        if any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+            if flag == "--tmux":
+                fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+            fail("bad_args", "session-unarchive values must not contain control characters")
+        values[flag] = value
+        i += 2
+    if not required <= values.keys():
+        fail("bad_args", "session-unarchive requires --tmux")
+    tmux = values["--tmux"]
+    if len(tmux) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in tmux):
+        fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+    if any(len(value.encode()) > 256 for value in values.values()):
+        fail("bad_args", "session-unarchive argument too long")
 
 output_path = None
 if script_mode:
@@ -886,7 +921,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

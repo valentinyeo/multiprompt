@@ -59,7 +59,7 @@ test('remote command list includes each wrapper command and app handler', () => 
   for (const verb of new Set([...wrapperVerbs(), ...handlers])) {
     assert.ok(verbs.includes(verb), `${verb} is available remotely`);
     assert.ok(accepts([verb]), `${verb} passes the command policy`);
-    if (!['workspace-list', 'session-open', 'session-status', 'session-close', 'session-wait', 'session-rebind', 'session-rename', 'session-move', 'session-pin', 'session-unpin', 'shell-open', 'pane-info'].includes(verb)) {
+    if (!['workspace-list', 'session-open', 'session-status', 'session-close', 'session-wait', 'session-rebind', 'session-rename', 'session-move', 'session-archive', 'session-unarchive', 'session-pin', 'session-unpin', 'shell-open', 'pane-info'].includes(verb)) {
       assert.ok(bridge.includes(`std.mem.eql(u8, command, "${verb}")`), `${verb} has a desktop dispatcher`);
     }
   }

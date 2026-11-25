@@ -12,11 +12,19 @@ const read = file => {
   return fs.readFileSync(full, 'utf8');
 };
 
+const shipped = pattern => {
+  const directory = path.join(__dirname, '..', path.dirname(pattern));
+  const name = path.basename(pattern);
+  const match = new RegExp(`^${name.replace('*', '.*')}$`);
+  return fs.existsSync(path.join(directory, name)) || fs.readdirSync(directory).some(entry => match.test(entry));
+};
+
 test('chat source changes always run the stillness journey without an AI picker', () => {
   const map = read('.claude/skills/verify-multiprompt/features/chat-still.md');
   const owned = map.match(/^Source files: (.+)$/m)[1].split(', ');
-  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/layout.zig', 'src/window_layout.zig', 'src/browser_pane.zig']) {
+  for (const file of ['src/chat*', 'src/app_state.zig', 'src/main.zig', 'src/chat_layout_snapshot.zig', 'src/window_layout.zig', 'src/browser_pane.zig']) {
     assert.ok(owned.includes(file), `${file} must select the stillness journey in the PR verifier`);
+    assert.ok(shipped(file), `${file} must name files the repository still ships`);
   }
   assert.match(map, /^Verify on: pull_request$/m, 'the stillness journey must stay selected for chat source pull requests');
   const workflow = read('.github/workflows/chat-still.yml');
@@ -81,6 +89,7 @@ test('both formal CI gates compare against the event baseline after mutations an
   for (const name of ['test.yml', 'chat-still.yml']) {
     const workflow = read(`.github/workflows/${name}`);
     assert.match(workflow, /CHAT_STILL_BASE: \$\{\{ github\.event\.pull_request\.base\.sha/);
+    assert.match(workflow, /github\.event_name == 'workflow_dispatch' && 'origin\/master'/, 'manual checks compare with the unchanged master baseline');
     assert.match(workflow, /tools\/verify-chat-still --self-test --replay --inherit-from "\$CHAT_STILL_BASE"/);
   }
 });

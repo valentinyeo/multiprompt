@@ -62,9 +62,10 @@ test("ACTIVE clears any prior dot and a resumed DONE respects filing content", (
 });
 
 test("SOFT-3113 hosted Waiting uses hook timestamps when console read is unavailable", () => {
+  const store = fs.readFileSync(path.join(path.resolve(__dirname, ".."), "src", "sidebar_attention.zig"), "utf8");
+  assert.match(store, /fn hostedArchiveHasNewContent/);
+  assert.match(store, /shellUsesHostedArchive/);
   const sidebar = fs.readFileSync(path.join(path.resolve(__dirname, ".."), "src", "sidebar.zig"), "utf8");
-  assert.match(sidebar, /fn hostedArchiveHasNewContent/);
-  assert.match(sidebar, /shellUsesHostedArchive/);
   assert.match(sidebar, /test "SOFT-3113 hosted Waiting chat regains workspace after hook DONE"/);
 });
 

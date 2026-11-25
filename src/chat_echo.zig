@@ -285,13 +285,29 @@ const Normalized = struct {
 };
 
 const mention_wire_note = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
+const mention_wire_lead = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(Valentin wrote this to you. It also mentions ");
 
 fn trimMentionWireNote(text: []const u16) []const u16 {
-    const ending = std.unicode.utf8ToUtf16LeStringLiteral(" or relay it unless you are also asked.)");
-    if (!std.mem.endsWith(u16, text, ending)) return text;
-    const mark = mention_wire_note[0..mention_wire_note.len];
-    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
-    return text[0..idx];
+    const endings = [_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral(" or relay it unless you are also asked.)"),
+        std.unicode.utf8ToUtf16LeStringLiteral(" or relay it.)"),
+    };
+    var complete = false;
+    for (endings) |ending| {
+        if (std.mem.endsWith(u16, text, ending)) {
+            complete = true;
+            break;
+        }
+    }
+    if (!complete) return text;
+    var cut: usize = 0;
+    var found = false;
+    for ([_][]const u16{ mention_wire_note, mention_wire_lead }) |mark| {
+        const idx = std.mem.lastIndexOf(u16, text, mark) orelse continue;
+        if (!found or idx > cut) cut = idx;
+        found = true;
+    }
+    return if (found) text[0..cut] else text;
 }
 
 pub fn sameText(a: []const u16, b: []const u16) bool {
@@ -801,8 +817,13 @@ test "SOFT-3084 only a complete mention wire note is ignored during echo matchin
     const typed = w("ask @Builder{live-builder}");
     const framed = w("ask @Builder{live-builder}\n\n(This line is addressed to Builder and was already delivered to it. Do not answer for Builder or relay it unless you are also asked.)");
     const unfinished = w("ask @Builder{live-builder}\n\n(This line is addressed to someone else");
+    const own = w("ask @Builder{live-builder}\n\n(Valentin wrote this to you. It also mentions Builder, which already got its own copy. Answer it as your own message, but do not answer for Builder or relay it.)");
+    const own_unfinished = w("ask @Builder{live-builder}\n\n(Valentin wrote this to you. It also mentions Builder");
     try std.testing.expect(sameText(&typed, &framed));
     try std.testing.expect(sameText(&framed, &typed));
+    try std.testing.expect(sameText(&typed, &own));
+    try std.testing.expect(sameText(&own, &typed));
+    try std.testing.expect(!sameText(&typed, &own_unfinished));
     try std.testing.expect(!sameText(&typed, &unfinished));
 }
 

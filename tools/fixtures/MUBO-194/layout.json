@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "revision": 4,
+  "workspaces": [
+    {"name": "Studio"},
+    {"name": "Archive"}
+  ],
+  "tabs": [
+    {"kind": "tmux", "name": "Lead Chat", "tmux_session": "live-1111aaaa", "tmux_host": 0, "workspace": "Studio"},
+    {"kind": "tmux", "name": "Design Peer", "tmux_session": "live-2222bbbb", "tmux_host": 0, "workspace": "Studio"},
+    {"kind": "tmux", "name": "QA Peer", "tmux_session": "live-3333cccc", "tmux_host": 0, "workspace": "Studio"},
+    {"kind": "tmux", "name": "Other Chat", "tmux_session": "live-4444dddd", "tmux_host": 0, "workspace": "Archive"}
+  ]
+}

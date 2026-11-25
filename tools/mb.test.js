@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 let run;
@@ -24,6 +24,14 @@ function harness(options = {}) {
   const sessions = new Set();
   const panes = new Map();
   const ownerPath = join(dir, 'owners.json');
+  const zsbPath = options.zsb ? join(dir, 'mp-zsb') : null;
+  const zsbLog = join(dir, 'zsb.log');
+  const zsbStatePath = join(dir, 'zsb-state.json');
+  if (zsbPath) {
+    writeFileSync(zsbPath, options.zsb, { mode: 0o755 });
+    writeFileSync(zsbLog, '');
+    writeFileSync(zsbStatePath, JSON.stringify(options.zsbState));
+  }
   const features = options.features ?? FEATURES;
   const fetch = async (url, init = {}) => {
     const path = new URL(url).pathname;
@@ -72,15 +80,17 @@ function harness(options = {}) {
   const call = async args => {
     assert.equal(typeof run, 'function');
     const lines = [], errors = [];
+    const env = { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir };
+    if (zsbPath) Object.assign(env, { MULTIPROMPT_ZSB: zsbPath, MB_TEST_STATE: zsbStatePath, MB_TEST_LOG: zsbLog });
     const code = await run(args, {
-      env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir },
+      env,
       out: line => lines.push(line), err: line => errors.push(line), fetch, tmux: tmuxFn,
       runtime: argv => { runtime.push(argv); return { status: 0, stdout: '{"status":"disabled"}' }; },
       ownerPath
     });
     let owners = null;
     try { owners = JSON.parse(readFileSync(ownerPath, 'utf8')); } catch { owners = null; }
-    return { code, lines, errors, puts, revision: () => revision, layout, tmux, runtime, sessions, panes, owners };
+    return { code, lines, errors, puts, revision: () => revision, layout, tmux, runtime, sessions, panes, owners, zsb: () => zsbPath ? readFileSync(zsbLog, 'utf8').split('\n').filter(line => line && line !== 'workspace-list') : [] };
   };
   return { call, dir, layout, puts, panes, sessions, tmux };
 }
@@ -161,6 +171,113 @@ test('open groups a shell once, and a different workspace is refused', async () 
   assert.match(moved.errors[0], /already open in Work/);
   assert.equal(box.puts.length, openedPuts);
   rmSync(box.dir, { recursive: true, force: true });
+});
+
+const MOVE_ZSB = `#!${process.execPath}
+const { readFileSync, writeFileSync } = require('node:fs');
+const [verb, ...flags] = process.argv.slice(2);
+const stateFile = process.env.MB_MOVE_STATE;
+require('node:fs').appendFileSync(process.env.MB_MOVE_LOG, JSON.stringify([verb, ...flags]) + '\\n');
+const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+const value = name => flags.includes(name) ? flags[flags.indexOf(name) + 1] : null;
+if (verb === 'workspace-list') {
+  console.log(JSON.stringify(state.listing));
+  process.exit(0);
+}
+if (verb !== 'session-move') {
+  console.log(JSON.stringify({ ok: false, error: 'unexpected' }));
+  process.exit(0);
+}
+const tabId = Number(value('--tab'));
+const workspaceName = value('--workspace');
+const groupName = value('--group');
+let moved = null;
+let origin = null;
+for (const workspace of state.listing.workspaces) {
+  for (const tab of [...(workspace.tabs || [])]) {
+    if (tab.id !== tabId) continue;
+    workspace.tabs.splice(workspace.tabs.indexOf(tab), 1);
+    moved = tab;
+    origin = workspace;
+  }
+  for (const group of workspace.groups || []) {
+    for (const tab of [...(group.tabs || [])]) {
+      if (tab.id !== tabId) continue;
+      group.tabs.splice(group.tabs.indexOf(tab), 1);
+      moved = tab;
+      origin = workspace;
+    }
+  }
+}
+if (!moved) {
+  console.log(JSON.stringify({ ok: false, error: 'unknown_tab' }));
+  process.exit(0);
+}
+const target = workspaceName === null ? origin : state.listing.workspaces.find(workspace => workspace.name === workspaceName);
+if (!target) {
+  console.log(JSON.stringify({ ok: false, error: 'unknown_workspace', valid_names: state.listing.workspaces.map(workspace => workspace.name) }));
+  process.exit(0);
+}
+if (groupName === null) target.tabs = [...(target.tabs || []), moved];
+else {
+  const group = (target.groups || []).find(item => item.name === groupName);
+  if (!group) {
+    console.log(JSON.stringify({ ok: false, error: 'unknown_group' }));
+    process.exit(0);
+  }
+  group.tabs = [...(group.tabs || []), moved];
+}
+writeFileSync(stateFile, JSON.stringify(state));
+console.log(JSON.stringify({ ok: true, moved: true, tab: tabId }));
+`;
+
+test('moving a tab to a workspace or group puts it there and repeats the same result', async () => {
+  assert.equal(typeof run, 'function');
+  const dir = mkdtempSync(join(tmpdir(), 'mb-move-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const zsb = join(bin, 'zsb');
+  writeFileSync(zsb, MOVE_ZSB, { mode: 0o755 });
+  const state = join(dir, 'state.json');
+  const listing = {
+    ok: true,
+    hosts: ['remote-1'],
+    workspaces: [
+      { id: 0, name: 'Home', active: true, groups: [{ id: 1, name: 'Ops', tabs: [] }], tabs: [{ id: 40, title: 'Move Me', host: 'remote-1', tmux: 'live-move' }] },
+      { id: 1, name: 'Away', active: false, groups: [{ id: 1, name: 'Ops', tabs: [] }], tabs: [] }
+    ]
+  };
+  writeFileSync(state, JSON.stringify({ listing }));
+  const log = join(dir, 'calls.jsonl');
+  const env = { HOME: dir, PATH: `${bin}:${process.env.PATH}`, MULTIPROMPT_HOST: '0', MB_MOVE_STATE: state, MB_MOVE_LOG: log };
+  const call = async args => {
+    const lines = [], errors = [];
+    const code = await run(args, {
+      env, out: line => lines.push(line), err: line => errors.push(line),
+      fetch() { assert.fail('move must not write the account service'); }
+    });
+    return { code, lines, errors };
+  };
+  const first = await call(['move', 'Move Me', '--workspace', 'Away']);
+  assert.equal(first.code, 0, text(first));
+  const second = await call(['move', 'Move Me', '--workspace', 'Away']);
+  assert.equal(second.code, 0, text(second));
+  assert.deepEqual(second.lines, first.lines);
+  let placed = JSON.parse(readFileSync(state, 'utf8')).listing.workspaces;
+  assert.deepEqual(placed[1].tabs.map(tab => tab.id), [40]);
+  assert.deepEqual(placed[0].tabs, []);
+  const grouped = await call(['move', 'Move Me', '--group', 'Ops']);
+  assert.equal(grouped.code, 0, text(grouped));
+  const again = await call(['move', 'Move Me', '--group', 'Ops']);
+  assert.equal(again.code, 0, text(again));
+  assert.deepEqual(again.lines, grouped.lines);
+  placed = JSON.parse(readFileSync(state, 'utf8')).listing.workspaces;
+  assert.deepEqual(placed[1].groups[0].tabs.map(tab => tab.id), [40]);
+  const moves = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(call => call[0] === 'session-move');
+  assert.equal(moves.length, 4);
+  assert.deepEqual(moves[0], moves[1]);
+  assert.deepEqual(moves[2], moves[3]);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('groups are refused before tmux when the service does not advertise them', async () => {
@@ -392,5 +509,83 @@ test('star is refused when the service has no favorite feature', async () => {
   assert.equal(refused.code, 1);
   assert.match(refused.errors[0], /does not support favorite/);
   assert.equal(box.puts.length, 0);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+const DESKTOP = `#!/usr/bin/env python3
+import json, os, sys
+state_path = os.environ['MB_TEST_STATE']
+log_path = os.environ['MB_TEST_LOG']
+state = json.load(open(state_path))
+args = sys.argv[1:]
+with open(log_path, 'a') as log:
+    log.write(' '.join(args) + '\\n')
+def tabs():
+    for workspace in state['workspaces']:
+        for tab in workspace['tabs']:
+            yield tab
+        for group in workspace['groups']:
+            for tab in group['tabs']:
+                yield tab
+if args == ['workspace-list']:
+    print(json.dumps(state))
+    sys.exit(0)
+if args[0] == 'shell-open' and '--attach' in args and '--name' in args:
+    session = args[args.index('--attach') + 1]
+    if any(tab['tmux'] == session for tab in tabs()):
+        print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
+        sys.exit(1)
+    tab = {'id': 70, 'title': args[args.index('--name') + 1], 'tmux': session, 'host': args[args.index('--host') + 1], 'pinned': False}
+    state['workspaces'][0]['tabs'].append(tab)
+    json.dump(state, open(state_path, 'w'), sort_keys=True)
+    print(json.dumps({'ok': True, 'created': True, 'tab': 70}))
+    sys.exit(0)
+if args[0] == 'session-close' and len(args) == 3 and args[1] == '--tab':
+    for workspace in state['workspaces']:
+        for tab in workspace['tabs']:
+            if str(tab['id']) == args[2]:
+                workspace['tabs'].remove(tab)
+                json.dump(state, open(state_path, 'w'), sort_keys=True)
+                print(json.dumps({'ok': True, 'closed': True, 'tab': int(args[2])}))
+                sys.exit(0)
+    print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
+    sys.exit(1)
+print(json.dumps({'ok': False, 'error': 'bad_args', 'message': 'unexpected ' + ' '.join(args)}))
+sys.exit(2)
+`;
+
+const OPEN_CLOSE_LAYOUT = { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [] };
+const OPEN_CLOSE_DESKTOP = {
+  ok: true,
+  hosts: ['remote-1'],
+  workspaces: [{ name: 'Work', groups: [], tabs: [{ id: 41, title: 'Home shell', host: 'remote-1', tmux: 'home-1', pinned: false }] }]
+};
+
+test('open and close reach the desktop once and repeat the same answer', async () => {
+  const box = harness({ layout: OPEN_CLOSE_LAYOUT, zsb: DESKTOP, zsbState: OPEN_CLOSE_DESKTOP });
+  const first = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--title', 'Runner 1', '--workspace', 'Work', '--group', 'Runners', '--host', '0', '--no-tmux']);
+  assert.equal(first.code, 0, text(first));
+  assert.match(first.lines.at(-1), /opened mp-runner-1/);
+  const opened = first.zsb();
+  assert.deepEqual(opened, ['shell-open --workspace Work --host remote-1 --name Runner 1 --attach mp-runner-1 --group Runners']);
+  const openedLayout = JSON.stringify(box.layout.tabs);
+  const openedPuts = box.puts.length;
+  const second = await box.call(['open', '--kind', 'shell', '--tmux', 'mp-runner-1', '--title', 'Runner 1', '--workspace', 'Work', '--group', 'Runners', '--host', '0', '--no-tmux']);
+  assert.equal(second.code, 0, text(second));
+  assert.match(second.lines.at(-1), /already open mp-runner-1/);
+  assert.equal(JSON.stringify(box.layout.tabs), openedLayout);
+  assert.equal(box.puts.length, openedPuts);
+  assert.deepEqual(second.zsb(), opened);
+  const closed = await box.call(['close', 'mp-runner-1']);
+  assert.equal(closed.code, 0, text(closed));
+  assert.match(closed.lines.at(-1), /closed mp-runner-1/);
+  const closedCalls = closed.zsb();
+  assert.deepEqual(closedCalls, [...opened, 'session-close --tab 70']);
+  const closedPuts = box.puts.length;
+  const again = await box.call(['close', 'mp-runner-1']);
+  assert.equal(again.code, 0, text(again));
+  assert.match(again.lines.at(-1), /already closed mp-runner-1/);
+  assert.equal(box.puts.length, closedPuts);
+  assert.deepEqual(again.zsb(), closedCalls);
   rmSync(box.dir, { recursive: true, force: true });
 });

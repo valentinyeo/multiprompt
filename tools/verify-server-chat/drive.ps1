@@ -16,8 +16,6 @@ $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
 $result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
 $job = $null
-$recorder = $null
-$writer = $null
 Start-Transcript "$Evidence/driver.log"
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 90) {
@@ -100,14 +98,6 @@ try {
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/job.cs"
     [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    $recorder = [Diagnostics.Process]::new()
-    $recorder.StartInfo = [Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg.exe).Source, "-y -f gdigrab -framerate 10 -i desktop -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
-    $recorder.StartInfo.UseShellExecute = $false
-    $recorder.StartInfo.RedirectStandardInput = $true
-    $recorder.StartInfo.RedirectStandardError = $true
-    [void]$recorder.Start()
-    $videoLog = $recorder.StandardError.ReadToEndAsync()
-    $writer = $recorder.StandardInput
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--no-window-restore')
     $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
@@ -134,14 +124,6 @@ try {
     throw
 } finally {
     if ($null -ne $job) { $cleanup = $job.Stop(); $result.cleanup = @{ activeAfterStop = $cleanup.ActiveProcesses }; $job.Dispose() }
-    if ($null -ne $recorder) {
-        $writer.WriteLine('q')
-        if (-not $recorder.WaitForExit(15000)) { $recorder.Kill(); $recorder.WaitForExit() }
-        [IO.File]::WriteAllText("$Evidence/video.log", $videoLog.GetAwaiter().GetResult())
-        $result.videoExit = $recorder.ExitCode
-        if ($recorder.ExitCode -ne 0 -or -not (Test-Path "$Evidence/journey.mp4") -or (Get-Item "$Evidence/journey.mp4").Length -lt 1024) { $result.status = 'failed'; $result.error = 'Video recording failed' }
-        $recorder.Dispose()
-    }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     try {
         $linuxEvidence = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $Evidence) -Evidence $Evidence -Name 'evidence-path').Trim()
