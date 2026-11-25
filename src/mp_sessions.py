@@ -337,6 +337,14 @@ def desktop_tabs(send, listing):
             yield workspace, group, tab
 
 
+def unreachable_detail(listing):
+    error = listing.get("error")
+    if not isinstance(error, str) or not error:
+        return None
+    message = listing.get("message")
+    return error if not isinstance(message, str) or not message else error + ": " + " ".join(message.split())
+
+
 def desktop_state(listing, tab=None, tmux=None, send=None):
     online = listing.get("ok") is True
     active = listing.get("active_workspace")
@@ -356,6 +364,7 @@ def desktop_state(listing, tab=None, tmux=None, send=None):
     else:
         visible, reason = None, "desktop visibility unavailable"
     return dict(in_layout=tab is not None if online else None, visible=visible, hidden_reason=reason,
+                offline_detail=None if online else unreachable_detail(listing),
                 waiting=tab.get("waiting") if tab else None, pinned=tab.get("pinned") if tab else None,
                 archived=tab.get("archived") if tab else (True if archived else None),
                 user_hidden=tab.get("user_hidden") if tab else None,
@@ -501,7 +510,7 @@ def find_existing(send, listing, slot, display, folder):
 
 def ensure_visible(send, listing, target, display):
     if listing.get("ok") is not True:
-        return dict(ok=False, error="desktop_offline")
+        return dict(ok=False, error="desktop_offline", detail=unreachable_detail(listing))
     workspace = target.get("workspace")
     if not workspace:
         workspace = default_workspace(listing)
@@ -809,6 +818,8 @@ def cmd_start(args):
                   workspace=workspace, group=group, host=host, visible=shown.get("ok") is True, tab=shown.get("tab"), task=first)
     if shown.get("ok") is not True:
         result["visible_error"] = shown.get("error")
+        if shown.get("detail"):
+            result["visible_error_detail"] = shown["detail"]
     print(json.dumps(result, separators=(",", ":")))
     return 0 if first is None or first["state"] not in ("failed", "cancelled") else 3
 
@@ -1058,7 +1069,7 @@ def evaluate_row(send, listing, row, ping):
         provider=provider,
         workspace=row.get("workspace"),
         group=row.get("group"),
-        **{field: row.get(field) for field in ("in_layout", "visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
+        **{field: row.get(field) for field in ("in_layout", "visible", "hidden_reason", "offline_detail", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
         status=status,
         reasons=reasons,
         last_reply=last_reply,
@@ -1079,9 +1090,11 @@ def health_report(send, listing, rows, ping, as_json):
             visible = row.get("visible")
             visibility = "visible" if visible is True else ("hidden: " if visible is False else "unknown: ") + (row.get("hidden_reason") or "unreported")
             flags = " ".join(field + "=" + ("unknown" if row.get(field) is None else "yes" if row[field] else "no") for field in ("waiting", "pinned"))
+            detail = row.get("offline_detail")
             print(row["link"] + " " + row["status"] + " | " + visibility + " | " + flags +
                   " | workspace=" + (row.get("workspace") or "unknown") + " | on screen=" +
-                  (row.get("active_workspace") or "unknown") + " | view=" + (row.get("sidebar_view") or "unknown"))
+                  (row.get("active_workspace") or "unknown") + " | view=" + (row.get("sidebar_view") or "unknown") +
+                  (" | unreachable: " + detail if detail else ""))
 
     return 1 if broken else 0
 
