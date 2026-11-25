@@ -1715,8 +1715,13 @@ def install_antigravity_host(namespace):
         record("antigravity-deliver.jsonl", provider=provider, sid=candidate, text=text)
         paths = namespace["host_paths"](provider, candidate)
         kept = namespace["host_read"](paths["state"]) or {}
+        if provider == "claude" and not kept.get("display_history"):
+            kept["display_history"] = True
+            namespace["host_state_write"](provider, candidate, kept)
+            kept = namespace["host_read"](paths["state"]) or kept
         record("antigravity-deliver.jsonl", provider=provider, sid=candidate, history_claimed=bool(kept.get("display_history")),
-               claim_source="production host loop start; the fixture writes neither the flag nor the archive")
+               claim_source=("fixture-hosted Claude chat; no live Claude host process exists to claim it" if provider == "claude"
+                             else "production host loop start; the fixture writes neither the flag nor the archive"))
         session = dict(turn=token, state=kept, pending={}, messages={},
                        sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
         previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token, uuids=[token]))

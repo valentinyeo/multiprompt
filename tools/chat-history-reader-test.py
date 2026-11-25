@@ -5507,7 +5507,13 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         handle.close()
         return True
 
+    def ready(self):
+        return [event for event in self.events()
+                if event.get('kind') == 'host.status' and (event.get('payload') or {}).get('state') == 'ready']
+
     def send(self):
+        self.start()
+        self.wait_for(self.ready)
         store = dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux)
         token = 'mubo221' + uuid.uuid4().hex
         submitted = reader.message_store_request(dict(store, op='message_submit', message_id=token, text=self.text, origin='human'))

@@ -32,11 +32,13 @@ runs:
         $target = $env:FFMPEG_TARGET
         function Use-Ffmpeg([string]$directory) {
           Add-Content -Path $env:GITHUB_PATH -Value $directory
+          Get-ChildItem -Path $directory -Filter *.exe -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
           $first = (& (Join-Path $directory 'ffmpeg.exe') -version | Select-Object -First 1)
           if ($LASTEXITCODE -ne 0 -or -not $first) { throw "FFmpeg $pinned does not run from $directory" }
           Write-Host "FFmpeg ready: $first"
         }
         if ($env:FFMPEG_CACHE_HIT -eq 'true' -and (Test-Path (Join-Path $target 'ffmpeg.exe'))) {
+          Get-ChildItem -Path $target -Filter *.exe -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
           $cached = (& (Join-Path $target 'ffmpeg.exe') -version 2>$null | Select-Object -First 1)
           if ($LASTEXITCODE -eq 0 -and $cached) {
             Write-Host "FFmpeg $pinned restored from cache"
