@@ -112,7 +112,7 @@ test('queued commands retain scope and identity across background read completio
     const run = spawnSync(process.env.ZIG || 'zig', ['test', 'queued.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
     assert.equal(run.error, undefined, run.error?.message);
     assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
-    assert.match(run.stderr, /All 7 tests passed/);
+    assert.match(run.stderr, /All 8 tests passed/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ const Pending = struct {
     revision: u64 = 7,
     location: u8 = 1,
     token: u8 = 3,
+    evidence: ?[]const u8 = null,
 };
 const PendingCommand = Pending;
 const rooms = struct {
@@ -21,6 +22,7 @@ const rooms = struct {
     };
     const Controller = struct {
         fail_launch: bool = false,
+        job: ?u8 = null,
         launches: usize = 0,
         room: [36]u8 = undefined,
         room_len: usize = 0,
@@ -42,6 +44,7 @@ var controller: ?rooms.Controller = .{};
 var pending_command: ?*Pending = null;
 var disposed: usize = 0;
 var discarded: usize = 0;
+var timer_kills: usize = 0;
 var refresh_failed: usize = 0;
 var refresh_queued: usize = 0;
 var action_failed: usize = 0;
@@ -89,7 +92,10 @@ fn scheduleDiscovery(_: *rooms.Controller) void { discovery += 1; }
 const app_state = struct { const g_main_hwnd = 0; };
 const TIMER_ROOM = 1;
 const w = struct {
-    fn KillTimer(_: usize, _: usize) bool { return true; }
+    fn KillTimer(_: usize, _: usize) bool {
+        timer_kills += 1;
+        return true;
+    }
     fn SetTimer(_: usize, _: usize, _: usize, _: ?*anyopaque) usize { return 1; }
 };
 fn reset(item: *Pending) void {
@@ -97,6 +103,7 @@ fn reset(item: *Pending) void {
     pending_command = item;
     disposed = 0;
     discarded = 0;
+    timer_kills = 0;
     refresh_failed = 0;
     refresh_queued = 0;
     action_failed = 0;
@@ -177,6 +184,25 @@ test "launch failure frees pending action and schedules durable recovery" {
     try std.testing.expectEqual(@as(usize, 1), rejection_logged);
     try std.testing.expectEqual(@as(usize, 1), error_shown);
     try std.testing.expectEqual(@as(usize, 1), disposed);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+}
+test "polling keeps running for a live read or a saved send and stops otherwise" {
+    var item = Pending{};
+    reset(&item);
+    const c = &controller.?;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 0), timer_kills);
+    pending_command = null;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+    c.job = 1;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+    c.job = null;
+    item.evidence = "{}";
+    pending_command = &item;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 2), timer_kills);
 }
 test "the real release helper tells the view its token failed and respects an uncreated view" {
     var item = Pending{};
