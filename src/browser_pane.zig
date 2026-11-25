@@ -4354,8 +4354,10 @@ pub fn updateBrowserVisibility() void {
         return;
     }
     parkStrayBrowserPanes(activeBrowserPaneToKeep());
-    const sh_vis = &app_state.shells[app_state.active_shell];
-    if (!foregroundIsOurs() and !browser_pane_redock.browserVisibilityAllowsBackgroundRedock(sh_vis.browser_hwnd != null and IsWindow(sh_vis.browser_hwnd) != 0, app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0)) return;
+    if (!foregroundIsOurs()) {
+        const sh_vis = &app_state.shells[app_state.active_shell];
+        if (!browser_pane_redock.browserVisibilityAllowsBackgroundRedock(sh_vis.browser_hwnd != null and IsWindow(sh_vis.browser_hwnd) != 0, app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0)) return;
+    }
     if (app_state.shells[app_state.active_shell].browser_docking) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         if (IsWindow(bh) != 0) {
