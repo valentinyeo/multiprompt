@@ -108,6 +108,7 @@ pub const View = struct {
     focus_target: usize = 0,
     too_small: bool = false,
     result: ?ActionResult = null,
+    start_failed: bool = false,
     error_text: [1024]u16 = undefined,
     error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
@@ -208,6 +209,12 @@ pub const View = struct {
     pub fn showError(self: *View, message: []const u8) void {
         self.error_len = std.unicode.utf8ToUtf16Le(&self.error_text, message) catch 0;
         self.result = .failed;
+        self.invalidate();
+    }
+
+    pub fn showHostStartError(self: *View, message: []const u8) void {
+        self.showError(message);
+        self.start_failed = true;
         self.invalidate();
     }
 
@@ -400,11 +407,13 @@ pub const View = struct {
         self.generation +%= 1;
         self.pending = null;
         self.result = null;
+        self.start_failed = false;
         self.clearHits();
     }
 
     fn token(self: *View, kind: ActionKind) ActionToken {
         self.error_len = 0;
+        self.start_failed = false;
         self.serial +%= 1;
         return .{ .generation = self.generation, .serial = self.serial, .kind = kind };
     }
@@ -754,7 +763,10 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
     smooth.fillRoundRect(dc, view.confirm_hit, view.px(20), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
     text(dc, L("Cancel"), view.cancel_hit, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     var count_buf: [48]u8 = undefined;
-    const count = if (view.mode == .create) (std.fmt.bufPrint(&count_buf, "Create · {d}", .{view.selected_count}) catch "") else (std.fmt.bufPrint(&count_buf, "Save · {d}", .{view.selected_count}) catch "");
+    const count = if (view.mode == .create)
+        (if (view.start_failed) std.fmt.bufPrint(&count_buf, "Retry · {d}", .{view.selected_count}) catch "" else std.fmt.bufPrint(&count_buf, "Create · {d}", .{view.selected_count}) catch "")
+    else
+        (std.fmt.bufPrint(&count_buf, "Save · {d}", .{view.selected_count}) catch "");
     var count_w: [48]u16 = undefined;
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     text(dc, count_w[0..count_len], view.confirm_hit, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);

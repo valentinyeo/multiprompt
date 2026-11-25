@@ -35,9 +35,11 @@ pub const Result = struct {
     }
 };
 
+pub const FailureReason = enum { transport, timeout, cancelled, parse, remote, host_start };
+
 pub const Failure = struct {
     kind: RequestKind,
-    reason: enum { transport, timeout, cancelled, parse, remote },
+    reason: FailureReason,
     code: [64]u8 = @splat(0),
     code_len: usize = 0,
     detail: [2048]u8 = undefined,
@@ -49,6 +51,38 @@ pub const Completion = union(enum) {
     failed: Failure,
     finished: Result,
 };
+
+const ssh_transport_errors = [_][]const u8{
+    "ssh: connect to host",
+    "ssh: Could not resolve hostname",
+    "ssh_exchange_identification",
+    "Connection refused",
+    "Connection timed out",
+    "Network is unreachable",
+    "Host key verification failed",
+    "Permission denied (",
+};
+
+pub fn sshTransportError(stderr: []const u8) bool {
+    for (ssh_transport_errors) |marker| if (std.mem.indexOf(u8, stderr, marker) != null) return true;
+    return false;
+}
+
+pub fn failedReason(timed_out: bool, cancelled: bool, reply_len: usize, stderr: []const u8) FailureReason {
+    if (cancelled) return .cancelled;
+    if (timed_out) return .timeout;
+    if (reply_len == 0 and !sshTransportError(stderr)) return .host_start;
+    return .transport;
+}
+
+test "a room host that dies before its first reply is reported as not started" {
+    try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, "bash: -c: line 1: syntax error near unexpected token `('"));
+    try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, ""));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 0, "ssh: connect to host example.test port 22: Connection refused"));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 12, "partial"));
+    try std.testing.expectEqual(FailureReason.timeout, failedReason(true, false, 0, ""));
+    try std.testing.expectEqual(FailureReason.cancelled, failedReason(false, true, 0, ""));
+}
 
 pub const Controller = struct {
     host: u8,
@@ -255,7 +289,7 @@ pub const Controller = struct {
             self.journal_lock = null;
         }
         const mutation = isMutation(self.kind);
-        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
+        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = failedReason(job.timed_out, job.cancelled.load(.acquire), job.output_len, job.error_text[0..job.error_len]), .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
             parsed.deinit();
