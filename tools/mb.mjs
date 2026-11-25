@@ -20,6 +20,7 @@ commands:
   unarchive <name> [--host N] [--json]
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
+  wait <name> [--host N] [--json]
   rename <name> <title> [--host N]
   move <name> [--workspace <name>] [--group <group>]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
@@ -476,6 +477,24 @@ async function archiveSession(ctx, flags, archived) {
   zsbCall(ctx, ['session-unarchive', '--tmux', String(target.tmux), '--host', String(target.host)]);
   if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: true, tmux: target.tmux, title: target.title }));
   else ctx.out(`${word} ${target.title}`);
+}
+
+async function waitSession(ctx, flags) {
+  if (flags._.length !== 1) throw new Failure('wait needs one tab name');
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const listing = zsbCall(ctx, ['workspace-list']);
+  const hostName = host === null ? null : (listing.hosts || [])[host];
+  if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
+  const wanted = clean(flags._[0]).toLowerCase();
+  const matches = listingTabs(listing).map(({ tab }) => tab).filter(tab => (host === null || tab.host === hostName) &&
+    (String(tab.title || '').toLowerCase() === wanted || String(tab.tmux || '').toLowerCase() === wanted));
+  if (matches.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
+  if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
+  const tab = matches[0];
+  const changed = tab.waiting !== true;
+  if (changed) zsbCall(ctx, ['session-wait', '--tab', String(tab.id)]);
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb: 'wait', changed, tab: tab.id, waiting: true }));
+  else ctx.out(`${changed ? 'waiting' : 'already waiting'} ${tab.title}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -1025,6 +1044,10 @@ export async function run(argv, overrides = {}) {
       const home = env.HOME;
       if (!home) throw new Failure('HOME is required');
       return await health({ env, out, err }, flags);
+    }
+    if (command === 'wait') {
+      await waitSession({ env, out, err }, parse(rest));
+      return 0;
     }
     if (command === 'move') {
       const flags = parse(rest);

@@ -77,6 +77,10 @@ print_help() {
       session-rename) echo 'usage: zsb session-rename --tab <id> --name <tab title>'
         echo '  --name accepts 1-63 UTF-16 units, without control characters.'
         ;;
+      session-wait) echo 'usage: zsb session-wait --tab <id>'
+        echo '  Puts one background terminal tab in Waiting until it needs attention, and changes nothing when it already waits.'
+        echo '  The active tab is refused with active_tab; an unknown tab with unknown_tab.'
+        ;;
       session-move) echo 'usage: zsb session-move --tab <id> [--workspace <name>] [--group <name> | --ungrouped]'
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
         echo '  The active tab is refused with active_tab; a snoozed workspace is refused with workspace_snoozed.'
@@ -180,6 +184,7 @@ Commands and flags:
   session-archive --tab ID          Archive one remote tab and end its tmux session
   session-unarchive --tmux SESSION [--host HOST]
                                     Reopen one archived session as a tab
+  session-wait --tab ID             Put a background tab in Waiting until it needs attention
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -245,7 +250,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-wait" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -603,9 +608,10 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-elif args[0] in {"session-close", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive"}:
+elif args[0] in {"session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive"}:
     edit_specs = {
         "session-close": ({"--tab"}, {"--tab"}),
+        "session-wait": ({"--tab"}, {"--tab"}),
         "session-rename": ({"--tab", "--name"}, {"--tab", "--name"}),
         "session-rebind": ({"--tab", "--host", "--tmux"}, {"--tab", "--tmux"}),
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
@@ -915,7 +921,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:
