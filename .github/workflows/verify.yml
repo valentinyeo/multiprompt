@@ -127,11 +127,6 @@ on:
         required: false
         default: ''
         type: string
-      real_pi_proof:
-        description: Run server-chat with real Pi openai-codex/gpt-6.1-sol, pinned valentin-mode and roundtrip proof
-        required: false
-        default: false
-        type: boolean
   workflow_call:
     inputs:
       features:
@@ -266,7 +261,7 @@ jobs:
           const { discoverFeatures, journeyMatrix } = require('./tools/verify-features.cjs');
           const { available, pr } = discoverFeatures();
           const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
-          if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
+          if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature) && feature !== 'server-chat-real-pi') || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
           console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
           console.log(`selected=${JSON.stringify(selected)}`);
           console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
@@ -471,7 +466,7 @@ jobs:
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
       AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '1200' || '' }}
       FEATURE: ${{ matrix.feature }}
-      REAL_PI_PROOF: ${{ inputs.real_pi_proof && '1' || '' }}
+      REAL_PI_PROOF: ${{ (inputs.real_pi_proof || matrix.feature == 'server-chat-real-pi') && '1' || '' }}
       VERIFY_CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -479,6 +474,10 @@ jobs:
         if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1'
         shell: pwsh
         run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-delivery'
+      - name: Select real Pi server-chat driver
+        if: env.REAL_PI_PROOF == '1'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'FEATURE=server-chat'
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -1258,7 +1257,7 @@ jobs:
         run: python3 tools/tmux-generation-proof.py binding-evidence/binding-commands.jsonl
   verify-real-pi-independent:
     needs: [journeys, verify]
-    if: always() && !cancelled() && inputs.real_pi_proof && needs.verify.result == 'success'
+    if: always() && !cancelled() && (inputs.real_pi_proof || inputs.feature == 'server-chat-real-pi') && needs.verify.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1268,7 +1267,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-server-chat
+          name: verify-${{ inputs.feature == 'server-chat-real-pi' && 'server-chat-real-pi' || 'server-chat' }}
           path: real-pi-evidence
       - name: Independent other-family audit of real Pi proof
         id: claude
