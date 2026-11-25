@@ -24,7 +24,7 @@ if (Test-Path "$Evidence/journey.json") { throw 'Use a fresh evidence folder for
 $record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-parse HEAD).Trim(); status='failed'; error=$null }
 $video = $null
 try {
-    $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 8 -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
+    $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 6 -i desktop -an -vf scale=960:-2 -c:v libx264 -preset ultrafast -crf 28 -movflags +faststart -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
     $start.CreateNoWindow = $true
@@ -33,7 +33,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Journey exited $LASTEXITCODE; inspect result.json" }
     $result = Get-Content "$Evidence/result.json" -Raw | ConvertFrom-Json
     if ($result.status -ne 'passed') { throw 'Journey did not pass' }
-    if ($result.scratchRemoved -eq $false) { throw 'Owned cleanup failed' }
+    if ($result.PSObject.Properties['scratchRemoved'] -and $result.scratchRemoved -eq $false) { throw 'Owned cleanup failed' }
     if ((Test-Path "$Evidence/process-tree.json") -and ((Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json).activeAfterStop -ne 0)) { throw 'Owned cleanup failed' }
     $record.status = 'passed'
 } catch {
@@ -43,11 +43,14 @@ try {
         try {
             if (-not $video.HasExited) { $video.StandardInput.WriteLine('q'); $video.StandardInput.Close() }
             if (-not $video.WaitForExit(15000)) { $video.Kill(); $video.WaitForExit(); throw 'Recorder did not stop' }
-            if ($video.ExitCode -ne 0 -or -not (Test-Path "$Evidence/journey.mp4")) { throw 'Recorder failed' }
+            if ($video.ExitCode -ne 0 -or -not (Test-Path "$Evidence/journey.mp4") -or (Get-Item "$Evidence/journey.mp4").Length -eq 0) { throw 'Recorder failed' }
             $probe = & ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json "$Evidence/journey.mp4"
             if ($LASTEXITCODE -ne 0 -or @((($probe -join "`n") | ConvertFrom-Json).streams).Count -ne 1) { throw 'Video is not readable' }
             $probe | Set-Content -Encoding UTF8 "$Evidence/video.json"
-        } catch { $record.status='failed'; $record.error=$_.Exception.Message }
+        } catch {
+            $record.status = 'failed'
+            if (-not $record.error) { $record.error = $_.Exception.Message } else { $record.videoError = $_.Exception.Message }
+        }
         finally { $video.Dispose() }
     }
     $record | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/journey.json"

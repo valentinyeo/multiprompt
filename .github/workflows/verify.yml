@@ -136,6 +136,10 @@ on:
       revision:
         required: false
         type: string
+      video_label:
+        description: Name the PR comparison clip before or after
+        required: false
+        type: string
       app_revision:
         required: false
         type: string
@@ -516,8 +520,7 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
-      - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
+      - name: Install journey video recorder
         uses: ./.github/actions/install-ffmpeg
         with:
           version: '7.1.1'
@@ -1004,12 +1007,10 @@ jobs:
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
-          if ($env:VERIFY_CANDIDATE_ARTIFACT) {
-            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
-          } elseif ($mapped.ContainsKey($env:FEATURE)) {
+          if ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
@@ -1129,8 +1130,7 @@ jobs:
         timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
-          $driver = if ($env:VERIFY_CANDIDATE_ARTIFACT) { '.claude/skills/verify-multiprompt/drive.ps1' } else { '.claude/skills/verify-multiprompt/control.ps1' }
-          & $driver -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |
@@ -1161,6 +1161,15 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Preserve the comparison video
+        if: always() && inputs.video_label != ''
+        shell: pwsh
+        env:
+          VIDEO_LABEL: ${{ inputs.video_label }}
+        run: |
+          if ($env:VIDEO_LABEL -notin @('before', 'after')) { throw 'Unknown comparison video label' }
+          if (-not (Test-Path evidence/journey.mp4) -or (Get-Item evidence/journey.mp4).Length -eq 0) { throw 'Journey video is missing' }
+          Copy-Item evidence/journey.mp4 "evidence/$env:VIDEO_LABEL.mp4"
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

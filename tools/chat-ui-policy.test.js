@@ -22,7 +22,7 @@ test('desktop verification still checks source and retains evidence', () => {
   const workflow = read('.github/workflows/verify.yml');
   assert.match(workflow, /default: appearance/);
   assert.match(workflow, /Executable source revision mismatch/);
-  assert.match(workflow, /verify-multiprompt\/control\.ps1 -Feature \$env:FEATURE/);
+  assert.match(workflow, /verify-multiprompt\/drive\.ps1 -Feature \$env:FEATURE/);
   assert.match(workflow, /uses: actions\/upload-artifact@[^\s]+[\s\S]*?path: evidence\//);
 });
 

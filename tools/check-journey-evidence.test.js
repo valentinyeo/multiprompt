@@ -113,6 +113,43 @@ test('a cancelled run keeps its always() journey evidence upload', () => {
   assert.deepEqual(checkJourneyEvidence({ '.github/workflows/journey.yml': source }), []);
 });
 
+test('removing journey.mp4 before its upload fails', () => {
+  const source = [
+    'jobs:',
+    '  journey:',
+    '    steps:',
+    '      - name: Drive',
+    '        run: ./drive.ps1',
+    '      - name: Tidy',
+    '        run: Remove-Item output/journey.mp4 -Force',
+    '      - if: always()',
+    '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+    '        with:',
+    '          name: proof',
+    '          path: output/journey.mp4',
+    '',
+  ].join('\n');
+  const problems = checkJourneyEvidence({ '.github/workflows/journey.yml': source });
+  assert.equal(problems.length, 1, problems.join('\n'));
+  assert.match(problems[0], /removes output\/journey\.mp4 before the upload/);
+});
+
+test('gating FFmpeg install or bypassing drive.ps1 in verify.yml fails', () => {
+  const gatedFfmpeg = verify().replace(
+    '      - name: Install journey video recorder\n        uses: ./.github/actions/install-ffmpeg',
+    "      - name: Install journey video recorder\n        if: env.FEATURE == 'appearance'\n        uses: ./.github/actions/install-ffmpeg",
+  );
+  assert.notEqual(gatedFfmpeg, verify());
+  assert.match(checkJourneyEvidence({ '.github/workflows/verify.yml': gatedFfmpeg }).join('\n'), /installs FFmpeg conditionally/);
+
+  const bypassedDrive = verify().replace(
+    '& .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE',
+    '& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE',
+  );
+  assert.notEqual(bypassedDrive, verify());
+  assert.match(checkJourneyEvidence({ '.github/workflows/verify.yml': bypassedDrive }).join('\n'), /bypassing journey\.mp4 recording/);
+});
+
 test('the CLI fails on a broken workflow directory and passes on the real one', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'journey-evidence-'));
   try {
