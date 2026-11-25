@@ -2,14 +2,14 @@
 
 The released app restores session.json, attaches to the tmux sessions the
 boundary fixture reports, sees a running agent for each one, and polls their
-transcripts for the whole window. With -StreamSeconds 0 the transcripts never
-change, so any work the app does in the window is idle work. With a positive
-value a reply keeps streaming into all three chats, which is the state the
-laptop sample was taken in: nothing for the user to do, a live answer arriving.
+transcripts for the whole window. The probe decides whether a reply keeps
+arriving; this fixture only builds the chats and the agent-host config that
+lets the transcript resolve without a live /proc.
 
 Usage: python live-chat-fixture.py <sandbox-root> <ssh-path>
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,6 +40,13 @@ for index, name in enumerate(names):
     if not path.exists():
         raise SystemExit(f'boundary fixture did not seed {path}')
     transcripts.append(path)
+
+agent_host = home / '.local' / 'state' / 'multiprompt' / 'agent-host'
+agent_host.mkdir(parents=True, exist_ok=True)
+for index, name in enumerate(names):
+    key = hashlib.sha256(('claude:' + sids[name]).encode('utf-8')).hexdigest()[:32]
+    (agent_host / (key + '.config.json')).write_text(json.dumps(dict(
+        enabled=True, cwd=f'C:/verify/work{index}', tmux=name)), encoding='utf-8')
 
 seed = dict(active_tab=0, single_window=True, chat_active=True, shared_server_connection=True,
             tabs=[dict(shell_id=i + 1, kind='tmux', name=name, manual=True, tmux_host=0,
