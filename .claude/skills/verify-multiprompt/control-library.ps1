@@ -1245,8 +1245,7 @@ function Resolve-ComputerHost {
     $vncPort = 5900
     $viewerPort = 6080
     $ssh = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh.exe'
-    $scanExe = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keyscan.exe'
-    if (-not (Test-Path -LiteralPath $ssh) -or -not (Test-Path -LiteralPath $scanExe)) { throw 'The computer-pane journey needs the Windows OpenSSH client tools' }
+    if (-not (Test-Path -LiteralPath $ssh)) { throw 'The computer-pane journey needs the Windows OpenSSH client tools' }
     $keyPath = Join-Path $env:RUNNER_TEMP 'computer-host-key'
     $keygen = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keygen.exe'
     Remove-Item -LiteralPath $keyPath, ($keyPath + '.pub') -Force -ErrorAction SilentlyContinue
@@ -1289,32 +1288,22 @@ function Resolve-ComputerHost {
     } while (-not $enrolled -and [DateTime]::UtcNow -lt $enrollDeadline)
     if (-not $enrolled) { throw 'The disposable host did not accept the client public key within fifteen minutes' }
     $port = 0
+    $knownHosts = Join-Path $env:RUNNER_TEMP 'computer-host-known_hosts'
+    Remove-Item -LiteralPath $knownHosts -Force -ErrorAction SilentlyContinue
     Write-Host ('Computer host: probing the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]))
     $deadline = [DateTime]::UtcNow.AddSeconds(1200)
     do {
         foreach ($candidate in $candidates) {
-            $probe = Invoke-ComputerSsh $ssh @('-F', 'none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=NUL', '-o', 'ConnectTimeout=6', '-o', 'LogLevel=ERROR', '-i', $keyPath, '-p', [string]$candidate, '-T', ($user + '@' + $address), 'echo verify-computer-host') 'echo verify-computer-host'
+            $probe = Invoke-ComputerSsh $ssh @('-F', 'none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', ('UserKnownHostsFile=' + $knownHosts), '-o', 'ConnectTimeout=6', '-o', 'LogLevel=ERROR', '-i', $keyPath, '-p', [string]$candidate, '-T', ($user + '@' + $address), 'echo verify-computer-host') 'echo verify-computer-host'
             if ($probe.exit -eq 0 -and $probe.out.Trim() -ceq 'verify-computer-host') { $port = $candidate; break }
         }
         if ($port -eq 0) { Write-Host 'Computer host: no host yet; probing the reserved ports again in fifteen seconds'; Start-Sleep -Seconds 15 }
     } while ($port -eq 0 -and [DateTime]::UtcNow -lt $deadline)
     if ($port -eq 0) { throw ('No disposable desktop host answered on the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]) + ' within twenty minutes') }
     Write-Host "Computer host: the disposable desktop answers on $($address):$port"
-    $knownHosts = Join-Path $env:RUNNER_TEMP 'computer-host-known_hosts'
-    $scanned = @()
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $scanned = @(& $scanExe -p $port -T 8 -t ed25519 $address 2>$null | Where-Object { $_ -match ('^\[' + [regex]::Escape($address) + '\]:' + $port + ' ssh-ed25519 ') })
-            if ($scanned.Count -eq 1) { break }
-            Start-Sleep -Seconds 2
-        }
-    } finally {
-        $ErrorActionPreference = $previousPreference
-    }
-    if ($scanned.Count -ne 1) { throw "ssh-keyscan did not publish exactly one host key for ${address}:$port" }
-    [IO.File]::WriteAllText($knownHosts, ($scanned[0] + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $recorded = @()
+    if (Test-Path -LiteralPath $knownHosts) { $recorded = @([IO.File]::ReadAllLines($knownHosts) | Where-Object { $_ -match ('^\[' + [regex]::Escape($address) + '\]:' + $port + ' ssh-') }) }
+    if ($recorded.Count -ne 1) { throw ("The first accepted connection did not record exactly one host key for ${address}:$port; it recorded " + $recorded.Count) }
     $fingerprint = (& (Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keygen.exe') -l -f $knownHosts 2>$null) -join ' '
     $aliases = 'remote-1 remote-2 remote-3'
     $configText = "Host $aliases`n  HostName $address`n  Port $port`n  User $user`n  IdentityFile $keyPath`n  UserKnownHostsFile $knownHosts`n  IdentitiesOnly yes`n  BatchMode yes`n"
