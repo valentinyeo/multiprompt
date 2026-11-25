@@ -10,6 +10,12 @@ REPLY = 'The hosted stand-in reply is visible.'
 RESUME_REPLY = 'The handover is reloaded, here is the next unfinished task.'
 
 
+def command_markup(text):
+    parts = text.strip().split(None, 1)
+    arguments = parts[1] if len(parts) > 1 else ''
+    return '<command-message>' + parts[0].lstrip('/') + '</command-message>\n<command-args>' + arguments + '</command-args>'
+
+
 def install(namespace, root, record, steady=False, fresh=False):
     previous_switch = namespace['host_dispatch_switch']
     previous_owned = namespace['host_owned']
@@ -82,8 +88,13 @@ def install(namespace, root, record, steady=False, fresh=False):
         if not matches(provider, sid):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
-        session = {'turn': 'standin-turn', 'state': dict(display_history=True) if display else {},
-                   'sends': [dict(id=token, attempt=attempt, accepted=False)]}
+        sent = dict(id=token, attempt=attempt, accepted=False)
+        state = dict(display_history=True) if display else {}
+        if text.lstrip().startswith('/'):
+            sent['text'] = command_markup(text)
+            state['display_history'] = True
+        session = {'turn': 'standin-turn', 'state': state,
+                   'sends': [sent]}
         if display:
             namespace['host_history_append'](provider, sid, session, dict(role='user', id=token, text=text))
             record('working-host.jsonl', stage='user-row', sid=sid, id=token)

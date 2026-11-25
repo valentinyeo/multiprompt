@@ -19,7 +19,7 @@ commands:
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
   rename <name> <title> [--host N]
-  move <name> [--group <group>] [--workspace <name>] [--host N]
+  move <name> [--workspace <name>] [--group <group>]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
@@ -470,22 +470,17 @@ async function renameSession(ctx, flags) {
 }
 
 async function moveSession(ctx, flags) {
-  if (flags._.length !== 1) throw new Failure('move needs one session');
-  if (flags.group === undefined && flags.workspace === undefined) throw new Failure('give --group or --workspace');
-  const group = flags.group === undefined ? null : groupName(flags.group);
-  const workspace = flags.workspace === undefined ? null : workspaceName(flags.workspace);
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  if (group !== null) requireFeature(await readLayout(ctx), 'groups');
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, flags._[0], host);
-    if (!tab) throw new Failure('no such session');
-    if (workspace && !layout.workspaces.some(item => item.name === workspace)) throw new Failure(`workspace ${workspace} not found or not visible to this key`);
-    let changed = false;
-    if (workspace && tab.workspace !== workspace) { tab.workspace = workspace; changed = true; }
-    if (group !== null && (tab.group || null) !== group) { tab.group = group; changed = true; }
-    return changed ? layout : null;
-  });
-  ctx.out(result.changed ? `moved ${flags._[0]} (revision ${result.revision})` : `already moved ${flags._[0]}`);
+  if (!flags._.length) throw new Failure('move needs one session');
+  const args = ['move', ...flags._];
+  if (flags.workspace !== undefined) args.push('--workspace', flags.workspace);
+  if (flags.group !== undefined) args.push('--group', flags.group);
+  const sessions = ctx.sessions || (argv => spawnSync('python3', [mpSessionsScript(ctx.env), ...argv], { encoding: 'utf8', env: ctx.env, timeout: 60000 }));
+  const result = sessions(args);
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const failure = (result.stderr || '').trimEnd();
+  if (failure) ctx.err(failure);
+  return result.status ?? 1;
 }
 
 async function style(ctx, flags) {
@@ -987,6 +982,10 @@ export async function run(argv, overrides = {}) {
       if (!home) throw new Failure('HOME is required');
       return await health({ env, out, err }, flags);
     }
+    if (command === 'move') {
+      const flags = parse(rest);
+      return await moveSession({ env, out, err, sessions: overrides.sessions }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;
@@ -1011,7 +1010,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, open, close, rename: renameSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;
