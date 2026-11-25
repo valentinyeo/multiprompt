@@ -43,6 +43,7 @@ Download with `gh run download <id> -n verify-rooms -D <directory>`. Inspect the
 
 ## Gotchas
 
+- The room's own message text is custom-painted and small, so step 3 reads a crop of the room window with several scales and thresholds (`Read-Room`) instead of one full-screen OCR pass. A whole-screen read has misread `BROADCAST534` as `BROADCASTS534` and failed a message that the screenshot plainly showed. The expected text is unchanged; a room that does not show the message still fails.
 - Room text is custom-painted and has no copy-all action. Tesseract reads actual desktop screenshots; saved room events independently prove what persisted. Member checks also retain `*-list.png`, cropped below the native member-search field, so typed query text or sidebar names cannot masquerade as picker results. Each list read cuts the row's avatar column off the left edge (the app draws the name 52 px after the row's left) and tries several scales and thresholds, keeping every variant's text in `*-list-variants.txt`; the avatar alone made Tesseract return nothing for a row that was plainly on screen. OCR failures need visual review before being called product bugs.
 - The member rows have no accessibility text, so UI Automation cannot supply the names; reading the list means reading pixels.
 - Display names and the app's generated mention aliases are different. This journey deliberately checks the requested `@<name>` user path; do not replace it with a private generated ID to hide a failed name mention.

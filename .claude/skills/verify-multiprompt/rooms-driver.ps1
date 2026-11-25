@@ -283,6 +283,18 @@ function Dialog-Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-footer-visible.txt", $text)
     return $text
 }
+function Read-Room([string]$Name) {
+    [void](Shot $Name)
+    $room = Room-Window
+    if (-not $room) { throw 'No visible room to read' }
+    $bounds = [Windows.Automation.AutomationElement]::FromHandle($room).Current.BoundingRectangle
+    $source = [Drawing.Bitmap]::new("$Evidence/$Name.png")
+    try {
+        $crop = $source.Clone([Drawing.Rectangle]::new([int]$bounds.Left, [int]$bounds.Top, [int]$bounds.Width, [int]$bounds.Height), $source.PixelFormat)
+        try { $crop.Save("$Evidence/$Name-room.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
+    } finally { $source.Dispose() }
+    return Read-Crop "$Evidence/$Name-room.png" "$Name-room"
+}
 function Shot-Room([string]$Name) {
     Doctor
     $room = Room-Window
@@ -577,7 +589,7 @@ Host remote-1
         Send-Text 'BROADCAST534' -Room -AllowKeptDraft
         try { [void](Wait-For 'saved human room event' { @(Room-Events (Snapshot 'send-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'BROADCAST534' }).Count -eq 1 } 20) }
         catch { throw "The room did not accept a plain send; room shows: $((Shot 'send-refused'))" }
-        if ((Shot 'send-after') -notmatch 'BROADCAST534') { throw 'Saved room message is not visible in the room' }
+        if ((Read-Room 'send-after') -notmatch 'BROADCAST534') { throw 'Saved room message is not visible in the room' }
     }
     $sent = @(Room-Events (Snapshot 'after-send') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'BROADCAST534' }).Count -eq 1
     Case 4 'Every member replies in the room' $(if (-not $sent) { 'No saved BROADCAST534 room message' } elseif (-not $hasMembers) { 'The room has fewer than two saved members' } else { '' }) {
