@@ -137,6 +137,7 @@ $result = [ordered]@{
     windowTranscriptReads = $null
     windowTranscriptRequests = $null
     windowReceiveToPaint = $null
+    windowScrollDelta = $null
     streamEvents = $null
     streamSeconds = $null
     sha256 = $null
@@ -228,6 +229,8 @@ try {
     $result.windowTranscriptReads = [regex]::Matches($window, '\[chat\] transcript (load|push) shell=').Count
     $result.windowTranscriptRequests = [regex]::Matches($window, '\[chat\] transcript request shell=').Count
     $result.windowReceiveToPaint = [regex]::Matches($window, 'PERF\[chat\]: receive to paint').Count
+    $scrolls = @([regex]::Matches($window, 'unread divider .*? scroll=(-?\d+)') | ForEach-Object { [int]$_.Groups[1].Value })
+    $result.windowScrollDelta = if ($scrolls.Count -ge 2) { $scrolls[$scrolls.Count - 1] - $scrolls[0] } else { 0 }
     if ($null -ne $streamProcess) {
         $result.streamEvents = (Read-StreamEvents) - $beforeStream
         Set-Content -Path (Join-Path $evidencePath 'stream-stop') -Value 'stop'
@@ -257,9 +260,9 @@ try {
     }
     if ($Scenario -eq 'stream') {
         $polls = [Math]::Max($result.windowTranscriptRequests, $result.windowTranscriptReads)
-        if ($polls -lt 100 -or $result.windowReceiveToPaint -lt 20) {
+        if ($polls -lt 100 -or $result.windowScrollDelta -lt 500) {
             $result.status = 'invalid'
-            if (-not $result.error) { $result.error = "the streamed reply never drove polling and paints (requests=$($result.windowTranscriptRequests), loads=$($result.windowTranscriptReads), paints=$($result.windowReceiveToPaint), events=$($result.streamEvents))" }
+            if (-not $result.error) { $result.error = "the streamed reply never drove polling and a scrolling view (requests=$($result.windowTranscriptRequests), loads=$($result.windowTranscriptReads), scroll=$($result.windowScrollDelta), events=$($result.streamEvents))" }
         }
     }
 } catch {

@@ -50,7 +50,7 @@ function side(runs) {
     statusSnapshots: median(pick('windowStatusSnapshots')),
     paintLines: median(pick('windowChatPaintLines')),
     transcriptReads: median(pick('windowTranscriptReads')),
-    paints: median(pick('windowReceiveToPaint')),
+    scroll: median(pick('windowScrollDelta')),
     streamEvents: median(pick('streamEvents')),
   };
 }
@@ -100,14 +100,14 @@ function renderScenario(lines, result) {
   const entry = SCENARIOS.find((row) => row.id === result.scenario);
   lines.push(`### ${entry ? entry.title : result.scenario}`);
   lines.push('');
-  lines.push('| release | windows | median MB/hour | MB/hour range | median CPU % of one core | CPU % range | transcript reads per window | receive-to-paint per window | reply events per window |');
+  lines.push('| release | windows | median MB/hour | MB/hour range | median CPU % of one core | CPU % range | transcript reads per window | view scroll growth per window | reply events per window |');
   lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const data of [before, after]) {
-    lines.push(`| ${data.runs[0]?.tag ?? 'n/a'} | ${data.windows} (${data.measured} measured) | ${fixed(data.mbPerHour, 3)} | ${fixed(data.mbMin, 3)}-${fixed(data.mbMax, 3)} | ${fixed(data.cpu, 3)} | ${fixed(data.cpuMin, 3)}-${fixed(data.cpuMax, 3)} | ${fixed(data.transcriptReads, 0)} | ${fixed(data.paints, 0)} | ${fixed(data.streamEvents, 0)} |`);
+    lines.push(`| ${data.runs[0]?.tag ?? 'n/a'} | ${data.windows} (${data.measured} measured) | ${fixed(data.mbPerHour, 3)} | ${fixed(data.mbMin, 3)}-${fixed(data.mbMax, 3)} | ${fixed(data.cpu, 3)} | ${fixed(data.cpuMin, 3)}-${fixed(data.cpuMax, 3)} | ${fixed(data.transcriptReads, 0)} | ${fixed(data.scroll, 0)} | ${fixed(data.streamEvents, 0)} |`);
   }
   lines.push('');
   for (const run of before.runs.concat(after.runs)) {
-    lines.push(`- ${run.tag} ${run.scenario} window ${run.windowSeconds} s: log ${fixed(run.logMbPerHour, 3)} MB/hour, CPU ${fixed(run.cpuPercentOfOneCore, 3)}% of one core, ${run.chatTabs ?? 'n/a'} live chats, ${run.windowTranscriptReads ?? 'n/a'} transcript reads, ${run.windowReceiveToPaint ?? 'n/a'} paints, ${run.windowChatPaintLines ?? 'n/a'} chat paint log lines, status ${run.status}${run.error ? ` (${run.error})` : ''}`);
+    lines.push(`- ${run.tag} ${run.scenario} window ${run.windowSeconds} s: log ${fixed(run.logMbPerHour, 3)} MB/hour, CPU ${fixed(run.cpuPercentOfOneCore, 3)}% of one core, ${run.chatTabs ?? 'n/a'} live chats, ${run.windowTranscriptReads ?? 'n/a'} transcript reads, ${run.windowScrollDelta ?? 'n/a'} scroll growth, ${run.windowChatPaintLines ?? 'n/a'} chat paint log lines, status ${run.status}${run.error ? ` (${run.error})` : ''}`);
   }
   lines.push('');
   lines.push(result.pass ? `${result.scenario.toUpperCase()} PASSED` : `${result.scenario.toUpperCase()} FAILED`);
