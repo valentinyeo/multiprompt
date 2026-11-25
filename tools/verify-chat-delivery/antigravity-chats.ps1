@@ -236,7 +236,6 @@ Remove-Item -LiteralPath "$state/stale-reader" -Force -ErrorAction SilentlyConti
 Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf); pinnedRuntime=$pinned.Groups[1].Value} "$caseDir/fresh-antigravity-reply.json"
 Shot 'antigravity-fresh-reply'
 $freshReply = 'Antigravity stand-in reply 1.'
-$freshReply = 'Antigravity stand-in reply 1.'
 $freshSecondText = 'second message in a fresh antigravity chat'
 $freshThirdText = 'third message in a fresh antigravity chat'
 $freshSecondReply = 'Antigravity stand-in reply 3.'
@@ -331,4 +330,8 @@ Fresh-Copied 'tab-away-back'
 Fresh-Transcript 'tab away and back' (Fresh-Text 'tab-away-back')
 if ((Fresh-Text 'tab-away-back').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The tab away and back view changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-tab-returned'
-Save @{provider='antigravity'; sid=$freshSid; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"
+$freshSessionRow = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]
+if ($freshSessionRow.csid -cne $freshSid) { throw 'The full reloads changed the fresh Antigravity chat identity' }
+$freshClaimAfter = Get-Content $freshState -Raw | ConvertFrom-Json
+if ($freshClaimAfter.display_history -ne $true) { throw 'The full reloads dropped the claimed Antigravity history flag' }
+Save @{provider='antigravity'; sid=$freshSid; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; sidAfter=$freshSessionRow.csid; displayHistoryAfter=$freshClaimAfter.display_history; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"

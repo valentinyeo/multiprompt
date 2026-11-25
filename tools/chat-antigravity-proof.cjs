@@ -66,6 +66,8 @@ function verify(root) {
   assert.equal(new Set(freshReload.texts).size, 3);
   assert.equal(new Set(freshReload.replies).size, 3);
   assert.equal(freshReload.tabAwayBack, true);
+  assert.equal(freshReload.sidAfter, fresh.csid, 'the full reloads changed the fresh Antigravity chat identity');
+  assert.equal(freshReload.displayHistoryAfter, true, 'the full reloads dropped the claimed Antigravity history flag');
   const claim = json('fresh-history-claim.json');
   assert.equal(claim.display_history, true, 'the fresh Antigravity host start never claimed its canonical history');
   assert.equal(claim.historyExists, true, 'the fresh Antigravity history file does not exist after the host claimed it');
