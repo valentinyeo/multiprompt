@@ -228,12 +228,12 @@ try {
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
-                $expectedNotes = @('IGSH-5 Typing feels faster', 'MUBO-77 Chats keep your place', 'IGSH-2 Middle change', 'IGSH-1 Older change')
+                $expectedNotes = @('Typing feels faster', 'Chats keep your place', 'Middle change', 'Older change')
                 $currentReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.10.0' })
                 $middleReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.9.0' })
                 $olderReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.8.0' })
                 Assert ($currentReleases.Count -eq 1 -and $middleReleases.Count -eq 1 -and $olderReleases.Count -eq 1) 'Staged note releases missing or duplicated'
-                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0])
+                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0]) | ForEach-Object { $_ -replace '^(?:IGSH|MUBO)-\d+ ', '' }
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
                 $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes[0..2] 'See all'
@@ -246,18 +246,18 @@ try {
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
                 $collapsed | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
+                $seeAllUrl = [regex]::Match((Read-SharedLog $log), '\[update\] card see all=([^\r\n]*)').Groups[1].Value
+                Assert ($seeAllUrl -ceq 'https://github.com/valentinyeo/multiprompt/releases/tag/v9.10.0') 'Update card See all does not point at the matching release notes'
                 Click-CardMore $collapsed
-                $expanded = Wait-CardView $log $collapsed.logEnd 'expanded' $expectedNotes 'Show less'
-                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Expanded update card window unavailable'
-                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
-                $graphics = [Drawing.Graphics]::FromImage($bitmap)
-                $dc = $graphics.GetHdc()
-                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Expanded update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-                try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
-                $expanded | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
-                Click-CardMore $expanded
-                $null = Wait-CardView $log $expanded.logEnd 'collapsed' $expectedNotes[0..2] 'See all'
-                Passed 'update card paints ticket titles and expands with real click'
+                $openedDeadline = [DateTime]::UtcNow.AddSeconds(15)
+                do {
+                    $openedLog = Read-SharedLog $log -Polling
+                    if ($openedLog.Substring([Math]::Min($collapsed.logEnd, $openedLog.Length)) -match '\[update\] card see all opened=\d+') { break }
+                    if ($cardProcess.HasExited -or [DateTime]::UtcNow -gt $openedDeadline) { throw 'Update card See all did not open the release notes' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                Assert (-not $cardProcess.HasExited -and $cardProcess.Responding) 'See all made the update card unresponsive'
+                Passed 'update card paints ticket titles and opens the matching release notes'
                 Passed 'signed staged notes retain expected data'
                 Select-Release 'v9.11.0'
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Ticket-title release was not staged'

@@ -6,7 +6,7 @@ Source files: src/update*, src/release*, src/startup.zig, src/launch_snapshot.zi
 
 Signed-manifest verification, background staging, explicit and cold apply, helper retirement, bundle rollback and launch-argument preservation.
 
-- Plain update-card notes show the newest three changes across skipped versions, then `and N more`; clicking that row opens the full list (IGSH-948).
+- Plain update-card notes show the newest three changes with no ticket numbers, then a `See all` link to that release's notes on GitHub (MUBO-577).
 - Staged release notes retain ticket IDs, titles and ticket links.
 - Background checks run every five minutes, so a release reaches an open app quickly (IGSH-838).
 
@@ -21,12 +21,12 @@ The disposable GitHub Windows job compiles local fake release executables, creat
 Prove responsive signed-out launch during background checking, cold-launch staged apply with original arguments, valid and rejected manifest signatures, checksum and provenance refusals, no unattended restart, explicit apply behind a download lock, matching bridge/extension installation, a second update with old helpers locking the backup, immediate-exit rollback, and recovery after the old-process exit timeout.
 
 - The fixture driver stages signed notes for several versions newer than the running app, then launches that real app with the cold-apply readiness flag. A held update mutex prevents production checks from replacing the local fixture.
-- It independently checks signed staged JSON for four ticket-title entries across three releases, one of them ticketed on the moved board (`MUBO-77`). Production paint logs must show the newest three titles and the `See all` toggle, with unclipped note bounds. A real ownership-checked mouse click opens all four titles, then collapses the card again. Screenshots and observed paint data are saved as `update-card-notes.png`, `update-card-notes.json`, `update-card-expanded.png` and `update-card-expanded.json`.
+- It independently checks signed staged JSON for four ticket-title entries across three releases, one of them ticketed on the moved board (`MUBO-77`). Production paint logs must show the newest three plain titles, the `See all` destination matching the offered version, and unclipped note bounds. A real ownership-checked mouse click on `See all` opens that release's notes in the default browser. Screenshots and observed paint data are saved as `update-card-notes.png` and `update-card-notes.json`.
 - A second signed fixture checks `IGSH-1243 Changelog ticket links` and its ticket URL; its proof is `ticket-title staged notes retain title and ticket link`. The fixture also stages a newer native executable at the installed path and verifies the restart card restores the saved session. Screenshots still require visual review; paint logs cannot prove readability.
 
 ## Gotchas
 
-User entry points are the sidebar Update ready card and Ctrl+K Restart to update; the latter is absent in dev builds. Dismissal, the `See all` toggle and overflowing release notes are separate controls. Release lines carry the ticket key the release pipeline publishes: `IGSH-` from board 2060 (including `SOFT-` fragments) and `MUBO-` from board 13734. The fixture restart uses posted mouse messages, not proof of a physical user click on every update surface.
+User entry points are the sidebar Update ready card and Ctrl+K Restart to update; the latter is absent in dev builds. Dismissal, the `See all` link and overflowing release notes are separate controls. Signed release lines keep the ticket key the release pipeline publishes: `IGSH-` from board 2060 (including `SOFT-` fragments) and `MUBO-` from board 13734. The card paints the plain title alone and logs the key for proof. The fixture restart uses posted mouse messages, not proof of a physical user click on every update surface.
 
 
 `safe-updates.json` records each successful scenario and cleanup; `sign-in-ready.png` shows the responsive signed-out app; `build.json` pins the branch executable and commit. Any missing assertion fails the job. All fixture processes are stopped before evidence is uploaded. The journey waits for the proof names the harness actually passes, and writes `result.json` only after its last check, so a late failure cannot report passed.

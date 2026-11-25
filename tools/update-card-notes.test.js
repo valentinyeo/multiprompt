@@ -9,12 +9,21 @@ function assertCardNotes(source) {
   assert.match(source, /for \(0\.\.shown\)/);
   assert.match(source, /card_notes\.line\(i\)/);
   assert.match(source, /DrawTextW/);
-  assert.match(source, /if \(card_expanded\) "Show less" else "See all"/);
-  assert.match(source, /\[update\] card view=\{s\} n=\{d\} first=\{s\}/);
+  assert.match(source, /drawAscii\(hdc, "See all", &more_rect/);
+  assert.match(source, /\[update\] card view=collapsed n=\{d\} first=\{s\}/);
   assert.match(source, /\[update\] card note \{d\}=\{s\}/);
+  assert.match(source, /\[update\] card note id \{d\}=\{s\}/);
   assert.match(source, /\[update\] card remaining=/);
+  assert.match(source, /\[update\] card see all=\{s\}/);
   assert.match(source, /\[update\] more row=\{d\},\{d\}/);
-  assert.match(source, /if \(cardHasToggle\(\) and ptInRect\(updateCardMoreRect\(card\), x, y\)\) return 4/);
+  assert.match(source, /if \(cardShowsSeeAll\(\) and ptInRect\(updateCardMoreRect\(card\), x, y\)\) return 4/);
+}
+
+function assertSeeAllAtAnyChangeCount(source) {
+  assert.match(source, /fn cardShowsSeeAll\(\) bool \{\s+return card_notes\.count > 0;\s+\}/);
+  assert.match(source, /if \(cardShowsSeeAll\(\)\) \{\s+var more_rect = updateCardMoreRect\(card\);\s+drawAscii\(hdc, "See all", &more_rect/);
+  assert.match(source, /if \(cardShowsSeeAll\(\) and ptInRect\(updateCardMoreRect\(card\), x, y\)\) return 4/);
+  assert.match(source, /fn seeAllUrl\(\) \[\]const u8 \{\s+return @import\("update_notes\.zig"\)\.releaseUrl\(&see_all_url/);
 }
 
 test('release asset includes every historical version, plain lines only, and the offered version rather than embedded-only notes', async () => {
@@ -93,16 +102,17 @@ test('updater stages checksum-verified notes before publishing ready, without a 
   assert.doesNotMatch(zig, /@import\("changelog.zig"\)/);
 });
 
-test('existing card uses the same growing rectangle for layout and hits, with three Unicode note rows, an expandable full list and a See all toggle', () => {
+test('existing card uses the same growing rectangle for layout and hits, with three plain note rows and a See all link', () => {
   const card = read('src/update_card.zig');
   assertCardNotes(card);
+  assertSeeAllAtAnyChangeCount(card);
   assert.equal((card.match(/update_release.cardNotes\(/g) || []).length, 2);
   assert.match(card, /const desired = base \+ notes_height/);
   assert.match(card, /return updateCardHeight\(\) \+ @import\("window_layout.zig"\).paneGap\(\)/);
   assert.match(card, /const bottom = client.bottom - uiScaled\(8\);\s+return \.\{ \.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\)/);
   assert.match(card, /const card = updateCardRect\(\)/);
   assert.match(card, /utf8ToUtf16Le\(&note_wide, card_notes.line\(i\)\)/);
-  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('if (cardHasToggle())', card.indexOf('pub fn paintSidebarUpdateCard')));
+  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('if (cardShowsSeeAll())', card.indexOf('pub fn paintSidebarUpdateCard')));
   assert.match(painter, /DrawTextW\(hdc, &note_wide, @intCast\(n\), &note, DT_WORDBREAK \| DT_NOPREFIX\)/);
   assert.doesNotMatch(painter, /DT_SINGLELINE|DT_END_ELLIPSIS/);
   assert.match(card, /DT_WORDBREAK \| DT_NOPREFIX \| @import\("win32.zig"\).DT_CALCRECT/);
@@ -114,9 +124,15 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   for (const name of [
     'ticket titles and skipped releases retain newest-first order',
     'invalid notes and filler are not displayed',
-    'collapsed and expanded counts retain omitted items',
+    'three cards lines show by default and the extra changes stay counted',
+    'one published change still links the full release notes',
+    'a release past the stored lines keeps every change behind the release notes link',
   ]) assert.ok(notes.includes(`test "${name}"`));
   assert.match(notes, /lines: \[MAX_LINES\]\[512\]u8/);
+  assert.match(notes, /ids: \[MAX_LINES\]\[16\]u8/);
+  assert.match(notes, /pub fn shown\(self: \*const Notes\) usize \{\s+return @min\(self.count, COLLAPSED_LINES\);\s+\}/);
+  assert.match(notes, /RELEASE_URL = "https:\/\/github\.com\/valentinyeo\/multiprompt\/releases\/tag\/v"/);
+  assert.match(notes, /fn productChange\(text: \[\]const u8\)/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
   assert.match(notes, /for \(TICKET_KEYS\) \|key\| if \(std\.mem\.startsWith\(u8, text, key\)\) return key\.len/);
@@ -132,6 +148,14 @@ test('master painter fails the exact card-note observability contract required b
   assertCardNotes(read('src/update_card.zig'));
 });
 
+test('the previous card stayed quiet and hid See all for a release with one to three changes', () => {
+  const previous = read('tools/fixtures/MUBO-577/previous-update-card.zig');
+  assert.match(previous, /fn cardHasToggle\(\) bool \{\s+return card_notes\.total > @import\("update_notes\.zig"\)\.COLLAPSED_LINES;\s+\}/);
+  assert.throws(() => assertSeeAllAtAnyChangeCount(previous), assert.AssertionError);
+  assert.throws(() => assertCardNotes(previous), assert.AssertionError);
+  assertSeeAllAtAnyChangeCount(read('src/update_card.zig'));
+});
+
 test('safe-updates journey requires painted multi-version notes and screenshot from the real branch app', () => {
   const suite = read('tools/update-release.test.ps1');
   assert.match(suite, /Copy-Item -LiteralPath \$Verifier -Destination \$cardExe/);
@@ -144,8 +168,9 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$collapsed \| ConvertTo-Json/);
   assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'See all'/);
+  assert.match(suite, /Update card See all does not point at the matching release notes/);
+  assert.match(suite, /Update card See all did not open the release notes/);
   assert.match(suite, /Click-CardMore \$collapsed/);
-  assert.match(suite, /'update-card-expanded\.png'/);
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
@@ -182,13 +207,27 @@ test('the published board keys reach the card and the real release explains itse
   assert.match(notes, /test "MUBO-577 real published release paints change lines for an available update"/);
 });
 
-test('the real release card paints published lines and reports See all', () => {
+test('the real release proof uses the downloaded production notes and their matching See all destination', () => {
   const proof = read('tools/update-card-real-notes.test.js');
+  assert.match(proof, /const offer = '0\.28\.1985'/);
+  assert.match(proof, /const installed = '0\.28\.1984'/);
+  assert.match(proof, /releases\/tags\/v\$\{offer\}/);
+  assert.match(proof, /asset\.digest/);
+  assert.match(proof, /-Dversion=\$\{installed\}/);
+  assert.match(proof, /update-card-real-release-proof\.ps1/);
   assert.match(proof, /src\/testdata\/mubo-577-release-notes\.json/);
-  assert.match(proof, /zig-out\/bin\/multiprompt\.exe/);
-  assert.match(proof, /update-card-release-proof\.ps1/);
-  assert.match(proof, /card remaining=See all/);
-  assert.match(proof, /card view=collapsed n=3 /);
+  assert.match(proof, /Pinned fixture drifted/);
+  assert.match(proof, /REAL_CARD_RECEIPT=/);
+  assert.match(proof, /'-Before'/);
+  assert.match(proof, /before-card\.png/);
+  const script = read('tools/update-card-real-release-proof.ps1');
+  assert.match(script, /\[switch\]\$Before/);
+  assert.match(script, /'before-card'/);
+  assert.match(script, /MPVERSION=\$Offer;multiprompt-x64\.exe/);
+  assert.match(script, /releases\/tag\/v\$Offer/);
+  assert.match(script, /'released-card'/);
+  assert.match(script, /'see-all-release'/);
+  assert.match(script, /painted a ticket number into the change text/);
   assert.match(read('.github/workflows/test-repeat.yml'), /path: evidence\//);
 });
 
@@ -211,6 +250,7 @@ test('changed implementation is comment-free and leaves no error log', async () 
     'tools/release-notes.mjs', 'tools/version-stamp.mjs', 'tools/update-release-fixtures.mjs',
     'tools/update-release.test.ps1', 'tools/update-release-journey.ps1',
     'tools/update-card-notes.test.js', 'tools/soft-2995-update-card.test.js', 'tools/changelog-fragments.test.js',
+    'tools/update-card-real-release-proof.ps1', 'tools/update-card-release-proof.ps1', 'tools/update-card-real-notes.test.js',
     'tools/changelog-entry.test.js', 'tools/version-stamp.test.mjs',
     'tools/fixtures/IGSH-728/master-update-card.zig',
     '.github/workflows/release.yml', '.github/workflows/test.yml',

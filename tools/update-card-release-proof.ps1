@@ -50,13 +50,19 @@ try {
     $image = Join-Path $Evidence 'released-card.png'
     try { $bitmap.Save($image) } finally { $bitmap.Dispose() }
     Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -ErrorAction SilentlyContinue
+    $painted = @($changes | ForEach-Object { ($_ -replace '^(?:IGSH|MUBO)-\d+ ', '') })
     for ($i = 0; $i -lt [Math]::Min(3, $changes.Count); $i++) {
         $note = [regex]::Match($text, '\[update\] card note ' + $i + '=([^\r\n]*)')
-        if (-not $note.Success -or $note.Groups[1].Value -cne $changes[$i]) { throw 'Released card differs from published notes' }
+        if (-not $note.Success -or $note.Groups[1].Value -cne $painted[$i]) { throw 'Released card differs from published notes' }
+        $id = [regex]::Match($text, '\[update\] card note id ' + $i + '=([^\r\n]*)')
+        $expectedId = [regex]::Match($changes[$i], '^((?:IGSH|MUBO)-\d+)').Groups[1].Value
+        if (-not $id.Success -or $id.Groups[1].Value -cne $expectedId) { throw 'Released card lost the published ticket id' }
     }
+    if ($text -match '\[update\] card note \d+=.*(?:IGSH|MUBO)-\d+') { throw 'Released card painted a ticket number into the change text' }
+    if ($text -notmatch '\[update\] card see all=https://github\.com/valentinyeo/multiprompt/releases/tag/v') { throw 'Released card has no See all destination' }
     if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Released binary changed during proof' }
-    @{ version = $document.version; sha256 = $hash; changes = $changes; simulatedOffer = '999.0.0'; success = $true } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
+    @{ version = $document.version; sha256 = $hash; changes = $changes; painted = $painted; simulatedOffer = '999.0.0'; success = $true } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
     if ($Wrapped) {
         function Wait-Card([scriptblock]$Condition, [string]$Failure) {
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -105,15 +111,6 @@ try {
             Write-Output ('WRAPPED_CARD_WINDOW=' + ($after.R - $after.L) + 'x' + ($after.B - $after.T))
             if ($after.R - $after.L -ne $Width -or $after.B - $after.T -ne $Height -or [ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) { throw 'Native card dimensions do not match requested proof size' }
         }
-        function Toggle-Card([string]$View) {
-            $click = Card-Click 'more row'
-            $lp = [IntPtr](($click.y -shl 16) -bor $click.x)
-            $script:cardLog = ''
-            Remove-Item $log -Force
-            $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x201, [IntPtr]1, $lp)
-            $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x202, [IntPtr]0, $lp)
-            Wait-Card { $script:cardLog -match ('card view=' + $View) -and $script:cardLog -match '\[update\] card remaining=' } 'Card expansion control did not change view'
-        }
         Write-Output ('WRAPPED_CARD_WAS_MAXIMIZED=' + [ReleaseCardProof]::IsZoomed($process.MainWindowHandle))
         $null = [ReleaseCardProof]::ShowWindow($process.MainWindowHandle, 9)
         Wait-Card { -not [ReleaseCardProof]::IsZoomed($process.MainWindowHandle) } 'Card window did not restore before resizing'
@@ -124,13 +121,12 @@ try {
         Capture-Card 'wrapped-normal'
         Resize-Card 640 480
         Capture-Card 'wrapped-minimum'
-        Toggle-Card 'expanded'
-        $expanded = Card-Bounds
+        $collapsed = Card-Bounds
         $restartBefore = Card-Click 'restart button'
-        if ($expanded.content -le $expanded.bottom - $expanded.top) { throw 'Long real notes did not require scrolling' }
+        if ($collapsed.content -le $collapsed.bottom - $collapsed.top) { throw 'Long real notes did not require scrolling' }
         $local = New-Object ReleaseCardProof+Point
-        $local.X = [int](($expanded.left + $expanded.right) / 2)
-        $local.Y = [int](($expanded.top + $expanded.bottom) / 2)
+        $local.X = [int](($collapsed.left + $collapsed.right) / 2)
+        $local.Y = [int](($collapsed.top + $collapsed.bottom) / 2)
         if (-not [ReleaseCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$local)) { throw 'Card wheel coordinate failed' }
         $wheelPoint = [IntPtr](($local.Y -shl 16) -bor ($local.X -band 0xffff))
         $script:cardLog = ''
@@ -141,10 +137,13 @@ try {
         $restartAfter = Card-Click 'restart button'
         if ($restartBefore.x -ne $restartAfter.x -or $restartBefore.y -ne $restartAfter.y -or $restartAfter.y -le $scrolled.bottom -or $scrolled.top -lt 0 -or $restartAfter.y -ge 480) { throw 'Scrolling moved or hid Restart' }
         Capture-Card 'wrapped-scrolled'
-        Toggle-Card 'collapsed'
-        if ((Card-Bounds).scroll -ne 0) { throw 'Collapse did not reset note scrolling' }
+        for ($i = 0; $i -lt 20 -and (Card-Bounds).scroll -gt 0; $i++) {
+            $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x20A, [IntPtr](120 -shl 16), $wheelPoint)
+            Start-Sleep -Milliseconds 150
+        }
+        Wait-Card { (Card-Bounds).scroll -eq 0 -and $script:cardLog -match '\[update\] card remaining=' } 'Notes did not return to their first line'
         Capture-Card 'wrapped-collapsed'
-        $wrappedReceipt = @{ version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; toggleVerified = $true; normal = $normal; expanded = $expanded; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $changes; simulatedOffer = '999.0.0'; success = $true }
+        $wrappedReceipt = @{ version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; normal = $normal; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $changes; painted = $painted; simulatedOffer = '999.0.0'; success = $true }
         $wrappedReceipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'wrapped-card.json')
         Write-Output ('WRAPPED_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'wrapped-card.json'))))
     }
