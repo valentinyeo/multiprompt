@@ -75,6 +75,11 @@ pub fn failedReason(timed_out: bool, cancelled: bool, reply_len: usize, stderr: 
     return .transport;
 }
 
+pub fn jobReason(job: *transport.Job) FailureReason {
+    if (job.host_start) return .host_start;
+    return failedReason(job.timed_out, job.cancelled.load(.acquire), job.output_len, job.error_text[0..job.error_len]);
+}
+
 test "a room host that dies before its first reply is reported as not started" {
     try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, "bash: -c: line 1: syntax error near unexpected token `('"));
     try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, ""));
@@ -291,7 +296,7 @@ pub const Controller = struct {
             self.journal_lock = null;
         }
         const mutation = isMutation(self.kind);
-        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = failedReason(job.timed_out, job.cancelled.load(.acquire), job.output_len, job.error_text[0..job.error_len]), .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
+        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = jobReason(job), .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
             parsed.deinit();
@@ -317,6 +322,7 @@ pub const Controller = struct {
             }
             parsed.deinit();
             if (failure.code_len == 0) return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
+            if (std.mem.eql(u8, failure.code[0..failure.code_len], "runtime_republish_failed")) failure.reason = .host_start;
             return .{ .failed = failure };
         }
         if (ok != .bool or parsed.value.object.get("result") == null) {

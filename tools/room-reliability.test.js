@@ -216,6 +216,69 @@ test('a room request that finds the helper published does not ask for the reader
   assert.match(bridge, /fail\('runtime_unavailable' if RUNTIME_SOURCE or not RUNTIME_FINGERPRINT else 'runtime_republish_required'\)/, 'only a request without the reader asks for it');
 });
 
+test('a request answered runtime_republish_required publishes the helper once and retries once', () => {
+  const transport = read('room_transport.zig');
+  assert.doesNotMatch(transport, /if \(attempt\(job, &reader\.digest, ""\)\) return;/, 'a reply that asks for the helper must not end the request');
+  assert.match(transport, /const first = attempt\(job, &reader\.digest, ""\);\n    if \(nextStep\(first, false\) != \.publish\)/, 'the first attempt publishes only when the host asks for the helper');
+  run(`
+const std = @import("std");
+const Reply = enum { ok, republish, start_failed, failed };
+const Step = enum { stop, publish, host_start };
+${declaration(transport, 'fn nextStep(')}
+const Driven = struct { sends: usize, publishes: usize, host_start: bool };
+fn drive(script: []const Reply) Driven {
+    var published = false;
+    var sends: usize = 0;
+    var publishes: usize = 0;
+    for (script) |reply| {
+        sends += 1;
+        const step = nextStep(reply, published);
+        if (step != .publish) return .{ .sends = sends, .publishes = publishes, .host_start = step == .host_start };
+        published = true;
+        publishes += 1;
+    }
+    return .{ .sends = sends, .publishes = publishes, .host_start = false };
+}
+test "a capabilities reply that asks for the helper publishes once and retries once" {
+    const cold = drive(&.{ .republish, .ok });
+    try std.testing.expectEqual(@as(usize, 2), cold.sends);
+    try std.testing.expectEqual(@as(usize, 1), cold.publishes);
+    try std.testing.expect(!cold.host_start);
+    const warm = drive(&.{.ok});
+    try std.testing.expectEqual(@as(usize, 1), warm.sends);
+    try std.testing.expectEqual(@as(usize, 0), warm.publishes);
+    const broken = drive(&.{.failed});
+    try std.testing.expectEqual(@as(usize, 1), broken.sends);
+    try std.testing.expectEqual(@as(usize, 0), broken.publishes);
+}
+`);
+});
+
+test('a publish that fails stops after one try and says the room host could not start', () => {
+  const transport = read('room_transport.zig');
+  const rooms = read('rooms.zig');
+  const bridge = read('room_bridge.py');
+  assert.match(transport, /const host_start_error = "\\"error\\":\\"runtime_republish_failed\\"";/, 'the bridge names a publish that left the host unable to start');
+  assert.match(transport, /if \(nextStep\(second, true\) == \.host_start\) \{\n        job\.host_start = true;/, 'a second miss after publishing is capped and reported as a start failure');
+  assert.match(rooms, /if \(job\.host_start\) return \.host_start;/, 'the room failure carries the start reason to the dialog');
+  assert.match(bridge, /if RUNTIME_SOURCE and not runtime_ready\(\):\n            PUBLISH_FAILED = True/, 'the bridge knows its publish left no usable helper');
+  assert.match(bridge, /if PUBLISH_FAILED:\n        fail\('runtime_republish_failed'\)/, 'every later request reports the failed publish');
+  run(`
+const std = @import("std");
+const Reply = enum { ok, republish, start_failed, failed };
+const Step = enum { stop, publish, host_start };
+${declaration(transport, 'fn nextStep(')}
+test "a failed publish is not retried" {
+    try std.testing.expectEqual(Step.host_start, nextStep(.start_failed, true));
+    try std.testing.expectEqual(Step.host_start, nextStep(.republish, true));
+    try std.testing.expectEqual(Step.stop, nextStep(.failed, true));
+    try std.testing.expectEqual(Step.stop, nextStep(.ok, true));
+    try std.testing.expectEqual(Step.publish, nextStep(.republish, false));
+    try std.testing.expectEqual(Step.host_start, nextStep(.start_failed, false));
+}
+`);
+});
+
 test('room bridge failures log full stderr and the exit code even after the dialog error fills', () => {
   const source = read('room_transport.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/bridge-errors.zig'), 'utf8');
