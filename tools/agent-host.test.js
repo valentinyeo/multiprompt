@@ -39,7 +39,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const commandEnd = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
   assert.ok(command >= 0 && commandEnd > command, 'workspaceLaunchCommand must exist');
   const choice = palette.slice(command, commandEnd);
-  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid\);/);
+  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid, agent_host\.READER\);/);
   assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
   assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
@@ -54,7 +54,7 @@ test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle pro
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
   assert.ok(format && args, 'the launch command must be readable');
   const mode = host.match(/const mode = if \(provider == \.claude\) "([^"]*)" else "";/);
-  const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
+  const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', reader: '~/.multiprompt-runtime/reader.py' };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');

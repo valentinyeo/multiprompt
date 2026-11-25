@@ -9399,7 +9399,7 @@ class MUBO135_ServerReplyOnceTest(unittest.TestCase):
 
 
 class MUBO_221_LaunchCommandTest(unittest.TestCase):
-    ARGS = ('READER', 'name', 'sid', 'session', 'cwd', 'mode', 'READER', 'name', 'sid')
+    ARGS = ('reader', 'name', 'sid', 'session', 'cwd', 'mode', 'reader', 'name', 'sid')
 
     def launch_command(self, provider='antigravity'):
         source = (ROOT / 'src/agent_host.zig').read_text()
@@ -9409,7 +9409,7 @@ class MUBO_221_LaunchCommandTest(unittest.TestCase):
         shape = block[opened:block.index('", .{', opened)]
         holes = shape.split('{s}')
         self.assertEqual(len(holes) - 1, len(self.ARGS), 'the launch command changed shape')
-        values = dict(READER='~/.multiprompt-runtime/reader.py', name=provider, session='live-abc',
+        values = dict(reader='~/.multiprompt-runtime/reader.py', name=provider, session='live-abc',
                       cwd='~/projects', sid='ffffffff-ffff-4fff-bfff-ffffffffffff', mode='')
         text = holes[0]
         for index, name in enumerate(self.ARGS):

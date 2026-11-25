@@ -196,3 +196,21 @@ if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity 
     (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
 Shot 'antigravity-new-session'
+$freshSid = $newTab.csid
+[void](Wait-For 'the fresh Antigravity chat enabled itself on the server' {
+    @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' -and $_.sid -ceq $freshSid -and $_.enabled -eq $true -and $_.tmux.StartsWith('live-') }).Count -eq 1
+} 90)
+$freshConfig = @((Agent-Configs) | Where-Object { $_.sid -ceq $freshSid })[0].path
+Copy-Item $freshConfig "$caseDir/fresh-antigravity-config.json"
+$freshHistory = Join-Path (Split-Path $freshConfig) ((Split-Path $freshConfig -Leaf) -replace '\.config\.json$', '.history.jsonl')
+$freshText = 'first message in a fresh antigravity chat'
+Send-Composer $freshText
+[void](Wait-For 'the fresh Antigravity chat sent its first message' {
+    (Test-Path "$state/agy-received.jsonl") -and (Read-Shared "$state/agy-received.jsonl").Contains($freshText)
+} 60)
+[void](Wait-For 'the fresh Antigravity chat showed a reply' {
+    (Test-Path $freshHistory) -and (Read-Shared $freshHistory).Contains('Antigravity stand-in reply 1.')
+} 60)
+Copy-Item $freshHistory "$caseDir/fresh-antigravity-history.jsonl"
+Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf)} "$caseDir/fresh-antigravity-reply.json"
+Shot 'antigravity-fresh-reply'

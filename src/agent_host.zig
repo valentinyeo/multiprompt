@@ -119,14 +119,21 @@ fn safePath(value: []const u8) bool {
 }
 
 pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
-    return launchCommandFor(out, .claude, session, cwd, sid);
+    return launchCommandFor(out, .claude, session, cwd, sid, READER);
 }
 
-pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
-    if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
+pub fn runtimePath(out: []u8, sha256: []const u8) ?[]const u8 {
+    if (sha256.len != 64) return null;
+    for (sha256) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return null;
+    return std.fmt.bufPrint(out, "~/.multiprompt-runtime/{s}.py", .{sha256}) catch null;
+}
+
+pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd: []const u8, sid: []const u8, reader: []const u8) ?[]const u8 {
+    if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid) or !safePath(reader)) return null;
+    if (!std.mem.endsWith(u8, reader, ".py")) return null;
     const mode = if (provider == .claude) " --permission-mode bypassPermissions" else "";
     const name = provider.wire();
-    return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} && python3 {s} host start {s} {s}", .{ READER, name, sid, session, cwd, mode, READER, name, sid }) catch null;
+    return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} && python3 {s} host start {s} {s}", .{ reader, name, sid, session, cwd, mode, reader, name, sid }) catch null;
 }
 
 pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid: []const u8) ?[]const u8 {
@@ -340,26 +347,43 @@ test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude
 test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider and no Claude permission flag" {
     var out: [1024]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
-    const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host enable pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "permission-mode") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
-    try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad") == null);
-    const cursor = launchCommandFor(&out, .cursor, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad", READER) == null);
+    const cursor = launchCommandFor(&out, .cursor, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, cursor, "host enable cursor ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, cursor, "host start cursor ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, cursor, "permission-mode") == null);
-    const antigravity = launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const antigravity = launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host enable antigravity ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host start antigravity ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "permission-mode") == null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, ">/dev/null") == null);
-    const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
     try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
+}
+
+test "MUBO-221 a chat starts from the runtime it published, not the shared pointer" {
+    var out: [1024]u8 = undefined;
+    var path_buf: [96]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const pinned = runtimePath(&path_buf, sha) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("~/.multiprompt-runtime/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.py", pinned);
+    try std.testing.expect(runtimePath(&path_buf, "0123") == null);
+    try std.testing.expect(runtimePath(&path_buf, "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef") == null);
+    const command = launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid, pinned) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.startsWith(u8, command, "python3 ~/.multiprompt-runtime/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.py host enable antigravity "));
+    try std.testing.expect(std.mem.indexOf(u8, command, "~/.multiprompt-runtime/reader.py") == null);
+    try std.testing.expect(std.mem.indexOf(u8, command, " host start antigravity ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid, "~/r x.py") == null);
+    try std.testing.expect(launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid, "~/.multiprompt-runtime/reader.txt") == null);
 }
 
 test "IGSH-1546 each provider maps to the agent kind its tab shows" {

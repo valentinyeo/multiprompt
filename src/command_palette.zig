@@ -2528,7 +2528,7 @@ pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []c
     const agent_host = @import("agent_host.zig");
     if (host_sid) |sid| {
         const provider = agent_host.hostedWorkspaceProvider(program) orelse return null;
-        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid);
+        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid, agent_host.READER);
     }
     return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
 }
@@ -3269,8 +3269,41 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
     const sid = agent_host.mintSessionId(&sid_buf) orelse return false;
     var session_buf: [64]u8 = undefined;
     const session = buildLiveChatSessionName(&session_buf);
+    if (hostLaunchArm(host, provider, sid, session, cwd)) return true;
+    return spawnHostedChatNow(provider, host, session, cwd, sid, agent_host.READER);
+}
+
+fn hostLaunchArm(host: u8, provider: @import("agent_host.zig").Provider, sid: []const u8, session: []const u8, cwd: []const u8) bool {
+    for (&app_state.g_host_launches, 0..) |*launch, slot| {
+        if (launch.session_len != 0 or launch.ready.load(.acquire)) continue;
+        launch.* = .{ .host = host, .provider = @intFromEnum(provider) };
+        @memcpy(launch.sid[0..sid.len], sid);
+        launch.sid_len = @intCast(sid.len);
+        @memcpy(launch.session[0..session.len], session);
+        launch.session_len = @intCast(session.len);
+        @memcpy(launch.cwd[0..cwd.len], cwd);
+        launch.cwd_len = @intCast(cwd.len);
+        if (@import("chat_session.zig").chatHostLaunchPrepare(slot)) return true;
+        launch.* = .{};
+        return false;
+    }
+    return false;
+}
+
+pub fn finishHostedChatSpawn(slot: usize) void {
+    if (slot >= app_state.g_host_launches.len) return;
+    const launch = &app_state.g_host_launches[slot];
+    if (!launch.ready.load(.acquire)) return;
+    const provider = std.enums.fromInt(@import("agent_host.zig").Provider, launch.provider) orelse return;
+    const spawnable = launch.session_len != 0 and launch.runtime_len != 0;
+    if (spawnable) _ = spawnHostedChatNow(provider, launch.host, launch.session[0..launch.session_len], launch.cwd[0..launch.cwd_len], launch.sid[0..launch.sid_len], launch.runtime[0..launch.runtime_len]);
+    launch.* = .{};
+}
+
+fn spawnHostedChatNow(provider: @import("agent_host.zig").Provider, host: u8, session: []const u8, cwd: []const u8, sid: []const u8, runtime: []const u8) bool {
+    const agent_host = @import("agent_host.zig");
     var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
-    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid) orelse return false;
+    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid, runtime) orelse return false;
     if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) return false;
 
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
@@ -3338,7 +3371,7 @@ test "IGSH-1546 Codex and Pi chats are live chats that never type into a termina
     var session_buf: [64]u8 = undefined;
     const session = buildLiveChatSessionName(&session_buf);
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid, agent_host.READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(pi.len <= app_state.g_pending_tmux_cmd.len);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
