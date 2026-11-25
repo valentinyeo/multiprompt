@@ -53,7 +53,12 @@ function verify(root) {
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0, 'the run left owned processes behind');
   assert.equal(cleanup.scratch_removed, true, 'the run left its scratch profile behind');
-  return { feature: 'chat-fresh-start', status: 'passed', boundary: 'Hosted stand-in remote shell, fake tmux and a scripted agent screen; production reader, message store and native desktop.' };
+  return {
+    feature: 'chat-fresh-start',
+    status: 'passed',
+    boundary: 'Hosted stand-in remote shell, fake tmux and a scripted agent screen; production reader, message store and native desktop.',
+    cleanup: `owned process tree stopped (${cleanup.remaining_owned_processes} left); scratch profile removed=${cleanup.scratch_removed}; evidence preserved=${cleanup.evidence_preserved}`
+  };
 }
 
 const evidence = process.argv[2];
