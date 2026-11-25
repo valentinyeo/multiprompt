@@ -94,7 +94,6 @@ var catalog_rows: std.ArrayList(CatalogRow) = .empty;
 var catalog_after: u64 = 0;
 var catalog_through: ?u64 = null;
 var catalog_complete = false;
-var catalog_store_uuid: ?[36]u8 = null;
 const StoreDiscovery = struct {
     controller: rooms.Controller,
     key: [64]u8,
@@ -453,7 +452,6 @@ fn clearCatalog() void {
     catalog_after = 0;
     catalog_through = null;
     catalog_complete = false;
-    catalog_store_uuid = null;
 }
 
 pub fn setAccount(id: ?[]const u8) void {
@@ -1886,7 +1884,6 @@ pub fn pollTimer(id: usize) bool {
                 discovery_attempts = 0;
                 discovery_waiting = false;
                 _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
-                catalog_store_uuid = c.host_uuid;
                 catalog_complete = true;
                 cacheCatalog(c);
                 finishRefresh(c, true);

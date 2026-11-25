@@ -155,7 +155,7 @@ class RoomStore:
                     fail('binding_immutable')
             else:
                 self.db.execute('UPDATE members SET active=0 WHERE id=?', (old['id'],))
-                self.db.execute("UPDATE deliveries SET status='cancelled' WHERE member_id=? AND status='pending'", (old['id'],))
+                self.db.execute("UPDATE deliveries SET status='cancelled' WHERE member_id=? AND status IN ('pending','pending_features_1')", (old['id'],))
         for alias, member in wanted.items():
             if alias in existing:
                 self.db.execute('UPDATE members SET display_name=? WHERE id=?', (member['display_name'], existing[alias]['id']))
@@ -279,8 +279,9 @@ class RoomStore:
                 self.db.execute('INSERT INTO event_features VALUES (?,1)', (event['id'],))
             deliveries = []
             for member in targets:
-                delivery = {'id': new_id(), 'room_id': room_id, 'event_id': event['id'], 'event_seq': event['seq'], 'member_id': member['id'], 'status': 'pending'}
+                delivery = {'id': new_id(), 'room_id': room_id, 'event_id': event['id'], 'event_seq': event['seq'], 'member_id': member['id'], 'status': 'pending_features_1' if upgraded else 'pending'}
                 cursor = self.db.execute('INSERT INTO deliveries (id, room_id, event_id, event_seq, member_id, status) VALUES (?, ?, ?, ?, ?, ?)', tuple(delivery.values()))
+                delivery['status'] = 'pending'
                 delivery['delivery_seq'] = cursor.lastrowid
                 deliveries.append(delivery)
             return {'event': event, 'deliveries': deliveries}
@@ -294,7 +295,7 @@ class RoomStore:
             if old['body'] != response_body:
                 fail('response_conflict')
             return json.loads(old['receipt'])
-        delivery = self.db.execute("SELECT d.id FROM deliveries d JOIN members m ON m.id=d.member_id WHERE d.room_id=? AND d.event_id=? AND d.member_id=? AND d.status='pending' AND m.active=1", (room_id, r['parent_event_id'], r['member_id'])).fetchone()
+        delivery = self.db.execute("SELECT d.id FROM deliveries d JOIN members m ON m.id=d.member_id WHERE d.room_id=? AND d.event_id=? AND d.member_id=? AND d.status IN ('pending','pending_features_1') AND m.active=1", (room_id, r['parent_event_id'], r['member_id'])).fetchone()
         if not delivery:
             fail('invalid_scope')
         event = self.event(room_id, 'agent_reply', {'parent_event_id': r['parent_event_id'], 'member_id': r['member_id'], 'response_id': r['response_id'], 'text': r['text']})
@@ -372,7 +373,7 @@ class RoomStore:
             fields(r, ('op', 'room_id', 'delivery_id'))
             self.room(r['room_id'])
             identifier(r['delivery_id'])
-            row = self.db.execute("SELECT d.id, d.event_id, d.event_seq, m.id AS member_id, m.host_uuid, m.provider, m.provider_sid, m.session_identity, e.body FROM deliveries d JOIN members m ON m.id=d.member_id JOIN events e ON e.id=d.event_id WHERE d.room_id=? AND d.id=? AND d.status='pending' AND m.active=1", (r['room_id'], r['delivery_id'])).fetchone()
+            row = self.db.execute("SELECT d.id, d.event_id, d.event_seq, m.id AS member_id, m.host_uuid, m.provider, m.provider_sid, m.session_identity, e.body FROM deliveries d JOIN members m ON m.id=d.member_id JOIN events e ON e.id=d.event_id WHERE d.room_id=? AND d.id=? AND d.status IN ('pending','pending_features_1') AND m.active=1", (r['room_id'], r['delivery_id'])).fetchone()
             if row is None:
                 fail('invalid_scope')
             event = json.loads(row['body'])
@@ -391,7 +392,7 @@ class RoomStore:
                 through = number(r['through'])
             if through > room['seq']:
                 fail('invalid_cursor')
-            deliveries = [dict(row) for row in self.db.execute('SELECT delivery_seq, id, room_id, event_id, event_seq, member_id, status FROM deliveries WHERE room_id=? AND delivery_seq>? AND event_seq<=? ORDER BY delivery_seq LIMIT ?', (room['id'], after, through, limit))]
+            deliveries = [dict(row) for row in self.db.execute("SELECT delivery_seq, id, room_id, event_id, event_seq, member_id, CASE WHEN status='pending_features_1' THEN 'pending' ELSE status END AS status FROM deliveries WHERE room_id=? AND delivery_seq>? AND event_seq<=? ORDER BY delivery_seq LIMIT ?", (room['id'], after, through, limit))]
             return {'deliveries': deliveries, 'through': through, 'next_after': deliveries[-1]['delivery_seq'] if deliveries else after}
         fields(r, ('op', 'room_id', 'after', 'limit'))
         self.room(r['room_id'])

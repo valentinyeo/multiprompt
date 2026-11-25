@@ -88,6 +88,13 @@ class RoomServiceTest(unittest.TestCase):
         self.error('invalid_mentions', {**self.post('@STRASSE RESEARCH hello', ['bob'], revision=2), 'room_features': 1})
         self.error('invalid_mentions', self.post('@ALICE hello', ['alice'], revision=2))
 
+    def test_removing_members_cancels_capability_gated_delivery_work(self):
+        sent = self.store.execute({**self.post('Hello', []), 'room_features': 1})
+        self.assertEqual(['pending', 'pending'], [delivery['status'] for delivery in self.deliveries()])
+        self.store.execute(self.edit([]))
+        self.assertEqual(['cancelled', 'cancelled'], [delivery['status'] for delivery in self.deliveries()])
+        self.error('invalid_scope', dict(op='delivery_work', room_id=self.room, delivery_id=sent['deliveries'][0]['id']))
+
     def test_ambiguous_shown_names_never_choose_an_arbitrary_member(self):
         self.store.execute(self.edit([{**self.alice, 'display_name': 'Same Name'}, {**self.bob, 'display_name': 'Same Name'}]))
         self.error('ambiguous_mentions', {**self.post('@same name hello', [], revision=2), 'room_features': 1})

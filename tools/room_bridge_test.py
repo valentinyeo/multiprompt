@@ -122,6 +122,42 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(receipt, self.bridge.execute(request))
         self.assertEqual(2, self.bridge.store.room(room)['seq'])
 
+    def test_legacy_reader_cannot_claim_capability_gated_work(self):
+        import json
+        import os
+        import subprocess
+        legacy = os.environ.get('LEGACY_ROOM_ROOT')
+        if not legacy:
+            self.skipTest('the hosted baseline checkout supplies the legacy helper')
+        room = self.bridge.store.execute({key: value for key, value in self.create.items() if key != 'host_uuid'})['event']['room_id']
+        sent = self.bridge.store.execute(dict(op='post_human', command_id=uid(), room_id=room, expected_revision=1, text='@Alpha enhanced question', recipients=['alpha'], room_features=1))
+        program = '''import json,sys,uuid
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / 'src'))
+import room_bridge
+room_bridge.scoped_runtime = lambda: True
+room_bridge.host_status = lambda sid: dict(enabled=True, tmux='fixture')
+def unavailable(query):
+    raise AssertionError('legacy collector claimed capability-gated work')
+room_bridge.runtime_request = unavailable
+bridge = room_bridge.RoomBridge(sys.argv[2])
+try:
+    page = bridge.execute(dict(op='events', host_uuid=sys.argv[3], room_id=sys.argv[4], after=0, limit=200))
+    assert len(page['events']) == 2
+    assert set(page['events'][1]) == {'id','room_id','seq','type','text','revision','recipients'}
+    result = bridge.execute(dict(op='post_human', host_uuid=sys.argv[3], command_id=str(uuid.uuid4()), room_id=sys.argv[4], expected_revision=1, text='Legacy follow-up', recipients=[]))
+    print(json.dumps(result))
+finally:
+    bridge.close()
+'''
+        done = subprocess.run([sys.executable, '-c', program, str(Path(legacy).resolve()), self.temp.name, self.host, room], text=True, capture_output=True, timeout=15, check=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual('pending', json.loads(done.stdout)['deliveries'][0]['status'])
+        work = self.bridge.store.execute(dict(op='delivery_work', room_id=room, delivery_id=sent['deliveries'][0]['id']))
+        self.assertEqual('@Alpha enhanced question', work['text'])
+        deliveries = self.bridge.store.execute(dict(op='deliveries', room_id=room, after=0, through=None, limit=200))['deliveries']
+        self.assertEqual(['pending', 'pending'], [delivery['status'] for delivery in deliveries])
+
     @mock.patch.object(bridge_module, 'host_status')
     def test_disabled_and_unsupported_paths_fail_closed(self, status):
         status.return_value = {'enabled': False}

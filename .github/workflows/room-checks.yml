@@ -66,6 +66,8 @@ jobs:
           done
       - name: Run room tests
         if: ${{ !cancelled() }}
+        env:
+          LEGACY_ROOM_ROOT: ${{ inputs.baseline && format('{0}/room-baseline', github.workspace) || '' }}
         shell: bash
         run: |
           set -o pipefail

@@ -153,7 +153,7 @@ class RoomBridge:
         self.store.close()
 
     def sweep_pending(self, sid=None):
-        pending = self.store.db.execute("SELECT DISTINCT d.room_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY COALESCE(p.checked,0) LIMIT 16", (sid, sid)).fetchall()
+        pending = self.store.db.execute("SELECT DISTINCT d.room_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.status IN ('pending','pending_features_1') AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY COALESCE(p.checked,0) LIMIT 16", (sid, sid)).fetchall()
         if not pending or not scoped_runtime():
             return
         deadline = time.monotonic() + 2
@@ -243,7 +243,7 @@ class RoomBridge:
         return result
 
     def sync_replies(self, room_id, sid=None, deadline=None):
-        deliveries = self.store.db.execute("SELECT d.id, d.member_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY (SELECT MAX(COALESCE(q.checked,0)) FROM deliveries e LEFT JOIN reply_progress q ON q.delivery_id=e.id WHERE e.member_id=d.member_id AND e.status='pending' AND COALESCE(q.done,0)=0),d.member_id,d.delivery_seq LIMIT 64", (room_id, sid, sid)).fetchall()
+        deliveries = self.store.db.execute("SELECT d.id, d.member_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.status IN ('pending','pending_features_1') AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY (SELECT MAX(COALESCE(q.checked,0)) FROM deliveries e LEFT JOIN reply_progress q ON q.delivery_id=e.id WHERE e.member_id=d.member_id AND e.status IN ('pending','pending_features_1') AND COALESCE(q.done,0)=0),d.member_id,d.delivery_seq LIMIT 64", (room_id, sid, sid)).fetchall()
         if deadline is None:
             deadline = time.monotonic() + 2
         waiting = set()
@@ -313,7 +313,7 @@ class RoomBridge:
         self.store.db.execute('BEGIN IMMEDIATE')
         try:
             current = self.store.db.execute('SELECT after_seq,done FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()
-            active = self.store.db.execute("SELECT 1 FROM deliveries d JOIN members m ON m.id=d.member_id WHERE d.id=? AND d.status='pending' AND m.active=1", (work['message_id'],)).fetchone()
+            active = self.store.db.execute("SELECT 1 FROM deliveries d JOIN members m ON m.id=d.member_id WHERE d.id=? AND d.status IN ('pending','pending_features_1') AND m.active=1", (work['message_id'],)).fetchone()
             if current['done'] or current['after_seq'] != after or active is None:
                 self.store.db.execute('COMMIT')
                 return
