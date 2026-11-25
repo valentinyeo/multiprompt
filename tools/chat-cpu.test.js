@@ -358,7 +358,8 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.ok(refresh.indexOf(unchanged[0]) < refresh.indexOf('const same_blocks'), 'only a changed revision compares history blocks');
   assert.match(refresh, /history\.revision/);
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
-  assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
+  assert.match(body(source, 'chatFileFetchThread'), /cacheWriteDue\(entry\.cache_written/);
+  assert.match(body(source, 'cacheWriteDue'), /CACHE_WRITE_MS/);
   assert.match(fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8'), /fn chatTableLayout\([^]*chatTableLayoutIn\(/);
   assert.match(body(source, 'chatPaintTranscriptContent'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
