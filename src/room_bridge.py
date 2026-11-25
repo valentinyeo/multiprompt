@@ -61,10 +61,11 @@ def host_status(sid):
         fail('invalid_session')
     reader = selected_reader()
     try:
-        with tempfile.TemporaryFile() as output:
-            completed = subprocess.run([sys.executable, str(reader), 'host', 'status', 'claude', sid], stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL, timeout=5, check=False)
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+            completed = subprocess.run([sys.executable, str(reader), 'host', 'status', 'claude', sid], stdin=subprocess.DEVNULL, stdout=output, stderr=errors, timeout=5, check=False)
             if completed.returncode != 0 or output.tell() > 32768:
-                fail('runtime_unavailable')
+                errors.seek(0)
+                fail('runtime_unavailable', errors.read(2048).decode('utf-8', errors='replace').strip())
             output.seek(0)
             status = json.loads(output.read(32769))
     except (OSError, ValueError, UnicodeError, subprocess.TimeoutExpired):
@@ -84,10 +85,11 @@ def runtime_request(query):
         source = ('ENGINE_INFO = ' + repr(info) + '\n').encode('utf-8') + source
         bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
         input = base64.b64encode(source) + b'\n' + (encoded(dict(query, id=1)) + '\n').encode('utf-8')
-        with tempfile.TemporaryFile() as output:
-            completed = subprocess.run([sys.executable, '-u', '-c', bootstrap, '--serve'], input=input, stdout=output, stderr=subprocess.DEVNULL, timeout=2, check=False)
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+            completed = subprocess.run([sys.executable, '-u', '-c', bootstrap, '--serve'], input=input, stdout=output, stderr=errors, timeout=2, check=False)
             if completed.returncode != 0 or output.tell() > 524288:
-                fail('runtime_unavailable')
+                errors.seek(0)
+                fail('runtime_unavailable', errors.read(2048).decode('utf-8', errors='replace').strip())
             output.seek(0)
             response = json.loads(output.read(524289))
     except (OSError, ValueError, UnicodeError, subprocess.TimeoutExpired):
@@ -363,6 +365,8 @@ def serve(directory):
                 response = {'ok': True, 'result': result}
             except RoomError as error:
                 response = {'ok': False, 'error': error.code}
+                if error.detail:
+                    response['message'] = error.detail
             except (ValueError, UnicodeError, RecursionError, TypeError):
                 response = {'ok': False, 'error': 'invalid_json'}
             print(encoded(response), flush=True)

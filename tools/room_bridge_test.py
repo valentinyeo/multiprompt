@@ -71,6 +71,15 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual('runtime_upgrade_required', result['reason'])
         self.assertIn('room_features', result)
 
+    def test_host_stderr_is_retained_for_the_room_error(self):
+        reader = Path(self.temp.name) / 'reader.py'
+        reader.write_text('import sys\nsys.stderr.write("host unreachable: connection refused")\nsys.exit(1)\n')
+        with mock.patch.object(bridge_module, 'selected_reader', return_value=reader):
+            with self.assertRaises(bridge_module.RoomError) as caught:
+                bridge_module.host_status(self.sid)
+        self.assertEqual('runtime_unavailable', caught.exception.code)
+        self.assertEqual('host unreachable: connection refused', caught.exception.detail)
+
     @mock.patch.object(bridge_module, 'host_status')
     def test_disabled_and_unsupported_paths_fail_closed(self, status):
         status.return_value = {'enabled': False}

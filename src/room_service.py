@@ -15,13 +15,14 @@ CONTEXT_FRAME_BYTES = 200
 
 
 class RoomError(Exception):
-    def __init__(self, code):
+    def __init__(self, code, detail=None):
         self.code = code
+        self.detail = detail
         super().__init__(code)
 
 
-def fail(code):
-    raise RoomError(code)
+def fail(code, detail=None):
+    raise RoomError(code, detail)
 
 
 def identifier(value):

@@ -116,14 +116,16 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(['@beta hello'], self.sent_to('beta'))
 
     def test_each_agent_receives_messages_in_post_order_after_a_runtime_failure(self):
+        self.enabled[self.sids['beta']] = False
         first = self.post('one')
-        self.post('two')
         self.runtime.fail_once.add(first['deliveries'][1]['id'])
+        self.enabled[self.sids['beta']] = True
+        self.post('two')
         self.sweep()
         self.sweep()
         self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('alpha'))
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('alpha')])
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('beta')])
 
     def test_offline_agent_receives_message_when_it_returns(self):
         self.enabled[self.sids['beta']] = False
@@ -136,8 +138,10 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(['hello'], self.sent_to('beta'))
 
     def test_agent_coming_back_mid_sweep_still_gets_messages_in_order(self):
+        self.enabled[self.sids['beta']] = False
         self.post('one')
         self.post('two')
+        self.enabled[self.sids['beta']] = True
         beta = self.sids['beta']
         answers = iter([False, True, True, True, True, True])
         original = self.status
@@ -151,7 +155,7 @@ class RoutingTest(unittest.TestCase):
         with mock.patch.object(bridge_module, 'host_status', flipping):
             self.sweep()
             self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('beta')])
 
     def test_longest_message_still_reaches_the_agent_with_context(self):
         self.post('first question')

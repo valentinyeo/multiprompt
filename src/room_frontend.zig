@@ -51,16 +51,14 @@ const TIMER_ROOM_UI: usize = 0xB313;
 const TIMER_ROOM_EVIDENCE: usize = 0xB314;
 const TIMER_ROOM_DISCOVERY: usize = 0xB315;
 const TIMER_ROOM_REPLIES: usize = 0xB316;
-const reply_fast_ms: u64 = 120_000;
-const reply_window_ms: u64 = 1_800_000;
 const Candidate = struct {
-    sid: [40]u8 = undefined,
+    sid: [80]u8 = undefined,
     sid_len: usize = 0,
     alias: [32]u8 = undefined,
     alias_len: usize = 0,
     display_name: [256]u8 = undefined,
     display_name_len: usize = 0,
-    session_identity: [48]u8 = undefined,
+    session_identity: [88]u8 = undefined,
     session_identity_len: usize = 0,
     host_uuid: [36]u8 = undefined,
     online: bool = false,
@@ -70,14 +68,10 @@ var request_generation: u64 = 0;
 var route_key: [64]u8 = undefined;
 var route_slot: u8 = 0;
 var bound_preexisting_pin = false;
-const CandidateSid = struct { bytes: [40]u8 = undefined, len: usize = 0 };
-var discovered_sids: [app_state.MAX_SHELLS]CandidateSid = undefined;
 var discovered_count: usize = 0;
 var candidate_scan: usize = 0;
 var candidate_generation: u64 = 0;
 var status_generation: u64 = 0;
-var pending_sid: [40]u8 = undefined;
-var pending_sid_len: usize = 0;
 var candidates: [app_state.MAX_SHELLS]Candidate = undefined;
 var candidate_count: usize = 0;
 var last_failure: ?rooms.Failure = null;
@@ -155,8 +149,6 @@ const PendingCommand = struct {
     awaiting_launch: bool = false,
 };
 var pending_command: ?*PendingCommand = null;
-var last_post_room: ?RoomLocation = null;
-var last_post_tick: u64 = 0;
 const CreatedSelection = struct { location: RoomLocation, generation: u64, token_generation: u64 };
 var created_selection: ?CreatedSelection = null;
 const RefreshIntent = struct { location: StoreLocation, attempts: u8 = 0, in_flight: bool = false, dirty: bool = false };
@@ -646,8 +638,18 @@ fn savePin(uuid: []const u8) bool {
     return std.mem.eql(u8, existing, uuid);
 }
 
+fn showFailure(failure: rooms.Failure) void {
+    if (!created or front == .hidden) return;
+    const code = failure.code[0..failure.code_len];
+    const reason: []const u8 = if (std.mem.eql(u8, code, "runtime_upgrade_required") or std.mem.eql(u8, code, "unsupported_remote_capability")) "The server's room helper is outdated. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "room_host_upgrade_required")) "This agent is running an old room helper. Restart the affected agent chat, then try again." else if (std.mem.eql(u8, code, "runtime_unavailable")) "The server's chat helper is unavailable. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "invalid_mentions") or std.mem.eql(u8, code, "ambiguous_mentions")) "Choose a unique member name from the @ picker, then try again." else if (std.mem.eql(u8, code, "host_disabled")) "This agent chat is disabled. Start it before adding it to a room." else if (failure.reason == .timeout) "The room host did not respond. Check its connection and try again." else "Could not reach the room host. Check its connection and try again.";
+    var buffer: [2048]u8 = undefined;
+    const detail = std.mem.trim(u8, failure.detail[0..failure.detail_len], " \t\r\n");
+    const message = if (detail.len > 0) std.fmt.bufPrint(&buffer, "{s} {s}", .{ reason, detail[0..@min(detail.len, 700)] }) catch reason else reason;
+    view.showError(message);
+}
+
 fn scheduleDiscovery(c: *const rooms.Controller) void {
-    if (created and front == .selected) view.showUnavailable();
+    if (last_failure) |failure| showFailure(failure);
     if (discovery_attempts >= 3) return;
     discovery_generation = account_generation;
     discovery_slot = route_slot;
@@ -750,28 +752,7 @@ fn scanCandidates() void {
     candidate_generation +%= 1;
     candidate_count = 0;
     candidate_scan = 0;
-    discovered_count = 0;
-    for (app_state.shells[0..app_state.shell_count]) |*item| {
-        if (!item.sync_owned or item.kind != .tmux or item.tmux_host != route_slot or item.ai_agent != 1 or item.claude_sid_len == 0 or item.claude_sid_len > pending_sid.len) continue;
-        const sid = item.claude_sid[0..item.claude_sid_len];
-        var valid = true;
-        for (sid) |ch| if (!std.ascii.isAlphanumeric(ch) and ch != '_' and ch != '-') { valid = false; break; };
-        if (!valid) continue;
-        var duplicate = false;
-        for (discovered_sids[0..discovered_count]) |old| if (std.mem.eql(u8, old.bytes[0..old.len], sid)) { duplicate = true; break; };
-        if (duplicate) continue;
-        discovered_sids[discovered_count] = .{};
-        @memcpy(discovered_sids[discovered_count].bytes[0..sid.len], sid);
-        discovered_sids[discovered_count].len = sid.len;
-        discovered_count += 1;
-    }
-    var i: usize = 1;
-    while (i < discovered_count) : (i += 1) {
-        const item = discovered_sids[i];
-        var j = i;
-        while (j > 0 and std.mem.order(u8, item.bytes[0..item.len], discovered_sids[j - 1].bytes[0..discovered_sids[j - 1].len]) == .lt) : (j -= 1) discovered_sids[j] = discovered_sids[j - 1];
-        discovered_sids[j] = item;
-    }
+    discovered_count = 1;
 }
 
 fn eligibleShell(sid: []const u8) ?*const app_state.Shell {
@@ -782,17 +763,46 @@ fn eligibleShell(sid: []const u8) ?*const app_state.Shell {
 }
 
 fn nextStatus(c: *rooms.Controller) bool {
-    while (candidate_scan < discovered_count) {
-        const snapshot = &discovered_sids[candidate_scan];
-        candidate_scan += 1;
-        const sid = snapshot.bytes[0..snapshot.len];
-        if (eligibleShell(sid) == null) continue;
-        @memcpy(pending_sid[0..sid.len], sid);
-        pending_sid_len = sid.len;
-        status_generation = candidate_generation;
-        if (c.status(sid)) return true;
+    if (candidate_scan >= discovered_count or !c.room_features) return false;
+    status_generation = candidate_generation;
+    if (!c.members()) return false;
+    candidate_scan = discovered_count;
+    return true;
+}
+
+fn acceptMembers(c: *const rooms.Controller, payload: std.json.Value) bool {
+    if (status_generation != candidate_generation) return true;
+    const members = payload.object.get("members") orelse return false;
+    if (members != .array or members.array.items.len > candidates.len) return false;
+    candidate_count = 0;
+    for (members.array.items) |member| {
+        const sid = textField(member, "sid") orelse return false;
+        const name = textField(member, "display_name") orelse return false;
+        const provider = textField(member, "provider") orelse return false;
+        const alive = member.object.get("alive") orelse return false;
+        if (!std.mem.eql(u8, provider, "claude") or sid.len == 0 or sid.len > 80 or name.len == 0 or name.len > 256 or !std.unicode.utf8ValidateSlice(name) or std.mem.indexOfScalar(u8, name, 0) != null or alive != .bool) return false;
+        for (sid) |ch| if (!std.ascii.isAlphanumeric(ch) and ch != '_' and ch != '-') return false;
+        for (candidates[0..candidate_count]) |old| if (std.mem.eql(u8, old.sid[0..old.sid_len], sid)) return false;
+        var candidate = Candidate{};
+        @memcpy(candidate.sid[0..sid.len], sid);
+        candidate.sid_len = sid.len;
+        @memcpy(candidate.display_name[0..name.len], name);
+        candidate.display_name_len = name.len;
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(sid, &digest, .{});
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        @memcpy(candidate.alias[0..6], "agent_");
+        @memcpy(candidate.alias[6..30], hex[0..24]);
+        candidate.alias_len = 30;
+        candidate.host_uuid = c.host_uuid;
+        @memcpy(candidate.session_identity[0..7], "claude:");
+        @memcpy(candidate.session_identity[7 .. 7 + sid.len], sid);
+        candidate.session_identity_len = 7 + sid.len;
+        candidate.online = alive.bool;
+        candidates[candidate_count] = candidate;
+        candidate_count += 1;
     }
-    return false;
+    return true;
 }
 
 fn numberField(value: std.json.Value, name: []const u8) ?u64 {
@@ -1013,8 +1023,7 @@ fn acceptSnapshot(payload: std.json.Value) bool {
             continue;
         }
         const sid = candidate.sid[0..candidate.sid_len];
-        const shell = eligibleShell(sid) orelse continue;
-        const appearance = @import("bot_avatar.zig").forShell(shell);
+        const appearance = if (eligibleShell(sid)) |shell| @import("bot_avatar.zig").forShell(shell) else @import("bot_avatar.zig").Appearance.forSession(sid);
         const alias = candidate.alias[0..candidate.alias_len];
         item.candidates.append(a, .{ .id = a.dupe(u8, alias) catch { freeOwned(item); return false; }, .name = wide(a, candidate.display_name[0..candidate.display_name_len]) orelse { freeOwned(item); return false; }, .alias = wide(a, alias) orelse { freeOwned(item); return false; }, .appearance = appearance, .name_color = @import("bot_avatar.zig").colors[appearance.color % @import("bot_avatar.zig").colors.len], .presence = if (candidate.online) .online else .offline }) catch { freeOwned(item); return false; };
     }
@@ -1133,7 +1142,8 @@ fn acceptEvents(payload: std.json.Value) bool {
             var question_id = id;
             var insertion_index = item.messages.items.len;
             if (std.mem.eql(u8, kind, "human")) {
-                if (event.object.count() != 7 or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
+                if (event.object.count() != (if (event.object.contains("room_features")) @as(usize, 8) else 7) or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
+                if (event.object.contains("room_features") and (numberField(event, "room_features") orelse 0) != 1) return false;
                 const recipients = event.object.get("recipients") orelse return false;
                 if (recipients != .array or recipients.array.items.len > 64) return false;
                 const saved = a.alloc([]const u8, recipients.array.items.len) catch return false;
@@ -1177,7 +1187,7 @@ fn acceptEvents(payload: std.json.Value) bool {
                 author = .{ .name = std.unicode.utf8ToUtf16LeStringLiteral("Unknown agent"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0x9a9a9a };
                 for (item.history.items) |old| if (std.mem.eql(u8, old.id, member_id)) { author = old.author; break; };
             }
-            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false }) catch return false;
+            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false, .member_id = a.dupe(u8, textField(event, "member_id") orelse "") catch return false }) catch return false;
         } else return false;
         last = seq;
     }
@@ -1285,24 +1295,24 @@ fn commandVisible(item: *const PendingCommand) bool {
 }
 
 fn replyPending(item: *const OwnedModel) bool {
-    if (item.human_events.items.len == 0) return false;
-    const human = item.human_events.items[item.human_events.items.len - 1];
-    var replies: usize = 0;
-    for (item.messages.items) |message| if (message.author != null and std.mem.eql(u8, message.question_id, human.id)) {
-        replies += 1;
-    };
-    return replies < human.recipients.len;
+    for (item.human_events.items) |human| {
+        for (human.recipients) |recipient| {
+            var active = false;
+            for (item.bindings.items) |binding| if (std.mem.eql(u8, binding.id, recipient)) { active = true; break; };
+            if (!active) continue;
+            var answered = false;
+            for (item.messages.items) |message| if (message.author != null and std.mem.eql(u8, message.question_id, human.id) and std.mem.eql(u8, message.member_id, recipient)) { answered = true; break; };
+            if (!answered) return true;
+        }
+    }
+    return false;
 }
 
 fn replyDelay() ?u32 {
-    const posted = last_post_room orelse return null;
-    if (!enabled or !created or !shown or !isVisible() or front != .selected or !sameLocation(front.selected, posted)) return null;
+    if (!enabled or !created or !shown or !isVisible() or front != .selected) return null;
     const current = owned_model orelse return null;
-    if (!std.mem.eql(u8, current.value.room_id, &posted.room_id) or !replyPending(current)) return null;
-    const age = w.GetTickCount64() -% last_post_tick;
-    if (age < reply_fast_ms) return 2000;
-    if (age < reply_window_ms) return 15000;
-    return null;
+    if (!std.mem.eql(u8, current.value.room_id, &front.selected.room_id) or !replyPending(current)) return null;
+    return 2000;
 }
 
 fn armReplyWatch() void {
@@ -1385,6 +1395,8 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             }
         },
         .failed => |failure| {
+            last_failure = failure;
+            if (fresh and commandVisible(item)) showFailure(failure);
             if (failure.kind == rooms.requestKind(item.kind) and failure.reason == .remote and failure.code_len > 0) {
                 const code = failure.code[0..failure.code_len];
                 if (!std.mem.eql(u8, code, "different_host") and !std.mem.eql(u8, code, "command_conflict")) {
@@ -1397,8 +1409,6 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     }
     const visible = fresh and commandVisible(item);
     if (state == .accepted and item.kind == .post) {
-        last_post_room = .{ .store = item.location, .room_id = item.room_id };
-        last_post_tick = w.GetTickCount64();
         dropSubmittedDraft(item);
     }
     if (evidence) |bytes| {
@@ -1531,7 +1541,7 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
         }
         metadata_read = null;
     }
-    if (kind == .status and status_generation == candidate_generation and candidate_scan > 0) candidate_scan -= 1;
+    if (kind == .members and status_generation == candidate_generation and candidate_scan > 0) candidate_scan -= 1;
     if (front == .selected) selection_waiting = true;
     item.awaiting_launch = false;
     c.launchPrepared(item.kind, &item.id, if (item.kind == .create) "" else &item.room_id, item.revision) catch {
@@ -1629,6 +1639,7 @@ pub fn pollTimer(id: usize) bool {
         .pending => unreachable,
         .failed => |failure| {
             last_failure = failure;
+            showFailure(failure);
             if (failure.kind == .catalog_metadata) {
                 finishMetadata(c, fresh, null);
                 return true;
@@ -1636,8 +1647,8 @@ pub fn pollTimer(id: usize) bool {
             if (failure.kind == .snapshot or failure.kind == .events) {
                 if (building_model) |old| freeOwned(old);
                 building_model = null;
-                if (!startSnapshot(c)) { view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
-            } else if (failure.kind != .status) {
+                if (!startSnapshot(c)) { showFailure(failure); armReplyWatch(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
+            } else if (failure.kind != .status and failure.kind != .members) {
                 if (failure.kind == .catalog) finishRefresh(c, false);
                 if (failure.kind == .capabilities or failure.kind == .catalog) scheduleDiscovery(c);
                 clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -1695,7 +1706,10 @@ pub fn pollTimer(id: usize) bool {
                 if (version != .integer or version.integer != 1 or !modes_agree or uuid != .string or !c.bindHost(uuid.string) or !savePin(uuid.string)) {
                     scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
+                const features = payload.object.get("room_features") orelse .null;
+                c.room_features = features == .array and features.array.items.len == 1 and features.array.items[0] == .integer and features.array.items[0].integer == 1;
                 c.live_send = live.bool;
+                if (!c.live_send and created and front != .hidden) view.showError("The server's room helper is unavailable or outdated. Reconnect a chat on this server, then try again.");
                 clearCatalog();
                 if (c.catalog(0, null)) return true;
                 scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
@@ -1733,46 +1747,10 @@ pub fn pollTimer(id: usize) bool {
                         }
                     }
                 }
-            } else if (result.kind == .status) {
-                const provider = payload.object.get("provider") orelse .null;
-                const sid = payload.object.get("sid") orelse .null;
-                const active = payload.object.get("enabled") orelse .null;
-                const alive = payload.object.get("alive") orelse .null;
-                const owner = payload.object.get("owner") orelse .null;
-                const shell = eligibleShell(pending_sid[0..pending_sid_len]);
-                if (status_generation == candidate_generation and provider == .string and std.mem.eql(u8, provider.string, "claude") and sid == .string and std.mem.eql(u8, sid.string, pending_sid[0..pending_sid_len]) and active == .bool and active.bool and alive == .bool and (owner == .null or (owner == .string and (std.mem.eql(u8, owner.string, "host") or std.mem.eql(u8, owner.string, "terminal")))) and shell != null and shell.?.name_len > 0 and shell.?.name_len <= shell.?.name.len and candidate_count < candidates.len) {
-                    var candidate = Candidate{};
-                    candidate.sid_len = pending_sid_len;
-                    @memcpy(candidate.sid[0..pending_sid_len], pending_sid[0..pending_sid_len]);
-                    var digest: [32]u8 = undefined;
-                    std.crypto.hash.sha2.Sha256.hash(pending_sid[0..pending_sid_len], &digest, .{});
-                    const hex = std.fmt.bytesToHex(digest, .lower);
-                    @memcpy(candidate.alias[0..6], "agent_");
-                    @memcpy(candidate.alias[6..30], hex[0..24]);
-                    candidate.alias_len = 30;
-                    var suffix: usize = 0;
-                    while (true) {
-                        var alias_taken = false;
-                        for (candidates[0..candidate_count]) |old| if (std.mem.eql(u8, old.alias[0..old.alias_len], candidate.alias[0..candidate.alias_len])) { alias_taken = true; break; };
-                        if (!alias_taken) break;
-                        suffix += 1;
-                        const alias = std.fmt.bufPrint(&candidate.alias, "agent_{s}_{x}", .{ hex[0..20], suffix }) catch break;
-                        candidate.alias_len = alias.len;
-                    }
-                    candidate.online = alive.bool and owner == .string and std.mem.eql(u8, owner.string, "host");
-                    candidate.host_uuid = c.host_uuid;
-                    @memcpy(candidate.session_identity[0..7], "claude:");
-                    @memcpy(candidate.session_identity[7 .. 7 + pending_sid_len], pending_sid[0..pending_sid_len]);
-                    candidate.session_identity_len = 7 + pending_sid_len;
-                    if (std.unicode.utf16LeToUtf8(&candidate.display_name, shell.?.name[0..shell.?.name_len])) |name_len| {
-                        candidate.display_name_len = name_len;
-                        if (name_len > 0 and std.mem.indexOfScalar(u8, candidate.display_name[0..name_len], 0) == null) {
-                            candidates[candidate_count] = candidate;
-                            candidate_count += 1;
-                            if (front == .create) _ = publishCreateCandidates();
-                        }
-                    } else |_| {}
-                }
+            } else if (result.kind == .members) {
+                if (!acceptMembers(c, payload)) {
+                    view.showError("Could not load the server's chat list. Reconnect and try again.");
+                } else if (front == .create) _ = publishCreateCandidates();
                 if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
             }
             if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -1809,8 +1787,8 @@ fn publishCreateCandidates() bool {
     const a = arena.allocator();
     var members: std.ArrayList(room_view.Member) = .empty;
     for (candidates[0..candidate_count]) |candidate| {
-        const shell = eligibleShell(candidate.sid[0..candidate.sid_len]) orelse continue;
-        const appearance = @import("bot_avatar.zig").forShell(shell);
+        const sid = candidate.sid[0..candidate.sid_len];
+        const appearance = if (eligibleShell(sid)) |shell| @import("bot_avatar.zig").forShell(shell) else @import("bot_avatar.zig").Appearance.forSession(sid);
         const alias = candidate.alias[0..candidate.alias_len];
         members.append(a, .{ .id = a.dupe(u8, alias) catch { arena.deinit(); return false; }, .name = wide(a, candidate.display_name[0..candidate.display_name_len]) orelse { arena.deinit(); return false; }, .alias = wide(a, alias) orelse { arena.deinit(); return false; }, .appearance = appearance, .name_color = @import("bot_avatar.zig").colors[appearance.color % @import("bot_avatar.zig").colors.len], .presence = if (candidate.online) .online else .offline }) catch { arena.deinit(); return false; };
     }
@@ -1979,23 +1957,29 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
 }
 
 fn postRequest(a: std.mem.Allocator, store_uuid: *const [36]u8, id: *const [36]u8, room_id: []const u8, revision: u64, text: []const u8, recipients: []const []const u8) ![]u8 {
-    return std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .host_uuid = store_uuid[0..], .command_id = id[0..], .room_id = room_id, .expected_revision = revision, .text = text, .recipients = recipients }, .{});
+    return std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .room_features = 1, .host_uuid = store_uuid[0..], .command_id = id[0..], .room_id = room_id, .expected_revision = revision, .text = text, .recipients = recipients }, .{});
 }
 
 fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, value: []const u16) room_view.ActionResult {
     if (!enabled or !created or front != .selected or room_id.len != 36 or revision == 0) return .failed;
     const c = if (controller) |*active| active else return .failed;
-    if (!c.live_send) return .unsupported;
+    if (!c.live_send or !c.room_features) {
+        view.showError("The server's room helper is unavailable or outdated. Reconnect a chat on this server, then try again.");
+        return .failed;
+    }
     const current = owned_model orelse return .failed;
     if (!std.mem.eql(u8, room_id, &front.selected.room_id) or !std.mem.eql(u8, current.value.room_id, room_id) or current.value.revision != revision) return .failed;
     var text_buf: [196608]u8 = undefined;
     const text_len = std.unicode.utf16LeToUtf8(&text_buf, value) catch return .failed;
     const text = text_buf[0..text_len];
     if (!room_post.validText(text) or current.bindings.items.len > room_post.max_recipients) return .failed;
-    var aliases: [room_post.max_recipients][]const u8 = undefined;
-    for (current.bindings.items, 0..) |binding, index| aliases[index] = binding.member.alias;
+    var names: [room_post.max_recipients]room_post.Recipient = undefined;
+    for (current.bindings.items, 0..) |binding, index| names[index] = .{ .alias = binding.member.alias, .display_name = binding.member.display_name };
     var picked: [room_post.max_recipients][]const u8 = undefined;
-    const count = room_post.recipients(text, aliases[0..current.bindings.items.len], &picked) orelse return .failed;
+    const count = room_post.namedRecipients(text, names[0..current.bindings.items.len], &picked) orelse {
+        view.showError("Choose a unique member name from the @ picker, then try again.");
+        return .failed;
+    };
     if (pending_command) |item| {
         if (item.evidence == null or item.kind != .post) return .failed;
         const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch return .failed;
@@ -2094,7 +2078,16 @@ pub fn openNewRoom(hwnd: w.HANDLE) void {
 }
 
 pub fn openCreate() void {
-    if (!saveDraft() or !enter()) return;
+    const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    if (!saveDraft()) {
+        _ = w.MessageBoxW(app_state.g_main_hwnd, L("Could not save your room draft. Try again before creating another room."), L("Rooms"), 0x10);
+        return;
+    }
+    if (!enter()) {
+        const reason: w.LPCWSTR = if (app_state.g_account_locked) L("Unlock your account before creating a room.") else if (account_len == 0) L("Sign in before creating a room.") else L("Room state is not ready. Wait for account sync, then try again.");
+        _ = w.MessageBoxW(app_state.g_main_hwnd, reason, L("Rooms"), 0x10);
+        return;
+    }
     restore_pending = false;
     selection_generation +%= 1;
     selection_waiting = false;
@@ -2106,7 +2099,16 @@ pub fn openCreate() void {
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.openCreate();
-    view.showUnavailable();
+    if (account_len == 0) {
+        view.showError("Sign in before creating a room.");
+        return;
+    }
+    var has_route = false;
+    for (applied_routes) |route| if (route != null) { has_route = true; break; };
+    if (!has_route) {
+        view.showError("Add a server to your account before creating a room.");
+        return;
+    }
     discovery_attempts = 0;
     beginDiscovery(false);
     if (controller) |*c| if (c.job == null and nextStatus(c)) { _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null); };
@@ -2257,7 +2259,6 @@ pub fn deinit() void {
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE);
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
     stopReplyWatch();
-    last_post_room = null;
     discovery_waiting = false;
     if (controller) |*c| c.shutdown();
     controller = null;
