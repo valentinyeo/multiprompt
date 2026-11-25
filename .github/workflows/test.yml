@@ -255,6 +255,9 @@ jobs:
       - name: Test installer prune
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/install-prune.test.js
+      - name: Prove a connected browser pane re-docks instead of showing Opening browser
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        run: node --test tools/browser-pane-redock.test.js
       - name: Check local listener accounts
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         shell: pwsh

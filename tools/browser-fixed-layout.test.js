@@ -52,8 +52,12 @@ test("placeholder paints the slot, is overlay-aware, and is wired into WM_PAINT"
   assert.match(paint, /themeConsoleBg\(\)/, "fills with the theme background");
   assert.match(paint, /Opening browser/);
   assert.match(paint, /Browser could not connect/);
-  assert.match(functionBody("browserPlaceholderPure"), /BROWSER_PLACEHOLDER_NOT_OPEN_MS/);
-  assert.match(source, /test "browserPlaceholderPure/);
+  assert.match(paint, /state == \.redock/);
+  const redockFile = path.join(root, 'src/browser_pane_redock.zig');
+  const redock = fs.existsSync(redockFile) ? fs.readFileSync(redockFile, 'utf8') : '';
+  assert.match(redock, /fn browserPlaceholderPure/);
+  assert.match(redock, /BROWSER_PLACEHOLDER_NOT_OPEN_MS/);
+  assert.match(redock, /test "browserPlaceholderPure/);
   assert.equal((source.match(/paintBrowserPlaceholder\(/g) || []).length, 3, "definition + both WM_PAINT paths");
   assert.match(functionBody("browserPaneCoversSlot"), /return !browserRectIsParked\(wr\)/, "a parked pane does not count as covering");
 });
