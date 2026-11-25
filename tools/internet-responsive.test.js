@@ -96,10 +96,12 @@ test('SOFT-3067 room transport runs remote work off the UI thread', () => {
   const transport = read('src/room_transport.zig');
   const start = fnBody(transport, 'pub fn start');
   const run = fnBody(transport, 'fn run');
+  const attempt = fnBody(transport, 'fn attempt');
   const shutdown = fnBody(read('src/rooms.zig'), 'pub fn shutdown');
   assert.match(start, /Thread\.spawn/, 'room transport must start on a worker');
   assert.doesNotMatch(start, longWait, 'start must not wait for the helper handshake');
-  assert.match(run, longWait, 'run owns the helper-ready wait');
+  assert.match(run, /attempt\(job,/, 'the worker starts the helper handshake on its own thread');
+  assert.match(attempt, longWait, 'the worker owns the helper-ready wait');
   assert.match(shutdown, uiBusy, 'room shutdown must not join a live worker on the GUI thread');
 });
 
