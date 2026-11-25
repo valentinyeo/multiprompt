@@ -395,22 +395,49 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   const before = path.join(directory, 'before.exe');
   await download(old, 'multiprompt-x64.exe', before);
   assert.match(fs.readFileSync(before, 'latin1'), /MPVERSION=0\.28\.983;/, 'Pinned old painter is not the v0.28.983 release binary');
-  const proof = (binary, label, contract) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', notes,
+  const beforeNotes = path.join(directory, 'before-notes.json');
+  await download(old, 'release-notes.json', beforeNotes);
+  const beforeHistory = JSON.parse(fs.readFileSync(beforeNotes, 'utf8'));
+  assert.equal(beforeHistory.version, '0.28.983', 'Pinned old notes are not the ones v0.28.983 shipped with');
+  const beforeLines = beforeHistory.releases.flatMap(release => release.changes);
+  assert.ok(beforeLines.length > 0, 'Pinned old release named no change');
+  assert.ok(beforeLines.every(line => !/^[A-Z]+-\d+ /.test(line)), 'v0.28.983 shipped plain note lines, before ticket keys');
+  const evidence = path.join(root, 'evidence/wrapped-card');
+  fs.rmSync(evidence, { recursive: true, force: true });
+  const keepEvidence = label => {
+    const target = path.join(evidence, label);
+    fs.mkdirSync(target, { recursive: true });
+    for (const name of ['released-card.png', 'released-card.json', 'wrapped-card.json', 'debug.log']) {
+      const file = path.join(directory, label, name);
+      if (fs.existsSync(file)) fs.copyFileSync(file, path.join(target, name));
+    }
+  };
+  const proof = (binary, source, label, contract) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', source,
     '-Evidence', path.join(directory, label), '-Wrapped', '-Contract', contract],
   { encoding: 'utf8', timeout: 180000, maxBuffer: 32 * 1024 * 1024 });
-  const red = proof(before, 'red', 'released');
+  const red = proof(before, beforeNotes, 'red', 'released');
+  keepEvidence('red');
+  fs.writeFileSync(path.join(evidence, 'red', 'provenance.json'), JSON.stringify({
+    tag: old.tag_name,
+    binary: old.assets.find(asset => asset.name === 'multiprompt-x64.exe').digest,
+    notes: old.assets.find(asset => asset.name === 'release-notes.json').digest,
+    notesVersion: beforeHistory.version,
+    notesChanges: beforeLines.length,
+  }, null, 2));
   assert.notEqual(red.status, 0, red.stdout + red.stderr);
   assert.match(red.stdout + red.stderr, /Card did not expose wrapped note bounds/);
   const redReceipt = JSON.parse(fs.readFileSync(path.join(directory, 'red', 'released-card.json'), 'utf8'));
   assert.equal(redReceipt.contract, 'released');
   assert.equal(redReceipt.binaryVersion, '0.28.983');
+  assert.equal(redReceipt.version, '0.28.983');
   assert.ok(redReceipt.painted.length > 0, 'The pinned old painter named no published note, so it cannot prove the wrapping rejection');
-  for (const line of redReceipt.painted) assert.match(line, /^IGSH-\d+ /);
+  for (const line of redReceipt.painted) assert.ok(beforeLines.includes(line), `Old painter named a line its own release never published: ${line}`);
   assert.deepEqual(redReceipt.ids, []);
   assert.equal(redReceipt.seeAll, false);
-  console.log('WRAPPED_CARD_RED v0.28.983 painted real published notes without wrapped bounds');
-  const green = proof(exe, 'green', 'new');
+  console.log('WRAPPED_CARD_RED v0.28.983 painted its own published notes without wrapped bounds');
+  const green = proof(exe, notes, 'green', 'new');
+  keepEvidence('green');
   assert.equal(green.status, 0, green.stdout + green.stderr);
   assert.match(green.stdout, /WRAPPED_CARD_RECEIPT=/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-normal:/);

@@ -6,12 +6,7 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $document = Get-Content $Notes -Raw | ConvertFrom-Json
 $changes = @($document.releases | Where-Object { $_.version -eq $document.version } | ForEach-Object { $_.changes })
 if ($Wrapped) {
-    $pool = @($document.releases | ForEach-Object { $_.changes })
-    if ($Contract -eq 'released') {
-        $pool = @($pool | Where-Object { $_ -match '^IGSH-\d+ ' })
-        if ($pool.Count -eq 0) { throw 'Released old painter proof needs published IGSH notes' }
-    }
-    $changes = @($pool | Sort-Object { $_.Length } -Descending | Select-Object -First 16)
+    $changes = @($document.releases | ForEach-Object { $_.changes } | Sort-Object { $_.Length } -Descending | Select-Object -First 16)
 }
 if ($changes.Count -eq 0) { throw 'Released card proof needs real product notes' }
 $binaryVersion = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)), 'MPVERSION=(\d+\.\d+\.\d+);')
@@ -69,9 +64,8 @@ try {
     if ([int]$views[$views.Count - 1].Groups[1].Value -ne $named.Count) { throw 'Released card view count differs from its note lines' }
     if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
     if ($Contract -eq 'released') {
-        $legacy = @($published | Where-Object { $_ -match '^IGSH-\d+ ' })
-        if ($named.Count -gt [Math]::Min(3, $legacy.Count)) { throw 'Released old card painted more lines than its own filter keeps' }
-        foreach ($line in $named) { if ($legacy -notcontains $line) { throw 'Released old card painted a line it never published verbatim' } }
+        if ($named.Count -gt [Math]::Min(3, $published.Count)) { throw 'Released old card painted more lines than its own filter keeps' }
+        foreach ($line in $named) { if ($published -notcontains $line) { throw 'Released old card painted a line it never published verbatim' } }
         if ($text -match '\[update\] card note id ') { throw 'Released old card already logs a ticket id' }
         if ($text -match '\[update\] card see all=') { throw 'Released old card already links the release notes' }
         if ($Wrapped -and $named.Count -eq 0) { throw 'Released old painter named no published note to wrap' }
