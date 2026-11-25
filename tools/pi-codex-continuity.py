@@ -33,7 +33,9 @@ def credentials(home, proof):
     payload = access.split('.')[1]
     claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
     expires = claims.get('exp')
-    account = tokens.get('account_id') or (claims.get('https://api.openai.com/auth') or {}).get('chatgpt_account_id')
+    auth_claim = next((value for key, value in claims.items()
+                       if isinstance(value, dict) and key.endswith('/auth') and isinstance(value.get('chatgpt_account_id'), str)), {})
+    account = tokens.get('account_id') or auth_claim.get('chatgpt_account_id')
     proof['credential_preflight'] = dict(account_id_present=isinstance(account, str) and bool(account),
                                         expiry_present=type(expires) in (int, float),
                                         access_token_current=type(expires) in (int, float) and expires > time.time())

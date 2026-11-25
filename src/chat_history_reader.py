@@ -3730,6 +3730,9 @@ def host_resume(provider, sid, tmux=None, cwd=None, mode=None):
 
 def host_send(provider, sid, text, tmux=None):
     import uuid
+    moved = host_switch_follow(sid)
+    if moved is not None:
+        provider, sid = moved
     if not host_identity(provider, sid):
         return dict(status='refused', reason='unsupported_provider')
     if not isinstance(text, str) or not text.strip() or '\x00' in text:
@@ -3744,7 +3747,14 @@ def host_send(provider, sid, text, tmux=None):
     store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
     try:
         submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text, origin='agent'))
+        queued = submitted.get('message') if isinstance(submitted, dict) else None
+        if isinstance(queued, dict) and host_identity(queued.get('provider'), queued.get('sid')):
+            store['provider'], store['sid'] = queued['provider'], queued['sid']
         message_store_request(dict(store, op='message_dispatch'))
+        later = host_switch_follow(store['sid'])
+        if later is not None and later != (store['provider'], store['sid']):
+            store['provider'], store['sid'] = later
+            message_store_request(dict(store, op='message_dispatch'))
         message = message_store_request(dict(store, op='message_status', message_id=token)).get('message')
     except (OSError, ValueError, KeyError, TypeError):
         return dict(status='error', reason='message_store_failed', id=token)
@@ -4984,11 +4994,28 @@ def host_switch_abort(target, new_sid, paths=None):
 
 
 def host_switch_ai(provider, sid, target, reason=None):
-    moved = host_switch_follow(sid)
-    if moved is not None:
-        provider, sid = moved
-    if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
-        return dict(status="refused", reason="unsupported_provider")
+    import fcntl
+    reply = dict(status="refused", reason="unsupported_provider")
+    for _ in range(5):
+        moved = host_switch_follow(sid)
+        if moved is not None:
+            provider, sid = moved
+        if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
+            return dict(status="refused", reason="unsupported_provider")
+        with message_dispatch_lock_path(provider, sid).open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            later = host_switch_follow(sid)
+            if later is not None and later != (provider, sid):
+                provider, sid = later
+                continue
+            reply = host_switch_ai_locked(provider, sid, target, reason)
+            break
+    if reply.get("status") == "switched":
+        start_message_worker(dict(tmux=reply["tmux"], provider=reply["provider"], sid=reply["sid"]), host_reader_source())
+    return reply
+
+
+def host_switch_ai_locked(provider, sid, target, reason=None):
     config = host_config(provider, sid)
     if config is None:
         return dict(status="refused", reason="host_disabled")
@@ -5032,7 +5059,14 @@ def host_switch_ai(provider, sid, target, reason=None):
             host_start(provider, sid)
         return dict(status="error", reason="switch_start_failed", provider=provider, sid=sid, tmux=tmux,
                     running=HOST_AI_NAMES[provider], start=started)
+    switched_path = host_switched_path()
+    previous_moved = host_read(switched_path)
+    moved_map = dict(previous_moved) if isinstance(previous_moved, dict) else {}
+    old_config_path = host_paths(provider, sid)["config"]
     try:
+        moved_map[sid] = [target, new_sid]
+        host_write(switched_path, moved_map)
+        host_write(old_config_path, dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
         from contextlib import closing
         with closing(message_store_db(tmux)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -5041,11 +5075,12 @@ def host_switch_ai(provider, sid, target, reason=None):
             db.execute("INSERT OR REPLACE INTO message_locators(provider,sid,tmux) VALUES (?,?,?)", (target, new_sid, tmux))
             db.execute("UPDATE shared_messages SET provider=?, sid=?, epoch=0 WHERE provider=? AND sid=? AND state='queued'",
                        (target, new_sid, provider, sid))
-        moved_map = host_read(host_switched_path()) or {}
-        moved_map[sid] = [target, new_sid]
-        host_write(host_switched_path(), moved_map)
-        host_write(host_paths(provider, sid)["config"], dict(config, enabled=False, switched_to=dict(provider=target, sid=new_sid)))
     except (OSError, ValueError, sqlite3.Error):
+        if isinstance(previous_moved, dict):
+            host_write(switched_path, previous_moved)
+        elif switched_path.exists():
+            switched_path.unlink(missing_ok=True)
+        host_write(old_config_path, config)
         host_stop(target, new_sid)
         host_switch_abort(target, new_sid, paths)
         return dict(status="error", reason="switch_failed")
@@ -7518,6 +7553,12 @@ def message_recall(provider, sid, tmux, token, attempt, text):
     return dict(status='refused', reason='recall_unavailable')
 
 
+def message_dispatch_lock_path(provider, sid):
+    path = message_store_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
+
+
 def message_store_request(q):
     import fcntl
     provider, sid, tmux = q.get('provider'), q.get('sid'), q.get('tmux')
@@ -7527,10 +7568,7 @@ def message_store_request(q):
         raise ValueError('invalid message protocol or identity')
     if q.get('op') not in ('message_dispatch', 'message_reset'):
         return message_store_transaction(q)
-    path = message_store_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
-    with lock_path.open('a') as lock:
+    with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return message_store_transaction(q)
 
@@ -7545,6 +7583,10 @@ def message_store_transaction(q):
         resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
     with closing(message_store_db(tmux)) as db, db:
         db.execute('BEGIN IMMEDIATE')
+        if op == 'message_submit':
+            moved = host_switch_follow(sid)
+            if moved is not None:
+                provider, sid = moved
         db.execute('INSERT OR IGNORE INTO message_chats(provider,sid) VALUES (?,?)', (provider, sid))
         epoch, seq = db.execute('SELECT epoch,seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         if provider == 'codex':
@@ -7863,9 +7905,7 @@ def message_store_transaction(q):
 
 def message_poll(tmux, provider, sid):
     import fcntl
-    path = message_store_path()
-    lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.dispatch')
-    with lock_path.open('a') as lock:
+    with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         message_poll_locked(tmux, provider, sid)
 

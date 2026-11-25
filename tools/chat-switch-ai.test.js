@@ -183,3 +183,108 @@ with tempfile.TemporaryDirectory() as directory:
     print('SWITCH_AI_PASS')
 `);
 });
+
+test('a send arriving after idle and during switch handoff never dispatches to the old host and preserves queued identity', () => {
+  python(setup + String.raw`
+import threading
+with tempfile.TemporaryDirectory() as directory:
+    transcript = prepare(directory)
+    handoff_entered = threading.Event()
+    handoff_release = threading.Event()
+    dispatch_entered = threading.Event()
+    delivered = []
+    switch_out = []
+    send_out = []
+    orig_store = r['message_store_request']
+
+    def fake_start(p, s):
+        handoff_entered.set()
+        assert handoff_release.wait(timeout=5)
+        return dict(status='started')
+
+    def fake_deliver(p, s, token, attempt, epoch, text, room_scope=None):
+        delivered.append((p, s, text))
+        return dict(status='sent')
+
+    def traced_store(q):
+        if q.get('op') == 'message_dispatch' and q.get('provider') == 'claude':
+            dispatch_entered.set()
+        return orig_store(q)
+
+    with patch.dict(r, conversation_path=lambda *args: transcript, host_start=fake_start,
+                    host_deliver=fake_deliver, host_dispatch_start=lambda *args: dict(status='owned'),
+                    host_owned=lambda *args: False, host_turn_busy=lambda *args: False,
+                    message_store_request=traced_store):
+        t_switch = threading.Thread(target=lambda: switch_out.append(
+            r['host_reply'](dict(op='switch_ai', provider='claude', sid=sid, to='antigravity'))))
+        t_switch.start()
+        assert handoff_entered.wait(timeout=5)
+        t_send = threading.Thread(target=lambda: send_out.append(
+            r['host_send']('claude', sid, 'SEND-DURING-HANDOFF', tmux)))
+        t_send.start()
+        assert dispatch_entered.wait(timeout=5)
+        t_send.join(timeout=0.1)
+        assert t_send.is_alive() and delivered == [], (t_send.is_alive(), delivered)
+        handoff_release.set()
+        t_switch.join(timeout=5)
+        t_send.join(timeout=5)
+        assert not t_switch.is_alive() and not t_send.is_alive()
+        reply = switch_out[0]
+        assert reply.get('status') == 'switched' and reply.get('provider') == 'antigravity', reply
+        new_sid = reply['sid']
+        send_reply = send_out[0]
+        assert send_reply.get('status') in ('sent', 'queued'), send_reply
+        orig_store(dict(message_protocol=1, provider='antigravity', sid=new_sid, tmux=tmux, op='message_dispatch'))
+    assert all(p == 'antigravity' and s == new_sid for p, s, _ in delivered), delivered
+    assert [text for _, _, text in delivered] == ['WAITING-TEXT', 'SEND-DURING-HANDOFF'], delivered
+    with closing(r['message_store_db'](tmux)) as db:
+        assert db.execute('SELECT provider,sid FROM message_locators WHERE tmux=?', (tmux,)).fetchall() == [('antigravity', new_sid)]
+        rows = db.execute('SELECT provider,sid,text,state FROM shared_messages ORDER BY position').fetchall()
+        assert rows == [('antigravity', new_sid, 'WAITING-TEXT', 'sent'), ('antigravity', new_sid, 'SEND-DURING-HANDOFF', 'sent')], rows
+    config = r['host_config']('antigravity', new_sid)
+    assert config['face'] == 'custom' and config['login'] == 'same-agent' and config['tmux'] == tmux, config
+    assert r['host_config']('claude', sid) is None
+    print('SWITCH_AI_PASS')
+`);
+});
+
+test('a switch waiting behind an active dispatch sees the busy turn and refuses without interrupting the old host', () => {
+  python(setup + String.raw`
+import threading
+with tempfile.TemporaryDirectory() as directory:
+    transcript = prepare(directory)
+    deliver_entered = threading.Event()
+    deliver_release = threading.Event()
+    busy = [False]
+    stopped = []
+    switch_out = []
+
+    def fake_deliver(p, s, token, attempt, epoch, text, room_scope=None):
+        deliver_entered.set()
+        assert deliver_release.wait(timeout=5)
+        busy[0] = True
+        return dict(status='sent')
+
+    with patch.dict(r, conversation_path=lambda *args: transcript, host_deliver=fake_deliver,
+                    host_dispatch_start=lambda *args: dict(status='owned'),
+                    host_turn_busy=lambda *args: busy[0],
+                    host_stop=lambda *args: stopped.append(args) or dict(status='stopped')):
+        t_dispatch = threading.Thread(target=lambda: r['message_store_request'](
+            dict(message_protocol=1, provider='claude', sid=sid, tmux=tmux, op='message_dispatch')))
+        t_dispatch.start()
+        assert deliver_entered.wait(timeout=5)
+        t_switch = threading.Thread(target=lambda: switch_out.append(
+            r['host_reply'](dict(op='switch_ai', provider='claude', sid=sid, to='antigravity'))))
+        t_switch.start()
+        t_switch.join(timeout=0.1)
+        assert t_switch.is_alive()
+        deliver_release.set()
+        t_dispatch.join(timeout=5)
+        t_switch.join(timeout=5)
+        assert not t_dispatch.is_alive() and not t_switch.is_alive()
+    assert switch_out == [dict(status='busy', reason='chat_busy')], switch_out
+    assert stopped == [], stopped
+    assert r['host_config']('claude', sid) is not None and r['host_switch_follow'](sid) is None
+    print('SWITCH_AI_PASS')
+`);
+});
