@@ -118,6 +118,7 @@ const PaintLogRule = struct { id: []const u8, line: []const u8, heartbeat_ms: u6
 const PAINT_LOG_HEARTBEAT_MS: u64 = 60_000;
 const PAINT_LOG_DIVIDER_HEARTBEAT_MS: u64 = 5_000;
 const PAINT_LOG_TRACE_HEARTBEAT_MS: u64 = 10_000;
+const PAINT_LOG_POSITION_HEARTBEAT_MS: u64 = 1_000;
 const PAINT_LOG_SLOW_MS: u64 = 8;
 const SLOW_CALL_LOG_MS: u64 = 30;
 
@@ -135,9 +136,10 @@ fn paintLogRule(msg: []const u8) ?PaintLogRule {
         return .{ .id = msg[start..], .line = msg };
     }
     if (std.mem.startsWith(u8, msg, "[chat] position ")) {
-        const state = std.mem.indexOf(u8, msg, " shell=") orelse return null;
-        const end = std.mem.indexOf(u8, msg, " paints=") orelse msg.len;
-        return .{ .id = "[chat] position", .line = msg[state..end], .heartbeat_ms = 1000 };
+        const anchor_at = std.mem.indexOf(u8, msg, " shell=") orelse return null;
+        const offset_at = std.mem.indexOf(u8, msg, " offset=") orelse return null;
+        const offset_end = std.mem.indexOfPos(u8, msg, offset_at + 1, " ") orelse msg.len;
+        return .{ .id = "[chat] position", .line = msg[anchor_at..offset_end], .heartbeat_ms = PAINT_LOG_POSITION_HEARTBEAT_MS };
     }
     if (std.mem.startsWith(u8, msg, "[chat] unread divider ")) {
         return .{ .id = "[chat] unread divider", .line = msg, .heartbeat_ms = PAINT_LOG_DIVIDER_HEARTBEAT_MS };
@@ -683,6 +685,33 @@ test "IGSH-1973 an unchanged divider line logs again only after the heartbeat" {
     try std.testing.expect(limiter.allow(rule.id, rule.line, 6000, rule.heartbeat_ms));
     const moved = paintLogRule("[chat] unread divider count=1 marker=3 index=2 unknown=0 y=11 message_y=4 scroll=1 message=7 offset=9 line_y=25").?;
     try std.testing.expect(limiter.allow(moved.id, moved.line, 6001, moved.heartbeat_ms));
+}
+
+test "MUBO-17 a streamed reply writes one position line a second while the anchor holds" {
+    var limiter: PaintLogLimiter = .{};
+    var line_buf: [256]u8 = undefined;
+    var now: u64 = 0;
+    var logged: usize = 0;
+    var paint: usize = 0;
+    while (paint < 10) : (paint += 1) {
+        const line = std.fmt.bufPrint(&line_buf, "[chat] position ms={d} shell=4 first=195 message=6700550409506523756 offset=101878 y={d} scroll={d} height={d} pad=52 opening=1047375 paints={d} layouts={d} tick={d}", .{
+            now, -24 - @as(i64, @intCast(paint)), 19040 + paint * 62, 19650 + paint * 62, paint, paint, now,
+        }) catch unreachable;
+        const rule = paintLogRule(line).?;
+        if (limiter.allow(rule.id, rule.line, now, rule.heartbeat_ms)) logged += 1;
+        now += 100;
+    }
+    try std.testing.expect(logged == 1);
+    const moved = paintLogRule("[chat] position ms=1100 shell=4 first=196 message=6700550409506523756 offset=102900 y=12 scroll=19192 height=19802 pad=52 opening=1047375 paints=11 layouts=10 tick=1100").?;
+    try std.testing.expect(limiter.allow(moved.id, moved.line, now, moved.heartbeat_ms));
+    const later = paintLogRule("[chat] position ms=2200 shell=4 first=195 message=6700550409506523756 offset=101878 y=-90 scroll=19200 height=19900 pad=52 opening=1047375 paints=12 layouts=11 tick=2200").?;
+    try std.testing.expect(limiter.allow(later.id, later.line, now, later.heartbeat_ms));
+}
+
+test "MUBO-17 no per-fetch performance line is written for the reply parse or the cache write" {
+    const source = @embedFile("chat_session.zig");
+    try std.testing.expect(std.mem.indexOf(u8, source, "chatPerf(\"parse\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "chatPerf(\"cache write\"") == null);
 }
 
 test "IGSH-1973 chat performance lines log on change or when slow and always for receive to paint" {

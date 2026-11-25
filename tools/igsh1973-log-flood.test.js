@@ -10,7 +10,7 @@ const repaintLoggers = {
   chatShellSyncBuild: 'logs only when the shell view changed',
   chatChoicesLog: 'logs only when the choice hash changed',
   chatPaintReadDivider: 'goes through the paint log rule in diagnostics',
-  chatLogPosition: 'position changes or a one-second snapshot, not each paint',
+  chatLogPosition: 'the anchor changes or a one-second snapshot, not each paint',
   chatPaintTranscriptContent: 'logs the missing history note once',
 };
 
@@ -55,6 +55,17 @@ test('IGSH-1973 every repeating diagnostic line is deduplicated with a heartbeat
   assert.match(rules, /"receive to paint"\)\) return null/);
   assert.match(diagnostics, /if \(paintLogRule\(msg\)\) \|rule\| \{\s*if \(!paintLogAllowed\(rule\)\) return;/);
   assert.match(diagnostics, /\(heartbeat_ms == 0 or now -\| entry\.at < heartbeat_ms\)/);
+});
+
+test('MUBO-17 a streamed reply does not log a line per fetch or per paint', () => {
+  const diagnostics = read('src/diagnostics.zig');
+  const positionRule = diagnostics.slice(diagnostics.indexOf('"[chat] position "'), diagnostics.indexOf('"[chat] unread divider "'));
+  assert.match(positionRule, /\.line = msg\[anchor_at\.\.offset_end\]/);
+  assert.doesNotMatch(positionRule, /paints=/);
+  const session = read('src/chat_session.zig');
+  assert.doesNotMatch(session, /chatPerf\("parse"/);
+  assert.doesNotMatch(session, /chatPerf\("cache write"/);
+  assert.match(session, /cacheWriteDue\(entry\.cache_written/);
 });
 
 test('IGSH-1973 the repeating lines are still emitted by their owners so the rules stay live', () => {

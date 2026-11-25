@@ -700,6 +700,18 @@ fn chatFilePollInterval() u64 {
     return 500;
 }
 
+pub fn cacheWriteDue(cache_written: u64, now: u64) bool {
+    return cache_written == 0 or now -| cache_written >= chat_history.CACHE_WRITE_MS;
+}
+
+test "a streamed push does not rewrite the transcript cache inside the write interval" {
+    const written = 10_000;
+    try std.testing.expect(!cacheWriteDue(written, written + 1));
+    try std.testing.expect(!cacheWriteDue(written, written + chat_history.CACHE_WRITE_MS - 1));
+    try std.testing.expect(cacheWriteDue(written, written + chat_history.CACHE_WRITE_MS));
+    try std.testing.expect(cacheWriteDue(0, 10_000));
+}
+
 fn chatQuietBackoff(quiet: u16) u64 {
     if (quiet < 1) return 4000;
     if (quiet < 2) return 8000;
@@ -1377,7 +1389,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             } else if (!delta) entry.backfill.deinit(a);
         }
     }
-    chatPerf("parse", parse_start, wire.items.len);
     if (ok) {
         if (!entry.staged and !entry.incremental and !entry.prepended and !entry.unchanged and entry.history.text.items.len > 0 and
             std.mem.eql(u16, entry.history.text.items, history.text.items) and std.meta.eql(entry.history.status, history.status))
@@ -1388,8 +1399,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         const changed = !entry.staged and history.revision != entry.history.revision;
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
-        if (if (!entry.staged and entry.cache_dirty and (pushed != null or entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
-            const write_start = GetTickCount64();
+        if (if (!entry.staged and entry.cache_dirty and cacheWriteDue(entry.cache_written, GetTickCount64())) chatHistoryPath(key, &path_buf) else null) |path| {
             var snapshot = history.cursor();
             defer snapshot.deinit(a);
             var snapshot_ok = true;
@@ -1426,7 +1436,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                         }
                     } else debugLog("[chat] transcript cache write failed");
                 }
-                chatPerf("cache write", write_start, bytes.len);
             } else |_| debugLog("[chat] transcript cache encode failed");
         }
         history.received_ms = if (!entry.staged and !entry.unchanged) parse_start else 0;
