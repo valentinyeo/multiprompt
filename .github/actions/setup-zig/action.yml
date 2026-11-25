@@ -2,6 +2,10 @@ name: Set up Zig
 description: Restore the pinned Zig archive from cache, download it with a time limit and retries on a miss, check its checksum and add Zig to PATH.
 
 inputs:
+  mirror:
+    description: Optional Zig community mirror; the pinned archive checksum is still required
+    required: false
+    default: ''
   cache:
     description: Restore the optional archive cache before downloading
     required: false
@@ -25,6 +29,7 @@ runs:
       shell: bash
       env:
         ZIG_VERSION: ${{ inputs.version }}
+        ZIG_MIRROR: ${{ inputs.mirror }}
         ZIG_ARCHIVE: ${{ runner.temp }}/zig-archive-${{ inputs.version }}/zig.tar.xz
       run: |
         set -euo pipefail
@@ -45,7 +50,9 @@ runs:
           rm -f "$archive"
         fi
         if [ ! -f "$archive" ]; then
-          curl -fsSL --connect-timeout 20 --max-time 240 --speed-limit 2048 --speed-time 45 --retry 3 --retry-max-time 300 "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" -o "$archive"
+          url="https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+          if [ -n "$ZIG_MIRROR" ]; then url="${ZIG_MIRROR%/}/zig-x86_64-linux-$ZIG_VERSION.tar.xz"; fi
+          curl -fsSL --connect-timeout 20 --max-time 240 --speed-limit 2048 --speed-time 45 --retry 3 --retry-max-time 300 "$url" -o "$archive"
         fi
         echo "$expected  $archive" | sha256sum -c -
         tar -xf "$archive" -C "$RUNNER_TEMP"
@@ -55,6 +62,7 @@ runs:
       shell: pwsh
       env:
         ZIG_VERSION: ${{ inputs.version }}
+        ZIG_MIRROR: ${{ inputs.mirror }}
         ZIG_ARCHIVE: ${{ runner.temp }}/zig-archive-${{ inputs.version }}/zig.zip
       run: |
         $ErrorActionPreference = 'Stop'
@@ -83,7 +91,9 @@ runs:
           if ((Get-Date) -gt $deadline) { break }
           Write-Host "Zig $pinned download attempt $attempt of $limit"
           try {
-            Invoke-WebRequest "https://ziglang.org/download/$pinned/zig-x86_64-windows-$pinned.zip" -OutFile $archive -TimeoutSec 180
+            $url = "https://ziglang.org/download/$pinned/zig-x86_64-windows-$pinned.zip"
+            if ($env:ZIG_MIRROR) { $url = "$($env:ZIG_MIRROR.TrimEnd('/'))/zig-x86_64-windows-$pinned.zip" }
+            Invoke-WebRequest $url -OutFile $archive -TimeoutSec 180
           } catch {
             Write-Host "Zig $pinned download attempt $attempt failed: $_"
             Remove-Item -Force -ErrorAction SilentlyContinue $archive
