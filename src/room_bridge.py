@@ -40,8 +40,10 @@ def private_file(directory, name, limit):
 
 
 RUNTIME_SOURCE = b''
+RUNTIME_FINGERPRINT = ''
 STORE_DIRECTORY = None
 PUBLISHED_MARKER = 'runtime-published'
+DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 
 
 def active_runtime():
@@ -53,16 +55,19 @@ def active_runtime():
 
 
 def published_marker():
+    if not STORE_DIRECTORY:
+        return {}
     try:
-        return Path(STORE_DIRECTORY, PUBLISHED_MARKER).read_text(encoding='utf-8', errors='replace').strip()
+        marker = json.loads(Path(STORE_DIRECTORY, PUBLISHED_MARKER).read_text(encoding='utf-8', errors='replace'))
     except (OSError, ValueError):
-        return ''
+        return {}
+    if not isinstance(marker, dict) or not isinstance(marker.get('reader'), str) or not isinstance(marker.get('active'), str):
+        return {}
+    return marker
 
 
-def remember_published():
-    active = active_runtime()
-    sha256 = active.get('sha256') if active else None
-    if not isinstance(sha256, str):
+def remember_published(reader, digest):
+    if not STORE_DIRECTORY or not reader or not DIGEST.fullmatch(digest):
         return
     try:
         path = Path(STORE_DIRECTORY, PUBLISHED_MARKER)
@@ -70,7 +75,7 @@ def remember_published():
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 os.fchmod(stream.fileno(), 0o600)
-                stream.write(sha256)
+                stream.write(json.dumps({'reader': reader, 'active': digest}, separators=(',', ':')))
             os.replace(temporary, path)
         finally:
             try:
@@ -81,11 +86,33 @@ def remember_published():
         pass
 
 
+def runtime_fingerprint():
+    if RUNTIME_FINGERPRINT and DIGEST.fullmatch(RUNTIME_FINGERPRINT):
+        return RUNTIME_FINGERPRINT
+    return hashlib.sha256(RUNTIME_SOURCE).hexdigest() if RUNTIME_SOURCE else ''
+
+
+def runtime_digest():
+    digest = published_marker().get('active')
+    return digest if isinstance(digest, str) else ''
+
+
+def runtime_ready():
+    marker = published_marker()
+    if not marker or marker['reader'] != runtime_fingerprint():
+        return False
+    active = active_runtime()
+    return isinstance(active, dict) and active.get('sha256') == marker['active']
+
+
 def publish_runtime():
     if not RUNTIME_SOURCE or not STORE_DIRECTORY:
         return False
-    active = active_runtime()
-    if active is not None and isinstance(active.get('sha256'), str) and active['sha256'] == published_marker():
+    try:
+        selected_reader()
+    except RoomError:
+        pass
+    else:
         return False
     bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
     try:
@@ -93,23 +120,37 @@ def publish_runtime():
     except (OSError, subprocess.TimeoutExpired) as error:
         sys.stderr.write('[room_bridge] publish failed %s\n' % type(error).__name__)
         return False
-    remember_published()
-    sys.stderr.write('[room_bridge] published runtime %s\n' % hashlib.sha256(RUNTIME_SOURCE).hexdigest()[:12])
+    active = active_runtime()
+    digest = active.get('sha256') if isinstance(active, dict) else None
+    if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+        sys.stderr.write('[room_bridge] publish failed no published runtime\n')
+        return False
+    remember_published(runtime_fingerprint(), digest)
+    if not runtime_ready():
+        sys.stderr.write('[room_bridge] publish failed runtime did not validate\n')
+        return False
+    sys.stderr.write('[room_bridge] published runtime %s\n' % digest[:12])
     return True
 
 
+def runtime_gap():
+    fail('runtime_unavailable' if RUNTIME_SOURCE or not RUNTIME_FINGERPRINT else 'runtime_republish_required')
+
+
 def selected_reader():
+    if not runtime_ready():
+        runtime_gap()
     directory = Path.home() / '.multiprompt-runtime'
     try:
         active = json.loads(private_file(directory, 'active.json', 4096))
-        if not isinstance(active, dict) or set(active) != {'protocol', 'generation', 'sha256'} or type(active['protocol']) is not int or active['protocol'] != 1 or type(active['generation']) is not int or active['generation'] < 1 or not isinstance(active['sha256'], str) or not re.fullmatch('[0-9a-f]{64}', active['sha256']):
-            fail('runtime_unavailable')
+        if not isinstance(active, dict) or set(active) != {'protocol', 'generation', 'sha256'} or type(active['protocol']) is not int or active['protocol'] != 1 or type(active['generation']) is not int or active['generation'] < 1 or not isinstance(active['sha256'], str) or not DIGEST.fullmatch(active['sha256']):
+            runtime_gap()
         source = private_file(directory, active['sha256'] + '.py', 4 * 1024 * 1024)
         if hashlib.sha256(source).hexdigest() != active['sha256']:
-            fail('runtime_unavailable')
+            runtime_gap()
         return directory / (active['sha256'] + '.py')
     except (OSError, ValueError, UnicodeError):
-        fail('runtime_unavailable')
+        runtime_gap()
 
 
 def host_status(sid):
@@ -138,10 +179,10 @@ def runtime_source():
         source = private_file(reader.parent, reader.name, 4 * 1024 * 1024)
         info = json.loads(private_file(reader.parent, 'active.json', 4096))
         if not isinstance(info, dict) or hashlib.sha256(source).hexdigest() != info.get('sha256'):
-            fail('runtime_unavailable')
+            runtime_gap()
         return source, info
     except (OSError, ValueError, UnicodeError):
-        fail('runtime_unavailable')
+        runtime_gap()
 
 
 def runtime_request(query):
@@ -168,7 +209,9 @@ def runtime_request(query):
 def scoped_runtime():
     try:
         return runtime_request({'op': 'engine_info'}).get('room_message_protocols') == [1]
-    except RoomError:
+    except RoomError as error:
+        if error.code == 'runtime_republish_required':
+            raise
         return False
 
 
@@ -426,11 +469,15 @@ class RoomBridge:
             raise
 
 
-def serve(directory, source=b''):
-    global RUNTIME_SOURCE, STORE_DIRECTORY
+def serve(directory, source=b'', fingerprint=''):
+    global RUNTIME_SOURCE, RUNTIME_FINGERPRINT, STORE_DIRECTORY
     RUNTIME_SOURCE = source if isinstance(source, bytes) else b''
+    RUNTIME_FINGERPRINT = fingerprint if isinstance(fingerprint, str) else ''
     STORE_DIRECTORY = directory
-    publish_runtime()
+    if runtime_ready():
+        sys.stderr.write('[room_bridge] runtime already published %s\n' % runtime_digest()[:12])
+    else:
+        publish_runtime()
     bridge = RoomBridge(directory)
     try:
         while True:

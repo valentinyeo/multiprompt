@@ -228,6 +228,33 @@ finally:
         self.assertEqual('runtime_unavailable', caught.exception.code)
         self.assertEqual('unsafe runtime permissions', caught.exception.detail)
 
+    def test_a_second_room_request_reuses_the_published_helper(self):
+        import io
+        import os
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        fingerprint = 'c' * 64
+        store = Path(self.temp.name, 'serve')
+        with tempfile.TemporaryDirectory() as home:
+            with mock.patch.dict(os.environ, {'HOME': home}):
+                bridge_module.RUNTIME_FINGERPRINT = fingerprint
+                bridge_module.RUNTIME_SOURCE = (root / 'src/chat_history_reader.py').read_bytes()
+                bridge_module.STORE_DIRECTORY = self.temp.name
+                try:
+                    self.assertTrue(bridge_module.publish_runtime(), 'the first request publishes the helper')
+                    bridge_module.RUNTIME_SOURCE = b''
+                    stdin = mock.MagicMock()
+                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities"}\n', b'']
+                    errors = io.StringIO()
+                    with mock.patch.object(sys, 'stdin', stdin), mock.patch.object(bridge_module.subprocess, 'run') as install, redirect_stdout(io.StringIO()), redirect_stderr(errors):
+                        bridge_module.serve(str(store), b'', fingerprint)
+                    install.assert_not_called()
+                finally:
+                    bridge_module.RUNTIME_SOURCE = b''
+                    bridge_module.RUNTIME_FINGERPRINT = ''
+                    bridge_module.STORE_DIRECTORY = None
+        self.assertIn('[room_bridge] runtime already published', errors.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

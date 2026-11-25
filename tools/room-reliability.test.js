@@ -191,13 +191,29 @@ test('room actions publish the shared chat helper on an account that never sent 
   const end = transport.indexOf('";', start);
   assert.notEqual(end, -1, 'the room transport bootstrap is a complete string');
   const bootstrap = transport.slice(start, end);
-  assert.equal(3, bootstrap.split('sys.stdin.buffer.readline()').length - 1, 'room_service, room_bridge and the reader each arrive on stdin');
-  assert.match(bootstrap, /r=base64\.b64decode\(sys\.stdin\.buffer\.readline\(\)\);/, 'the third stdin line is the reader');
-  assert.match(bootstrap, /b\.serve\(os\.path\.expanduser\([^)]*\),r\)/, 'the reader is handed to the bridge');
-  assert.match(transport, /writeSource\(input, @embedFile\("chat_history_reader\.py"\), &watch\.expired\)/, 'the room transport uploads the reader');
-  assert.match(bridge, /def serve\(directory, source=b''\):\n    global RUNTIME_SOURCE, STORE_DIRECTORY\n    RUNTIME_SOURCE = source if isinstance\(source, bytes\) else b''\n    STORE_DIRECTORY = directory\n    publish_runtime\(\)/, 'the bridge publishes the helper before it answers anything');
+  assert.equal(4, bootstrap.split('sys.stdin.buffer.readline()').length - 1, 'room_service, room_bridge, the reader digest and the reader each arrive on stdin');
+  assert.match(bootstrap, /f=sys\.stdin\.buffer\.readline\(\)\.decode\('ascii'\)\.strip\(\);/, 'the third stdin line names the reader the app expects');
+  assert.match(bootstrap, /p=base64\.b64decode\(sys\.stdin\.buffer\.readline\(\)\);/, 'the fourth stdin line carries the reader only when the app sends it');
+  assert.match(bootstrap, /b\.serve\(os\.path\.expanduser\([^)]*\),p,f\)/, 'the reader and the expected digest are handed to the bridge');
+  assert.match(transport, /const reader = bundleReader\(\) orelse return;/, 'the room transport carries the same reader the chat path publishes');
+  assert.match(transport, /attempt\(job, &reader\.digest, ""\)/, 'a room request asks first without carrying the reader');
+  assert.match(transport, /attempt\(job, &reader\.digest, reader\.source\)/, 'only a miss carries the reader');
+  assert.match(bridge, /def serve\(directory, source=b'', fingerprint=''\):/, 'the bridge takes the reader only when the app sends it');
+  assert.match(bridge, /if runtime_ready\(\):\n        sys\.stderr\.write\('\[room_bridge\] runtime already published/, 'a hit says the helper is already published');
+  assert.match(bridge, /else:\n        publish_runtime\(\)/, 'a miss publishes the helper');
   assert.match(bridge, /subprocess\.run\(\[sys\.executable, '-u', '-c', bootstrap, 'host', 'list'\], input=base64\.b64encode\(RUNTIME_SOURCE\)/, 'the carried reader installs the shared helper itself');
+  assert.match(bridge, /\[room_bridge\] published runtime/, 'a real publish is logged with its digest');
   assert.doesNotMatch(bridge, /def install_runtime/, 'the bridge reuses the reader install path instead of copying it');
+});
+
+test('a room request that finds the helper published does not ask for the reader', () => {
+  const transport = read('room_transport.zig');
+  const bridge = read('room_bridge.py');
+  assert.match(transport, /fn republishRequested\(job: \*Job\) bool \{\n    return job\.success and std\.mem\.indexOf\(u8, job\.output\[0\.\.job\.output_len\], republish_error\) != null;\n\}/, 'a reply that asks for the reader is recognised');
+  assert.match(transport, /job\.output_len = 0;\n    job\.error_len = 0;\n    job\.success = false;\n    diagnostics\.syncLog\("\[rooms\] bridge publishing the shared helper"\);/, 'the second attempt starts from a clean reply and says so');
+  assert.match(bridge, /def runtime_ready\(\):\n    marker = published_marker\(\)\n    if not marker or marker\['reader'\] != runtime_fingerprint\(\):\n        return False\n    active = active_runtime\(\)\n    return isinstance\(active, dict\) and active\.get\('sha256'\) == marker\['active'\]/, 'the published digest must still be the one this app published');
+  assert.match(bridge, /remember_published\(runtime_fingerprint\(\), digest\)/, 'the published pair is remembered for the next request');
+  assert.match(bridge, /fail\('runtime_unavailable' if RUNTIME_SOURCE or not RUNTIME_FINGERPRINT else 'runtime_republish_required'\)/, 'only a request without the reader asks for it');
 });
 
 test('room bridge failures log full stderr and the exit code even after the dialog error fills', () => {
