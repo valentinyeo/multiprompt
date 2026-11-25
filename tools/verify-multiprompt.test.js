@@ -186,7 +186,13 @@ test('IGSH-1028 reusable PR journeys select their requested feature and cannot c
   };
   for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.deepEqual(run(feature).selected, [feature]);
   assert.deepEqual(run('').selected, featureMatrix(workflow).pr);
-  assert.deepEqual(run('all').selected, featureMatrix(workflow).available);
+  const ordinary = featureMatrix(workflow).available.filter(feature => feature !== 'rooms');
+  assert.deepEqual(run('all').selected, ordinary);
+  assert.deepEqual(run('all', '', 'schedule').selected, ordinary);
+  assert.deepEqual(run('all', '', 'workflow_dispatch').selected, featureMatrix(workflow).available);
+  assert.ok(!run('').selected.includes('rooms'));
+  assert.deepEqual(run('', '["rooms"]').selected, ['rooms']);
+  assert.deepEqual(run('rooms', '', 'workflow_dispatch').builds, ['rooms']);
   assert.deepEqual(run('', '["chat-newest","title-bar"]').selected, ['chat-newest', 'title-bar']);
   assert.equal(run('', '["title-bar"]').matrix.length, 6);
 });

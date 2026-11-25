@@ -283,7 +283,7 @@ test('the verifier reuses verify.yml and the head harness for matching before an
   assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
   assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
   assert.match(verify, /continue-on-error: .*inputs\.app_revision != ''/);
-  assert.match(verify, /name: verify-app\$\{\{ matrix\.profile == 'chat-still' && '-chat-still' \|\| '' \}\}\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
+  assert.match(verify, /name: verify-app\$\{\{ matrix\.profile == 'chat-still' && '-chat-still' \|\| matrix\.profile == 'rooms' && '-rooms' \|\| '' \}\}\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
 });
 
 test('the verdict job fails the check on FAIL and posts one comment', () => {
