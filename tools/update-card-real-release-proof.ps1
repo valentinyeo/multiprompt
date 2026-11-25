@@ -15,7 +15,17 @@ $id = $marker.Groups[1].Value
 $painted = $marker.Groups[2].Value
 $installed = '0.28.1984'
 $seeAll = "https://github.com/valentinyeo/multiprompt/releases/tag/v$Offer"
-$cardExe = Join-Path $Evidence 'card.exe'
+$notesHash = (Get-FileHash $Notes -Algorithm SHA256).Hash.ToLowerInvariant()
+$shellIdentity = [Environment]::GetFolderPath('LocalApplicationData')
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+$disposable = Join-Path $tempRoot ('multiprompt-real-card-' + [guid]::NewGuid().ToString('N'))
+$cardExe = Join-Path $disposable 'card.exe'
+$appData = Join-Path $disposable 'roaming'
+$localData = Join-Path $disposable 'local'
+$profileData = Join-Path $disposable 'profile'
+$readyPage = Join-Path $disposable 'ready.html'
+New-Item -ItemType Directory -Force $disposable | Out-Null
+New-Item -ItemType Directory -Force $appData, $localData, $profileData, (Join-Path $appData 'ZigShell') | Out-Null
 Copy-Item -LiteralPath $Exe -Destination $cardExe
 $hash = (Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant()
 $binaryVersion = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($cardExe)), 'MPVERSION=(\d+\.\d+\.\d+);')
@@ -24,24 +34,41 @@ New-Item -ItemType Directory -Force "$cardExe.update" | Out-Null
 Copy-Item -LiteralPath $Notes -Destination "$cardExe.update/release-notes.json" -Force
 if ((Get-FileHash $Notes -Algorithm SHA256).Hash -ne (Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash) { throw 'Staged notes differ from the downloaded production asset' }
 [IO.File]::WriteAllText("$cardExe.update/ready.txt", "MPVERSION=$Offer;multiprompt-x64.exe")
-$env:APPDATA = Join-Path $Evidence 'roaming'
-$env:LOCALAPPDATA = Join-Path $Evidence 'local'
-$env:USERPROFILE = Join-Path $Evidence 'profile'
-$env:HOME = $env:USERPROFILE
+[IO.File]::WriteAllText($readyPage, '<html><head><title>Multiprompt release proof ready</title></head><body>ready</body></html>')
+$env:APPDATA = $appData
+$env:LOCALAPPDATA = $localData
+$env:USERPROFILE = $profileData
+$env:HOME = $profileData
 $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '1'
-New-Item -ItemType Directory -Force "$env:APPDATA/ZigShell", $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
+$browserExe = ''
+$browserProgId = ''
+$browserProfilePath = ''
+$associationSource = ''
+$browserPort = 0
+$cdpUp = $false
+$browserTargetUrl = ''
+$browserTargetTitle = ''
+$browserWindowTitle = ''
+$navigationSource = ''
+$openedValue = 0
+$firstShellOpen = 0
+$process = $null
+$browser = $null
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public class RealCardProof {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public Mouse mouse; }
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public InputUnion data; }
+    public delegate bool EnumProc(IntPtr window, IntPtr parameter);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -50,9 +77,29 @@ public class RealCardProof {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, Input[] inputs, int size);
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+    public static string Title(IntPtr window) {
+        StringBuilder text = new StringBuilder(1024);
+        GetWindowTextW(window, text, text.Capacity);
+        return text.ToString();
+    }
+    public static IntPtr[] VisibleWindows(uint[] processIds) {
+        List<IntPtr> found = new List<IntPtr>();
+        EnumWindows(delegate(IntPtr window, IntPtr parameter) {
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            if (Array.IndexOf(processIds, processId) >= 0 && IsWindowVisible(window)) found.Add(window);
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
     public static void Click() {
         foreach (uint flags in new uint[] { 2, 4 }) {
             Input input = new Input();
@@ -66,10 +113,10 @@ public class RealCardProof {
 $eventName = 'Local\MultipromptRealCard-' + [guid]::NewGuid().ToString('N')
 $event = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
 $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::Unicode.GetBytes($cardExe.ToLowerInvariant())))).Replace('-', '')
-$mutex = New-Object Threading.Mutex($false, $mutexName)
-$null = $mutex.WaitOne()
-$process = $null
-$log = Join-Path $env:APPDATA 'ZigShell/debug.log'
+$mutex = $null
+$mutexAcquired = $false
+$log = Join-Path $appData 'ZigShell/debug.log'
+$script:cardText = ''
 function Read-CardLog {
     if (-not (Test-Path $log)) { return '' }
     return (Get-Content $log -Raw -ErrorAction SilentlyContinue)
@@ -83,7 +130,10 @@ function Wait-CardLog([scriptblock]$Condition, [string]$Failure, [int]$Seconds) 
         Start-Sleep -Milliseconds 100
     } while ($true)
 }
-function Save-Window([IntPtr]$Window, [string]$Name) {
+function Save-Json($Value, [string]$Name) {
+    $Value | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $Evidence $Name)
+}
+function Save-CardWindow([IntPtr]$Window, [string]$Name) {
     $rectangle = New-Object RealCardProof+Rect
     if (-not [RealCardProof]::GetWindowRect($Window, [ref]$rectangle)) { throw "$Name window rectangle unavailable" }
     $bitmap = New-Object Drawing.Bitmap([Math]::Max(1, $rectangle.R - $rectangle.L), [Math]::Max(1, $rectangle.B - $rectangle.T))
@@ -94,8 +144,217 @@ function Save-Window([IntPtr]$Window, [string]$Name) {
     try { $bitmap.Save($file) } finally { $bitmap.Dispose() }
     return $file
 }
-try {
-    $process = Start-Process $cardExe -ArgumentList "--update-ready $eventName" -PassThru
+function Save-ScreenWindow([IntPtr]$Window, [string]$Name) {
+    $previous = [RealCardProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    try {
+        $rectangle = New-Object RealCardProof+Rect
+        if (-not [RealCardProof]::GetWindowRect($Window, [ref]$rectangle)) { throw "$Name window rectangle unavailable" }
+        $width = $rectangle.R - $rectangle.L
+        $height = $rectangle.B - $rectangle.T
+        if ($width -lt 400 -or $height -lt 300) { throw "$Name browser window is too small to prove the page" }
+        $bitmap = New-Object Drawing.Bitmap($width, $height)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        try { $graphics.CopyFromScreen($rectangle.L, $rectangle.T, 0, 0, (New-Object Drawing.Size($width, $height))) } finally { $graphics.Dispose() }
+        $file = Join-Path $Evidence ($Name + '.png')
+        try { $bitmap.Save($file) } finally { $bitmap.Dispose() }
+        Save-Json @{ handle = $Window.ToInt64(); rectangle = $rectangle; width = $width; height = $height; capture = 'screen' } ($Name + '.json')
+        return $file
+    } finally { [void][RealCardProof]::SetThreadDpiAwarenessContext($previous) }
+}
+function Save-Desktop([string]$Name) {
+    $previous = [RealCardProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    try {
+        $width = [Math]::Max(200, [RealCardProof]::GetSystemMetrics(0))
+        $height = [Math]::Max(200, [RealCardProof]::GetSystemMetrics(1))
+        $bitmap = New-Object Drawing.Bitmap($width, $height)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        try { $graphics.CopyFromScreen(0, 0, 0, 0, (New-Object Drawing.Size($width, $height))) } finally { $graphics.Dispose() }
+        $file = Join-Path $Evidence ($Name + '.png')
+        try { $bitmap.Save($file) } finally { $bitmap.Dispose() }
+        return $file
+    } finally { [void][RealCardProof]::SetThreadDpiAwarenessContext($previous) }
+}
+function Get-OwnedTree([int]$RootProcessId) {
+    $snapshot = @(Get-CimInstance Win32_Process | Select-Object -Property ProcessId, ParentProcessId)
+    $ids = @($RootProcessId)
+    do {
+        $added = @($snapshot | Where-Object { $ids -contains [int]$_.ParentProcessId -and $ids -notcontains [int]$_.ProcessId } | ForEach-Object { [int]$_.ProcessId })
+        $ids = @($ids + $added)
+    } while ($added.Count -gt 0)
+    return $ids
+}
+function Get-BrowserProcesses {
+    return @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe'" | ForEach-Object {
+        @{ pid = [int]$_.ProcessId; parent = [int]$_.ParentProcessId; name = $_.Name; commandLine = [string]$_.CommandLine }
+    })
+}
+function Get-BrowserWindows {
+    $browserIds = @(Get-Process -Name 'msedge', 'chrome' -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+    if ($browserIds.Count -eq 0) { return @() }
+    return @([RealCardProof]::VisibleWindows([uint32[]]$browserIds) | ForEach-Object {
+        $handle = [IntPtr]$_
+        @{ handle = $handle.ToInt64(); title = [RealCardProof]::Title($handle) }
+    } | Where-Object { $_.title.Length -gt 0 })
+}
+function Get-CdpTargets {
+    try { return @(Invoke-RestMethod -Uri "http://127.0.0.1:$browserPort/json/list" -TimeoutSec 3 -ErrorAction Stop) } catch { return @() }
+}
+function Get-CdpVersion {
+    try { return Invoke-RestMethod -Uri "http://127.0.0.1:$browserPort/json/version" -TimeoutSec 3 -ErrorAction Stop } catch { return $null }
+}
+function Resolve-DefaultBrowser {
+    $progId = ''
+    try { $progId = [string](Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction Stop).ProgId } catch { $progId = '' }
+    $programFiles = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+    $chrome = @($programFiles | ForEach-Object { Join-Path $_ 'Google\Chrome\Application\chrome.exe' }) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    $edge = @($programFiles | ForEach-Object { Join-Path $_ 'Microsoft\Edge\Application\msedge.exe' }) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if ($progId -eq 'ChromeHTML' -and $chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $shellIdentity 'Google\Chrome') 'User Data'); source = 'user choice' } }
+    if ($progId -eq 'MSEdgeHTM' -and $edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $shellIdentity 'Microsoft\Edge') 'User Data'); source = 'user choice' } }
+    if ($edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $shellIdentity 'Microsoft\Edge') 'User Data'); source = 'proof fallback' } }
+    if ($chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $shellIdentity 'Google\Chrome') 'User Data'); source = 'proof fallback' } }
+    throw 'No installed browser can carry the release notes proof'
+}
+function Set-UrlHandler([string]$BrowserExe) {
+    foreach ($scheme in @('http', 'https')) {
+        $protocol = "HKCU:\Software\Classes\$scheme"
+        if (-not (Test-Path $protocol)) { New-Item -Path $protocol -Force | Out-Null }
+        if ($null -eq (Get-ItemProperty -Path $protocol -Name 'URL Protocol' -ErrorAction SilentlyContinue)) { Set-ItemProperty -Path $protocol -Name 'URL Protocol' -Value '' }
+        $command = Join-Path $protocol 'shell\open\command'
+        if (-not (Test-Path $command)) { New-Item -Path $command -Force | Out-Null }
+        Set-Item -Path $command -Value ('"' + $BrowserExe + '" "%1"') -Force
+    }
+}
+function Start-WarmBrowser {
+    $script:browserPort = Get-Random -Minimum 9300 -Maximum 9899
+    $arguments = @(
+        ('--user-data-dir="' + $browserProfilePath + '"'),
+        '--profile-directory=Default',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-notifications',
+        '--disable-background-mode',
+        '--disable-gpu',
+        '--disable-session-crashed-bubble',
+        '--hide-crash-restore-bubble',
+        ('--remote-debugging-port=' + $script:browserPort),
+        '--window-position=0,0',
+        '--window-size=900,640',
+        $readyPage
+    )
+    $script:browser = Start-Process -FilePath $browserExe -ArgumentList $arguments -PassThru
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
+    do {
+        if ($null -ne (Get-CdpVersion)) { return $true }
+        if ($script:browser.HasExited -or [DateTime]::UtcNow -gt $deadline) { return $false }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
+}
+function Invoke-SeeAllClick([int]$HintX, [int]$HintY) {
+    $dpiContext = [RealCardProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    try {
+        $point = New-Object RealCardProof+Point
+        $point.X = $HintX
+        $point.Y = $HintY
+        $client = New-Object RealCardProof+Rect
+        if (-not [RealCardProof]::GetClientRect($process.MainWindowHandle, [ref]$client)) { throw 'Real card client bounds unavailable' }
+        if ($point.X -lt 0 -or $point.Y -lt 0 -or $point.X -ge $client.R -or $point.Y -ge $client.B) { throw 'See all row is outside the real card client' }
+        if (-not [RealCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$point)) { throw 'See all row has no screen position' }
+        $null = [RealCardProof]::SetForegroundWindow($process.MainWindowHandle)
+        if (-not [RealCardProof]::SetCursorPos($point.X, $point.Y)) { throw 'Could not reach the See all row' }
+        if ([RealCardProof]::WindowFromPoint($point) -ne $process.MainWindowHandle) { throw 'See all row is obscured' }
+        Start-Sleep -Milliseconds 100
+        [RealCardProof]::Click()
+    } finally { [void][RealCardProof]::SetThreadDpiAwarenessContext($dpiContext) }
+}
+function Wait-SeeAllOpen([int]$Offset) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        $text = Read-CardLog
+        $fresh = $text.Substring([Math]::Min($Offset, $text.Length))
+        if ($fresh -match '\[update\] card see all opened=\d+') {
+            $last = @([regex]::Matches($fresh, '\[update\] card see all opened=(\d+)'))[-1]
+            return [int]$last.Groups[1].Value
+        }
+        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'See all did not report a shell open' }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+}
+function Show-BrowserForCapture([IntPtr]$Window) {
+    [void][RealCardProof]::ShowWindow($Window, 9)
+    $null = [RealCardProof]::SetForegroundWindow($Window)
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        if ([RealCardProof]::GetForegroundWindow() -eq $Window) { return $true }
+        if ([DateTime]::UtcNow -gt $deadline) { return $false }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+}
+function Save-FailureEvidence([string]$Reason) {
+    $text = Read-CardLog
+    $tail = if ($text.Length -gt 4000) { $text.Substring($text.Length - 4000) } else { $text }
+    if ($text.Length -gt 0) { Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -Force -ErrorAction SilentlyContinue }
+    $desktop = ''
+    try { $desktop = Save-Desktop 'failure-desktop' } catch { $desktop = '' }
+    $targets = @()
+    try { $targets = Get-CdpTargets } catch { $targets = @() }
+    Save-Json @{
+        reason = $Reason
+        before = [bool]$Before
+        seeAllUrl = $seeAll
+        shellOpenCode = $openedValue
+        firstShellOpenCode = $firstShellOpen
+        navigationSource = $navigationSource
+        cardLogTail = $tail
+        browserExe = $browserExe
+        browserProgId = $browserProgId
+        browserProfile = $browserProfilePath
+        associationSource = $associationSource
+        browserPid = $(if ($browser) { $browser.Id } else { 0 })
+        browserExited = $(if ($browser) { $browser.HasExited } else { $true })
+        browserProcesses = @(Get-BrowserProcesses)
+        browserWindows = @(Get-BrowserWindows)
+        cdpPort = $browserPort
+        cdpAvailable = $cdpUp
+        cdpTargets = $targets
+        desktopPng = $(if ($desktop) { Split-Path $desktop -Leaf } else { '' })
+    } 'see-all-diagnostics.json'
+}
+function Stop-OwnedTree([Nullable[int]]$RootProcessId) {
+    if ($null -eq $RootProcessId -or $RootProcessId -le 0) { return @() }
+    $owned = @(Get-OwnedTree $RootProcessId)
+    if ($owned.Count -gt 0) {
+        $ordered = @($owned)
+        [array]::Reverse($ordered)
+        foreach ($ownedId in $ordered) { Stop-Process -Id $ownedId -Force -ErrorAction SilentlyContinue }
+    }
+    return $owned
+}
+function Wait-ProcessGone([int[]]$ProcessIds, [int]$Seconds) {
+    if ($ProcessIds.Count -eq 0) { return @() }
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    do {
+        $alive = @($ProcessIds | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Where-Object { $_ } | ForEach-Object { [int]$_.Id })
+        if ($alive.Count -eq 0) { return @() }
+        if ([DateTime]::UtcNow -gt $deadline) { return $alive }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+}
+function Invoke-CardProof {
+    if (-not $Before) {
+        $browserChoice = Resolve-DefaultBrowser
+        $script:browserExe = $browserChoice.exe
+        $script:browserProgId = $browserChoice.progId
+        $script:browserProfilePath = $browserChoice.profile
+        $script:associationSource = $browserChoice.source
+        if ($script:associationSource -eq 'proof fallback') { Set-UrlHandler $script:browserExe }
+        $script:cdpUp = Start-WarmBrowser
+        if ($script:cdpUp) {
+            $warmIds = [uint32[]]@(Get-OwnedTree $browser.Id | ForEach-Object { [uint32]$_ })
+            $warmWindow = @([RealCardProof]::VisibleWindows([uint32[]]$warmIds) | Where-Object { [RealCardProof]::Title($_) -match '^Multiprompt release proof ready' }) | Select-Object -First 1
+            if ($null -ne $warmWindow) { [void][RealCardProof]::ShowWindow($warmWindow, 6) }
+        }
+    }
+    $script:process = Start-Process $cardExe -ArgumentList "--update-ready $eventName" -PassThru
     if (-not $event.WaitOne(20000)) { throw 'Real card app did not report readiness' }
     if ($Before) {
         Wait-CardLog { $script:cardText -match '\[update\] card view=collapsed n=0 ' -and $script:cardText -match '\[update\] card remaining=' } 'Released card did not paint its version row' 30
@@ -103,22 +362,35 @@ try {
         if ($cardText -match '\[update\] more row=') { throw 'Released card already offers See all' }
         if ($cardText -match '\[update\] card see all=') { throw 'Released card already links the release notes' }
         $process.Refresh()
-        $beforeImage = Save-Window $process.MainWindowHandle 'before-card'
+        $beforeImage = Save-CardWindow $process.MainWindowHandle 'before-card'
         if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Card binary changed during proof' }
         Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'before-debug.log') -ErrorAction SilentlyContinue
-        @{
+        Save-Json @{
             released = "v$installed"
             installed = $installed
             offered = $Offer
             notesVersion = $document.version
-            notesSha256 = (Get-FileHash $Notes -Algorithm SHA256).Hash.ToLowerInvariant()
+            notesSha256 = $notesHash
             binarySha256 = $hash
             painted = @()
             seeAll = $false
             empty = $true
             cardPng = 'before-card.png'
             success = $true
-        } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'before-card.json')
+        } 'before-card.json'
+        Save-Json @{
+            kind = 'released installed executable'
+            sourceExe = $Exe
+            binarySha256 = $hash
+            binaryVersion = $installed
+            notesPath = $Notes
+            notesSha256 = $notesHash
+            notesVersion = $document.version
+            offered = $Offer
+            seeAllUrl = $seeAll
+            os = [Environment]::OSVersion.VersionString
+            commit = [string]$env:GITHUB_SHA
+        } 'provenance.json'
         Write-Output ('BEFORE_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'before-card.json'))))
         Write-Output ('BEFORE_CARD_PNG=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($beforeImage)))
         return
@@ -138,72 +410,156 @@ try {
     if (-not $restart.Success -or -not $more.Success) { throw 'Real card geometry is missing its controls' }
     $cardProcess = $process
     $cardProcess.Refresh()
-    $cardImage = Save-Window $cardProcess.MainWindowHandle 'released-card'
-    $dpiContext = [RealCardProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    try {
-        $point = New-Object RealCardProof+Point
-        $point.X = [int]$more.Groups[1].Value
-        $point.Y = [int]$more.Groups[2].Value
-        $client = New-Object RealCardProof+Rect
-        if (-not [RealCardProof]::GetClientRect($cardProcess.MainWindowHandle, [ref]$client)) { throw 'Real card client bounds unavailable' }
-        if ($point.X -lt 0 -or $point.Y -lt 0 -or $point.X -ge $client.R -or $point.Y -ge $client.B) { throw 'See all row is outside the real card client' }
-        if (-not [RealCardProof]::ClientToScreen($cardProcess.MainWindowHandle, [ref]$point)) { throw 'See all row has no screen position' }
-        $null = [RealCardProof]::SetForegroundWindow($cardProcess.MainWindowHandle)
-        if (-not [RealCardProof]::SetCursorPos($point.X, $point.Y)) { throw 'Could not reach the See all row' }
-        if ([RealCardProof]::WindowFromPoint($point) -ne $cardProcess.MainWindowHandle) { throw 'See all row is obscured' }
-        Start-Sleep -Milliseconds 100
-        $paintedAt = $cardText.Length
-        [RealCardProof]::Click()
-    } finally { [void][RealCardProof]::SetThreadDpiAwarenessContext($dpiContext) }
-    Wait-CardLog { (Read-CardLog).Substring([Math]::Min($paintedAt, (Read-CardLog).Length)) -match '\[update\] card see all opened=' } 'See all did not open the release notes' 20
-    $opened = [regex]::Match((Read-CardLog).Substring([Math]::Min($paintedAt, (Read-CardLog).Length)), '\[update\] card see all opened=(\d+)')
-    $browser = $null
-    $browserTitle = ''
-    $deadline = [DateTime]::UtcNow.AddSeconds(90)
-    do {
-        foreach ($candidate in @(Get-Process -Name msedge, chrome -ErrorAction SilentlyContinue)) {
-            if ($candidate.MainWindowHandle -eq [IntPtr]::Zero) { continue }
-            if ($candidate.MainWindowTitle -notmatch [regex]::Escape("v$Offer")) { continue }
-            $browser = $candidate
-            $browserTitle = $candidate.MainWindowTitle
-            break
+    $cardImage = Save-CardWindow $cardProcess.MainWindowHandle 'released-card'
+    $paintedAt = $cardText.Length
+    Invoke-SeeAllClick ([int]$more.Groups[1].Value) ([int]$more.Groups[2].Value)
+    $script:openedValue = Wait-SeeAllOpen $paintedAt
+    $script:firstShellOpen = $script:openedValue
+    if ($script:openedValue -le 32) {
+        Set-UrlHandler $browserExe
+        foreach ($scheme in @('http', 'https')) { Remove-Item -Path "HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\$scheme\UserChoice" -Force -ErrorAction SilentlyContinue }
+        $script:associationSource = 'proof fallback after shell open failed'
+        $paintedAt = (Read-CardLog).Length
+        Invoke-SeeAllClick ([int]$more.Groups[1].Value) ([int]$more.Groups[2].Value)
+        $script:openedValue = Wait-SeeAllOpen $paintedAt
+        if ($script:openedValue -le 32) { $null = Save-FailureEvidence "See all shell open failed with code $script:openedValue"; throw "See all shell open failed with code $script:openedValue" }
+    }
+    $browserTarget = $null
+    $releaseWindow = [IntPtr]::Zero
+    $windowTitle = ''
+    if ($script:cdpUp) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        do {
+            foreach ($target in @(Get-CdpTargets)) {
+                if ($null -eq $target) { continue }
+                if ($target.type -cne 'page') { continue }
+                if ($target.url -cne $seeAll) { continue }
+                $browserTarget = $target
+                $browserTargetUrl = [string]$target.url
+                $browserTargetTitle = [string]$target.title
+                break
+            }
+            if ($null -ne $browserTarget) { break }
+            if ([DateTime]::UtcNow -gt $deadline) { break }
+            Start-Sleep -Milliseconds 250
+        } while ($true)
+    }
+    if ($null -ne $browserTarget -and $null -ne $browser) {
+        $browserIds = [uint32[]]@(Get-OwnedTree $browser.Id | ForEach-Object { [uint32]$_ })
+        $fallbackWindow = [IntPtr]::Zero
+        $fallbackTitle = ''
+        foreach ($candidate in @([RealCardProof]::VisibleWindows([uint32[]]$browserIds))) {
+            $text = [RealCardProof]::Title($candidate)
+            if ($text.Length -eq 0) { continue }
+            if ($text -match [regex]::Escape("v$Offer")) { $releaseWindow = $candidate; $windowTitle = $text; break }
+            if ($fallbackWindow -eq [IntPtr]::Zero) { $fallbackWindow = $candidate; $fallbackTitle = $text }
         }
-        if ($null -ne $browser -or [DateTime]::UtcNow -gt $deadline) { break }
-        Start-Sleep -Milliseconds 250
-    } while ($true)
-    if ($null -eq $browser) { throw 'See all did not reach the release notes page in a browser' }
-    Start-Sleep -Seconds 2
-    $releaseImage = Save-Window $browser.MainWindowHandle 'see-all-release'
+        if ($releaseWindow -eq [IntPtr]::Zero -and $fallbackWindow -ne [IntPtr]::Zero) { $releaseWindow = $fallbackWindow; $windowTitle = $fallbackTitle }
+    }
+    if ($null -eq $browserTarget) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        do {
+            foreach ($candidate in @(Get-BrowserWindows)) {
+                if ($candidate.title -match [regex]::Escape("v$Offer")) { $releaseWindow = [IntPtr]$candidate.handle; $windowTitle = $candidate.title; break }
+            }
+            if ($releaseWindow -ne [IntPtr]::Zero) { break }
+            if ([DateTime]::UtcNow -gt $deadline) { break }
+            Start-Sleep -Milliseconds 500
+        } while ($true)
+    }
+    if ($releaseWindow -eq [IntPtr]::Zero) {
+        foreach ($candidate in @(Get-BrowserWindows)) { $releaseWindow = [IntPtr]$candidate.handle; $windowTitle = $candidate.title; break }
+    }
+    $script:browserWindowTitle = $windowTitle
+    if ($null -ne $browserTarget) { $script:navigationSource = 'browser-target' }
+    elseif ($releaseWindow -ne [IntPtr]::Zero -and $windowTitle -match [regex]::Escape("v$Offer")) { $script:navigationSource = 'window-title' }
+    if ($script:navigationSource -eq '') { $null = Save-FailureEvidence 'no browser reached the release notes page'; throw 'See all did not reach the release notes page in a browser' }
+    if (-not (Show-BrowserForCapture $releaseWindow)) { $null = Save-FailureEvidence 'release notes browser did not take the foreground'; throw 'Could not bring the release notes browser to the front' }
+    $releaseImage = Save-ScreenWindow $releaseWindow 'see-all-release'
     $cardProcess.Refresh()
     if ($cardProcess.HasExited -or -not $cardProcess.Responding) { throw 'Real card app stopped answering after See all' }
     if ((Read-CardLog) -notmatch '\[update\] card view=collapsed n=1 ') { throw 'See all changed the painted change lines' }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Card binary changed during proof' }
     Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -ErrorAction SilentlyContinue
-    @{
+    Save-Json @{
         installed = $installed
         offered = $Offer
         notesVersion = $document.version
-        notesSha256 = (Get-FileHash $Notes -Algorithm SHA256).Hash.ToLowerInvariant()
+        notesSha256 = $notesHash
         binarySha256 = $hash
         published = $changes
         painted = @($painted)
         ids = @($id)
         seeAllUrl = $seeAll
-        seeAllOpened = [int]$opened.Groups[1].Value
-        browserTitle = $browserTitle
+        seeAllOpened = $script:openedValue
+        firstShellOpen = $script:firstShellOpen
+        navigationSource = $script:navigationSource
+        browserExe = $browserExe
+        browserProgId = $browserProgId
+        browserProfile = $browserProfilePath
+        associationSource = $associationSource
+        browserPort = $browserPort
+        cdpAvailable = $script:cdpUp
+        browserTargetUrl = $browserTargetUrl
+        browserTargetTitle = $browserTargetTitle
+        browserTitle = $script:browserWindowTitle
         cardPng = 'released-card.png'
         releasePng = 'see-all-release.png'
         success = $true
-    } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
+    } 'released-card.json'
+    Save-Json @{
+        kind = 'branch build with build-option version override'
+        sourceExe = $Exe
+        binarySha256 = $hash
+        binaryVersion = $installed
+        notesPath = $Notes
+        notesSha256 = $notesHash
+        notesVersion = $document.version
+        offered = $Offer
+        seeAllUrl = $seeAll
+        os = [Environment]::OSVersion.VersionString
+        commit = [string]$env:GITHUB_SHA
+        browserExe = $browserExe
+        browserProgId = $browserProgId
+        associationSource = $associationSource
+    } 'provenance.json'
     Write-Output ('REAL_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'released-card.json'))))
     Write-Output ('REAL_CARD_PNG=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($cardImage)))
     Write-Output ('SEE_ALL_PNG=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($releaseImage)))
-} finally {
-    if ($process) {
-        Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+}
+try {
+    $mutex = New-Object Threading.Mutex($false, $mutexName)
+    $null = $mutex.WaitOne()
+    $mutexAcquired = $true
+    try { Invoke-CardProof } catch {
+        $reason = [string]$_.Exception.Message
+        try { $null = Save-FailureEvidence $reason } catch { $null = $_ }
+        throw
     }
-    $mutex.ReleaseMutex()
-    $mutex.Dispose()
+} finally {
+    $stopped = @()
+    if ($null -ne $process -and -not $process.HasExited) { $stopped += @(Stop-OwnedTree $process.Id) }
+    if ($null -ne $browser -and -not $browser.HasExited) { $stopped += @(Stop-OwnedTree $browser.Id) }
+    $remaining = @()
+    if ($stopped.Count -gt 0) { $remaining = @(Wait-ProcessGone ([int[]]@($stopped | Select-Object -Unique)) 20) }
+    $disposableRemoved = $false
+    for ($attempt = 0; $attempt -lt 10 -and -not $disposableRemoved; $attempt++) {
+        Remove-Item -LiteralPath $disposable -Recurse -Force -ErrorAction SilentlyContinue
+        $disposableRemoved = -not (Test-Path -LiteralPath $disposable)
+        if (-not $disposableRemoved) { Start-Sleep -Milliseconds 200 }
+    }
+    try {
+        Save-Json @{
+            ownedPids = @($stopped | Select-Object -Unique)
+            remainingPids = $remaining
+            disposableRemoved = $disposableRemoved
+            browserProfile = $browserProfilePath
+            browserProfileRetained = $(if ($browserProfilePath) { Test-Path -LiteralPath $browserProfilePath } else { $false })
+            evidenceFiles = @(Get-ChildItem -LiteralPath $Evidence -File | ForEach-Object { $_.Name })
+            success = ($remaining.Count -eq 0 -and $disposableRemoved)
+        } 'cleanup.json'
+    } catch { $null = $_ }
+    if ($mutexAcquired) { $mutex.ReleaseMutex() }
+    if ($null -ne $mutex) { $mutex.Dispose() }
     $event.Dispose()
 }

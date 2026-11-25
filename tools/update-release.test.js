@@ -185,8 +185,10 @@ test('update card journey uses checked native input and reads a live log', () =>
   assert.match(click, /SetCursorPos\(\$point\.X, \$point\.Y\)[\s\S]*\[UpdateProof\]::Click\(\)/);
   assert.match(suite, /SendInput\(1, new Input\[\] \{ input \}, Marshal.SizeOf\(typeof\(Input\)\)\) != 1/);
   assert.match(suite, /new uint\[\] \{ 2, 4 \}/);
-  assert.match(suite, /Click-CardMore \$collapsed\s+\$expanded = Wait-CardView \$log \$collapsed\.logEnd 'expanded'/);
-  assert.match(suite, /Click-CardMore \$expanded\s+\$null = Wait-CardView \$log \$expanded\.logEnd 'collapsed'/);
+  assert.match(suite, /Click-CardMore \$collapsed\s+\$openedDeadline = \[DateTime\]::UtcNow\.AddSeconds\(15\)\s+do \{/);
+  assert.match(suite, /\\\[update\\\] card see all opened=\d\+/);
+  assert.match(suite, /Update card See all did not open the release notes/);
+  assert.doesNotMatch(suite, /Wait-CardView \$log \$collapsed\.logEnd 'expanded'/);
   assert.match(suite, /\[IO\.FileShare\]::ReadWrite -bor \[IO\.FileShare\]::Delete/);
   assertSharedLogRetry(suite);
   assert.match(suite, /shared log reads while writer remains open/);

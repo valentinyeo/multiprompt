@@ -99,10 +99,29 @@ test('the branch app names the real offered release change and its See all opens
   assert.deepEqual(receipt.ids, ['MUBO-243']);
   assert.equal(receipt.seeAllUrl, seeAllUrl);
   assert.ok(receipt.seeAllOpened > 32, `See all shell open failed: ${receipt.seeAllOpened}`);
-  assert.match(receipt.browserTitle, /v0\.28\.1985/);
+  assert.match(receipt.browserExe, /(?:msedge|chrome)\.exe$/i);
+  assert.ok(['user choice', 'proof fallback', 'proof fallback after shell open failed'].includes(receipt.associationSource), receipt.associationSource);
+  if (receipt.navigationSource === 'browser-target') assert.equal(receipt.browserTargetUrl, seeAllUrl);
+  else assert.equal(receipt.navigationSource, 'window-title', `See all navigation source: ${receipt.navigationSource}`);
+  assert.match(`${receipt.browserTargetTitle} ${receipt.browserTitle}`, /v0\.28\.1985/, 'no browser window named the offered release');
+  const release = JSON.parse(fs.readFileSync(path.join(evidence, 'see-all-release.json'), 'utf8'));
+  assert.equal(release.capture, 'screen');
+  assert.ok(release.width >= 400 && release.height >= 300, `release capture is ${release.width}x${release.height}`);
   assert.match(fs.readFileSync(path.join(evidence, 'debug.log'), 'utf8'), /\[update\] card view=collapsed n=1 /);
   for (const name of ['released-card.png', 'see-all-release.png']) {
     assert.ok(fs.statSync(path.join(evidence, name)).size > 20000, `${name} is not a real screenshot`);
+  }
+  const provenance = JSON.parse(fs.readFileSync(path.join(evidence, 'provenance.json'), 'utf8'));
+  assert.equal(provenance.kind, 'branch build with build-option version override');
+  assert.equal(provenance.binarySha256, receipt.binarySha256);
+  assert.equal(provenance.notesSha256, receipt.notesSha256);
+  assert.equal(provenance.seeAllUrl, seeAllUrl);
+  for (const directory of [beforeEvidence, evidence]) {
+    assert.deepEqual(fs.readdirSync(directory).filter(name => fs.statSync(path.join(directory, name)).isDirectory()), [], `${directory} holds a disposable profile that breaks the artifact upload`);
+    const cleanup = JSON.parse(fs.readFileSync(path.join(directory, 'cleanup.json'), 'utf8'));
+    assert.deepEqual(cleanup.remainingPids, [], `${directory} left test-created processes running`);
+    assert.equal(cleanup.disposableRemoved, true, `${directory} kept its disposable folder`);
+    assert.equal(cleanup.success, true, `${directory} cleanup failed`);
   }
   console.log(`REAL_RELEASE_CARD notes=${receipt.notesSha256} before=${path.join(beforeEvidence, 'before-card.png')} after=${path.join(evidence, 'released-card.png')} release=${path.join(evidence, 'see-all-release.png')}`);
 });
