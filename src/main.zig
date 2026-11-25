@@ -8422,6 +8422,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     if (app_state.g_chat_active) {
                         chatWorkingIndicatorSync();
+                        @import("chat_render.zig").chatLogPosition();
                     }
                     @import("chat_composer.zig").chatStopSlotSync();
                     if (app_state.g_voice_mic_start_pending and !app_state.g_dictation_capturing.load(.acquire) and app_state.g_voice_mode_active and app_state.g_voice_always_listen) voiceMicStart();

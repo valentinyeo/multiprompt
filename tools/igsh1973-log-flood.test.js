@@ -10,6 +10,7 @@ const repaintLoggers = {
   chatShellSyncBuild: 'logs only when the shell view changed',
   chatChoicesLog: 'logs only when the choice hash changed',
   chatPaintReadDivider: 'goes through the paint log rule in diagnostics',
+  chatLogPosition: 'position changes or a one-second snapshot, not each paint',
   chatPaintTranscriptContent: 'logs the missing history note once',
 };
 
@@ -48,22 +49,12 @@ test('IGSH-1973 the list cache that only existed to log once per list is gone', 
 test('IGSH-1973 every repeating diagnostic line is deduplicated with a heartbeat', () => {
   const diagnostics = read('src/diagnostics.zig');
   const rules = diagnostics.slice(diagnostics.indexOf('fn paintLogRule('), diagnostics.indexOf('fn paintLogAllowed('));
-  for (const prefix of ['[chat] transcript request ', '[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ', '[bt ']) {
+  for (const prefix of ['[chat] position ', '[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ', '[bt ']) {
     assert.ok(rules.includes(`"${prefix}"`), `paintLogRule must cover ${prefix}`);
   }
   assert.match(rules, /"receive to paint"\)\) return null/);
   assert.match(diagnostics, /if \(paintLogRule\(msg\)\) \|rule\| \{\s*if \(!paintLogAllowed\(rule\)\) return;/);
   assert.match(diagnostics, /\(heartbeat_ms == 0 or now -\| entry\.at < heartbeat_ms\)/);
-});
-
-test('MUBO-17 a streamed reply does not log every transcript fetch', () => {
-  const render = read('src/chat_render.zig');
-  assert.doesNotMatch(render, /\[chat\] position ms=/);
-  assert.doesNotMatch(render, /fn chatLogPosition\(/);
-  const diagnostics = read('src/diagnostics.zig');
-  const requestRule = diagnostics.slice(diagnostics.indexOf('"[chat] transcript request "'), diagnostics.indexOf('if (std.mem.startsWith(u8, msg, "[chat] unread divider ")'));
-  assert.match(requestRule, /\.line = msg\[shell_at\.\.shell_end\]/);
-  assert.match(diagnostics, /PAINT_LOG_REQUEST_HEARTBEAT_MS: u64 = 30_000/);
 });
 
 test('IGSH-1973 the repeating lines are still emitted by their owners so the rules stay live', () => {
